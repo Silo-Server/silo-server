@@ -4104,10 +4104,10 @@ export interface paths {
       cookie?: never;
     };
     get?: never;
-    /** Assign enabled and/or update_policy on one installation. Disabling stops the running plugin first. Repeating the same assignment converges on one stored row. */
+    /** Assign enabled and/or update_policy on one installation. Disabling stops the running plugin once the change is saved. Disabling the installation of the last OIDC or LDAP provider people can sign in with while auth.local_password_login is off is 409 sign_in_provider_required, and the plugin keeps running. Repeating the same assignment converges on one stored row. */
     put: operations["updateAdminPluginInstallation"];
     post?: never;
-    /** Stop the plugin, delete the installation row (configuration, bindings and archives cascade) and remove its files. Row delete and file removal are not one transaction and a repeat finds no row: a later 404 is not this caller's receipt; never automatically retry. */
+    /** Delete the installation row (configuration, bindings and archives cascade), then stop the plugin and remove its files. Row delete and file removal are not one transaction and a repeat finds no row: a later 404 is not this caller's receipt; never automatically retry. Uninstalling the last OIDC or LDAP provider people can sign in with while auth.local_password_login is off is 409 sign_in_provider_required, and the plugin keeps running. While another request is changing the sign-in accounts of this plugin, the uninstall changes nothing and answers 503 dependency_unavailable with Retry-After; repeat it then. */
     delete: operations["deleteAdminPluginInstallation"];
     options?: never;
     head?: never;
@@ -4122,7 +4122,7 @@ export interface paths {
       cookie?: never;
     };
     get?: never;
-    /** Replace the auth provider binding for one capability. Sign-in providers rebuild on every node without a restart. Enabling a binding while another one is enabled is 409 provider_already_enabled. The whole row is assigned, so repeating the request converges on one stored binding. */
+    /** Replace the auth provider binding for one capability. Sign-in providers rebuild on every node without a restart. Enabling a binding while another one is enabled is 409 provider_already_enabled. Turning off the last OIDC or LDAP binding people can sign in with while auth.local_password_login is off is 409 sign_in_provider_required. The whole row is assigned, so repeating the request converges on one stored binding. */
     put: operations["updateAdminPluginAuthBinding"];
     post?: never;
     delete?: never;
@@ -5483,7 +5483,7 @@ export interface paths {
     get: operations["getAdminStoredSettings"];
     /**
      * Validate and merge captured settings under the existing transaction guard; prerequisite probes and runtime notifications are not replayable receipts.
-     * @description Turning auth.local_password_login off while no enabled break-glass admin can sign in with a password is 409 break_glass_required.
+     * @description Turning auth.local_password_login off while no enabled break-glass admin can sign in with a password is 409 break_glass_required, and while no OIDC or LDAP provider people can sign in with is on it is 409 sign_in_provider_required (an OpenID Connect provider counts only with server.public_url set, so clearing server.public_url while auth.local_password_login is off and it is the only provider is refused the same way). Otherwise the change applies at once; listAdminLocalPasswordOffAccounts tells beforehand which accounts lose their way in.
      */
     put: operations["updateAdminSettings"];
     post?: never;
@@ -5504,7 +5504,7 @@ export interface paths {
     get: operations["getAdminSetting"];
     /**
      * Validate and replace one setting with the established single-key validation rules and transaction guard.
-     * @description Turning auth.local_password_login off while no enabled break-glass admin can sign in with a password is 409 break_glass_required.
+     * @description Turning auth.local_password_login off while no enabled break-glass admin can sign in with a password is 409 break_glass_required, and while no OIDC or LDAP provider people can sign in with is on it is 409 sign_in_provider_required (an OpenID Connect provider counts only with server.public_url set, so clearing server.public_url while auth.local_password_login is off and it is the only provider is refused the same way). Otherwise the change applies at once; listAdminLocalPasswordOffAccounts tells beforehand which accounts lose their way in.
      */
     put: operations["updateAdminSetting"];
     post?: never;
@@ -5574,6 +5574,26 @@ export interface paths {
     };
     /** Read configured secret key names without returning secret values. */
     get: operations["getAdminSensitiveSettingsStatus"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/sign-in/local-password-off/accounts": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List the accounts that lose their way in when local password sign-in is turned off.
+     * @description Answers for turning auth.local_password_login off: enabled accounts whose local password signs in today, that are not break-glass admins and have no linked identity at an enabled provider. Break-glass admins keep their password and are not listed; neither are disabled accounts. Each account is in one group: email_match when email auto-match can link it at its first provider sign-in (the provider must assert that email as verified), otherwise admin_link. totals counts both groups whichever is asked for. Ordered by username; pages are live, not a snapshot.
+     */
+    get: operations["listAdminLocalPasswordOffAccounts"];
     put?: never;
     post?: never;
     delete?: never;
@@ -20374,6 +20394,62 @@ export interface components {
       /** @description Existing work; omit to reuse a linked work or create one. */
       work_id?: string;
     };
+    AdminLocalPasswordOffAccount: {
+      /**
+       * @description The account's email; empty when it has none
+       * @example alice@example.test
+       */
+      email: string;
+      /**
+       * @description Opaque identifier
+       * @example 12
+       */
+      id: string;
+      /**
+       * @description Whether the account is the server Owner
+       * @example false
+       */
+      is_owner: boolean;
+      /**
+       * @description What decides the account's outcome. email_match: an ordinary account with an email, and email auto-match is on, so the provider's first sign-in for that verified email links it. email_match_off: the same, with email auto-match off. administrator: an admin or the Owner, which email auto-match never links. no_email: an ordinary account without an email
+       * @example email_match
+       * @enum {string}
+       */
+      reason: "email_match" | "email_match_off" | "administrator" | "no_email";
+      /**
+       * @example user
+       * @enum {string}
+       */
+      role: "admin" | "user";
+      /** @example alice */
+      username: string;
+    };
+    AdminLocalPasswordOffAccounts: {
+      /**
+       * @description The auth.email_auto_match value the grouping used
+       * @example true
+       */
+      email_auto_match: boolean;
+      /** @description The page's items; empty, never null */
+      items: components["schemas"]["AdminLocalPasswordOffAccount"][];
+      /** @description Cursor state; absent for bounded unpaginated collections */
+      page?: components["schemas"]["PageInfo"];
+      totals: components["schemas"]["AdminLocalPasswordOffTotals"];
+    };
+    AdminLocalPasswordOffTotals: {
+      /**
+       * Format: int64
+       * @description Accounts in the admin_link group
+       * @example 1
+       */
+      admin_link: number;
+      /**
+       * Format: int64
+       * @description Accounts in the email_match group
+       * @example 3
+       */
+      email_match: number;
+    };
     AdminLoginSessionsRevoked: {
       /**
        * Format: int64
@@ -29569,6 +29645,8 @@ export interface components {
       identities: boolean;
       /** @description Whether auth binding and auth plugin changes apply without a server restart */
       live_provider_changes: boolean;
+      /** @description Whether listAdminLocalPasswordOffAccounts lists the accounts that lose their way in when auth.local_password_login is turned off, and whether updateAdminSettings refuses turning it off without an enabled OIDC or LDAP provider (sign_in_provider_required) */
+      local_password_off_accounts: boolean;
       /** @description Whether linking a network identity (linkAccountIdentityWithNetwork, or createAdminUserIdentity at a network provider) keeps the account's local password sign-in. While the provider's latest answer refuses the person, that password is refused with not_permitted (break-glass accounts excepted); an unavailable or unsupported answer keeps the refusal, and it ends when the provider vouches again or the network provider is turned off. Servers without the field turn local password sign-in off on such a link. network_sign_in says whether the link operations are served */
       network_link_keeps_password: boolean;
       /** @description Whether signInWithNetworkIdentity and linkAccountIdentityWithNetwork are served. Whether a given request may use them is answered by listAuthProviders, which lists a network provider only to a request that arrived through that provider's network */
@@ -90525,6 +90603,120 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["AdminSensitiveStatus"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  listAdminLocalPasswordOffAccounts: {
+    parameters: {
+      query: {
+        cursor?: string;
+        /** @description Answer as if auth.email_auto_match had this value, for an edit that changes both settings; omitted uses the saved value */
+        email_auto_match?: "true" | "false";
+        /** @description email_match: accounts email auto-match can link at their first provider sign-in. admin_link: accounts nothing links until an administrator does */
+        group: "email_match" | "admin_link";
+        /** @description Page size; default 50, maximum 200 */
+        limit?: number;
+      };
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminLocalPasswordOffAccounts"];
         };
       };
       /** @description Bad Request */

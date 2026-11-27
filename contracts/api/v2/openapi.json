@@ -15869,6 +15869,129 @@
         ],
         "type": "object"
       },
+      "AdminLocalPasswordOffAccount": {
+        "additionalProperties": false,
+        "properties": {
+          "email": {
+            "description": "The account's email; empty when it has none",
+            "examples": [
+              "alice@example.test"
+            ],
+            "type": "string"
+          },
+          "id": {
+            "description": "Opaque identifier",
+            "examples": [
+              "12"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "is_owner": {
+            "description": "Whether the account is the server Owner",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
+          "reason": {
+            "description": "What decides the account's outcome. email_match: an ordinary account with an email, and email auto-match is on, so the provider's first sign-in for that verified email links it. email_match_off: the same, with email auto-match off. administrator: an admin or the Owner, which email auto-match never links. no_email: an ordinary account without an email",
+            "enum": [
+              "email_match",
+              "email_match_off",
+              "administrator",
+              "no_email"
+            ],
+            "examples": [
+              "email_match"
+            ],
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "admin",
+              "user"
+            ],
+            "examples": [
+              "user"
+            ],
+            "type": "string"
+          },
+          "username": {
+            "examples": [
+              "alice"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "username",
+          "email",
+          "role",
+          "is_owner",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "AdminLocalPasswordOffAccounts": {
+        "additionalProperties": false,
+        "properties": {
+          "email_auto_match": {
+            "description": "The auth.email_auto_match value the grouping used",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "items": {
+            "description": "The page's items; empty, never null",
+            "items": {
+              "$ref": "#/components/schemas/AdminLocalPasswordOffAccount"
+            },
+            "type": "array"
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageInfo",
+            "description": "Cursor state; absent for bounded unpaginated collections"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/AdminLocalPasswordOffTotals"
+          }
+        },
+        "required": [
+          "email_auto_match",
+          "totals",
+          "items"
+        ],
+        "type": "object"
+      },
+      "AdminLocalPasswordOffTotals": {
+        "additionalProperties": false,
+        "properties": {
+          "admin_link": {
+            "description": "Accounts in the admin_link group",
+            "examples": [
+              1
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "email_match": {
+            "description": "Accounts in the email_match group",
+            "examples": [
+              3
+            ],
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "email_match",
+          "admin_link"
+        ],
+        "type": "object"
+      },
       "AdminLoginSessionsRevoked": {
         "additionalProperties": false,
         "properties": {
@@ -39227,6 +39350,10 @@
             "description": "Whether auth binding and auth plugin changes apply without a server restart",
             "type": "boolean"
           },
+          "local_password_off_accounts": {
+            "description": "Whether listAdminLocalPasswordOffAccounts lists the accounts that lose their way in when auth.local_password_login is turned off, and whether updateAdminSettings refuses turning it off without an enabled OIDC or LDAP provider (sign_in_provider_required)",
+            "type": "boolean"
+          },
           "network_link_keeps_password": {
             "description": "Whether linking a network identity (linkAccountIdentityWithNetwork, or createAdminUserIdentity at a network provider) keeps the account's local password sign-in. While the provider's latest answer refuses the person, that password is refused with not_permitted (break-glass accounts excepted); an unavailable or unsupported answer keeps the refusal, and it ends when the provider vouches again or the network provider is turned off. Servers without the field turn local password sign-in off on such a link. network_sign_in says whether the link operations are served",
             "type": "boolean"
@@ -39264,6 +39391,7 @@
           "provider_recheck",
           "credentials_linking",
           "network_sign_in",
+          "local_password_off_accounts",
           "network_link_keeps_password",
           "revision",
           "state"
@@ -117169,7 +117297,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Stop the plugin, delete the installation row (configuration, bindings and archives cascade) and remove its files. Row delete and file removal are not one transaction and a repeat finds no row: a later 404 is not this caller's receipt; never automatically retry.",
+        "summary": "Delete the installation row (configuration, bindings and archives cascade), then stop the plugin and remove its files. Row delete and file removal are not one transaction and a repeat finds no row: a later 404 is not this caller's receipt; never automatically retry. Uninstalling the last OIDC or LDAP provider people can sign in with while auth.local_password_login is off is 409 sign_in_provider_required, and the plugin keeps running. While another request is changing the sign-in accounts of this plugin, the uninstall changes nothing and answers 503 dependency_unavailable with Retry-After; repeat it then.",
         "tags": [
           "admin-plugins"
         ],
@@ -117376,7 +117504,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Assign enabled and/or update_policy on one installation. Disabling stops the running plugin first. Repeating the same assignment converges on one stored row.",
+        "summary": "Assign enabled and/or update_policy on one installation. Disabling stops the running plugin once the change is saved. Disabling the installation of the last OIDC or LDAP provider people can sign in with while auth.local_password_login is off is 409 sign_in_provider_required, and the plugin keeps running. Repeating the same assignment converges on one stored row.",
         "tags": [
           "admin-plugins"
         ],
@@ -117586,7 +117714,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Replace the auth provider binding for one capability. Sign-in providers rebuild on every node without a restart. Enabling a binding while another one is enabled is 409 provider_already_enabled. The whole row is assigned, so repeating the request converges on one stored binding.",
+        "summary": "Replace the auth provider binding for one capability. Sign-in providers rebuild on every node without a restart. Enabling a binding while another one is enabled is 409 provider_already_enabled. Turning off the last OIDC or LDAP binding people can sign in with while auth.local_password_login is off is 409 sign_in_provider_required. The whole row is assigned, so repeating the request converges on one stored binding.",
         "tags": [
           "admin-plugins"
         ],
@@ -136736,7 +136864,7 @@
         "x-silo-service-backed": true
       },
       "put": {
-        "description": "Turning auth.local_password_login off while no enabled break-glass admin can sign in with a password is 409 break_glass_required.",
+        "description": "Turning auth.local_password_login off while no enabled break-glass admin can sign in with a password is 409 break_glass_required, and while no OIDC or LDAP provider people can sign in with is on it is 409 sign_in_provider_required (an OpenID Connect provider counts only with server.public_url set, so clearing server.public_url while auth.local_password_login is off and it is the only provider is refused the same way). Otherwise the change applies at once; listAdminLocalPasswordOffAccounts tells beforehand which accounts lose their way in.",
         "operationId": "updateAdminSettings",
         "parameters": [
           {
@@ -137763,7 +137891,7 @@
         "x-silo-service-backed": true
       },
       "put": {
-        "description": "Turning auth.local_password_login off while no enabled break-glass admin can sign in with a password is 409 break_glass_required.",
+        "description": "Turning auth.local_password_login off while no enabled break-glass admin can sign in with a password is 409 break_glass_required, and while no OIDC or LDAP provider people can sign in with is on it is 409 sign_in_provider_required (an OpenID Connect provider counts only with server.public_url set, so clearing server.public_url while auth.local_password_login is off and it is the only provider is refused the same way). Otherwise the change applies at once; listAdminLocalPasswordOffAccounts tells beforehand which accounts lose their way in.",
         "operationId": "updateAdminSetting",
         "parameters": [
           {
@@ -138009,6 +138137,204 @@
         "x-silo-demo-restricted": true,
         "x-silo-guarded": true,
         "x-silo-retry-safety": "non_retryable",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/sign-in/local-password-off/accounts": {
+      "get": {
+        "description": "Answers for turning auth.local_password_login off: enabled accounts whose local password signs in today, that are not break-glass admins and have no linked identity at an enabled provider. Break-glass admins keep their password and are not listed; neither are disabled accounts. Each account is in one group: email_match when email auto-match can link it at its first provider sign-in (the provider must assert that email as verified), otherwise admin_link. totals counts both groups whichever is asked for. Ordered by username; pages are live, not a snapshot.",
+        "operationId": "listAdminLocalPasswordOffAccounts",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "email_match: accounts email auto-match can link at their first provider sign-in. admin_link: accounts nothing links until an administrator does",
+            "explode": false,
+            "in": "query",
+            "name": "group",
+            "required": true,
+            "schema": {
+              "description": "email_match: accounts email auto-match can link at their first provider sign-in. admin_link: accounts nothing links until an administrator does",
+              "enum": [
+                "email_match",
+                "admin_link"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Answer as if auth.email_auto_match had this value, for an edit that changes both settings; omitted uses the saved value",
+            "explode": false,
+            "in": "query",
+            "name": "email_auto_match",
+            "schema": {
+              "description": "Answer as if auth.email_auto_match had this value, for an edit that changes both settings; omitted uses the saved value",
+              "enum": [
+                "true",
+                "false"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size; default 50, maximum 200",
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "description": "Page size; default 50, maximum 200",
+              "examples": [
+                50
+              ],
+              "format": "int64",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "maxLength": 8192,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminLocalPasswordOffAccounts"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List the accounts that lose their way in when local password sign-in is turned off.",
+        "tags": [
+          "admin-users"
+        ],
+        "x-silo-class": "acting_admin",
         "x-silo-service-backed": true
       }
     },

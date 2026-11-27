@@ -37,6 +37,7 @@ type ExternalSignInService interface {
 	LinkAccountIdentityCredentials(ctx context.Context, userID int, in handlers.CredentialsLinkInput) (handlers.ExternalIdentityView, error)
 	NetworkLinkingAvailable() bool
 	LinkAccountIdentityNetwork(ctx context.Context, userID int, in handlers.NetworkLinkInput) (handlers.ExternalIdentityView, error)
+	ListLocalPasswordOffAccounts(ctx context.Context, q auth.LocalPasswordOffQuery) (auth.LocalPasswordOffPage, error)
 }
 
 // ExternalSignInCapabilities describes the external sign-in operations this
@@ -61,6 +62,8 @@ type ExternalSignInCapabilities struct {
 	// network identity to describe: servers before it turned the password off.
 	// It describes the linking rule, not whether the link operations are
 	// served (NetworkSignIn).
+	// LocalPasswordOffAccounts: listAdminLocalPasswordOffAccounts is served.
+	LocalPasswordOffAccounts bool `json:"local_password_off_accounts" doc:"Whether listAdminLocalPasswordOffAccounts lists the accounts that lose their way in when auth.local_password_login is turned off, and whether updateAdminSettings refuses turning it off without an enabled OIDC or LDAP provider (sign_in_provider_required)"`
 	NetworkLinkKeepsPassword bool `json:"network_link_keeps_password" doc:"Whether linking a network identity (linkAccountIdentityWithNetwork, or createAdminUserIdentity at a network provider) keeps the account's local password sign-in. While the provider's latest answer refuses the person, that password is refused with not_permitted (break-glass accounts excepted); an unavailable or unsupported answer keeps the refusal, and it ends when the provider vouches again or the network provider is turned off. Servers without the field turn local password sign-in off on such a link. network_sign_in says whether the link operations are served"`
 }
 
@@ -351,6 +354,7 @@ func registerExternalSignIn(reg *Registry) {
 				out.Body.CredentialsLinking = svc.CredentialsLinkingAvailable()
 				out.Body.NetworkSignIn = svc.NetworkLinkingAvailable() && reg.deps.Sessions != nil
 				out.Body.NetworkLinkKeepsPassword = true
+				out.Body.LocalPasswordOffAccounts = true
 			}
 			return out, nil
 		})
@@ -632,4 +636,6 @@ func registerExternalSignIn(reg *Registry) {
 		}
 		return out, nil
 	})
+
+	registerLocalPasswordOffAccounts(reg)
 }
