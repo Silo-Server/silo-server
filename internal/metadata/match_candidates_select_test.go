@@ -1,6 +1,8 @@
 package metadata
 
 import (
+	"context"
+	"errors"
 	"slices"
 	"testing"
 )
@@ -394,22 +396,31 @@ func TestSelectInitialMatchCandidate_LoneNoYearMovie(t *testing.T) {
 	tmdbID := map[string]string{testTMDBProvider: "177572"}
 	cases := []struct {
 		name      string
+		hintTitle string
 		hintType  string
 		candidate MatchCandidate
 		wantMatch bool
 	}{
-		{name: "dated film with the exact title", hintType: anchoredItemTypeMovie, wantMatch: true,
+		{name: "dated film with the exact title", hintTitle: "Big Hero 6", hintType: anchoredItemTypeMovie, wantMatch: true,
 			candidate: matchCand("Big Hero 6", 2014, anchoredItemTypeMovie, tmdbID, testTMDBProvider)},
-		{name: "undated film", hintType: anchoredItemTypeMovie,
+		{name: "dated film with bracketed provider year decoration", hintTitle: "Big Hero 6", hintType: anchoredItemTypeMovie, wantMatch: true,
+			candidate: matchCand("Big Hero 6 (2014)", 2014, anchoredItemTypeMovie, tmdbID, testTMDBProvider)},
+		{name: "undated film", hintTitle: "Big Hero 6", hintType: anchoredItemTypeMovie,
 			candidate: matchCand("Big Hero 6", 0, anchoredItemTypeMovie, tmdbID, testTMDBProvider)},
-		{name: "result without provider IDs", hintType: anchoredItemTypeMovie,
+		{name: "result without provider IDs", hintTitle: "Big Hero 6", hintType: anchoredItemTypeMovie,
 			candidate: matchCand("Big Hero 6", 2014, anchoredItemTypeMovie, map[string]string{}, testTMDBProvider)},
-		{name: "series", hintType: anchoredItemTypeSeries,
+		{name: "near title", hintTitle: "Big Hero 6", hintType: anchoredItemTypeMovie,
+			candidate: matchCand("Big Hero", 2014, anchoredItemTypeMovie, tmdbID, testTMDBProvider)},
+		{name: "bare trailing year in candidate title", hintTitle: "Fantasia", hintType: anchoredItemTypeMovie,
+			candidate: matchCand("Fantasia 2000", 2000, anchoredItemTypeMovie, tmdbID, testTMDBProvider)},
+		{name: "non-corroborating source only", hintTitle: "Big Hero 6", hintType: anchoredItemTypeMovie,
+			candidate: matchCand("Big Hero 6", 2014, anchoredItemTypeMovie, tmdbID, testNFOProvider)},
+		{name: "series", hintTitle: "Big Hero 6", hintType: anchoredItemTypeSeries,
 			candidate: matchCand("Big Hero 6", 2014, anchoredItemTypeSeries, tmdbID, testTMDBProvider)},
 	}
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
-			hints := &MatchHints{Title: "Big Hero 6", Type: tt.hintType}
+			hints := &MatchHints{Title: tt.hintTitle, Type: tt.hintType}
 			got, ok := selectInitialMatchCandidate(hints, []MatchCandidate{tt.candidate}, nil)
 			if !tt.wantMatch {
 				if ok || got != nil {
@@ -425,6 +436,126 @@ func TestSelectInitialMatchCandidate_LoneNoYearMovie(t *testing.T) {
 			}
 		})
 	}
+}
+
+type loneNoYearTestProvider struct {
+	slug    string
+	search  func(SearchQuery) ([]SearchResult, error)
+	details *MetadataResult
+}
+
+func (p *loneNoYearTestProvider) Slug() string       { return p.slug }
+func (p *loneNoYearTestProvider) Name() string       { return p.slug }
+func (p *loneNoYearTestProvider) ForTypes() []string { return []string{anchoredItemTypeMovie} }
+func (p *loneNoYearTestProvider) Search(_ context.Context, q SearchQuery) ([]SearchResult, error) {
+	return p.search(q)
+}
+func (p *loneNoYearTestProvider) GetMetadata(_ context.Context, req MetadataRequest) (*MetadataResult, error) {
+	if req.ProviderIDs[p.slug] == "" {
+		return nil, nil
+	}
+	return p.details, nil
+}
+
+func TestInitialMatchPipeline_LoneNoYearMovieGuards(t *testing.T) {
+	t.Parallel()
+
+	t.Run("dated movie rejects yearless filename alternate", func(t *testing.T) {
+		t.Parallel()
+		harness := newTestHarness()
+		oldFilm := SearchResult{
+			Name: "Remake", Year: 1995, Provider: testTMDBProvider,
+			ProviderIDs: map[string]string{testTMDBProvider: "995"},
+		}
+		provider := &loneNoYearTestProvider{
+			slug: testTMDBProvider,
+			search: func(q SearchQuery) ([]SearchResult, error) {
+				if q.Title == "Remake" {
+					return []SearchResult{oldFilm}, nil
+				}
+				return nil, nil
+			},
+			details: &MetadataResult{HasMetadata: true, Title: "Remake", Year: 1995, ProviderIDs: map[string]string{testTMDBProvider: "995"}},
+		}
+		result, err := harness.service.ProcessWithProviders(context.Background(), ProcessRequest{
+			Mode: ModeInitialMatch,
+			Hints: &MatchHints{
+				Title: "Remake", Year: 2026, Type: anchoredItemTypeMovie,
+				AlternateIdentities: []MatchIdentityHint{{Title: "Remake", Year: 0, Source: "filename"}},
+			},
+		}, []Provider{provider})
+		if err != nil {
+			t.Fatalf("ProcessWithProviders() error = %v", err)
+		}
+		if result != nil && result.Updated {
+			t.Fatalf("dated movie matched out-of-year film via yearless alternate: %#v", result)
+		}
+	})
+
+	t.Run("numeric title alternate still matches undated movie", func(t *testing.T) {
+		t.Parallel()
+		harness := newTestHarness()
+		provider := &loneNoYearTestProvider{
+			slug: testTMDBProvider,
+			search: func(q SearchQuery) ([]SearchResult, error) {
+				if q.Title == "Blade Runner 2049" && q.Year == 0 {
+					return []SearchResult{{
+						Name: "Blade Runner 2049", Year: 2017, Provider: testTMDBProvider,
+						ProviderIDs: map[string]string{testTMDBProvider: "335984"},
+					}}, nil
+				}
+				return nil, nil
+			},
+			details: &MetadataResult{HasMetadata: true, Title: "Blade Runner 2049", Year: 2017, ProviderIDs: map[string]string{testTMDBProvider: "335984"}},
+		}
+		result, err := harness.service.ProcessWithProviders(context.Background(), ProcessRequest{
+			Mode: ModeInitialMatch,
+			Hints: &MatchHints{
+				Title: "Blade Runner", Year: 2049, Type: anchoredItemTypeMovie,
+				AlternateIdentities: []MatchIdentityHint{{Title: "Blade Runner 2049", Year: 0, Source: "numeric_title"}},
+			},
+		}, []Provider{provider})
+		if err != nil {
+			t.Fatalf("ProcessWithProviders() error = %v", err)
+		}
+		if result == nil || !result.Updated || result.Decision == nil || result.Decision.Outcome != MatchOutcomeMatched {
+			t.Fatalf("result = %#v, want matched numeric title", result)
+		}
+	})
+
+	t.Run("transient error on another remote provider blocks lone match", func(t *testing.T) {
+		t.Parallel()
+		harness := newTestHarness()
+		failing := &loneNoYearTestProvider{
+			slug: testTMDBProvider,
+			search: func(SearchQuery) ([]SearchResult, error) {
+				return nil, errors.New("provider returned HTTP 503")
+			},
+		}
+		surviving := &loneNoYearTestProvider{
+			slug: testTVDBProvider,
+			search: func(SearchQuery) ([]SearchResult, error) {
+				return []SearchResult{{
+					Name: "Dune", Year: 1984, Provider: testTVDBProvider,
+					ProviderIDs: map[string]string{testTVDBProvider: "1984"},
+				}}, nil
+			},
+			details: &MetadataResult{HasMetadata: true, Title: "Dune", Year: 1984, ProviderIDs: map[string]string{testTVDBProvider: "1984"}},
+		}
+		result, err := harness.service.ProcessWithProviders(context.Background(), ProcessRequest{
+			Mode:  ModeInitialMatch,
+			Hints: &MatchHints{Title: "Dune", Type: anchoredItemTypeMovie},
+		}, []Provider{failing, surviving})
+		if err != nil {
+			t.Fatalf("ProcessWithProviders() error = %v", err)
+		}
+		if result != nil && result.Updated {
+			t.Fatalf("partial remote search persisted a lone match: %#v", result)
+		}
+		if result == nil || result.Decision == nil || result.Decision.Outcome != MatchOutcomeProviderTransient {
+			t.Fatalf("decision = %#v, want provider_transient", result)
+		}
+	})
 }
 
 //nolint:goconst // Keep the production-shaped provider fixtures readable in place.

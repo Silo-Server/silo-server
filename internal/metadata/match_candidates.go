@@ -947,7 +947,8 @@ func selectInitialMatch(hints *MatchHints, candidates []MatchCandidate, provider
 			// providers, which candidatesAreSingleDistinctShow already verified) is
 			// strong independent corroboration — it stands in for a missing hint year
 			// (folders without a "(YYYY)"). A lone single-source no-year result is NOT
-			// accepted here and stays subject to the single-candidate >=70 gate.
+			// accepted here; a dated exact-title movie is handled by loneExactTitleMovie
+			// below, and every other lone candidate stays subject to the >=70 gate.
 			multiSourceCorroborated := hints.Year == 0 && distinctSourceCount(topGroup) >= 2
 			// An exact normalized-title match on a sole distinct show is strong
 			// corroboration on its own, even when the folder year is off by a year
@@ -1000,11 +1001,41 @@ func loneExactTitleMovie(hints *MatchHints, candidate MatchCandidate) bool {
 		return false
 	}
 	if candidate.Year == 0 || !candidateTypeMatchesHint(hints.Type, candidate.ContentType) ||
-		providerIDRichness(candidate.ProviderIDs) == 0 {
+		providerIDRichness(candidate.ProviderIDs) == 0 || candidateCorroboratingSourceCount(candidate) == 0 {
 		return false
 	}
-	similarity, _ := bestCandidateTitleSimilarity(hints.Title, candidate, 0)
-	return similarity == 1
+	return loneExactCandidateTitleMatch(hints.Title, candidate)
+}
+
+// loneExactCandidateTitleMatch reports whether hintTitle matches one of the
+// candidate's titles exactly after stripping only bracketed provider year
+// decorations ("(2014)", "[2014]"). Bare trailing years ("Fantasia 2000",
+// "AEW Worlds End 2023") stay part of the title so an undated folder cannot
+// match a year-suffixed sequel or edition.
+func loneExactCandidateTitleMatch(hintTitle string, candidate MatchCandidate) bool {
+	for _, title := range candidateTitles(candidate) {
+		if inferTitleSimilarity(hintTitle, stripBracketedCandidateYear(title, candidate.Year), 0) == 1 {
+			return true
+		}
+	}
+	return false
+}
+
+func stripBracketedCandidateYear(title string, year int) string {
+	normalized := normalizeCandidateTitle(title)
+	if normalized == "" || year == 0 {
+		return normalized
+	}
+	fields := strings.Fields(normalized)
+	if len(fields) <= 1 {
+		return normalized
+	}
+	last := fields[len(fields)-1]
+	trimmed := trimYearDecoration(last)
+	if trimmed != last && trimmed == strconv.Itoa(year) {
+		return strings.Join(fields[:len(fields)-1], " ")
+	}
+	return normalized
 }
 
 // trustedIDWinner picks the highest-scored candidate that carries the trusted

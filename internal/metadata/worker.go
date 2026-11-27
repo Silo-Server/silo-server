@@ -386,7 +386,10 @@ func (w *MatchWorker) buildProcessRequestForGroup(ctx context.Context, represent
 
 const maxAlternateMatchIdentities = 3
 
-const seriesReleaseYearHintSource = "series_release_year"
+const (
+	seriesReleaseYearHintSource = "series_release_year"
+	numericTitleHintSource      = "numeric_title"
+)
 
 func queuedMatchIdentityAlternates(file *models.MediaFile, skeleton *skeletonResult, libraryRoots ...string) []MatchIdentityHint {
 	if file == nil || skeleton == nil {
@@ -428,7 +431,7 @@ func queuedMatchIdentityAlternates(file *models.MediaFile, skeleton *skeletonRes
 		// number as a year. Keep the complete, undated title as a fallback.
 		if year := strconv.Itoa(stem.Year); stem.Year != 0 && stem.Remainder == "" &&
 			!strings.Contains(base, "("+year+")") && !strings.Contains(base, "["+year+"]") {
-			add(stem.Title+" "+year, 0, "numeric_title")
+			add(stem.Title+" "+year, 0, numericTitleHintSource)
 		}
 
 		observedRoot := strings.TrimSpace(skeleton.ObservedRootPath)
