@@ -24,8 +24,12 @@ const (
 	ChapterSilenceAlgorithm     = "chapter:silence:v2"
 	EpisodeVersionCopyAlgorithm = "episode-version-copy:v1"
 	ChromaprintAlgorithm        = "chromaprint:v4"
-	ChromaprintFormat           = "chromaprint:raw:uint32le"
-	DefaultPointHopSeconds      = 0.123
+	// LevelAlgorithm is the loudness-envelope season comparison that
+	// replaced Chromaprint for intros. It outranks Chromaprint so
+	// re-analysis overwrites what that path wrote.
+	LevelAlgorithm         = "envelope:v1"
+	ChromaprintFormat      = "chromaprint:raw:uint32le"
+	DefaultPointHopSeconds = 0.123
 
 	// Credits algorithm identifiers. Credits season comparisons are keyed by
 	// CreditsAnalysisConfigHash; bump CreditsBehaviorVersion to re-run them
@@ -37,10 +41,18 @@ const (
 	CreditsAudioVideoAlgorithm  = "credits-audio:video:v1"
 	CreditsVideoAlgorithm       = "credits-video:v1"
 
+	// PreviewAlgorithm identifies a preview placed by shape matching. Nothing
+	// writes it yet; see preview.go.
+	PreviewAlgorithm = "preview-shape:v1"
+
 	// chromaprintAlgorithmFamily prefixes every Chromaprint intro identifier
 	// local analysis has stored, current and superseded, including the
-	// subtitle-refined ones markers.scannerAlgorithmPriority ranks.
+	// subtitle-refined ones markers.scannerAlgorithmPriority ranks. It is the
+	// family the envelope comparison replaced, so a comparison that finds no
+	// intro now withdraws what either family wrote.
 	chromaprintAlgorithmFamily = "chromaprint:"
+	// levelAlgorithmFamily prefixes every loudness-envelope intro identifier.
+	levelAlgorithmFamily = "envelope:"
 
 	// legacyChapterSilenceAlgorithm extended chapter ends by up to 30 seconds.
 	// The silence backfill revisits its markers under the current limit.
@@ -171,6 +183,13 @@ func (c Config) normalized() Config {
 		c.SilenceBackfillMaxDuration = 45 * time.Minute
 	}
 	return c
+}
+
+// isSeasonIntroAlgorithm reports whether algorithm is one a season comparison
+// of intros wrote: the current envelope identifiers or the Chromaprint ones
+// they replaced.
+func isSeasonIntroAlgorithm(algorithm string) bool {
+	return strings.HasPrefix(algorithm, levelAlgorithmFamily) || strings.HasPrefix(algorithm, chromaprintAlgorithmFamily)
 }
 
 func intPtr(value int) *int {
@@ -424,12 +443,12 @@ type RunSummary struct {
 	LibrariesScanned            int      `json:"libraries_scanned"`
 	FilesConsidered             int      `json:"files_considered"`
 	SeasonGroupsConsidered      int      `json:"season_groups_considered"`
-	FingerprintsComputed        int      `json:"fingerprints_computed"`
-	FingerprintCacheHits        int      `json:"fingerprint_cache_hits"`
-	FingerprintExtractionErrors int      `json:"fingerprint_extraction_errors"`
+	LevelsComputed              int      `json:"levels_computed"`
+	LevelsCacheHits             int      `json:"levels_cache_hits"`
+	LevelsExtractionErrors      int      `json:"levels_extraction_errors"`
 	ChapterMarkersWritten       int      `json:"chapter_markers_written"`
-	ChromaprintMarkersWritten   int      `json:"chromaprint_markers_written"`
-	ChromaprintMarkersWithdrawn int      `json:"chromaprint_markers_withdrawn"`
+	SeasonMarkersWritten        int      `json:"season_markers_written"`
+	SeasonMarkersWithdrawn      int      `json:"season_markers_withdrawn"`
 	ChapterMarkersWithdrawn     int      `json:"chapter_markers_withdrawn"`
 	GroupsNotFound              int      `json:"groups_not_found"`
 	GroupsSkipped               int      `json:"groups_skipped"`
@@ -458,10 +477,13 @@ type RunSummary struct {
 	CreditsRejected                int `json:"credits_rejected"`
 	// Credits tail pass counters: keyframe statistics and silences of the
 	// files whose credits are placed, and the markers video helped place.
-	CreditsTailScansComputed        int `json:"credits_tail_scans_computed"`
-	CreditsTailCacheHits            int `json:"credits_tail_cache_hits"`
-	CreditsTailScanErrors           int `json:"credits_tail_scan_errors"`
-	CreditsTailUnusable             int `json:"credits_tail_unusable"`
+	CreditsTailScansComputed int `json:"credits_tail_scans_computed"`
+	CreditsTailCacheHits     int `json:"credits_tail_cache_hits"`
+	CreditsTailScanErrors    int `json:"credits_tail_scan_errors"`
+	CreditsTailUnusable      int `json:"credits_tail_unusable"`
+	// PreviewsDetected counts the next-episode previews the credits analysis
+	// measured agreement on. Nothing is written for them yet.
+	PreviewsDetected                int `json:"previews_detected,omitempty"`
 	CreditsAudioVideoMarkersWritten int `json:"credits_audio_video_markers_written"`
 	CreditsVideoMarkersWritten      int `json:"credits_video_markers_written"`
 	// Movie counters. Movies get credits only, from chapters and video; the

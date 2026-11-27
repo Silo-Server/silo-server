@@ -110,63 +110,6 @@ type matchProfile struct {
 	SnapToChapters bool
 }
 
-// introProfile is the intro comparison for cfg.
-func introProfile(cfg Config) matchProfile {
-	cfg = cfg.normalized()
-	return matchProfile{
-		MinSeconds:             float64(cfg.MinimumIntroDurationSeconds),
-		MaxSeconds:             float64(cfg.MaximumIntroDurationSeconds),
-		AdjustedMinSeconds:     minimumAdjustedIntroSeconds,
-		AdjustedMaxSeconds:     maximumAdjustedIntroSeconds,
-		ShortSeconds:           shortIntroSeconds,
-		MinimumShortPartners:   minimumShortIntroPartners,
-		SeasonToleranceSeconds: seasonDurationToleranceSeconds,
-		Algorithm:              ChromaprintAlgorithm,
-		ConsistentConfidence:   chromaprintConsistentConfidence,
-		InconsistentConfidence: chromaprintInconsistentConfidence,
-		ShortConfidence:        chromaprintShortConfidence,
-		ZeroStartSnapSeconds:   zeroStartSnapSeconds,
-		SnapToChapters:         true,
-	}
-}
-
-// CompareFingerprints matches each file against its neighboring episodes, and
-// an unmatched file against a wider set of the season, and
-// reduces the pair results for a file to a consensus: the median boundaries of
-// the results that agree with the most-confirmed one. Taking the longest pair
-// result instead let a single over-extended match set the boundaries. A file's
-// confidence depends on whether its intro agrees with the season: a real intro
-// runs the same length in most episodes.
-func CompareFingerprints(inputs []fingerprintInput, cfg Config) map[int]Segment {
-	return compareFingerprints(inputs, introProfile(cfg))
-}
-
-// compareFingerprints is CompareFingerprints for any marker kind's profile.
-func compareFingerprints(inputs []fingerprintInput, profile matchProfile) map[int]Segment {
-	matches := matchSeason(inputs, profile)
-	best := make(map[int]Segment, len(matches))
-	for fileID, match := range matches {
-		segment := match.Segment
-		duration := segment.End - segment.Start
-		// A short match only one partner episode supports is as likely a
-		// recurring music cue as an intro, so it is not written.
-		if profile.weakShortMatch(segment, match.Confirmations) {
-			continue
-		}
-		switch {
-		case duration < profile.ShortSeconds:
-			segment.Confidence = profile.ShortConfidence
-		case match.SeasonConsistent && match.Confirmations >= 2:
-			segment.Confidence = profile.ConsistentConfidence
-		default:
-			segment.Confidence = profile.InconsistentConfidence
-		}
-		segment.Algorithm = profile.Algorithm
-		best[fileID] = segment
-	}
-	return best
-}
-
 // seasonMatch is a file's consensus match before it is rated.
 type seasonMatch struct {
 	// Segment holds the consensus boundaries, without confidence or
@@ -180,7 +123,7 @@ type seasonMatch struct {
 }
 
 // matchSeason compares the files of a season and reduces each file's pair
-// results to a consensus; see CompareFingerprints.
+// results to a consensus, as the credits comparison does over tail fingerprints.
 func matchSeason(inputs []fingerprintInput, profile matchProfile) map[int]seasonMatch {
 	ordered := append([]fingerprintInput(nil), inputs...)
 	sort.SliceStable(ordered, func(i, j int) bool {

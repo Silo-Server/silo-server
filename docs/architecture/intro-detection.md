@@ -66,14 +66,50 @@ for a single item does not take the lock.
    when its stored analysis still stands. The silence backfill withdraws
    nothing, since it does not compare season groups; it runs right after the
    nightly episode pass, which has already withdrawn what it would.
-2. **Chromaprint.** Remaining files are grouped by library, season, and
-   presentation (edition and audio language). Each file's opening audio
-   (25 percent of the runtime, at most ten minutes) is fingerprinted once and
-   cached. Each file is compared with the next eight episodes in episode order,
-   and a file none of them matched with up to 48 more. Matches must last 12
-   seconds to 3 minutes.
-   A file's intro is the median of the pair results that agree with its
-   most-confirmed one (`chromaprint:v4`).
+2. **Loudness envelope.** Remaining files are grouped by library, season,
+   and presentation (edition and audio language). Each file's opening audio
+   (25 percent of the runtime, at most ten minutes) is measured once into a
+   loudness envelope — the speech band's level every 10 ms, 200 to 3400 Hz,
+   nine levels a second at its coarsest — and cached. The envelope is
+   compared across the season:
+
+   - **Offsets.** The traces are cross-correlated to find where one file's
+     audio sits in another's. The search runs on a decimated copy and scores
+     each offset by the longest stretch over which a two-second window
+     correlates at 0.7 or more, because an intro is a short shared stretch,
+     not a global alignment; a whole-overlap correlation averages one theme
+     over five minutes of episode and loses it. The best six offsets are
+     walked.
+   - **Runs.** At each offset a one-second window slides at a 0.1-second hop,
+     marks the frames where the two traces correlate at 0.7 or more, bridges
+     gaps of up to 0.6 seconds and keeps stretches of 4 seconds or more.
+     Every window correlates against its own mean, so a stretch of silence —
+     which is a constant in the frame — matches nothing.
+   - **Agreement.** A file's stretches are clustered when both edges lie
+     within 3 seconds. A cluster is reported only if at least two other
+     episodes support it (one, at a stricter correlation, if the season has
+     two episodes or no cluster is better supported), every supporter
+     correlates at 0.8 or more, and a supporter whose stretch ran into the end
+     of the window does not decide the end. Edges are the median when every
+     supporter is within 0.2 seconds, else the inner intersection.
+   - **Bounds.** A cluster must start before 60 percent of the episode, which
+     is what keeps a reprise of the theme — a two-parter's cold open, a
+     "next time" montage — from being reported instead of the opening, and
+     last 12 seconds to 3 minutes.
+
+   A file's intro is that cluster (`envelope:v1`), with its edges refined from
+   the same trace: the start moves to where the level lifts out of the quiet
+   before it, and the end to where the music fades under its own median. A
+   start within 0.35 seconds of the beginning of the file becomes the
+   beginning of the file, and nothing else snaps to zero.
+
+   Two things the Chromaprint path did are gone with it. Its points summarize
+   about 2.4 seconds of audio, so a match's edges were only as sharp as that
+   window and were corrected by fixed leads; and two files of one studio logo
+   matched as readily as two files of one theme, with gaps of up to 3.5
+   seconds bridged, so an opening after a logo began at zero. An envelope edge
+   is the frame where the shared recording starts, and a logo and the theme
+   after it are two recordings.
 
 Earlier versions moved a Chromaprint start past subtitle cues in its first
 15 seconds (`chromaprint:dialogue:v4`). Most such cues belonged to the opening
@@ -100,9 +136,12 @@ stores a distinct input signature, so it is compared again in full once no
 file is held out, as after the held-out file is deleted. A failed marker
 write leaves the group `failed`, so the next run analyzes it again.
 
-Chromaprint points summarize a window that starts at the point's timestamp,
-so raw matches start and end early. Fixed leads measured against authored
-intro chapters move both boundaries later.
+The envelope comparison this replaced was a Chromaprint one. Its points
+summarize a window that starts at the point's timestamp, so raw matches start
+and end early, and fixed leads measured against authored intro chapters moved
+both boundaries later. `envelope:v1` outranks every `chromaprint:` identifier,
+so a season comparison overwrites what the old path wrote; a comparison that
+finds nothing withdraws an intro either family wrote.
 
 Every ffmpeg attempt that detection makes (fingerprints, tail passes, and
 silence detection) has a deadline of two minutes plus the running time of
@@ -117,8 +156,10 @@ hardware attempt times out tries software on a deadline of its own.
 
 ## Confidence
 
-Chromaprint confidence is the rate at which markers of the same kind covered
-at least 80 percent of the authored intro chapter in replay:
+Season-comparison confidence is the rate at which markers of the same kind
+covered at least 80 percent of the authored intro chapter in replay, kept
+unchanged by the move to envelopes so contribution thresholds still mean what
+they did:
 
 | Marker | Confidence |
 |---|---|
@@ -126,9 +167,11 @@ at least 80 percent of the authored intro chapter in replay:
 | Other markers of at least 20 seconds | 0.65 |
 | Shorter than 20 seconds, confirmed by two or more pairs | 0.30 |
 
-A match shorter than 20 seconds that only one partner episode confirms is not
-written: a recurring music cue is often shared by a single pair of episodes,
-while a title card recurs across the season. Such a file first gets the wider
+A cluster shorter than 20 seconds that only one partner episode confirms is
+not written: a recurring music cue is often shared by a single pair of
+episodes, while a title card recurs across the season. A span only one partner
+carries at all is written at 0.65 — the pairing is real, but the season does not
+confirm it. Such a file first gets the wider
 search, as a file with no match does, so a title card shared with episodes
 outside its neighbor window still finds its partners. That search records
 results for the file alone, so it changes no other file's match. Music cues
@@ -212,7 +255,12 @@ tombstone is no marker to clients, as a manual clear is.
 
 ## Versions and caches
 
-- `AlgorithmVersion` and `Config.ConfigHash` key the fingerprint cache.
+- Envelopes are `intro_levels` rows in the same artifact table, keyed by
+  `intro_levels` and the envelope parameters, holding one byte per 10 ms of
+  the opening. A window with no audio is stored `unusable`, and a failed
+  measurement `failed` with backoff. `-` for the Chromaprint fingerprint
+  cache: `AlgorithmVersion` and `Config.ConfigHash` key the fingerprint
+  cache, which intros no longer read (credits do).
   Changing either discards every cached fingerprint, and re-reading the audio
   of a large library takes days. Change them only when the fingerprint itself
   changes. `ConfigHash` covers only the analysis window; the intro duration
@@ -222,7 +270,9 @@ tombstone is no marker to clients, as a manual clear is.
   [artifact storage](media-sampling.md#artifact-storage) for its keys and
   statuses. Intro detection writes only `complete` rows.
 - `AnalysisBehaviorVersion` is part of the season state key. Bump it to
-  re-run every season comparison over cached fingerprints.
+  re-run every season comparison over cached envelopes; it is 7, above the
+  Chromaprint-era 6, so every intro season group is compared once more when
+  this build first runs.
 - A season group whose stored state settled it is skipped while its input
   signature is unchanged. The database clears a file's derived markers when
   its identity changes (hash, size, modification time, duration, item,
@@ -237,7 +287,8 @@ tombstone is no marker to clients, as a manual clear is.
   results, `markers.scannerAlgorithmPriority` decides which may replace the
   other before confidence is compared. A new identifier needs a rank above the
   one it supersedes, or re-analysis cannot overwrite what the old version
-  wrote.
+  wrote. `envelope:v1` ranks 23, above `chromaprint:v4` (21) and below the
+  chapter results (30) and the version copy (24).
 - `SilenceConfigHash` covers the silence settings. Changing them re-queues
   chapter files the backfill already tried.
 
@@ -308,6 +359,72 @@ from playback: most episodes have no credits local analysis can find, and
 every start would otherwise repeat the comparison. Admin refresh compares both
 kinds again, and admin re-detection compares again the kinds it asks for:
 the intro, the credits, or both.
+
+### Where credits start
+
+End credits usually cut from the last shot to black, and the first name appears
+some seconds later. The audio match cannot see any of that: the credits' music
+may start a minute into a silent roll, and the matcher starts where the music
+starts. The placed segment therefore began late on exactly the files
+TheIntroDB reports it on, with black and text on screen.
+
+The picture now decides the start, from the tail pass's keyframes:
+
+- A run starts at its first text keyframe, and its start then moves back over
+  the black and the mostly black keyframes directly before it: a dense column
+  of names measures as mostly black, and the rule that never moved a start back
+  over one was what left those files late. The walk stops at a story keyframe,
+  at a gap wider than 12 seconds between keyframes, or after 45 seconds.
+- An audio match whose music starts after the credits' picture moves its start
+  back to the black the credits open on, when nothing but black and text lies
+  between the two starts. A story keyframe in between means the match starts on
+  the music over the last shot, and the previous rule applies instead: the
+  start moves forward to the first text run within 60 seconds.
+
+The frame-checked corpus in `testdata/credits_cases.txt` holds the validated
+files, and `TestCreditsCasesFromValidation` replays them: eight files from the
+prototype's validation plus three that encode the faults above — a 30-second
+black card before the first name, dense names before the first clean one, and a
+music bed starting 40 seconds into the roll. The first two are placed late by
+the previous rules.
+
+### Chapters as hints
+
+A release that names its credits chapter usually names the scenes around them.
+`DetectChapterRecap` reads a "Previously On", "Recap", "Last Time On" or "The
+Story So Far" run in the first five minutes, and an intro is never started
+inside it: a match that reaches into the recap starts where the recap ends.
+`DetectChapterPreview` reads a "Next Episode", "Next On", "Preview" or "Coming
+Up" run in the last part of the file, five to 240 seconds long, and credits end
+where it begins, beside the bounds a stored preview marker already gave.
+
+These are hints, not markers: neither writes one, because a preview is a
+button and not a skip, and neither kind has a setting yet.
+
+### Next-episode previews (groundwork)
+
+A preview carries new footage every episode, so nothing matches; what recurs is
+its shape. `detectPreviews` measures, for each file whose credits were placed,
+the stretch from the end of the credits to the end of the file: 10 to 75
+seconds, lengths agreeing within 1.5 seconds across at least three episodes,
+and a card — text on black, or a card — in the file's last five seconds. The
+run reports the count in `previews_detected` and logs the file IDs at debug
+level. It writes no marker: previews need their own marker kind with a button
+semantic, a setting and a web control, and a library should be measured on the
+result before that lands. The jingle half of the reference rule needs the
+tail fingerprints compared pairwise, which the credits path does not do yet.
+
+### Subtitle hints (not used yet)
+
+A subtitle track's cue times are the other cheap hint of the same kind: dialogue
+stops where credits begin and is absent through an opening, so the last cue
+before the end bounds the credits' start and the cue-free stretch bounds the
+intro. Silo cannot use it today: a stored track carries its language, codec and
+flags, not its cue times, and the tail pass decodes audio rather than text
+subtitle streams. Using it needs a cues artifact (`internal/subtitles.ParseCues`
+over an embedded track, or a sidecar file) keyed like the envelopes, and it is
+the next step after this change. The reference engine uses on-screen text
+reading for the same reason and finds credits that matching misses.
 
 ### Tail pass
 

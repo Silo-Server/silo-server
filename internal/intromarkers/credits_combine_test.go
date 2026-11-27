@@ -34,4 +34,6 @@ type creditsCase struct {
 	window    float64
 	evidence  creditsEvidence
 	want      *Segment
+	// wantNone marks a case whose credits a person found none of.
+	wantNone bool
 }

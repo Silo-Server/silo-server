@@ -52,3 +52,14 @@ func TestManualDeletionRejectsAutomaticProjection(t *testing.T) {
 		t.Fatal("explicit manual replacement must be allowed")
 	}
 }
+
+func TestEnvelopeIdentifierOutranksChromaprint(t *testing.T) {
+	// A season comparison that found no intro withdraws what an earlier one
+	// wrote only if its identifier ranks above that one's.
+	if scannerAlgorithmPriority("envelope:v1") <= scannerAlgorithmPriority("chromaprint:v4") {
+		t.Fatal("envelope:v1 must outrank chromaprint:v4 so re-analysis replaces it")
+	}
+	if scannerAlgorithmPriority("envelope:v1") >= scannerAlgorithmPriority("chapter:v1") {
+		t.Fatal("a chapter is authored for the file and must still outrank a season comparison")
+	}
+}

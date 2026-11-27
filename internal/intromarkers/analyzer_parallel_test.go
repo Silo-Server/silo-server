@@ -35,10 +35,19 @@ func (e failingExtractor) ExtractCredits(ctx context.Context, candidate Candidat
 	return e.Extract(ctx, candidate)
 }
 
+func (e failingExtractor) ExtractLevels(ctx context.Context, candidate Candidate) (levelsInput, bool, error) {
+	return levelsInput{}, false, e.errFor[candidate.FileID]
+}
+
 func (e *concurrencyProbeExtractor) Preflight(context.Context) error { return nil }
 
 func (e *concurrencyProbeExtractor) ExtractCredits(ctx context.Context, candidate Candidate) (Fingerprint, bool, error) {
 	return e.Extract(ctx, candidate)
+}
+
+func (e *concurrencyProbeExtractor) ExtractLevels(ctx context.Context, candidate Candidate) (levelsInput, bool, error) {
+	_, _, err := e.Extract(ctx, candidate)
+	return levelsInput{}, false, err
 }
 
 func (e *concurrencyProbeExtractor) Extract(context.Context, Candidate) (Fingerprint, bool, error) {

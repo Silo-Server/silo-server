@@ -103,9 +103,10 @@ func combineCredits(candidate Candidate, evidence creditsEvidence, limits credit
 	duration := candidate.DurationSeconds
 	keyframes := evidence.Keyframes
 	runs := buildRuns(keyframes)
-	segment, ok := combineAudio(evidence.Audio, keyframes, &runs, duration)
+	windowStart := limits.WindowStart(duration)
+	segment, ok := combineAudio(evidence.Audio, keyframes, &runs, duration, windowStart)
 	if !ok {
-		segment, ok = placeVideoCredits(runs, keyframes, evidence.Silences, limits.WindowStart(duration), duration, limits)
+		segment, ok = placeVideoCredits(runs, keyframes, evidence.Silences, windowStart, duration, limits)
 	}
 	if !ok {
 		return Segment{}, false
@@ -117,7 +118,7 @@ func combineCredits(candidate Candidate, evidence creditsEvidence, limits credit
 // combineAudio places credits from an audio match and the runs near it. When
 // a later run reaching the end of the file overrides the match, it narrows
 // runs to the runs after the match for the video-only path.
-func combineAudio(audio *creditsAudio, keyframes []creditsKeyframe, runs *[]creditsRun, duration float64) (Segment, bool) {
+func combineAudio(audio *creditsAudio, keyframes []creditsKeyframe, runs *[]creditsRun, duration, windowStart float64) (Segment, bool) {
 	if audio == nil || (!audio.strong() && !audio.weak()) {
 		return Segment{}, false
 	}
@@ -148,9 +149,17 @@ func combineAudio(audio *creditsAudio, keyframes []creditsKeyframe, runs *[]cred
 				first = run
 			}
 		}
-		lead := blackLeadIn(keyframes, first)
-		if lead >= audio.Start+creditsRefineMinimumSeconds && first.Start <= audio.Start+creditsRefineWindowSeconds &&
-			onlyContentBetween(keyframes, audio.Start, lead) {
+		lead := creditsLeadIn(keyframes, first.First, windowStart)
+		switch {
+		case lead >= audio.Start+creditsRefineMinimumSeconds && first.Start <= audio.Start+creditsRefineWindowSeconds &&
+			onlyContentBetween(keyframes, audio.Start, lead):
+			// The match starts on the music over the story's last shot, and
+			// the credits' picture starts later.
+			start, refined = lead, true
+		case creditsStartsBefore(keyframes, lead, start, end):
+			// The credits' picture starts before the match's music, which
+			// begins late on a silent or quiet black card. The start moves
+			// back to the black the credits open on.
 			start, refined = lead, true
 		}
 	}
@@ -184,23 +193,6 @@ func combineAudio(audio *creditsAudio, keyframes []creditsKeyframe, runs *[]cred
 	return segment, true
 }
 
-// blackLeadIn returns where run's credits begin: the first of the true-black
-// keyframes directly before its first text, when they all lie within
-// creditsVideoBlackLeadSeconds of it, or else the run's start. Credits
-// usually cut from the story to black before the first name appears; a
-// longer stretch of black may be a dark scene, so the run starts at its
-// text.
-func blackLeadIn(keyframes []creditsKeyframe, run creditsRun) float64 {
-	lead := run.Start
-	for i := run.First - 1; i >= 0 && keyframes[i].Class == keyframeBlack; i-- {
-		if run.Start-keyframes[i].Seconds > creditsVideoBlackLeadSeconds {
-			return run.Start
-		}
-		lead = keyframes[i].Seconds
-	}
-	return lead
-}
-
 // onlyContentBetween reports whether keyframes in [from, to) exist and all
 // show story. A mostly black keyframe counts as story here: without text
 // around it, it is as likely a dark scene as credits.
@@ -229,17 +221,18 @@ func placeVideoCredits(runs []creditsRun, keyframes []creditsKeyframe, silences 
 	if duration-cluster.End > limits.videoEOFSeconds {
 		return Segment{}, false
 	}
-	start := cluster.Start
-	i := cluster.First - 1
-	for ; i >= 0 && keyframes[i].Class == keyframeBlack && start-keyframes[i].Seconds <= creditsVideoBlackLeadSeconds; i-- {
-		start = keyframes[i].Seconds
+	start := creditsLeadIn(keyframes, cluster.First, windowStart)
+	// previous is the last keyframe before the lead-in: a story keyframe
+	// there is the cut into the credits.
+	previous := windowStart
+	for i := cluster.First - 1; i >= 0; i-- {
+		if keyframes[i].Seconds < start {
+			previous = keyframes[i].Seconds
+			break
+		}
 	}
 	// A silence entirely between the last keyframe before the credits and
 	// their start marks the cut; one reaching into either side does not.
-	previous := windowStart
-	if i >= 0 {
-		previous = keyframes[i].Seconds
-	}
 	for _, silence := range silences {
 		if silence.End > 0 && previous <= silence.Start && silence.End <= start && silence.End > previous {
 			start = silence.End

@@ -294,7 +294,10 @@ type fakeFingerprintExtractor struct {
 	extractCalls        int
 	creditsExtractCalls int
 	// creditsErr is returned by every ExtractCredits call.
-	creditsErr error
+	creditsErr         error
+	levelsExtractCalls int
+	// levelsErr is returned by every ExtractLevels call.
+	levelsErr error
 }
 
 func (f *fakeFingerprintExtractor) Preflight(context.Context) error {
@@ -309,6 +312,13 @@ func (f *fakeFingerprintExtractor) Extract(context.Context, Candidate) (Fingerpr
 	defer f.mu.Unlock()
 	f.extractCalls++
 	return Fingerprint{}, false, nil
+}
+
+func (f *fakeFingerprintExtractor) ExtractLevels(context.Context, Candidate) (levelsInput, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.levelsExtractCalls++
+	return levelsInput{}, false, f.levelsErr
 }
 
 func (f *fakeFingerprintExtractor) ExtractCredits(context.Context, Candidate) (Fingerprint, bool, error) {

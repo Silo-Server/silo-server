@@ -11,8 +11,8 @@ func applyCreditsGuards(segment Segment, candidate Candidate, limits creditsLimi
 	if duration <= 0 {
 		return Segment{}, false
 	}
-	if candidate.PreviewStart != nil && *candidate.PreviewStart > segment.Start && *candidate.PreviewStart < segment.End {
-		segment.End = *candidate.PreviewStart
+	if preview, ok := previewStartInside(candidate, segment); ok {
+		segment.End = preview
 	}
 	if limits.CheckCreditsPlacement(segment.Start, segment.End, duration, candidate.IntroEnd) != nil {
 		return Segment{}, false

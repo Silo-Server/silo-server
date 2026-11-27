@@ -8,7 +8,6 @@ import (
 	"os"
 	"slices"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 
@@ -97,8 +96,6 @@ type introRepository interface {
 	WithdrawMarker(ctx context.Context, withdrawal MarkerWithdrawal) (bool, error)
 	LoadSeasonState(ctx context.Context, state SeasonState, analysisHash string) (*SeasonState, error)
 	UpsertSeasonState(ctx context.Context, state SeasonState, analysisHash string) error
-	LoadFingerprint(ctx context.Context, candidate Candidate, cfg Config) (*Fingerprint, error)
-	UpsertFingerprint(ctx context.Context, fp Fingerprint) error
 	LoadArtifacts(ctx context.Context, fileIDs []int, key mediaartifact.Key) (map[int]mediaartifact.Artifact, error)
 	UpsertArtifact(ctx context.Context, a mediaartifact.Artifact) error
 	RecordArtifactFailure(ctx context.Context, failure mediaartifact.Failure) error
@@ -106,10 +103,11 @@ type introRepository interface {
 
 type fingerprintExtractor interface {
 	Preflight(ctx context.Context) error
-	// Extract fingerprints a candidate's opening audio for intros.
-	Extract(ctx context.Context, candidate Candidate) (Fingerprint, bool, error)
 	// ExtractCredits fingerprints a candidate's tail audio for credits.
 	ExtractCredits(ctx context.Context, candidate Candidate) (Fingerprint, bool, error)
+	// ExtractLevels measures a candidate's opening loudness envelope for
+	// intro detection.
+	ExtractLevels(ctx context.Context, candidate Candidate) (levelsInput, bool, error)
 }
 
 func NewAnalyzer(repo *Repository, config Config, logger *slog.Logger) *Analyzer {
@@ -239,23 +237,6 @@ func (a *Analyzer) withLookupSlot(ctx context.Context, read func() error) error 
 	}
 	defer func() { <-slots }()
 	return read()
-}
-
-// fingerprintLookupFunc returns how ensureFingerprints reads a candidate's
-// cached intro fingerprint.
-func (a *Analyzer) fingerprintLookupFunc() func(context.Context, Candidate) (*Fingerprint, fingerprintLookup, error) {
-	return func(ctx context.Context, candidate Candidate) (*Fingerprint, fingerprintLookup, error) {
-		var fp *Fingerprint
-		err := a.withLookupSlot(ctx, func() error {
-			var err error
-			fp, err = a.repo.LoadFingerprint(ctx, candidate, a.config)
-			return err
-		})
-		if err != nil || fp == nil {
-			return nil, fingerprintMissing, err
-		}
-		return fp, fingerprintCached, nil
-	}
 }
 
 // ffmpegAcquirer returns how one analysis waits for an ffmpeg slot.
@@ -1451,11 +1432,11 @@ func (a *Analyzer) analyzeGroup(ctx context.Context, group candidateGroup, opts 
 		return summary, nil
 	}
 
-	inputs, counts, err := a.ensureFingerprints(ctx, group.Candidates)
-	summary.FingerprintCacheHits += counts.hits
-	summary.FingerprintsComputed += counts.computed
-	summary.FingerprintExtractionErrors += counts.failed
-	settle := func(status string) { settleSeasonState(&state, status, counts) }
+	inputs, counts, err := a.ensureIntroLevels(ctx, group.Candidates)
+	summary.LevelsCacheHits += counts.hits
+	summary.LevelsComputed += counts.computed
+	summary.LevelsExtractionErrors += counts.failed
+	settle := func(status string) { settleSeasonState(&state, status, counts.failed, counts.deferred) }
 	if err != nil {
 		state.Status = seasonStatusFailed
 		state.LastError = err.Error()
@@ -1465,8 +1446,8 @@ func (a *Analyzer) analyzeGroup(ctx context.Context, group candidateGroup, opts 
 		summary.Errors = append(summary.Errors, err.Error())
 		return summary, err
 	}
-	if distinctFingerprintEpisodeCount(inputs) < 2 {
-		state.LastError = "too few fingerprints"
+	if distinctLevelEpisodeCount(inputs) < 2 {
+		state.LastError = "too few loudness envelopes"
 		settle(seasonStatusNotFound)
 		if opts.persistState {
 			if err := a.repo.UpsertSeasonState(ctx, state, analysisHash); err != nil {
@@ -1477,7 +1458,7 @@ func (a *Analyzer) analyzeGroup(ctx context.Context, group candidateGroup, opts 
 		return summary, nil
 	}
 
-	segments := CompareFingerprints(inputs, a.config)
+	segments := CompareLevels(inputs, a.config)
 	// Only a comparison over every file of the season group may withdraw an
 	// intro: a file whose extraction failed, or one held out because another
 	// source marked it, could be the partner that confirms it.
@@ -1490,7 +1471,7 @@ func (a *Analyzer) analyzeGroup(ctx context.Context, group candidateGroup, opts 
 		}
 		segment, found := segments[candidate.FileID]
 		if !found {
-			if complete && a.withdrawChromaprintIntro(ctx, candidate, &summary) != nil {
+			if complete && a.withdrawSeasonIntro(ctx, candidate, &summary) != nil {
 				writeFailures++
 			}
 			continue
@@ -1510,11 +1491,11 @@ func (a *Analyzer) analyzeGroup(ctx context.Context, group candidateGroup, opts 
 			writeFailures++
 			msg := fmt.Sprintf("file %d: %v", candidate.FileID, patchErr)
 			summary.Errors = append(summary.Errors, msg)
-			a.logger.WarnContext(ctx, "intro marker chromaprint patch failed", "file_id", candidate.FileID, "path", candidate.FilePath, "error", patchErr)
+			a.logger.WarnContext(ctx, "intro marker patch failed", "file_id", candidate.FileID, "path", candidate.FilePath, "error", patchErr)
 			continue
 		}
 		if applied {
-			summary.ChromaprintMarkersWritten++
+			summary.SeasonMarkersWritten++
 		}
 	}
 
@@ -1531,7 +1512,7 @@ func (a *Analyzer) analyzeGroup(ctx context.Context, group candidateGroup, opts 
 			state.Status = seasonStatusFailed
 			state.LastError = fmt.Sprintf("%d intro marker write(s) failed", writeFailures)
 		}
-		state.MarkersWritten = summary.ChromaprintMarkersWritten
+		state.MarkersWritten = summary.SeasonMarkersWritten
 		if err := a.repo.UpsertSeasonState(ctx, state, analysisHash); err != nil {
 			return summary, err
 		}
@@ -1551,14 +1532,14 @@ func groupInputSignature(group candidateGroup) string {
 	return signature
 }
 
-// withdrawChromaprintIntro clears a file's intro when an earlier Chromaprint
-// comparison wrote it and the season's complete comparison no longer finds
-// one, as after a stricter matching rule or a change to the season's files.
-// Intros from any other source or detector stay. A failure is logged and
-// added to summary before it is returned.
-func (a *Analyzer) withdrawChromaprintIntro(ctx context.Context, candidate Candidate, summary *RunSummary) error {
+// withdrawSeasonIntro clears a file's intro when an earlier season comparison
+// wrote it and the season's complete comparison no longer finds one, as after a
+// stricter matching rule or a change to the season's files. Intros from any
+// other source or detector stay. A failure is logged and added to summary
+// before it is returned.
+func (a *Analyzer) withdrawSeasonIntro(ctx context.Context, candidate Candidate, summary *RunSummary) error {
 	stored := candidate.marker(kindIntro)
-	if !stored.present() || stored.Algorithm == nil || !strings.HasPrefix(*stored.Algorithm, chromaprintAlgorithmFamily) ||
+	if !stored.present() || stored.Algorithm == nil || !isSeasonIntroAlgorithm(*stored.Algorithm) ||
 		candidate.effectiveSource(kindIntro) != models.MarkerSourceScanner {
 		return nil
 	}
@@ -1570,11 +1551,11 @@ func (a *Analyzer) withdrawChromaprintIntro(ctx context.Context, candidate Candi
 	})
 	if err != nil {
 		summary.Errors = append(summary.Errors, fmt.Sprintf("file %d: %v", candidate.FileID, err))
-		a.logger.WarnContext(ctx, "intro marker chromaprint withdrawal failed", "file_id", candidate.FileID, "algorithm", *stored.Algorithm, "error", err)
+		a.logger.WarnContext(ctx, "intro marker withdrawal failed", "file_id", candidate.FileID, "algorithm", *stored.Algorithm, "error", err)
 		return err
 	}
 	if withdrawn {
-		summary.ChromaprintMarkersWithdrawn++
+		summary.SeasonMarkersWithdrawn++
 	}
 	return nil
 }
@@ -1660,102 +1641,16 @@ type fingerprintCounts struct {
 	deferred int
 }
 
-// ensureFingerprints loads cached intro fingerprints and extracts missing
-// ones. It returns the inputs with how they were obtained; a database error
-// or cancellation is returned as err. Credits inputs come from
-// ensureCreditsInputs.
-func (a *Analyzer) ensureFingerprints(ctx context.Context, candidates []Candidate) ([]fingerprintInput, fingerprintCounts, error) {
-	var (
-		mu       sync.Mutex
-		inputs   []fingerprintInput
-		counts   fingerprintCounts
-		firstErr error
-	)
-	setErr := func(err error) {
-		mu.Lock()
-		if firstErr == nil {
-			firstErr = err
-		}
-		mu.Unlock()
-	}
-	count := func(field *int, input *fingerprintInput) {
-		mu.Lock()
-		*field++
-		if input != nil {
-			inputs = append(inputs, *input)
-		}
-		mu.Unlock()
-	}
-	lookupFingerprint := a.fingerprintLookupFunc()
-	acquire := a.ffmpegAcquirer()
-	var wg sync.WaitGroup
-	for _, candidate := range candidates {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			if err := ctx.Err(); err != nil {
-				setErr(err)
-				return
-			}
-			cached, lookup, err := lookupFingerprint(ctx, candidate)
-			if err != nil {
-				setErr(err)
-				return
-			}
-			switch lookup {
-			case fingerprintCached:
-				count(&counts.hits, &fingerprintInput{Candidate: candidate, Points: cached.Points, WindowStart: cached.WindowStartSeconds})
-				return
-			case fingerprintUnusable:
-				return
-			case fingerprintDeferred:
-				count(&counts.deferred, nil)
-				return
-			}
-
-			release, err := acquire(ctx)
-			if err != nil {
-				setErr(err)
-				return
-			}
-			fp, ok, err := a.extractor.Extract(ctx, candidate)
-			release()
-			if err != nil {
-				if ctx.Err() != nil {
-					setErr(ctx.Err())
-					return
-				}
-				a.logger.WarnContext(ctx, "marker fingerprint extraction failed", "kind", kindIntro.String(), "file_id", candidate.FileID, "path", candidate.FilePath, "error", err)
-				count(&counts.failed, nil)
-				return
-			}
-			if !ok {
-				return
-			}
-			if err := a.repo.UpsertFingerprint(ctx, fp); err != nil {
-				setErr(err)
-				return
-			}
-			count(&counts.computed, &fingerprintInput{Candidate: candidate, Points: fp.Points, WindowStart: fp.WindowStartSeconds})
-		}()
-	}
-	wg.Wait()
-	sort.Slice(inputs, func(i, j int) bool {
-		return inputs[i].Candidate.FileID < inputs[j].Candidate.FileID
-	})
-	return inputs, counts, firstErr
-}
-
 // settleSeasonState records a group's analysis status. A failed extraction
 // (unlike a file with no audio to fingerprint) may succeed later, so the
 // group stays partial and is retried even though its inputs have not
 // changed. A failed status stands, since partial would settle it for a while.
-func settleSeasonState(state *SeasonState, status string, counts fingerprintCounts) {
+func settleSeasonState(state *SeasonState, status string, failedExtractions, deferred int) {
 	state.Status = status
 	if status == seasonStatusFailed {
 		return
 	}
-	if failed := counts.failed + counts.deferred; failed > 0 {
+	if failed := failedExtractions + deferred; failed > 0 {
 		state.Status = seasonStatusPartial
 		state.LastError = fmt.Sprintf("%d fingerprint extraction(s) failed", failed)
 	}
@@ -1790,15 +1685,15 @@ func mergeRunSummary(dst *RunSummary, src RunSummary) {
 	dst.LibrariesScanned += src.LibrariesScanned
 	dst.FilesConsidered += src.FilesConsidered
 	dst.SeasonGroupsConsidered += src.SeasonGroupsConsidered
-	dst.FingerprintsComputed += src.FingerprintsComputed
-	dst.FingerprintCacheHits += src.FingerprintCacheHits
+	dst.LevelsComputed += src.LevelsComputed
+	dst.LevelsCacheHits += src.LevelsCacheHits
 	dst.ChapterMarkersWritten += src.ChapterMarkersWritten
-	dst.ChromaprintMarkersWritten += src.ChromaprintMarkersWritten
-	dst.ChromaprintMarkersWithdrawn += src.ChromaprintMarkersWithdrawn
+	dst.SeasonMarkersWritten += src.SeasonMarkersWritten
+	dst.SeasonMarkersWithdrawn += src.SeasonMarkersWithdrawn
 	dst.ChapterMarkersWithdrawn += src.ChapterMarkersWithdrawn
 	dst.GroupsNotFound += src.GroupsNotFound
 	dst.GroupsSkipped += src.GroupsSkipped
-	dst.FingerprintExtractionErrors += src.FingerprintExtractionErrors
+	dst.LevelsExtractionErrors += src.LevelsExtractionErrors
 	dst.Errors = append(dst.Errors, src.Errors...)
 	if src.ChromaprintSupported {
 		dst.ChromaprintSupported = true
@@ -1827,6 +1722,7 @@ func mergeRunSummary(dst *RunSummary, src RunSummary) {
 	dst.CreditsTailScanErrors += src.CreditsTailScanErrors
 	dst.CreditsTailUnusable += src.CreditsTailUnusable
 	dst.CreditsAudioVideoMarkersWritten += src.CreditsAudioVideoMarkersWritten
+	dst.PreviewsDetected += src.PreviewsDetected
 	dst.CreditsVideoMarkersWritten += src.CreditsVideoMarkersWritten
 	dst.MoviesConsidered += src.MoviesConsidered
 	dst.MovieCreditsMarkersWritten += src.MovieCreditsMarkersWritten

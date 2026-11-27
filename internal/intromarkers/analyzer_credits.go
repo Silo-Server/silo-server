@@ -208,7 +208,7 @@ func (a *Analyzer) analyzeCreditsGroup(ctx context.Context, group candidateGroup
 	counts.failed += inputs.tailCounts.failed
 	counts.deferred += inputs.tailCounts.deferred
 	persist := func(status string) error {
-		settleSeasonState(&state, status, counts)
+		settleSeasonState(&state, status, counts.failed, counts.deferred)
 		if !opts.persistState {
 			return nil
 		}
@@ -233,6 +233,9 @@ func (a *Analyzer) analyzeCreditsGroup(ctx context.Context, group candidateGroup
 	errorsBefore := len(summary.Errors)
 	found := 0
 	written := 0
+	// placed holds the credits each file got, which bound the previews
+	// measured after them.
+	placed := map[int]Segment{}
 	for _, candidate := range targets {
 		if err := ctx.Err(); err != nil {
 			return summary, err
@@ -257,6 +260,7 @@ func (a *Analyzer) analyzeCreditsGroup(ctx context.Context, group candidateGroup
 			continue
 		}
 		found++
+		placed[candidate.FileID] = segment
 		if !a.patchCredits(ctx, candidate, segment, &summary) {
 			continue
 		}
@@ -273,6 +277,7 @@ func (a *Analyzer) analyzeCreditsGroup(ctx context.Context, group candidateGroup
 	if err := ctx.Err(); err != nil {
 		return summary, err
 	}
+	a.countPreviews(ctx, targets, inputs.tails, placed, &summary)
 	if found == 0 {
 		summary.CreditsGroupsNotFound++
 		return summary, persist(seasonStatusNotFound)
@@ -285,6 +290,38 @@ func (a *Analyzer) analyzeCreditsGroup(ctx context.Context, group candidateGroup
 		return summary, persist(seasonStatusFailed)
 	}
 	return summary, persist(seasonStatusComplete)
+}
+
+// countPreviews measures the next-episode preview after each file's credits
+// and records how many agree across the season. Previews have no marker kind
+// with a skip of its own yet, so this pass writes nothing: it exists to measure
+// a library before that lands (see preview.go).
+func (a *Analyzer) countPreviews(ctx context.Context, targets []Candidate, tails map[int]*creditsTail, placed map[int]Segment, summary *RunSummary) {
+	var previewInputs []previewInput
+	for _, candidate := range targets {
+		tail := tails[candidate.FileID]
+		segment, ok := placed[candidate.FileID]
+		if tail == nil {
+			continue
+		}
+		previewInputs = append(previewInputs, previewInput{
+			Candidate:  candidate,
+			CreditsEnd: segment.End,
+			HasCredits: ok,
+			Keyframes:  classifyKeyframes(tail.Frames),
+		})
+	}
+	previews := detectPreviews(previewInputs)
+	if len(previews) == 0 {
+		return
+	}
+	summary.PreviewsDetected += len(previews)
+	files := make([]int, 0, len(previews))
+	for fileID := range previews {
+		files = append(files, fileID)
+	}
+	slices.Sort(files)
+	a.logger.DebugContext(ctx, "next-episode previews measured", "files", files)
 }
 
 // patchCredits writes a credits segment onto the candidate's file unless its
