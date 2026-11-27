@@ -1625,7 +1625,7 @@ func (h *AdminHandler) UpdateAdminSettings(ctx context.Context, values map[strin
 	)
 	err := h.inSwitchWriteTx(ctx, touchesAppKeySwitch(slices.Collect(maps.Keys(values))...), func(tx pgx.Tx) error {
 		var err error
-		result, publish, err = h.updateAdminSettings(ctx, tx, values, guard)
+		result, publish, err = h.updateAdminSettings(ctx, tx, values, guard, true)
 		return err
 	})
 	if err != nil {
@@ -1643,7 +1643,7 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 	)
 	err := h.inSwitchWriteTx(ctx, touchesAppKeySwitch(key), func(tx pgx.Tx) error {
 		var err error
-		result, publish, err = h.updateAdminSetting(ctx, tx, key, value, guard)
+		result, publish, err = h.updateAdminSetting(ctx, tx, key, value, guard, true)
 		return err
 	})
 	if err != nil {
@@ -1669,15 +1669,16 @@ func (h *AdminHandler) ApplyAdminSettingsInTx(ctx context.Context, tx pgx.Tx, va
 	if tx == nil {
 		return AdminSettingsUpdateResult{}, nil, errors.New("a transaction is required")
 	}
-	return h.updateAdminSettings(ctx, tx, values, guard)
+	return h.updateAdminSettings(ctx, tx, values, guard, false)
 }
 
 // updateAdminSettings validates and writes values, in tx when it is set and
-// in a transaction of its own otherwise. publish announces the committed
+// in a transaction of its own otherwise. precheck runs a non-nil guard first,
+// on a read outside tx, as well as under the settings lock. publish announces the committed
 // changes: events, the settings hook, and restart flags.
 //
 //nolint:funlen,gocyclo // UpdateAdminSettings' body, moved as is behind the caller-transaction entry points
-func (h *AdminHandler) updateAdminSettings(ctx context.Context, tx pgx.Tx, values map[string]string, guard func(AdminSettingsSnapshot) error) (AdminSettingsUpdateResult, func(context.Context), error) {
+func (h *AdminHandler) updateAdminSettings(ctx context.Context, tx pgx.Tx, values map[string]string, guard func(AdminSettingsSnapshot) error, precheck bool) (AdminSettingsUpdateResult, func(context.Context), error) {
 	fail := func(err error) (AdminSettingsUpdateResult, func(context.Context), error) {
 		return AdminSettingsUpdateResult{}, nil, err
 	}
@@ -1693,7 +1694,10 @@ func (h *AdminHandler) updateAdminSettings(ctx context.Context, tx pgx.Tx, value
 		return fail(&APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: "A settings update may contain at most 250 values"})
 	}
 
-	if guard != nil && tx == nil {
+	// A stale write answers 412 before any validation error, as it always
+	// has; only a caller's own transaction (ApplyAdminSettingsInTx) leaves the
+	// guard to the read under the settings lock.
+	if guard != nil && precheck {
 		stored, err := h.SettingsRepo.GetAll(ctx)
 		if err != nil {
 			return fail(err)
@@ -1749,6 +1753,7 @@ func (h *AdminHandler) updateAdminSettings(ctx context.Context, tx pgx.Tx, value
 	)
 	var preconditionErr error
 	var committedSnapshot *AdminSettingsSnapshot
+	var sweptKeySessions *int64
 	err = updateServerSettingsWithTx(ctx, h.SettingsRepo, tx,
 		func(stored map[string]string, tx pgx.Tx) (map[string]string, error) {
 			if guard != nil {
@@ -1782,10 +1787,12 @@ func (h *AdminHandler) updateAdminSettings(ctx context.Context, tx pgx.Tx, value
 				preconditionErr = err
 				return nil, err
 			}
-			if err := h.checkAppKeySetting(ctx, tx, actorUserID(ctx), before, after); err != nil {
+			swept, err := h.checkAppKeySetting(ctx, tx, actorUserID(ctx), before, after)
+			if err != nil {
 				preconditionErr = err
 				return nil, err
 			}
+			sweptKeySessions = swept
 			if err := h.checkPublicURLSetting(ctx, tx, before, after); err != nil {
 				preconditionErr = err
 				return nil, err
@@ -1858,6 +1865,7 @@ func (h *AdminHandler) updateAdminSettings(ctx context.Context, tx pgx.Tx, value
 		}
 	}
 	publish := func(ctx context.Context) {
+		logSwitchOff(ctx, sweptKeySessions)
 		for _, key := range changed {
 			if h.EventBus != nil {
 				_ = h.EventBus.Publish(ctx, cache.ChannelAdmin,
@@ -1888,7 +1896,7 @@ func (h *AdminHandler) updateAdminSettings(ctx context.Context, tx pgx.Tx, value
 // change, as updateAdminSettings' does.
 //
 //nolint:funlen,gocyclo // UpdateAdminSetting's body, moved as is behind the caller-transaction entry point
-func (h *AdminHandler) updateAdminSetting(ctx context.Context, tx pgx.Tx, key, value string, guard func(AdminSettingsSnapshot) error) (AdminSettingUpdateResult, func(context.Context), error) {
+func (h *AdminHandler) updateAdminSetting(ctx context.Context, tx pgx.Tx, key, value string, guard func(AdminSettingsSnapshot) error, precheck bool) (AdminSettingUpdateResult, func(context.Context), error) {
 	req := updateSettingRequest{Value: value}
 
 	if h.SettingsRepo == nil {
@@ -1908,7 +1916,10 @@ func (h *AdminHandler) updateAdminSetting(ctx context.Context, tx pgx.Tx, key, v
 		return AdminSettingUpdateResult{}, nil, &APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: key + " is managed by /admin/rate-limits/config"}
 	}
 
-	if guard != nil && tx == nil {
+	// A stale write answers 412 before any validation error, as it always
+	// has; only a caller's own transaction (ApplyAdminSettingsInTx) leaves the
+	// guard to the read under the settings lock.
+	if guard != nil && precheck {
 		stored, err := h.SettingsRepo.GetAll(ctx)
 		if err != nil {
 			return AdminSettingUpdateResult{}, nil, err
@@ -2133,6 +2144,7 @@ func (h *AdminHandler) updateAdminSetting(ctx context.Context, tx pgx.Tx, key, v
 		validationCode   string
 	)
 	var preconditionErr error
+	var sweptKeySessions *int64
 	err = updateServerSettingsWithTx(ctx, h.SettingsRepo, tx,
 		func(stored map[string]string, tx pgx.Tx) (map[string]string, error) {
 			if guard != nil {
@@ -2204,10 +2216,12 @@ func (h *AdminHandler) updateAdminSetting(ctx context.Context, tx pgx.Tx, key, v
 				preconditionErr = err
 				return nil, err
 			}
-			if err := h.checkAppKeySetting(ctx, tx, actorUserID(ctx), before, after); err != nil {
+			swept, err := h.checkAppKeySetting(ctx, tx, actorUserID(ctx), before, after)
+			if err != nil {
 				preconditionErr = err
 				return nil, err
 			}
+			sweptKeySessions = swept
 			if err := h.checkPublicURLSetting(ctx, tx, before, after); err != nil {
 				preconditionErr = err
 				return nil, err
@@ -2238,6 +2252,7 @@ func (h *AdminHandler) updateAdminSetting(ctx context.Context, tx pgx.Tx, key, v
 	}
 	restartRequired := effectiveChanged && config.RestartRequired(key)
 	publish := func(ctx context.Context) {
+		logSwitchOff(ctx, sweptKeySessions)
 		if effectiveChanged {
 			if h.EventBus != nil {
 				_ = h.EventBus.Publish(ctx, cache.ChannelAdmin,

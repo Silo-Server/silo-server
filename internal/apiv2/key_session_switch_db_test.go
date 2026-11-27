@@ -3,11 +3,13 @@ package apiv2
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
@@ -28,7 +30,14 @@ func TestKeySessionSweepMissedEndsAtRefreshDB(t *testing.T) {
 	ctx := t.Context()
 	for _, key := range []string{config.AuthAppKeySignInSettingKey, demomode.SettingKey} {
 		var saved *string
-		_ = d.pool.QueryRow(ctx, `SELECT value FROM server_settings WHERE key = $1`, key).Scan(&saved)
+		var value string
+		switch err := d.pool.QueryRow(ctx, `SELECT value FROM server_settings WHERE key = $1`, key).Scan(&value); {
+		case errors.Is(err, pgx.ErrNoRows):
+		case err != nil:
+			t.Fatalf("reading setting %s: %v", key, err)
+		default:
+			saved = &value
+		}
 		t.Cleanup(func() {
 			if saved == nil {
 				_, _ = d.pool.Exec(context.Background(), `DELETE FROM server_settings WHERE key = $1`, key)

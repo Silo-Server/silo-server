@@ -29,31 +29,40 @@ func appKeySwitch(values map[string]string) bool {
 // after are the effective values. Turning the switch on needs nothing: keys
 // were never revoked. While the Owner holds a live key session, only the
 // Owner may turn it off (auth.CheckSwitchOffActor, owner_protected); actorID
-// is the account making the write.
-func (h *AdminHandler) checkAppKeySetting(ctx context.Context, tx pgx.Tx, actorID int, before, after map[string]string) error {
+// is the account making the write. ended is how many sessions the sweep
+// ended, nil when the write does not turn the switch off; the caller logs it
+// once the write commits (logSwitchOff).
+func (h *AdminHandler) checkAppKeySetting(ctx context.Context, tx pgx.Tx, actorID int, before, after map[string]string) (ended *int64, err error) {
 	if !appKeySwitch(before) || appKeySwitch(after) {
-		return nil
+		return nil, nil
 	}
 	if tx == nil {
 		// The sweep must share the write's transaction; only a settings
 		// store without one (a test fake) gets here.
-		return ErrAdminSettingsUnavailable
+		return nil, ErrAdminSettingsUnavailable
 	}
 	if err := auth.CheckSwitchOffActor(ctx, tx, actorID); err != nil {
 		if errors.Is(err, auth.ErrOwnershipChanging) {
-			return &APIError{Status: http.StatusConflict, Code: codeConflict, Message: "The server's ownership is changing. Save again."}
+			return nil, (&APIError{Status: http.StatusConflict, Code: codeConflict, Message: "The server's ownership is changing. Save again."}).WithCause(err)
 		}
-		return ownerError(err)
+		return nil, ownerError(err)
 	}
 	if err := auth.CheckAppKeysOff(ctx, tx, signInSettingsOf(after)); err != nil {
-		return breakGlassError(err)
+		return nil, breakGlassError(err)
 	}
-	ended, err := auth.EndAppKeySessionsTx(ctx, tx)
+	n, err := auth.EndAppKeySessionsTx(ctx, tx)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	slog.InfoContext(ctx, "app key switch turned off; ending key sessions", "component", "auth", "sessions", ended)
-	return nil
+	return &n, nil
+}
+
+// logSwitchOff records a committed switch-off and the sessions its sweep
+// ended; ended is checkAppKeySetting's answer, nil for none.
+func logSwitchOff(ctx context.Context, ended *int64) {
+	if ended != nil {
+		slog.InfoContext(ctx, "app key switch turned off; ended key sessions", "component", "auth", "sessions", *ended)
+	}
 }
 
 // AccountsAtRisk lists the accounts change would leave with no way in, for

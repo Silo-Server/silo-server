@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -11,6 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/auth"
@@ -28,7 +31,26 @@ type switchWriteFixture struct {
 	ownKey, appKey string
 }
 
-var switchSettingKeys = []string{config.AuthAppKeySignInSettingKey, demomode.SettingKey, config.BackupDestinationSettingKey}
+// The S3 keys are saved and cleared too, so a case that relies on S3 being
+// unconfigured does not depend on what the database already holds.
+var switchSettingKeys = []string{config.AuthAppKeySignInSettingKey, demomode.SettingKey, config.BackupDestinationSettingKey,
+	config.BackupS3BucketSettingKey, config.BackupS3EndpointSettingKey}
+
+// storedSettingValue reads a stored setting for a test to restore: nil when
+// there is no row. Any other read error fails the test, so a cleanup never
+// deletes a row it could not read.
+func storedSettingValue(t *testing.T, pool *pgxpool.Pool, key string) *string {
+	t.Helper()
+	var value string
+	err := pool.QueryRow(t.Context(), `SELECT value FROM server_settings WHERE key = $1`, key).Scan(&value)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		t.Fatalf("reading setting %s: %v", key, err)
+	}
+	return &value
+}
 
 func newSwitchWriteFixture(t *testing.T) *switchWriteFixture {
 	t.Helper()
@@ -36,7 +58,13 @@ func newSwitchWriteFixture(t *testing.T) *switchWriteFixture {
 	if dsn == "" {
 		t.Skip("SILO_TEST_DATABASE_URL is not set")
 	}
-	pool, err := pgxpool.New(t.Context(), dsn)
+	poolConfig, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Room for a staged test's blocker, parties and poll on a 4-CPU runner.
+	poolConfig.MaxConns = 16
+	pool, err := pgxpool.NewWithConfig(t.Context(), poolConfig)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,9 +72,7 @@ func newSwitchWriteFixture(t *testing.T) *switchWriteFixture {
 	f := &switchWriteFixture{pool: pool, suffix: strconv.FormatInt(time.Now().UnixNano(), 10)}
 	saved := map[string]*string{}
 	for _, key := range switchSettingKeys {
-		var value *string
-		_ = pool.QueryRow(t.Context(), `SELECT value FROM server_settings WHERE key = $1`, key).Scan(&value)
-		saved[key] = value
+		saved[key] = storedSettingValue(t, pool, key)
 	}
 	t.Cleanup(func() {
 		for key, value := range saved {
@@ -132,8 +158,12 @@ func TestAppKeySwitchWriteEndsKeySessionsDB(t *testing.T) {
 	f := newSwitchWriteFixture(t)
 	ctx := t.Context()
 	h := &AdminHandler{SettingsRepo: serversettings.NewServerSettingsRepo(f.pool), pool: f.pool}
-	if existing, err := h.AccountsAtRisk(ctx, auth.ChangeAppKeysOff); err != nil || len(existing) > 0 {
-		t.Skipf("accounts that sign in only with keys already in the database (%v): every switch-off would be refused", err)
+	existing, err := h.AccountsAtRisk(ctx, auth.ChangeAppKeysOff)
+	if err != nil {
+		t.Fatalf("reading the accounts at risk: %v", err)
+	}
+	if len(existing) > 0 {
+		t.Skipf("%d accounts that sign in only with keys already in the database: every switch-off would be refused", len(existing))
 	}
 	for i, tc := range []struct {
 		name string
@@ -186,6 +216,9 @@ func TestAppKeySwitchWriteEndsKeySessionsDB(t *testing.T) {
 			if f.live(t, own) || f.live(t, app) {
 				t.Errorf("key sessions live after the switch went off: own %v, granted app %v", f.live(t, own), f.live(t, app))
 			}
+			if !appKeySwitchOffStored(t, f.pool) {
+				t.Error("the write ended the key sessions but did not store the switch off")
+			}
 			if !f.live(t, password) || !f.live(t, deviceSignIn) {
 				t.Errorf("other sessions ended: password %v, device sign-in %v", f.live(t, password), f.live(t, deviceSignIn))
 			}
@@ -205,11 +238,14 @@ func TestAppKeysOffJudgedOnTheBatchLocalSettingDB(t *testing.T) {
 	f := newSwitchWriteFixture(t)
 	ctx := t.Context()
 	h := &AdminHandler{SettingsRepo: serversettings.NewServerSettingsRepo(f.pool), pool: f.pool}
-	if existing, err := h.AccountsAtRisk(ctx, auth.ChangeAppKeysOff); err != nil || len(existing) > 0 {
-		t.Skipf("accounts that sign in only with keys already in the database (%v)", err)
+	existing, err := h.AccountsAtRisk(ctx, auth.ChangeAppKeysOff)
+	if err != nil {
+		t.Fatalf("reading the accounts at risk: %v", err)
 	}
-	var savedLocal *string
-	_ = f.pool.QueryRow(ctx, `SELECT value FROM server_settings WHERE key = $1`, config.AuthLocalPasswordLoginSettingKey).Scan(&savedLocal)
+	if len(existing) > 0 {
+		t.Skipf("%d accounts that sign in only with keys already in the database", len(existing))
+	}
+	savedLocal := storedSettingValue(t, f.pool, config.AuthLocalPasswordLoginSettingKey)
 	t.Cleanup(func() {
 		if savedLocal == nil {
 			_, _ = f.pool.Exec(context.Background(), `DELETE FROM server_settings WHERE key = $1`, config.AuthLocalPasswordLoginSettingKey)
@@ -258,4 +294,63 @@ func TestAppKeysOffJudgedOnTheBatchLocalSettingDB(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A stale settings write answers 412 before anything else is judged, whether
+// or not it names a switch key (which runs it in a transaction taken before
+// the write) and whether or not its values are valid: the precondition is
+// checked first, as it always was. Each invalid value is shown invalid with
+// no precondition.
+func TestStaleSettingsWriteAnswersPreconditionFirstDB(t *testing.T) {
+	f := newSwitchWriteFixture(t)
+	ctx := t.Context()
+	h := &AdminHandler{SettingsRepo: serversettings.NewServerSettingsRepo(f.pool), pool: f.pool}
+	stale := func(AdminSettingsSnapshot) error {
+		return &APIError{Status: http.StatusPreconditionFailed, Code: "precondition_failed", Message: "stale"}
+	}
+	status := func(err error) int {
+		if apiErr, ok := errors.AsType[*APIError](err); ok {
+			return apiErr.Status
+		}
+		return 0
+	}
+	for _, tc := range []struct {
+		name, key, value string
+		valid            bool
+	}{
+		{"a switch key, valid", config.AuthAppKeySignInSettingKey, "true", true},
+		{"a switch key, invalid", config.AuthAppKeySignInSettingKey, "maybe", false},
+		{"no switch key, valid", config.AuthLocalPasswordLoginSettingKey, "true", true},
+		{"no switch key, invalid", config.AuthLocalPasswordLoginSettingKey, "maybe", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if !tc.valid {
+				if _, err := h.UpdateAdminSettings(ctx, map[string]string{tc.key: tc.value}, nil); status(err) != http.StatusBadRequest {
+					t.Fatalf("without a precondition: %v, want a 400 validation error", err)
+				}
+			}
+			if _, err := h.UpdateAdminSettings(ctx, map[string]string{tc.key: tc.value}, stale); status(err) != http.StatusPreconditionFailed {
+				t.Fatalf("stale batch: %v, want 412", err)
+			}
+			if _, err := h.UpdateAdminSetting(ctx, tc.key, tc.value, stale); status(err) != http.StatusPreconditionFailed {
+				t.Fatalf("stale single setting: %v, want 412", err)
+			}
+		})
+	}
+}
+
+// appKeySwitchOffStored reports whether the stored settings turn the app key
+// switch off: auth.app_key_sign_in false, or demo mode on.
+func appKeySwitchOffStored(t *testing.T, pool *pgxpool.Pool) bool {
+	t.Helper()
+	values := map[string]string{}
+	for _, key := range []string{config.AuthAppKeySignInSettingKey, demomode.SettingKey} {
+		if v := storedSettingValue(t, pool, key); v != nil {
+			values[key] = *v
+		}
+	}
+	if _, ok := values[config.AuthAppKeySignInSettingKey]; !ok {
+		values[config.AuthAppKeySignInSettingKey] = "true"
+	}
+	return !appKeySwitch(values)
 }

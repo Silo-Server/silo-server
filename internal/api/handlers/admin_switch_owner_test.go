@@ -2,12 +2,14 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
@@ -19,8 +21,7 @@ import (
 // restoreSetting saves key and restores it when t ends.
 func (f *switchWriteFixture) restoreSetting(t *testing.T, key string) {
 	t.Helper()
-	var saved *string
-	_ = f.pool.QueryRow(t.Context(), `SELECT value FROM server_settings WHERE key = $1`, key).Scan(&saved)
+	saved := storedSettingValue(t, f.pool, key)
 	t.Cleanup(func() {
 		if saved == nil {
 			_, _ = f.pool.Exec(context.Background(), `DELETE FROM server_settings WHERE key = $1`, key)
@@ -69,8 +70,12 @@ func TestPublicURLWritesKeepAWayInDB(t *testing.T) {
 	f := newSwitchWriteFixture(t)
 	ctx := t.Context()
 	h := &AdminHandler{SettingsRepo: serversettings.NewServerSettingsRepo(f.pool), pool: f.pool}
-	if existing, err := h.AccountsAtRisk(ctx, auth.ChangeAppKeysOff); err != nil || len(existing) > 0 {
-		t.Skipf("accounts that sign in only with keys already in the database (%v)", err)
+	existing, err := h.AccountsAtRisk(ctx, auth.ChangeAppKeysOff)
+	if err != nil {
+		t.Fatalf("reading the accounts at risk: %v", err)
+	}
+	if len(existing) > 0 {
+		t.Skipf("%d accounts that sign in only with keys already in the database", len(existing))
 	}
 	f.restoreSetting(t, config.ServerPublicURLSettingKey)
 	provider := f.oauthProvider(t)
@@ -251,23 +256,30 @@ func TestLocalPasswordsOffJudgesTheStateLeftDB(t *testing.T) {
 	}
 }
 
-// waitLockWaiters waits until n backends of this database wait on a lock.
-func (f *switchWriteFixture) waitLockWaiters(t *testing.T, n int) {
+// blockedBy waits until a backend of this database waits on a lock the
+// backend holder holds, and answers its pid; a party that answers on
+// returned first fails the test at once with its answer.
+func (f *switchWriteFixture) blockedBy(t *testing.T, holder uint32, returned <-chan error) uint32 {
 	t.Helper()
 	deadline := time.Now().Add(20 * time.Second)
 	for {
-		var waiting int
-		if err := f.pool.QueryRow(t.Context(), `SELECT COUNT(*) FROM pg_stat_activity
-			WHERE datname = current_database() AND wait_event_type = 'Lock'`).Scan(&waiting); err != nil {
+		var pid uint32
+		err := f.pool.QueryRow(t.Context(), `SELECT pid FROM pg_stat_activity
+			WHERE datname = current_database() AND $1 = ANY(pg_blocking_pids(pid)) LIMIT 1`, holder).Scan(&pid)
+		if err == nil {
+			return pid
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
 			t.Fatal(err)
 		}
-		if waiting >= n {
-			return
-		}
 		if time.Now().After(deadline) {
-			t.Fatalf("%d backends waiting on a lock, want %d", waiting, n)
+			t.Fatalf("nothing waited on backend %d", holder)
 		}
-		time.Sleep(10 * time.Millisecond) //nolint:forbidigo // the poll interval; the wait is on pg_stat_activity, an observable lock wait
+		select {
+		case err := <-returned:
+			t.Fatalf("a party returned before it waited: %v", err)
+		case <-time.After(10 * time.Millisecond):
+		}
 	}
 }
 
@@ -342,11 +354,17 @@ func TestOwnershipMoveAgainstSwitchOffDB(t *testing.T) {
 			if !transferFirst {
 				first, second = switchOff, move
 			}
+			var holder uint32
+			if err := hold.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&holder); err != nil {
+				t.Fatal(err)
+			}
+			// The first party waits on the held row, the second on the
+			// first (the ownership lock it holds).
 			done := make(chan error, 2)
 			go func() { done <- first() }()
-			f.waitLockWaiters(t, 1)
+			firstPID := f.blockedBy(t, holder, done)
 			go func() { done <- second() }()
-			f.waitLockWaiters(t, 2)
+			f.blockedBy(t, firstPID, done)
 			if err := hold.Rollback(ctx); err != nil {
 				t.Fatal(err)
 			}

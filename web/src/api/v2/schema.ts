@@ -15229,7 +15229,7 @@ export interface components {
        */
       access_group_id?: string | null;
       audio_transcode_allowed?: boolean | null;
-      /** @description Make the admin account a break-glass account, which keeps local password sign-in while the server turns it off, or clear it. Only admins may hold it, and only the server Owner may set or clear it (403 permission_denied otherwise); clearing the last usable one while local password sign-in is off is 409 break_glass_required; setting it, while local password sign-in is off, on an account whose Silo app keys would then be its only way in (no usable password, no sign-in provider account) is 409 last_sign_in_method */
+      /** @description Make the admin account a break-glass account, which keeps local password sign-in while the server turns it off, or clear it. Only admins may hold it, and only the server Owner may set or clear it (403 permission_denied otherwise); clearing the last usable one while local password sign-in is off is 409 break_glass_required; setting it, while local password sign-in is off, on an account whose Silo app keys would then be its only way in (no usable password, no usable sign-in provider account) is 409 last_sign_in_method */
       break_glass?: boolean;
       download_allowed?: boolean | null;
       download_transcode_allowed?: boolean | null;
