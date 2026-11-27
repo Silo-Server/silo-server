@@ -20,7 +20,7 @@ import (
 // check for actor, the setting, then the sweep.
 func switchOffAs(ctx context.Context, env *keyEnv, actor int) error {
 	return pgx.BeginFunc(ctx, env.pool, func(tx pgx.Tx) error {
-		if err := LockOwnershipShared(ctx, tx); err != nil {
+		if err := LockSwitchWrite(ctx, tx); err != nil {
 			return err
 		}
 		if err := lockServerSettings(ctx, tx); err != nil {

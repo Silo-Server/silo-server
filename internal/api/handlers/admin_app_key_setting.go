@@ -105,20 +105,23 @@ func touchesAppKeySwitch(keys ...string) bool {
 	return false
 }
 
-// inSwitchWriteTx runs write in a transaction that takes the ownership lock
-// (shared) before anything else, when locking is set, so the settings lock the
-// write takes next, and the Owner check under it (auth.CheckSwitchOffActor),
-// come after it: the orders are ownership then settings (this write),
-// ownership then account rows (an ownership transfer), and account row then
-// settings (key and password sign-in), and no path takes the settings lock
-// or an account row before the ownership lock. Otherwise, or with no
-// database, write runs with no transaction of its own (nil), as before.
+// inSwitchWriteTx runs write in a transaction that takes, when locking is
+// set, the ownership lock (shared) and then every plugin installation row
+// (share) before anything else (auth.LockSwitchWrite), so the settings lock
+// the write takes next, the Owner check under it (auth.CheckSwitchOffActor)
+// and the sweep come after them. The orders are ownership then settings
+// (this write), ownership then account rows (an ownership transfer), account
+// row then settings (key and password sign-in), and installation row then
+// settings (this write, a plugin write, a provider-bound key's sign-in):
+// nothing holds the settings lock while it waits for the ownership lock or
+// an installation row. Otherwise, or with no database, write runs with no
+// transaction of its own (nil), as before.
 func (h *AdminHandler) inSwitchWriteTx(ctx context.Context, locking bool, write func(tx pgx.Tx) error) error {
 	if !locking || h.pool == nil {
 		return write(nil)
 	}
 	return pgx.BeginFunc(ctx, h.pool, func(tx pgx.Tx) error {
-		if err := auth.LockOwnershipShared(ctx, tx); err != nil {
+		if err := auth.LockSwitchWrite(ctx, tx); err != nil {
 			return err
 		}
 		return write(tx)

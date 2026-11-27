@@ -104,8 +104,10 @@ func EndAppKeySessionsTx(ctx context.Context, tx pgx.Tx) (int64, error) {
 //     row: a device sign-in it approved in advance stops being honored
 //     because collection reads the session's state (approverLive).
 func endKeySessionsTx(ctx context.Context, tx pgx.Tx, only []string) (int64, error) {
-	if _, err := tx.Exec(ctx, `SELECT id FROM plugin_installations ORDER BY id FOR SHARE`); err != nil {
-		return 0, fmt.Errorf("locking plugin installations: %w", err)
+	// Callers take these before the settings lock (lockInstallationsShared);
+	// taking them again here changes nothing for them.
+	if err := lockInstallationsShared(ctx, tx); err != nil {
+		return 0, err
 	}
 	const ending = `device_key_id IS NOT NULL AND revoked_at IS NULL AND ($1::text[] IS NULL OR id = ANY($1))`
 	if err := lockSessionsInOrder(ctx, tx, ending, only); err != nil {
@@ -116,6 +118,30 @@ func endKeySessionsTx(ctx context.Context, tx pgx.Tx, only []string) (int64, err
 		return 0, fmt.Errorf("ending app key sessions: %w", err)
 	}
 	return tag.RowsAffected(), nil
+}
+
+// lockInstallationsShared takes every plugin installation row (share, in id
+// order). A path that both ends key sessions and holds the settings lock
+// takes them first, before the settings lock: a plugin write that guards
+// sign-in (plugins.signInGuard) takes its installation row and then the
+// settings lock, so the settings lock is never held while waiting for an
+// installation row.
+func lockInstallationsShared(ctx context.Context, tx pgx.Tx) error {
+	if _, err := tx.Exec(ctx, `SELECT id FROM plugin_installations ORDER BY id FOR SHARE`); err != nil {
+		return fmt.Errorf("locking plugin installations: %w", err)
+	}
+	return nil
+}
+
+// LockSwitchWrite takes, at the start of a settings write that could turn the
+// app key switch off, the locks that must come before the settings lock: the
+// ownership lock (shared; see lockOwnership) and every plugin installation
+// row (share; see lockInstallationsShared), which the sweep needs.
+func LockSwitchWrite(ctx context.Context, tx pgx.Tx) error {
+	if err := LockOwnershipShared(ctx, tx); err != nil {
+		return err
+	}
+	return lockInstallationsShared(ctx, tx)
 }
 
 // afterRenewalSwitchRead, when set, runs between a key session renewal's
@@ -129,8 +155,8 @@ var afterRenewalSwitchRead func()
 // at its next refresh like any revoked session, and its access token is
 // refused from then on, rather than pausing until the switch comes back.
 // It reads the switch once without a lock; only when that read says off
-// does it take the settings lock (shared), read again and end the session in
-// endKeySessionsTx's order. Skipping the lock while the switch is on is safe:
+// does it take the installation rows and the settings lock (shared), read
+// again and end the session in endKeySessionsTx's order. Skipping the lock while the switch is on is safe:
 // a switch-off that commits just after the plain read runs its own sweep,
 // which ends this session in the same transaction as the write, so tokens
 // this renewal goes on to mint name a revoked session and fail on first use.
@@ -144,6 +170,9 @@ func endKeySessionIfSwitchOff(ctx context.Context, pool *pgxpool.Pool, sessionID
 	}
 	ended := false
 	err = pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
+		if err := lockInstallationsShared(ctx, tx); err != nil {
+			return err
+		}
 		if err := lockSettingsShared(ctx, tx); err != nil {
 			return err
 		}

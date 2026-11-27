@@ -22,6 +22,9 @@ import (
 // transaction.
 func switchOff(ctx context.Context, pool *pgxpool.Pool) error {
 	return pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
+		if err := LockSwitchWrite(ctx, tx); err != nil {
+			return err
+		}
 		if err := lockServerSettings(ctx, tx); err != nil {
 			return err
 		}
