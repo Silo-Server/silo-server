@@ -31,6 +31,9 @@ type keyRoutesDB struct {
 	handler http.Handler
 	devices *auth.DeviceLoginService
 	userID  int
+	// adminID is an administrator account of its own, with no session until
+	// a test opens one.
+	adminID int
 	claims  map[string]*auth.Claims
 }
 
@@ -75,20 +78,12 @@ func newKeyRoutesDB(t *testing.T, with ...func(*Dependencies)) *keyRoutesDB {
 		t.Fatal(err)
 	}
 
-	claims := map[string]*auth.Claims{}
-	session := func(token, openedVia string, deviceKey *string, impersonator *int) {
-		id := uuid.NewString()
-		if _, err := pool.Exec(ctx, `INSERT INTO auth_sessions (id, user_id, device_name, expires_at, opened_via, device_key_id)
-			VALUES ($1, $2, 'test', $3, NULLIF($4, ''), $5::uuid)`, id, userID, time.Now().Add(time.Hour), openedVia, deviceKey); err != nil {
-			t.Fatal(err)
-		}
-		claims[token] = &auth.Claims{UserID: userID, Role: "user", SessionID: id, TokenType: auth.TokenTypeAccess, ImpersonatorUserID: impersonator}
-	}
-	session("tok-phone", models.SessionOpenedPassword, nil, nil)
-	session("tok-tv", models.SessionOpenedDeviceLogin, nil, nil)
-	session("tok-app", models.SessionOpenedAppKey, &grantKey, nil)
-	session("tok-old", "", nil, nil)
-	session("tok-acting", models.SessionOpenedPassword, nil, &adminID)
+	d := &keyRoutesDB{pool: pool, userID: userID, adminID: adminID, claims: map[string]*auth.Claims{}}
+	d.storeSession(t, "tok-phone", userID, "user", models.SessionOpenedPassword, nil, nil)
+	d.storeSession(t, "tok-tv", userID, "user", models.SessionOpenedDeviceLogin, nil, nil)
+	d.storeSession(t, "tok-app", userID, "user", models.SessionOpenedAppKey, &grantKey, nil)
+	d.storeSession(t, "tok-old", userID, "user", "", nil, nil)
+	d.storeSession(t, "tok-acting", userID, "user", models.SessionOpenedPassword, nil, &adminID)
 
 	jwt := auth.NewJWTService("synthetic-key-routes-secret", time.Minute, time.Hour)
 	sessions := auth.NewSessionRepository(pool)
@@ -100,12 +95,25 @@ func newKeyRoutesDB(t *testing.T, with ...func(*Dependencies)) *keyRoutesDB {
 	deps.Devices = handler
 	// The real session lookup, so the claim saying another app's key opened
 	// the session comes from the rows, as in production.
-	deps.Auth = apimw.NewAuthMiddleware(fakeTokens{claims}, sessions, fakeAPIKeys{},
-		fakeUsers{map[int]*models.User{userID: {ID: userID, Role: "user", Enabled: true}}})
+	deps.Auth = apimw.NewAuthMiddleware(fakeTokens{d.claims}, sessions, fakeAPIKeys{},
+		fakeUsers{map[int]*models.User{userID: {ID: userID, Role: "user", Enabled: true}, adminID: {ID: adminID, Role: "admin", Enabled: true}}})
 	for _, change := range with {
 		change(&deps)
 	}
-	return &keyRoutesDB{pool: pool, handler: NewHandler(deps), devices: devices, userID: userID, claims: claims}
+	d.handler, d.devices = NewHandler(deps), devices
+	return d
+}
+
+// storeSession stores a live session of userID opened as openedVia (empty
+// for no record) and makes token authenticate as it.
+func (d *keyRoutesDB) storeSession(t *testing.T, token string, userID int, role, openedVia string, deviceKey *string, impersonator *int) {
+	t.Helper()
+	id := uuid.NewString()
+	if _, err := d.pool.Exec(t.Context(), `INSERT INTO auth_sessions (id, user_id, device_name, expires_at, opened_via, device_key_id)
+		VALUES ($1, $2, 'test', $3, NULLIF($4, ''), $5::uuid)`, id, userID, time.Now().Add(time.Hour), openedVia, deviceKey); err != nil {
+		t.Fatal(err)
+	}
+	d.claims[token] = &auth.Claims{UserID: userID, Role: role, SessionID: id, TokenType: auth.TokenTypeAccess, ImpersonatorUserID: impersonator}
 }
 
 // TestKeyRoutesRefuseSessionsDB: the key list, the list of devices waiting

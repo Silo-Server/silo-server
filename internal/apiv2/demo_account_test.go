@@ -13,6 +13,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/demomode"
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 const demoRefusalDetail = "This action is not available in demo mode."
@@ -375,4 +376,77 @@ func documentOperations(t *testing.T) []documentOperation {
 		return strings.Compare(a.Method, b.Method)
 	})
 	return out
+}
+
+// demoVisitorDeviceReads are the caller's own reads of the account's
+// devices, keys and approvals, by operation ID, with the path a test reads.
+// Each answers a demo visitor no device name, address or time.
+var demoVisitorDeviceReads = map[string]string{
+	"listAppKeys":            "/auth/keys",
+	"listPendingAppKeys":     "/auth/keys/pending",
+	"listDevicePreapprovals": "/auth/device/preapprovals",
+}
+
+// demoNoDeviceRows are the other reads tagged app-keys or device-login that a
+// non-administrator can call, with why they carry no row of the account's
+// devices.
+var demoNoDeviceRows = map[string]string{
+	"getAppKeySessionAccess": "four booleans about the caller's own session",
+}
+
+// TestDemoVisitorReadsNoDeviceRows: demo visitors share one account, so its
+// devices, waiting devices and approvals are other visitors'. It fails when
+// a read of them tagged app-keys or device-login is added without deciding
+// what a demo visitor gets, and when a listed read answers a demo visitor a
+// device name, an enrolled address or a time the account's rows hold, while
+// an administrator still gets them. listSessions has its own rule
+// (TestDemoVisitorSessionListDB).
+func TestDemoVisitorReadsNoDeviceRows(t *testing.T) {
+	seen := map[string]bool{}
+	for _, op := range documentOperations(t) {
+		if op.Method != http.MethodGet || op.Class == ClassPublic || op.Class == ClassActingAdmin || (op.Tag != "app-keys" && op.Tag != "device-login") {
+			continue
+		}
+		seen[op.ID] = true
+		_, read := demoVisitorDeviceReads[op.ID]
+		_, none := demoNoDeviceRows[op.ID]
+		if read == none {
+			t.Errorf("%s: list it in exactly one of demoVisitorDeviceReads and demoNoDeviceRows", op.ID)
+		}
+	}
+	for _, list := range []map[string]string{demoVisitorDeviceReads, demoNoDeviceRows} {
+		for id := range list {
+			if !seen[id] {
+				t.Errorf("%s matches no read; remove it", id)
+			}
+		}
+	}
+
+	key := &models.AppDeviceKey{ID: "0c5f1a52-7e0c-4f0e-9f43-2f1f6f0c7d11", KeyID: "zT321tSgcB7emUH9k0B0oA", Kind: models.DeviceKeyKindDevice, Name: "Seeded phone",
+		Platform: "ios", Status: models.DeviceKeyStatusPending, EnrolledVia: models.AppKeyEnrolledIntroduce, EnrolledIP: "198.51.100.77", CreatedAt: fixedTime()}
+	keys := &fakeAppKeys{enabled: true, keys: auth.OwnAppKeys{Person: &models.AppPersonKey{KeyID: "PgujdSfBbNNyXngLWCsOgw", EnrolledIP: "198.51.100.77", CreatedAt: fixedTime()},
+		Devices: []*models.AppDeviceKey{key}}, pending: []*models.AppDeviceKey{key}}
+	deps := appKeyDeps(keys)
+	deps.DemoSettings = fakeSettings{demo: true}
+	h := NewHandler(deps)
+	// The seeded rows' names (the pre-approval fake's is Living room TV),
+	// address and time.
+	marks := []string{"Seeded phone", "Living room TV", "198.51.100.77", NewInstant(fixedTime()).String()}
+	for id, path := range demoVisitorDeviceReads {
+		visitor := do(t, h, http.MethodGet, Prefix+path, "", bearer(memberToken))
+		admin := do(t, h, http.MethodGet, Prefix+path, "", bearer(adminToken))
+		if visitor.Code != http.StatusOK || admin.Code != http.StatusOK {
+			t.Fatalf("%s: visitor %d, administrator %d", id, visitor.Code, admin.Code)
+		}
+		reached := false
+		for _, mark := range marks {
+			if strings.Contains(visitor.Body.String(), mark) {
+				t.Errorf("%s answers a demo visitor %q: %s", id, mark, visitor.Body.String())
+			}
+			reached = reached || strings.Contains(admin.Body.String(), mark)
+		}
+		if !reached {
+			t.Errorf("%s: the administrator's answer holds none of the seeded rows: %s", id, admin.Body.String())
+		}
+	}
 }

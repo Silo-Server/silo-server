@@ -106,7 +106,7 @@ func mainProfileChangedProblem() *Problem {
 func registerAppKeyPending(reg *Registry) {
 	list := humaOp(http.MethodGet, Prefix+"/auth/keys/pending", "listPendingAppKeys", "app-keys",
 		"List the signed-in account's devices waiting for approval.")
-	list.Description = pendingSessionRule + " Only an administrator's account has waiting devices: a device a person key introduces to it waits for approval for 24 hours. Each item is a device object as listAppKeys returns it. Answers while auth.app_key_sign_in is off."
+	list.Description = pendingSessionRule + " Only an administrator's account has waiting devices: a device a person key introduces to it waits for approval for 24 hours. Each item is a device object as listAppKeys returns it. Answers while auth.app_key_sign_in is off." + demoVisitorKeyListRule
 	list.Errors = []int{http.StatusForbidden}
 	Register(reg, Operation{Operation: list, Class: ClassAuthenticated, ServiceBacked: true, Origins: grantedRefusedSignIn}, reg.listPendingAppKeys)
 
@@ -133,19 +133,19 @@ func (reg *Registry) listPendingAppKeys(ctx context.Context, _ *struct{}) (*Pend
 	if !claimsFrom(ctx).IsOwnLoginSession() {
 		return nil, appKeyProblem(auth.NotOwnSessionError(claimsFrom(ctx)))
 	}
+	if visitor, p := demoVisitorOwnSession(ctx, reg.deps.DemoSettings); p != nil {
+		return nil, p
+	} else if visitor {
+		return &PendingAppKeyListOutput{Body: PendingAppKeyList{Items: []AppDeviceKey{}}}, nil
+	}
 	keys, err := svc.ListPendingAppKeys(ctx, claimsFrom(ctx))
 	if err != nil {
 		return nil, appKeyProblem(err)
 	}
-	hide := reg.hideEnrolledAddresses(ctx)
 	out := PendingAppKeyList{Items: make([]AppDeviceKey, 0, len(keys))}
 	for _, key := range keys {
 		// An introduced key never comes from a grant, so allowed_by stays null.
-		device := appDeviceKeyOf(key, "")
-		if hide {
-			device.EnrolledIPAddress = ""
-		}
-		out.Items = append(out.Items, device)
+		out.Items = append(out.Items, appDeviceKeyOf(key, ""))
 	}
 	return &PendingAppKeyListOutput{Body: out}, nil
 }

@@ -114,7 +114,7 @@ func registerAppCodes(reg *Registry) {
 
 	sessionAccess := humaOp(http.MethodGet, Prefix+"/auth/keys/session", "getAppKeySessionAccess", "app-keys",
 		"Describe what the caller's login session may do with the account's app keys.")
-	sessionAccess.Description = "So a page can tell, before it asks, whether this session may list or manage keys, and whether signing in again would help. Answers while auth.app_key_sign_in is off; read getAppKeyCapability for the switch. approve follows the X-Profile-Id the request declares."
+	sessionAccess.Description = "So a page can tell, before it asks, whether this session may list or manage keys, and whether signing in again would help. Answers while auth.app_key_sign_in is off; read getAppKeyCapability for the switch. approve follows the X-Profile-Id the request declares. In demo mode a caller that is not an administrator gets list true (the lists answer it empty) and manage, approve and sign_in_again false, for every login session however it was opened; an API key, an administrator acting as the account and another app's session get their usual answer, and for any other such caller a server that has never read whether demo mode is on answers 500 internal_error."
 	Register(reg, Operation{Operation: sessionAccess, Class: ClassProfileScoped, ProfileOptional: true, ServiceBacked: true, Origins: grantedOwnSession}, reg.getAppKeySessionAccess)
 
 	declareRetryAfter(reg, "Seconds to wait before asking again.", sessionOp)
@@ -195,6 +195,13 @@ func (reg *Registry) getAppKeySessionAccess(ctx context.Context, _ *struct{}) (*
 		return nil, err
 	}
 	claims := claimsFrom(ctx)
+	// A demo visitor's lists answer empty and every key change is closed,
+	// whatever the session; signing in again changes neither.
+	if visitor, p := demoVisitorOwnSession(ctx, reg.deps.DemoSettings); p != nil {
+		return nil, p
+	} else if visitor {
+		return &AppKeySessionAccessOutput{CacheControl: cachePrivateNoCache, Body: AppKeySessionAccess{List: true}}, nil
+	}
 	got, err := svc.AppKeySessionAccess(ctx, claims)
 	if err != nil {
 		return nil, appKeyProblem(err)

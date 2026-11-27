@@ -265,7 +265,9 @@ function DeviceLists({
           {t("web.settings.sessions.refresh")}
         </Button>
       </div>
-      {state && !on && (
+      {/* It speaks of the listed devices; a demo visitor's lists, or an
+          account's with none, have nothing it could be about. */}
+      {state && !on && !empty && (
         <p className="surface-panel-subtle text-muted-foreground p-3 text-sm">
           {state === "disabled" ? t(`${P}.off`) : t(`${P}.unavailable`)}
         </p>

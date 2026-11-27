@@ -587,39 +587,3 @@ func (f *fakeAppKeys) VerifyProfileSet(context.Context, auth.KeyRequest) (*auth.
 }
 
 func (f *fakeAppKeys) SessionMayManageKeys(context.Context, *auth.Claims) error { return f.manageErr }
-
-// In demo mode every visitor shares one account, so the person's own key
-// lists answer no enrolled address to a caller who is not an administrator;
-// an administrator still sees it. Regression: a key enrolled before demo mode
-// was turned on would show its address to every visitor.
-func TestDemoModeHidesEnrolledAddresses(t *testing.T) {
-	key := &models.AppDeviceKey{ID: "0c5f1a52-7e0c-4f0e-9f43-2f1f6f0c7d11", KeyID: "zT321tSgcB7emUH9k0B0oA", Kind: models.DeviceKeyKindDevice,
-		Status: models.DeviceKeyStatusPending, EnrolledVia: models.AppKeyEnrolledIntroduce, EnrolledIP: "127.0.0.2", CreatedAt: fixedTime()}
-	keys := &fakeAppKeys{enabled: true, keys: auth.OwnAppKeys{Person: &models.AppPersonKey{KeyID: "PgujdSfBbNNyXngLWCsOgw", EnrolledIP: "127.0.0.2", CreatedAt: fixedTime()},
-		Devices: []*models.AppDeviceKey{key}}, pending: []*models.AppDeviceKey{key}}
-	deps := appKeyDeps(keys)
-	deps.DemoSettings = fakeSettings{demo: true}
-	h := NewHandler(deps)
-	for _, tc := range []struct {
-		token, want string
-	}{{memberToken, ""}, {adminToken, "127.0.0.2"}} {
-		var list AppKeyList
-		rec := do(t, h, http.MethodGet, Prefix+"/auth/keys", "", bearer(tc.token))
-		if rec.Code != http.StatusOK {
-			t.Fatalf("%s: key list status %d: %s", tc.token, rec.Code, rec.Body.String())
-		}
-		decodeJSON(t, rec.Body, &list)
-		if list.PersonKey == nil || list.PersonKey.EnrolledIPAddress != tc.want || len(list.Devices) != 1 || list.Devices[0].EnrolledIPAddress != tc.want {
-			t.Fatalf("%s: key list = %+v, want address %q", tc.token, list, tc.want)
-		}
-		var pending PendingAppKeyList
-		rec = do(t, h, http.MethodGet, Prefix+"/auth/keys/pending", "", bearer(tc.token))
-		if rec.Code != http.StatusOK {
-			t.Fatalf("%s: pending list status %d: %s", tc.token, rec.Code, rec.Body.String())
-		}
-		decodeJSON(t, rec.Body, &pending)
-		if len(pending.Items) != 1 || pending.Items[0].EnrolledIPAddress != tc.want {
-			t.Fatalf("%s: pending list = %+v, want address %q", tc.token, pending, tc.want)
-		}
-	}
-}
