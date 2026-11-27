@@ -705,10 +705,11 @@ by kind, as an object naming every kind with its count, idle kinds as `0`:
 A prepared download is classed by the same work: one that re-encodes video is a
 `video_transcode`, because it competes with playback encodes for the same GPU.
 
-It comes from the same health response as `active_jobs`, though the node reads
-the two separately, so their sums can differ briefly while a job starts or
-stops. Node selection reads it: see "Job kind balancing" below. Omitted on a
-node predating job kinds.
+It comes from the same health response as `active_jobs`. Both count new work
+that holds a job-cap slot from the moment the node accepts it, so a start still
+waiting for its first segment counts against the node. Their sums can differ
+briefly while a job starts or stops. Node selection reads it: see "Job kind
+balancing" below. Omitted on a node predating job kinds.
 
 ### Job kind balancing
 
