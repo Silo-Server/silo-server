@@ -427,6 +427,7 @@
 ./internal/auth TestCollectReadsApproverAtStatementClockDB
 ./internal/auth TestPromotionEndsSessionAppCodesDB
 ./internal/api/handlers TestStaleSettingsWriteAnswersPreconditionFirstDB
+./internal/api/handlers TestGuardedSwitchWriteOnOneConnectionDB
 ./internal/auth TestSessionEndersLockInIDOrderDB
 ./internal/auth TestSignInLinkCodeRedeemAgainstSweepDB
 ./internal/auth TestSwitchOffAfterRenewalReadDB

@@ -354,3 +354,56 @@ func appKeySwitchOffStored(t *testing.T, pool *pgxpool.Pool) bool {
 	}
 	return !appKeySwitch(values)
 }
+
+// A guarded write of a switch key takes no second connection while it holds
+// its transaction: on a pool of one connection it completes, fresh or stale,
+// as a batch and as a single setting. Regression guard: the precondition
+// read went through the pool after the write's transaction had taken the
+// only connection, so the write waited on itself until its deadline.
+func TestGuardedSwitchWriteOnOneConnectionDB(t *testing.T) {
+	f := newSwitchWriteFixture(t)
+	poolConfig, err := pgxpool.ParseConfig(os.Getenv("SILO_TEST_DATABASE_URL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	poolConfig.MaxConns = 1
+	one, err := pgxpool.NewWithConfig(t.Context(), poolConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(one.Close)
+	if _, err := f.pool.Exec(t.Context(), `DELETE FROM server_settings WHERE key = ANY($1)`, switchSettingKeys); err != nil {
+		t.Fatal(err)
+	}
+	h := &AdminHandler{SettingsRepo: serversettings.NewServerSettingsRepo(one), pool: one}
+	fresh := func(AdminSettingsSnapshot) error { return nil }
+	stale := func(AdminSettingsSnapshot) error {
+		return &APIError{Status: http.StatusPreconditionFailed, Code: "precondition_failed", Message: "stale"}
+	}
+	for _, tc := range []struct {
+		name  string
+		guard func(AdminSettingsSnapshot) error
+		want  int
+	}{{"fresh", fresh, 0}, {"stale", stale, http.StatusPreconditionFailed}} {
+		for _, single := range []bool{false, true} {
+			t.Run(tc.name+map[bool]string{false: " batch", true: " single setting"}[single], func(t *testing.T) {
+				ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+				defer cancel()
+				var err error
+				if single {
+					_, err = h.UpdateAdminSetting(ctx, config.AuthAppKeySignInSettingKey, "true", tc.guard)
+				} else {
+					_, err = h.UpdateAdminSettings(ctx, map[string]string{config.AuthAppKeySignInSettingKey: "true"}, tc.guard)
+				}
+				switch {
+				case tc.want == 0 && err != nil:
+					t.Fatalf("fresh write on one connection: %v", err)
+				case tc.want != 0:
+					if apiErr, ok := errors.AsType[*APIError](err); !ok || apiErr.Status != tc.want {
+						t.Fatalf("stale write on one connection: %v, want %d", err, tc.want)
+					}
+				}
+			})
+		}
+	}
+}

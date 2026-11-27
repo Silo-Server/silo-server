@@ -1623,9 +1623,15 @@ func (h *AdminHandler) UpdateAdminSettings(ctx context.Context, values map[strin
 		result  AdminSettingsUpdateResult
 		publish func(context.Context)
 	)
+	if err := h.settingsLeadingChecks(values); err != nil {
+		return AdminSettingsUpdateResult{}, err
+	}
+	if err := h.precheck(ctx, guard); err != nil {
+		return AdminSettingsUpdateResult{}, err
+	}
 	err := h.inSwitchWriteTx(ctx, touchesAppKeySwitch(slices.Collect(maps.Keys(values))...), func(tx pgx.Tx) error {
 		var err error
-		result, publish, err = h.updateAdminSettings(ctx, tx, values, guard, true)
+		result, publish, err = h.updateAdminSettings(ctx, tx, values, guard)
 		return err
 	})
 	if err != nil {
@@ -1641,9 +1647,15 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 		result  AdminSettingUpdateResult
 		publish func(context.Context)
 	)
+	if err := h.settingLeadingChecks(key, value); err != nil {
+		return AdminSettingUpdateResult{}, err
+	}
+	if err := h.precheck(ctx, guard); err != nil {
+		return AdminSettingUpdateResult{}, err
+	}
 	err := h.inSwitchWriteTx(ctx, touchesAppKeySwitch(key), func(tx pgx.Tx) error {
 		var err error
-		result, publish, err = h.updateAdminSetting(ctx, tx, key, value, guard, true)
+		result, publish, err = h.updateAdminSetting(ctx, tx, key, value, guard)
 		return err
 	})
 	if err != nil {
@@ -1651,6 +1663,58 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 	}
 	publish(ctx)
 	return result, nil
+}
+
+// precheck runs a non-nil guard on the stored settings before the write
+// opens its transaction, so a stale write answers 412 before any validation
+// error, as it always has. It reads through the store with no transaction
+// held, so the write never waits for a second connection while it holds one;
+// the guard runs again under the settings lock.
+func (h *AdminHandler) precheck(ctx context.Context, guard func(AdminSettingsSnapshot) error) error {
+	if guard == nil {
+		return nil
+	}
+	stored, err := h.SettingsRepo.GetAll(ctx)
+	if err != nil {
+		return err
+	}
+	return guard(h.adminSettingsSnapshot(stored))
+}
+
+// settingsLeadingChecks are the batch's refusals that come before its
+// precondition: no store, no values, too many values.
+func (h *AdminHandler) settingsLeadingChecks(values map[string]string) error {
+	if h.SettingsRepo == nil {
+		return &APIError{Status: 500, Code: codeInternalError, Message: "Settings store not configured"}
+	}
+	if len(values) == 0 {
+		return &APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: "At least one setting is required"}
+	}
+	if len(values) > 250 {
+		return &APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: "A settings update may contain at most 250 values"}
+	}
+	return nil
+}
+
+// settingLeadingChecks are the single-setting write's refusals that come
+// before its precondition.
+func (h *AdminHandler) settingLeadingChecks(key, value string) error {
+	if h.SettingsRepo == nil {
+		return &APIError{Status: http.StatusInternalServerError, Code: codeInternalError, Message: "Settings store not configured"}
+	}
+	if key == "" {
+		return &APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: "Setting key is required"}
+	}
+	if machineManagedSettingKeys[key] {
+		return &APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: key + " is managed internally"}
+	}
+	if h.environmentRefusesSave(key, value) {
+		return &APIError{Status: http.StatusBadRequest, Code: "managed_by_environment", Message: key + " is managed by an environment variable"}
+	}
+	if strings.HasPrefix(key, "ratelimit.") {
+		return &APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: key + " is managed by /admin/rate-limits/config"}
+	}
+	return nil
 }
 
 // codeInternalError is the API error code of a server-side failure.
@@ -1669,43 +1733,23 @@ func (h *AdminHandler) ApplyAdminSettingsInTx(ctx context.Context, tx pgx.Tx, va
 	if tx == nil {
 		return AdminSettingsUpdateResult{}, nil, errors.New("a transaction is required")
 	}
-	return h.updateAdminSettings(ctx, tx, values, guard, false)
+	return h.updateAdminSettings(ctx, tx, values, guard)
 }
 
 // updateAdminSettings validates and writes values, in tx when it is set and
-// in a transaction of its own otherwise. precheck runs a non-nil guard first,
-// on a read outside tx, as well as under the settings lock. publish announces the committed
+// in a transaction of its own otherwise. A non-nil guard runs under the
+// settings lock; the public entry points also run it first (precheck). publish announces the committed
 // changes: events, the settings hook, and restart flags.
 //
 //nolint:funlen,gocyclo // UpdateAdminSettings' body, moved as is behind the caller-transaction entry points
-func (h *AdminHandler) updateAdminSettings(ctx context.Context, tx pgx.Tx, values map[string]string, guard func(AdminSettingsSnapshot) error, precheck bool) (AdminSettingsUpdateResult, func(context.Context), error) {
+func (h *AdminHandler) updateAdminSettings(ctx context.Context, tx pgx.Tx, values map[string]string, guard func(AdminSettingsSnapshot) error) (AdminSettingsUpdateResult, func(context.Context), error) {
 	fail := func(err error) (AdminSettingsUpdateResult, func(context.Context), error) {
 		return AdminSettingsUpdateResult{}, nil, err
 	}
-	if h.SettingsRepo == nil {
-		return fail(&APIError{Status: 500, Code: codeInternalError, Message: "Settings store not configured"})
+	if err := h.settingsLeadingChecks(values); err != nil {
+		return fail(err)
 	}
 	req := updateSettingsRequest{Values: values}
-
-	if len(req.Values) == 0 {
-		return fail(&APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: "At least one setting is required"})
-	}
-	if len(req.Values) > 250 {
-		return fail(&APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: "A settings update may contain at most 250 values"})
-	}
-
-	// A stale write answers 412 before any validation error, as it always
-	// has; only a caller's own transaction (ApplyAdminSettingsInTx) leaves the
-	// guard to the read under the settings lock.
-	if guard != nil && precheck {
-		stored, err := h.SettingsRepo.GetAll(ctx)
-		if err != nil {
-			return fail(err)
-		}
-		if err := guard(h.adminSettingsSnapshot(stored)); err != nil {
-			return fail(err)
-		}
-	}
 
 	keys := make([]string, 0, len(req.Values))
 	for key := range req.Values {
@@ -1896,37 +1940,10 @@ func (h *AdminHandler) updateAdminSettings(ctx context.Context, tx pgx.Tx, value
 // change, as updateAdminSettings' does.
 //
 //nolint:funlen,gocyclo // UpdateAdminSetting's body, moved as is behind the caller-transaction entry point
-func (h *AdminHandler) updateAdminSetting(ctx context.Context, tx pgx.Tx, key, value string, guard func(AdminSettingsSnapshot) error, precheck bool) (AdminSettingUpdateResult, func(context.Context), error) {
+func (h *AdminHandler) updateAdminSetting(ctx context.Context, tx pgx.Tx, key, value string, guard func(AdminSettingsSnapshot) error) (AdminSettingUpdateResult, func(context.Context), error) {
 	req := updateSettingRequest{Value: value}
-
-	if h.SettingsRepo == nil {
-		return AdminSettingUpdateResult{}, nil, &APIError{Status: http.StatusInternalServerError, Code: codeInternalError, Message: "Settings store not configured"}
-	}
-
-	if key == "" {
-		return AdminSettingUpdateResult{}, nil, &APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: "Setting key is required"}
-	}
-	if machineManagedSettingKeys[key] {
-		return AdminSettingUpdateResult{}, nil, &APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: key + " is managed internally"}
-	}
-	if h.environmentRefusesSave(key, value) {
-		return AdminSettingUpdateResult{}, nil, &APIError{Status: http.StatusBadRequest, Code: "managed_by_environment", Message: key + " is managed by an environment variable"}
-	}
-	if strings.HasPrefix(key, "ratelimit.") {
-		return AdminSettingUpdateResult{}, nil, &APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: key + " is managed by /admin/rate-limits/config"}
-	}
-
-	// A stale write answers 412 before any validation error, as it always
-	// has; only a caller's own transaction (ApplyAdminSettingsInTx) leaves the
-	// guard to the read under the settings lock.
-	if guard != nil && precheck {
-		stored, err := h.SettingsRepo.GetAll(ctx)
-		if err != nil {
-			return AdminSettingUpdateResult{}, nil, err
-		}
-		if err := guard(h.adminSettingsSnapshot(stored)); err != nil {
-			return AdminSettingUpdateResult{}, nil, err
-		}
+	if err := h.settingLeadingChecks(key, value); err != nil {
+		return AdminSettingUpdateResult{}, nil, err
 	}
 
 	if normalized, err := config.NormalizeAdminSetting(key, req.Value); err != nil {
