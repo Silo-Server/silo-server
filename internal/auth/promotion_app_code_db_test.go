@@ -45,9 +45,8 @@ func TestPromotionEndsSessionAppCodesDB(t *testing.T) {
 		return redeemCase{user: user, person: person,
 			request: env.request(t, message{purpose: appkeys.PurposeRedeem, signer: person, device: &device, fields: map[string]any{"code": issued.Code}})}
 	}
-	redeem := func(ctx context.Context, c redeemCase) error {
-		_, err := env.signIn.RedeemAppCode(ctx, KeyRedeemRequest{KeyRequest: c.request, PersonKey: c.person.pub})
-		return err
+	redeem := func(ctx context.Context, c redeemCase) (*KeySignInResult, error) {
+		return env.signIn.RedeemAppCode(ctx, KeyRedeemRequest{KeyRequest: c.request, PersonKey: c.person.pub})
 	}
 	// Nothing a key gave the account outlives the promotion.
 	requireNoKeys := func(t *testing.T, userID int) {
@@ -70,7 +69,7 @@ func TestPromotionEndsSessionAppCodesDB(t *testing.T) {
 	if err := promote(ctx, c.user.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := redeem(ctx, c); !errors.Is(err, ErrAppCodeInvalid) {
+	if _, err := redeem(ctx, c); !errors.Is(err, ErrAppCodeInvalid) {
 		t.Fatalf("redeem after promotion = %v, want ErrAppCodeInvalid", err)
 	}
 	requireNoKeys(t, c.user.ID)
@@ -79,7 +78,12 @@ func TestPromotionEndsSessionAppCodesDB(t *testing.T) {
 		t.Run(map[bool]string{true: "promotion first", false: "redeem first"}[promoteFirst], func(t *testing.T) {
 			c := issue(t, map[bool]string{true: "promotecode-race-p", false: "promotecode-race-r"}[promoteFirst])
 			promoteIt := func(ctx context.Context) error { return promote(ctx, c.user.ID) }
-			redeemIt := func(ctx context.Context) error { return redeem(ctx, c) }
+			var result *KeySignInResult
+			redeemIt := func(ctx context.Context) error {
+				var err error
+				result, err = redeem(ctx, c)
+				return err
+			}
 			var promoted, redeemed error
 			if promoteFirst {
 				errs := raceOnAccountRow(t, env.pool, c.user.ID, promoteIt, redeemIt)
@@ -96,6 +100,26 @@ func TestPromotionEndsSessionAppCodesDB(t *testing.T) {
 				t.Fatalf("redeem after the promotion committed = %v, want ErrAppCodeInvalid", redeemed)
 			case !promoteFirst && redeemed != nil:
 				t.Fatalf("redeem before the promotion = %v, want it enrolled", redeemed)
+			}
+			if !promoteFirst {
+				// The redeem enrolled a device key and opened its session,
+				// and the promotion ended both.
+				if result == nil || result.Pair == nil || result.DeviceID == "" {
+					t.Fatalf("redeem before the promotion = %+v; want a device key and a session", result)
+				}
+				var keyRevoked, sessionRevoked *bool
+				if err := env.pool.QueryRow(ctx, `SELECT
+					(SELECT revoked_at IS NOT NULL FROM auth_device_keys WHERE id = $1 AND user_id = $3),
+					(SELECT revoked_at IS NOT NULL FROM auth_sessions WHERE id = $2 AND device_key_id = $1)`,
+					result.DeviceID, result.Pair.SessionID, c.user.ID).Scan(&keyRevoked, &sessionRevoked); err != nil {
+					t.Fatal(err)
+				}
+				if keyRevoked == nil || sessionRevoked == nil {
+					t.Fatalf("the redeem's device key or session is not stored (key %v, session %v)", keyRevoked, sessionRevoked)
+				}
+				if !*keyRevoked || !*sessionRevoked {
+					t.Fatalf("after the promotion: device key revoked %v, session revoked %v; want both ended", *keyRevoked, *sessionRevoked)
+				}
 			}
 			requireNoKeys(t, c.user.ID)
 		})
