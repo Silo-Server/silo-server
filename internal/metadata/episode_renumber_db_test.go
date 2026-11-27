@@ -434,23 +434,23 @@ func TestEpisodesOfCurrentNumberingDB(t *testing.T) {
 		}
 		all = append(all, episode)
 	}
-	// mark records a refresh whose order listed the episodes at slots ("1.2").
-	mark := func(slots ...string) {
+	markTargets := func(targets ...EpisodeResult) {
 		t.Helper()
-		targets := make([]EpisodeResult, 0, len(slots))
-		for _, slot := range slots {
-			var season, number int
-			if _, err := fmt.Sscanf(slot, "%d.%d", &season, &number); err != nil {
-				t.Fatal(err)
-			}
-			targets = append(targets, EpisodeResult{SeasonNumber: season, EpisodeNumber: number})
-		}
 		if err := pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
-			_, err := markListedEpisodes(ctx, tx, series, targets)
+			_, err := markListedEpisodes(ctx, tx, series, "tvdb", targets)
 			return err
 		}); err != nil {
 			t.Fatal(err)
 		}
+	}
+	// mark records a refresh whose order listed the episodes at slots ("1.2").
+	mark := func(slots ...string) {
+		t.Helper()
+		targets := make([]EpisodeResult, len(slots))
+		for i, slot := range slots {
+			_, _ = fmt.Sscanf(slot, "%d.%d", &targets[i].SeasonNumber, &targets[i].EpisodeNumber)
+		}
+		markTargets(targets...)
 	}
 	current := func() string {
 		t.Helper()
@@ -491,17 +491,33 @@ func TestEpisodesOfCurrentNumberingDB(t *testing.T) {
 		WHERE series_id = $1 AND season_number = 1 AND episode_number = 4`, series); err != nil {
 		t.Fatal(err)
 	}
-	if err := pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
-		_, err := markListedEpisodes(ctx, tx, series, []EpisodeResult{
-			{SeasonNumber: 1, EpisodeNumber: 2, ProviderSeasonNumber: 1, ProviderEpisodeNumber: 2},
-			{SeasonNumber: 1, EpisodeNumber: 3, ProviderSeasonNumber: 1, ProviderEpisodeNumber: 3},
-		})
-		return err
-	}); err != nil {
+	if _, err := pool.Exec(ctx, `UPDATE episodes SET provider_numbering = 'tvdb' WHERE series_id = $1`, series); err != nil {
 		t.Fatal(err)
 	}
+	markTargets(
+		EpisodeResult{SeasonNumber: 1, EpisodeNumber: 2, ProviderSeasonNumber: 1, ProviderEpisodeNumber: 2},
+		EpisodeResult{SeasonNumber: 1, EpisodeNumber: 3, ProviderSeasonNumber: 1, ProviderEpisodeNumber: 3},
+	)
 	if got := current(); got != "1.2 1.3 1.4 2.1" {
 		t.Fatalf("after an absolute refresh without provider season 2 = %q", got)
+	}
+	// A row back at a listed slot is listed, whatever season it held before.
+	markTargets(EpisodeResult{SeasonNumber: 1, EpisodeNumber: 1, ProviderSeasonNumber: 3, ProviderEpisodeNumber: 1})
+	if got := current(); got != "1.1 1.2 1.3 1.4 2.1" {
+		t.Fatalf("after 1.1 was listed again = %q", got)
+	}
+	// A row another provider numbered goes by the season it shows in.
+	if _, err := pool.Exec(ctx, `UPDATE episodes SET provider_numbering = 'tmdb'
+		WHERE series_id = $1 AND season_number = 1 AND episode_number = 4`, series); err != nil {
+		t.Fatal(err)
+	}
+	markTargets(
+		EpisodeResult{SeasonNumber: 1, EpisodeNumber: 1, ProviderSeasonNumber: 1, ProviderEpisodeNumber: 1},
+		EpisodeResult{SeasonNumber: 1, EpisodeNumber: 2, ProviderSeasonNumber: 1, ProviderEpisodeNumber: 2},
+		EpisodeResult{SeasonNumber: 1, EpisodeNumber: 3, ProviderSeasonNumber: 1, ProviderEpisodeNumber: 3},
+	)
+	if got := current(); got != "1.1 1.2 1.3 2.1" {
+		t.Fatalf("after a refresh that lacks the other provider's 1.4 = %q", got)
 	}
 }
 

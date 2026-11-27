@@ -273,14 +273,16 @@ func writeEpisodeFileNumbers(ctx context.Context, tx pgx.Tx, seriesID, structure
 }
 
 // markListedEpisodes records inside tx which rows the series' order lists
-// (episodesOfCurrentNumbering). In each provider season targets has
-// episodes in, the rows at the targets' numbers are listed and the rest,
-// which the order lacks, are not. A provider season targets has none of
-// keeps its marks: a refresh that could not load a season says nothing about
-// its episodes. Seasons are the provider's default ones (provider numbers,
-// else the shown ones), since the absolute layout shows every season as one.
-// It returns how many rows changed.
-func markListedEpisodes(ctx context.Context, tx pgx.Tx, seriesID string, targets []EpisodeResult) (int64, error) {
+// (episodesOfCurrentNumbering). The rows at the targets' numbers are listed.
+// In each provider season targets has episodes in, the other rows, which
+// the order lacks, are not; a provider season targets has none of keeps its
+// marks, since a refresh that could not load a season says nothing about its
+// episodes. Seasons are the structure provider's default ones (its provider
+// numbers, else the shown ones), since the absolute layout shows every
+// season as one; a row another provider numbered goes by its shown season.
+// It runs before this refresh's provider numbers are written. It returns how
+// many rows changed.
+func markListedEpisodes(ctx context.Context, tx pgx.Tx, seriesID, structureSlug string, targets []EpisodeResult) (int64, error) {
 	n := len(targets)
 	seasons, numbers, providerSeasons := make([]int32, 0, n), make([]int32, 0, n), make([]int32, 0, n)
 	for _, target := range targets {
@@ -296,13 +298,17 @@ func markListedEpisodes(ctx context.Context, tx pgx.Tx, seriesID string, targets
 		}
 	}
 	tag, err := tx.Exec(ctx, `
-		WITH listed AS (SELECT s, n, ps FROM unnest($2::int[], $3::int[], $4::int[]) AS v(s, n, ps))
-		UPDATE episodes e
-		SET unlisted = NOT EXISTS (SELECT 1 FROM listed WHERE s = e.season_number AND n = e.episode_number)
-		WHERE e.series_id = $1
-		  AND COALESCE(e.provider_season_number, e.season_number) IN (SELECT ps FROM listed)
-		  AND e.unlisted IS DISTINCT FROM NOT EXISTS (SELECT 1 FROM listed WHERE s = e.season_number AND n = e.episode_number)`,
-		seriesID, seasons, numbers, providerSeasons)
+		WITH listed AS (SELECT s, n, ps FROM unnest($2::int[], $3::int[], $4::int[]) AS v(s, n, ps)),
+		marks AS (
+			SELECT e.content_id,
+			       EXISTS (SELECT 1 FROM listed WHERE s = e.season_number AND n = e.episode_number) AS at_target,
+			       CASE WHEN e.provider_numbering = $5 THEN COALESCE(e.provider_season_number, e.season_number)
+			            ELSE e.season_number END IN (SELECT ps FROM listed) AS loaded
+			FROM episodes e WHERE e.series_id = $1)
+		UPDATE episodes e SET unlisted = NOT m.at_target
+		FROM marks m
+		WHERE e.content_id = m.content_id AND (m.at_target OR m.loaded) AND e.unlisted = m.at_target`,
+		seriesID, seasons, numbers, providerSeasons, structureSlug)
 	if err != nil {
 		return 0, fmt.Errorf("marking the listed episodes of %s: %w", seriesID, err)
 	}

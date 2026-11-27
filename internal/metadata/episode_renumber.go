@@ -470,7 +470,7 @@ func (s *MetadataService) renumberSeriesEpisodes(ctx context.Context, seriesID s
 	if err := applyEpisodeRenumber(ctx, tx, seriesID, plan.Moves); err != nil {
 		return err
 	}
-	marked, err := markListedEpisodes(ctx, tx, seriesID, targets)
+	marked, err := markListedEpisodes(ctx, tx, seriesID, structureKey, targets)
 	if err != nil {
 		return err
 	}
