@@ -90,9 +90,15 @@ func listsAccount(accounts []AccountAtRisk, id int) bool {
 	return slices.ContainsFunc(accounts, func(a AccountAtRisk) bool { return a.ID == id })
 }
 
-// Each change lists exactly the accounts it would leave with no way in, or
-// with keys as their only way in: a key that works now and no password or
-// provider identity that does.
+// The truth table for the three sign-in writes, one row per kind of account:
+// what turning app keys off, turning local passwords off and removing the
+// public URL each do to it. App keys off and the public URL either leave the
+// account alone or refuse the write naming it. Local passwords off leaves it
+// alone, warns (it loses password sign-in, and the write is allowed), or is
+// blocked by it (it would be left with keys as its only way in, or none, and
+// the write is refused). The local-passwords answer is read from
+// listAdminLocalPasswordOffAccounts' groups, and the refusal's list must name
+// exactly the accounts in its blocking group.
 func TestAccountsAtRiskDB(t *testing.T) {
 	env := newExternalSignInEnv(t)
 	ctx := t.Context()
@@ -102,8 +108,18 @@ func TestAccountsAtRiskDB(t *testing.T) {
 	directory := env.riskProvider(t, "directory", `["password"]`)
 	oidc := env.riskProvider(t, "oidc", `["oauth2"]`)
 	network := env.riskProvider(t, "network", `["network"]`)
+	identities := NewIdentityService(env.pool)
 
-	type listed struct{ appKeysOff, localOff bool }
+	const (
+		alone  = "unaffected"
+		warned = "warned"
+		blocks = "blocks"
+	)
+	type outcome struct {
+		appKeysOff bool
+		localOff   string
+		urlRemoved bool
+	}
 	for i, tc := range []struct {
 		name    string
 		localOn bool
@@ -112,66 +128,81 @@ func TestAccountsAtRiskDB(t *testing.T) {
 		pw, bg  bool
 		// publicURL is server.public_url; OAuth sign-in needs one.
 		publicURL string
-		want      listed
+		disabled  bool
+		want      outcome
 	}{
-		{name: "passwordless with a device key", localOn: true, want: listed{true, true},
+		{name: "passwordless with a device key", localOn: true, want: outcome{true, blocks, false},
 			seed: func(t *testing.T, id int) { env.riskKey(t, id, models.DeviceKeyStatusActive, nil) }},
-		{name: "passwordless with only a person key", localOn: true, want: listed{true, true},
+		{name: "passwordless with only a person key", localOn: true, want: outcome{true, blocks, false},
 			seed: func(t *testing.T, id int) { env.riskKey(t, id, "", nil) }},
-		{name: "admin with only a person key: a new device waits", localOn: true, role: models.RoleAdmin,
+		{name: "admin with only a person key: a new device waits", localOn: true, role: models.RoleAdmin, want: outcome{false, alone, false},
 			seed: func(t *testing.T, id int) { env.riskKey(t, id, "", nil) }},
-		{name: "only a waiting device key", localOn: true,
+		{name: "only a waiting device key", localOn: true, want: outcome{false, alone, false},
 			seed: func(t *testing.T, id int) { env.riskKey(t, id, models.DeviceKeyStatusPending, nil) }},
-		{name: "a password", localOn: true, pw: true,
+		// It loses its password and its local key with it, as an account
+		// with only a password always has: warned, not refused.
+		{name: "a password and a local key", localOn: true, pw: true, want: outcome{false, warned, false},
 			seed: func(t *testing.T, id int) { env.riskKey(t, id, models.DeviceKeyStatusActive, nil) }},
-		{name: "a password only", localOn: true, pw: true, seed: func(*testing.T, int) {}},
-		{name: "a provider only", localOn: true, seed: func(t *testing.T, id int) {
+		{name: "a password only", localOn: true, pw: true, want: outcome{false, warned, false}, seed: func(*testing.T, int) {}},
+		{name: "a provider only", localOn: true, want: outcome{false, alone, false}, seed: func(t *testing.T, id int) {
 			env.riskIdentity(t, id, directory, "risk-provider-only")
 		}},
-		{name: "a password and a key bound to a provider that signs people in", localOn: true, pw: true, seed: func(t *testing.T, id int) {
-			identity := env.riskIdentity(t, id, directory, "risk-pw-bound-usable")
-			env.riskKey(t, id, models.DeviceKeyStatusActive, &identity)
-		}},
+		{name: "an OAuth provider only, with a public URL", localOn: true, publicURL: "https://media.example.test/", want: outcome{false, alone, true},
+			seed: func(t *testing.T, id int) { env.riskIdentity(t, id, oidc, "risk-oidc-only") }},
+		{name: "a password and a key bound to a provider that signs people in", localOn: true, pw: true, want: outcome{false, alone, false},
+			seed: func(t *testing.T, id int) {
+				identity := env.riskIdentity(t, id, directory, "risk-pw-bound-usable")
+				env.riskKey(t, id, models.DeviceKeyStatusActive, &identity)
+			}},
 		// Local passwords off would leave its key, which needs no local
-		// password, as its only way in.
-		{name: "a password and a key bound to a provider that can't sign people in", localOn: true, pw: true, want: listed{false, true},
+		// password, as its only way in: main's list warned it, and it blocks.
+		{name: "a password and a key bound to a provider that can't sign people in", localOn: true, pw: true, want: outcome{false, blocks, false},
 			seed: func(t *testing.T, id int) {
 				identity := env.riskIdentity(t, id, oidc, "risk-pw-bound-unusable")
 				env.riskKey(t, id, models.DeviceKeyStatusActive, &identity)
 			}},
-		{name: "an administrator with a password and a key", localOn: true, role: models.RoleAdmin, pw: true,
+		{name: "keys only, bound to a provider that signs people in", localOn: true, want: outcome{false, alone, false},
+			seed: func(t *testing.T, id int) {
+				identity := env.riskIdentity(t, id, directory, "risk-keys-bound-usable")
+				env.riskKey(t, id, models.DeviceKeyStatusActive, &identity)
+			}},
+		{name: "an administrator with a password and a key", localOn: true, role: models.RoleAdmin, pw: true, want: outcome{false, warned, false},
 			seed: func(t *testing.T, id int) { env.riskKey(t, id, models.DeviceKeyStatusActive, nil) }},
-		{name: "a directory identity", localOn: true, seed: func(t *testing.T, id int) {
+		{name: "a directory identity", localOn: true, want: outcome{false, alone, false}, seed: func(t *testing.T, id int) {
 			env.riskIdentity(t, id, directory, "risk-directory-identity")
 			env.riskKey(t, id, models.DeviceKeyStatusActive, nil)
 		}},
-		{name: "an OAuth identity with a public URL", localOn: true, publicURL: "https://media.example.test/", seed: func(t *testing.T, id int) {
-			env.riskIdentity(t, id, oidc, "risk-oidc-url")
-			env.riskKey(t, id, models.DeviceKeyStatusActive, nil)
-		}},
-		{name: "an OAuth identity, no public URL: OAuth signs nobody in", localOn: true, want: listed{true, true}, seed: func(t *testing.T, id int) {
+		{name: "an OAuth identity with a public URL", localOn: true, publicURL: "https://media.example.test/", want: outcome{false, alone, true},
+			seed: func(t *testing.T, id int) {
+				env.riskIdentity(t, id, oidc, "risk-oidc-url")
+				env.riskKey(t, id, models.DeviceKeyStatusActive, nil)
+			}},
+		{name: "an OAuth identity, no public URL: OAuth signs nobody in", localOn: true, want: outcome{true, blocks, false}, seed: func(t *testing.T, id int) {
 			env.riskIdentity(t, id, oidc, "risk-oidc-nourl")
 			env.riskKey(t, id, models.DeviceKeyStatusActive, nil)
 		}},
-		{name: "a network identity: signs in only on its network", localOn: true, publicURL: "https://media.example.test", want: listed{true, true},
+		{name: "a network identity: signs in only on its network", localOn: true, publicURL: "https://media.example.test", want: outcome{true, blocks, false},
 			seed: func(t *testing.T, id int) {
 				env.riskIdentity(t, id, network, "risk-network")
 				env.riskKey(t, id, models.DeviceKeyStatusActive, nil)
 			}},
-		{name: "provider-bound key, its provider's sign-in off", localOn: true, want: listed{true, true}, seed: func(t *testing.T, id int) {
+		{name: "provider-bound key, its provider's sign-in off", localOn: true, want: outcome{true, blocks, false}, seed: func(t *testing.T, id int) {
 			identity := env.riskIdentity(t, id, env.installationID, "risk-off")
 			env.riskKey(t, id, models.DeviceKeyStatusActive, &identity)
 		}},
-		{name: "local passwords already off: its key doesn't work now", want: listed{false, true},
+		{name: "local passwords already off: its key doesn't work now", want: outcome{false, blocks, false},
 			seed: func(t *testing.T, id int) { env.riskKey(t, id, models.DeviceKeyStatusActive, nil) }},
-		{name: "break-glass with local passwords off", role: models.RoleAdmin, bg: true, want: listed{true, true},
+		{name: "break-glass with local passwords off", role: models.RoleAdmin, bg: true, want: outcome{true, blocks, false},
 			seed: func(t *testing.T, id int) { env.riskKey(t, id, models.DeviceKeyStatusActive, nil) }},
-		{name: "break-glass with a password", localOn: true, role: models.RoleAdmin, pw: true, bg: true,
+		{name: "break-glass with a password", localOn: true, role: models.RoleAdmin, pw: true, bg: true, want: outcome{false, alone, false},
+			seed: func(t *testing.T, id int) { env.riskKey(t, id, models.DeviceKeyStatusActive, nil) }},
+		{name: "disabled, with no way in but a key", localOn: true, disabled: true, want: outcome{false, alone, false},
 			seed: func(t *testing.T, id int) { env.riskKey(t, id, models.DeviceKeyStatusActive, nil) }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			label := fmt.Sprintf("risk-%d", i)
-			env.setSetting(t, config.AuthLocalPasswordLoginSettingKey, map[bool]string{true: "true", false: "false"}[tc.localOn])
+			local := map[bool]string{true: "true", false: "false"}[tc.localOn]
+			env.setSetting(t, config.AuthLocalPasswordLoginSettingKey, local)
 			env.setSetting(t, config.ServerPublicURLSettingKey, tc.publicURL)
 			role := tc.role
 			if role == "" {
@@ -179,22 +210,66 @@ func TestAccountsAtRiskDB(t *testing.T) {
 			}
 			id := env.riskAccount(t, label, role, tc.pw, tc.bg)
 			tc.seed(t, id)
+			if tc.disabled {
+				if _, err := env.pool.Exec(ctx, `UPDATE users SET enabled = false WHERE id = $1`, id); err != nil {
+					t.Fatal(err)
+				}
+			}
 			appKeys, err := AccountsAtRisk(ctx, env.pool, ChangeAppKeysOff)
 			if err != nil {
 				t.Fatal(err)
 			}
-			local, err := AccountsAtRisk(ctx, env.pool, ChangeLocalPasswordsOff)
+			refused, err := AccountsAtRisk(ctx, env.pool, ChangeLocalPasswordsOff)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got := (listed{listsAccount(appKeys, id), listsAccount(local, id)}); got != tc.want {
-				t.Fatalf("listed = %+v, want %+v", got, tc.want)
+			group := localPasswordOffGroupOf(t, identities, id)
+			if blocking := group == LocalPasswordOffBlocking; listsAccount(refused, id) != blocking {
+				t.Fatalf("the refusal names it = %v, but its group is %q: the page and the refusal disagree", !blocking, group)
+			}
+			got := outcome{appKeysOff: listsAccount(appKeys, id), localOff: map[string]string{
+				"": alone, LocalPasswordOffEmailMatch: warned, LocalPasswordOffAdminLink: warned, LocalPasswordOffBlocking: blocks,
+			}[group]}
+			if tc.publicURL != "" {
+				err := pgx.BeginFunc(ctx, env.pool, func(tx pgx.Tx) error {
+					return CheckPublicURLChange(ctx, tx, SignInSettingsOf(local, tc.publicURL), SignInSettingsOf(local, ""))
+				})
+				got.urlRemoved = listsAccountErr(err, id)
+			}
+			if got != tc.want {
+				t.Fatalf("outcome = %+v, want %+v", got, tc.want)
 			}
 			if _, err := env.pool.Exec(ctx, `UPDATE users SET enabled = false WHERE id = $1`, id); err != nil {
 				t.Fatal(err)
 			}
 		})
 	}
+}
+
+// localPasswordOffGroupOf answers which group of
+// listAdminLocalPasswordOffAccounts holds the account, or "" for none.
+func localPasswordOffGroupOf(t *testing.T, identities *IdentityService, id int) string {
+	t.Helper()
+	for _, group := range []string{LocalPasswordOffEmailMatch, LocalPasswordOffAdminLink, LocalPasswordOffBlocking} {
+		query := LocalPasswordOffQuery{Group: group, Limit: 500}
+		for {
+			page, err := identities.LocalPasswordOffAccounts(t.Context(), query)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, a := range page.Accounts {
+				if a.ID == id {
+					return group
+				}
+			}
+			if !page.More || len(page.Accounts) == 0 {
+				break
+			}
+			last := page.Accounts[len(page.Accounts)-1]
+			query.AfterUsername, query.AfterID = last.Username, last.ID
+		}
+	}
+	return ""
 }
 
 // Turning local passwords off is refused while an account holds keys and has

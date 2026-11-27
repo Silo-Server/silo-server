@@ -449,6 +449,8 @@
 ./internal/auth TestSessionEndersLockInIDOrderDB
 ./internal/auth TestSignInLinkCodeRedeemAgainstSweepDB
 ./internal/auth TestPluginWriteAgainstKeyPathsDB
+./internal/auth TestLocalPasswordOffMatchesMainWithoutKeysDB
+./internal/auth TestLocalPasswordOffPageAndRefusalAgreeDB
 ./internal/auth TestSwitchOffAfterRenewalReadDB
 ./internal/api/handlers TestPublicURLWritesKeepAWayInDB
 ./internal/api/handlers TestSwitchOffKeepsOwnerProtectionDB
