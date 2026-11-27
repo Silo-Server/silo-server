@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"path"
 	"sort"
 	"strings"
@@ -439,7 +440,7 @@ func (s *MetadataService) UploadCustomSeasonPoster(ctx context.Context, seriesID
 	if _, err := s.dbPool.Exec(ctx, `
 		INSERT INTO series_custom_season_uploads (series_id, source, path, thumbhash)
 		VALUES ($1, $2, $3, $4)
-		ON CONFLICT (series_id, source) DO UPDATE SET path = EXCLUDED.path, thumbhash = EXCLUDED.thumbhash`,
+		ON CONFLICT (series_id, source) DO UPDATE SET path = EXCLUDED.path, thumbhash = EXCLUDED.thumbhash, uploaded_at = now()`,
 		seriesID, poster.Source, poster.Path, poster.Thumbhash); err != nil {
 		return CustomSeasonPoster{}, fmt.Errorf("recording the uploaded season poster: %w", err)
 	}
@@ -466,6 +467,27 @@ func (s *MetadataService) resolveCustomSeasonPosters(ctx context.Context, series
 		seasons[i].Poster = upload
 	}
 	return nil
+}
+
+// pruneCustomSeasonUploads lets go of the series' uploaded season posters
+// that neither its arrangement nor any of its seasons shows, once they are a
+// day old (a newer one may wait in an open arranger), so the artwork GC can
+// collect them. It runs after a refresh has put the arrangement's posters on
+// the seasons, which needs the upload rows to tell a dropped upload from a
+// season's own image. A failure only delays the cleanup.
+func (s *MetadataService) pruneCustomSeasonUploads(ctx context.Context, seriesID string) {
+	if s == nil || s.dbPool == nil {
+		return
+	}
+	if _, err := s.dbPool.Exec(ctx, `
+		DELETE FROM series_custom_season_uploads u
+		WHERE u.series_id = $1 AND u.uploaded_at < now() - interval '1 day'
+		  AND NOT EXISTS (SELECT 1 FROM series_custom_seasons c WHERE c.series_id = u.series_id AND c.poster_source = u.source)
+		  AND NOT EXISTS (SELECT 1 FROM seasons s WHERE s.series_id = u.series_id AND s.poster_source_path = u.source)`,
+		seriesID); err != nil {
+		slog.WarnContext(ctx, "metadata: pruning uploaded season posters failed", "component", "metadata",
+			"series_id", seriesID, "error", err)
+	}
 }
 
 // customSeasonUploads lists the posters uploaded for the series' arranged

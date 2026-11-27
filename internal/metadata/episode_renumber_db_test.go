@@ -397,6 +397,23 @@ func TestSaveCustomSeasonsDB(t *testing.T) {
 		t.Fatalf("referenced artwork = %v (%v), want the arranged season's upload", held, err)
 	}
 
+	// A refresh lets go of uploads nothing names any more, once they are a
+	// day old: a fresh one may wait in an open arranger.
+	if _, err := pool.Exec(ctx, `INSERT INTO series_custom_season_uploads (series_id, source, path, uploaded_at) VALUES
+		($1, 'upload://sha256:replaced', 'series/x/poster/original.old.webp', now() - interval '2 days'),
+		($1, 'upload://sha256:pending', 'series/x/poster/original.new.webp', now())`, series); err != nil {
+		t.Fatal(err)
+	}
+	svc.pruneCustomSeasonUploads(ctx, series)
+	var kept []string
+	rows, err := pool.Query(ctx, `SELECT source FROM series_custom_season_uploads WHERE series_id = $1 ORDER BY source`, series)
+	if err == nil {
+		kept, err = pgx.CollectRows(rows, pgx.RowTo[string])
+	}
+	if err != nil || fmt.Sprint(kept) != "[upload://sha256:ours upload://sha256:pending]" {
+		t.Fatalf("uploads after a refresh = %v (%v), want the named and the fresh one", kept, err)
+	}
+
 	// Switching back to the arrangement keeps the provider its episode keys
 	// belong to: another provider's keys would match none of its slots.
 	other := EpisodeOrderSettings{Provider: "tmdb", Layout: episodeLayoutCustom}

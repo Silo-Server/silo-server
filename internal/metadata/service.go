@@ -6797,6 +6797,7 @@ func (s *MetadataService) persistSeasonAndEpisodeRows(
 	}
 
 	s.enqueueSeriesChildImages(ctx, seriesID, imageJobs)
+	s.pruneCustomSeasonUploads(ctx, seriesID)
 	return true
 }
 
