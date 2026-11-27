@@ -1213,6 +1213,11 @@ settings, so no other server offers demo sign-in.
   limit (`demo_login`), so demo visitors do not spend the address's password sign-in
   attempts.
 
+Like a password visitor's session, a demo sign-in session outlives turning demo mode off and
+a promotion of the account; disabling the account ends it, as it ends every session. Before
+turning demo mode off on a public demo, or giving the demo account any other use, sign the
+account out everywhere (`deleteAdminUserLoginSessions`).
+
 ## Policy discovery
 
 `GET /api/v2/policy/capability` reports `enabled`, `editor_available`,
