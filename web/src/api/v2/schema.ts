@@ -2644,6 +2644,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/admin/items/{id}/custom-seasons/posters": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Store an uploaded poster for an arranged season without publishing it; saving an arrangement that names it puts it on that season. */
+    post: operations["uploadAdminCustomSeasonPoster"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/admin/items/{id}/episode-order": {
     parameters: {
       query?: never;
@@ -17177,6 +17194,19 @@ export interface components {
       title?: string;
       visibility?: string;
     };
+    AdminCustomSeasonPosterUploaded: {
+      /** @description Send it as a season's poster in setAdminCustomSeasons */
+      poster: components["schemas"]["CustomSeasonPoster"];
+      /** Format: uri-reference */
+      poster_url?: string;
+    };
+    AdminCustomSeasonPosterUploadForm: {
+      /**
+       * Format: binary
+       * @description The poster: JPEG, PNG or WebP, at most 10 MiB; its bytes decide the format
+       */
+      image: string;
+    };
     AdminCustomSeasons: {
       /** @description The base order; layout is custom */
       choice: components["schemas"]["EpisodeOrderChoice"];
@@ -28321,6 +28351,13 @@ export interface components {
       /** @description Stored artwork reference (storage key, plugin path, or URL), not a fetchable URL; not validated as a URI */
       poster_url?: string;
     };
+    CustomSeasonPoster: {
+      /** @description Artwork storage path */
+      path: string;
+      /** @description The upload:// source of the image */
+      source: string;
+      thumbhash: string;
+    };
     CustomSeasonsEpisode: {
       /** @example 1997-07-27 */
       air_date?: string;
@@ -28351,6 +28388,11 @@ export interface components {
        * @example 1
        */
       provider_season: number;
+      /**
+       * Format: uri-reference
+       * @description The provider's still for the episode; absent when it has none
+       */
+      still_url?: string;
       /** @example Children of the Gods */
       title: string;
     };
@@ -28367,8 +28409,20 @@ export interface components {
        * @example
        */
       overview: string;
+      /** @description The admin's uploaded poster; absent shows provider_poster_url */
+      poster?: components["schemas"]["CustomSeasonPoster"];
+      /**
+       * Format: uri-reference
+       * @description URL of poster
+       */
+      poster_url?: string;
       /** @description Description of the base order's season with this number */
       provider_overview: string;
+      /**
+       * Format: uri-reference
+       * @description Poster of the base order's season with this number
+       */
+      provider_poster_url?: string;
       /**
        * @description Title of the base order's season with this number
        * @example Season 1
@@ -31261,6 +31315,8 @@ export interface components {
       number: number;
       /** @description Empty shows the base order's description for this number */
       overview: string;
+      /** @description A poster from uploadAdminCustomSeasonPoster; absent shows the base order's poster for this number */
+      poster?: components["schemas"]["CustomSeasonPoster"];
       /** @description Empty shows the base order's title for this number */
       title: string;
     };
@@ -65496,6 +65552,145 @@ export interface operations {
       };
       /** @description Precondition Required */
       428: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  uploadAdminCustomSeasonPoster: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name a profile of the authenticated account. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "multipart/form-data": components["schemas"]["AdminCustomSeasonPosterUploadForm"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminCustomSeasonPosterUploaded"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
         headers: {
           [name: string]: unknown;
         };

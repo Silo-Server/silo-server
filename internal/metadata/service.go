@@ -6132,6 +6132,14 @@ func (s *MetadataService) persistSeasonAndEpisodeRows(
 				providerSeason.PosterThumbhash = fallbackThumbhash
 			}
 		}
+		// An arranged season's uploaded poster is already in artwork
+		// storage; its upload:// source keeps the image cache from
+		// replacing it. A season that loses it takes the provider's poster
+		// again, which the cache then fetches over the stored copy.
+		if custom := season.customPoster; custom != nil && !imagesLocked {
+			providerSeason.PosterPath, providerSeason.PosterSourcePath, providerSeason.PosterThumbhash =
+				custom.Path, custom.Source, custom.Thumbhash
+		}
 		dbSeason := &models.Season{
 			SeriesID:                seriesID,
 			SeasonNumber:            providerSeason.SeasonNumber,

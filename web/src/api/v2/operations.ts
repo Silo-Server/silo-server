@@ -708,6 +708,7 @@ export const v2Operations = {
   "POST /api/v2/admin/invitations/{id}/resend": "resendAdminInvitation",
   "POST /api/v2/admin/invite-codes": "createAdminInviteCode",
   "POST /api/v2/admin/invite-codes/{id}/top-up": "topUpAdminInviteCode",
+  "POST /api/v2/admin/items/{id}/custom-seasons/posters": "uploadAdminCustomSeasonPoster",
   "POST /api/v2/admin/items/{id}/episode-order/preview": "previewAdminEpisodeOrder",
   "POST /api/v2/admin/items/{id}/images/apply": "applyAdminItemImage",
   "POST /api/v2/admin/items/{id}/images/upload": "uploadAdminItemImage",

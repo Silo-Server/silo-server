@@ -280,6 +280,13 @@ type customSeason struct {
 	Number   int
 	Title    string
 	Overview string
+	Poster   CustomSeasonPoster
+}
+
+// CustomSeasonPoster is a poster an admin uploaded for an arranged season:
+// the artwork storage path, its upload:// source and thumbhash.
+type CustomSeasonPoster struct {
+	Path, Source, Thumbhash string
 }
 
 // customLayout is a series' arranged seasons and where each episode sits,
@@ -382,6 +389,10 @@ func applyCustomLayout(seasons []SeasonResult, episodes []EpisodeResult, structu
 		}
 		if custom.Overview != "" {
 			season.Overview = custom.Overview
+		}
+		if custom.Poster.Path != "" {
+			poster := custom.Poster
+			season.customPoster = &poster
 		}
 		arranged = append(arranged, season)
 	}

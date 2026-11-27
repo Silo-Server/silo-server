@@ -127,3 +127,15 @@ export function useSaveCustomSeasons(contentId: string) {
     },
   });
 }
+
+/** Stores a poster for an arranged season; saving the seasons puts it on the season. */
+export function useUploadCustomSeasonPoster(contentId: string) {
+  return useMutation({
+    retry: false,
+    mutationFn: (image: File) =>
+      v2("POST /api/v2/admin/items/{id}/custom-seasons/posters", {
+        path: { id: contentId },
+        form: { image },
+      }),
+  });
+}

@@ -1,7 +1,12 @@
 import type { Translate } from "@/i18n";
 
 // Provider names are brands, the same in every language.
-export const EPISODE_PROVIDER_LABEL: Record<string, string> = { tvdb: "TVDB", tmdb: "TMDB" };
+const PROVIDER_LABELS: Record<string, string | undefined> = { tvdb: "TVDB", tmdb: "TMDB" };
+
+/** A provider's brand name: TVDB, TMDB. */
+export function providerLabel(provider: string): string {
+  return PROVIDER_LABELS[provider] ?? provider.toUpperCase();
+}
 
 /**
  * Names an episode order: TVDB aired order, TMDB default order, or a named
@@ -13,7 +18,7 @@ export function episodeOrderLabel(
   orderId: string,
   orderName?: string,
 ): string {
-  const label = EPISODE_PROVIDER_LABEL[provider] ?? provider;
+  const label = providerLabel(provider);
   if (orderId) {
     return t("web.item.episodeOrder.namedOrder", { provider: label, order: orderName || orderId });
   }

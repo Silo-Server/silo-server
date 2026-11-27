@@ -8,6 +8,11 @@ CREATE TABLE public.series_custom_seasons (
     number integer NOT NULL CHECK (number >= 1),
     title text NOT NULL DEFAULT '',
     overview text NOT NULL DEFAULT '',
+    -- An uploaded poster (artwork storage path, its upload:// source and
+    -- thumbhash); empty takes the provider season with the same number's.
+    poster_path text NOT NULL DEFAULT '',
+    poster_source text NOT NULL DEFAULT '',
+    poster_thumbhash text NOT NULL DEFAULT '',
     PRIMARY KEY (series_id, number)
 );
 

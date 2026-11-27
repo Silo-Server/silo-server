@@ -92,6 +92,10 @@ func (fakeAdminCustomSeasons) CustomSeasons(context.Context, string, *metadata.E
 	}, nil
 }
 
+func (fakeAdminCustomSeasons) UploadCustomSeasonPoster(context.Context, string, []byte) (metadata.CustomSeasonPoster, error) {
+	return metadata.CustomSeasonPoster{Path: "series/series-1/poster/original.ab12.webp", Source: "upload://sha256:ab12", Thumbhash: "th"}, nil
+}
+
 func (fakeAdminCustomSeasons) SaveCustomSeasons(context.Context, string, metadata.CustomSeasonsSave, *int64, int) (int64, error) {
 	return 5, nil
 }

@@ -3,7 +3,10 @@ package apiv2
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
+
+	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/Silo-Server/silo-server/internal/adminjob"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
@@ -271,6 +274,21 @@ func (reg *Registry) saveEpisodeOrderGuarded(ctx context.Context, id, ifMatch, i
 type AdminCustomSeasonsService interface {
 	CustomSeasons(ctx context.Context, seriesID string, base *metadata.EpisodeOrderSettings) (metadata.CustomSeasons, error)
 	SaveCustomSeasons(ctx context.Context, seriesID string, save metadata.CustomSeasonsSave, revision *int64, userID int) (int64, error)
+	UploadCustomSeasonPoster(ctx context.Context, seriesID string, data []byte) (metadata.CustomSeasonPoster, error)
+}
+
+// AdminImagePresigner turns stored and provider image paths into URLs a
+// browser can load (catalog.DetailService).
+type AdminImagePresigner interface {
+	PresignImageURLs(ctx context.Context, paths []string, imageType, size string) map[string]string
+}
+
+// CustomSeasonPoster is a poster uploaded for an arranged season. Send it
+// back unchanged as the season's poster.
+type CustomSeasonPoster struct {
+	Path      string `json:"path" maxLength:"1024" doc:"Artwork storage path"`
+	Source    string `json:"source" maxLength:"1024" pattern:"^upload://" doc:"The upload:// source of the image"`
+	Thumbhash string `json:"thumbhash" maxLength:"256"`
 }
 
 // CustomSeasonsEpisode is one episode in the season arranger.
@@ -280,18 +298,22 @@ type CustomSeasonsEpisode struct {
 	ProviderSeason      int    `json:"provider_season" doc:"Season in the base order" example:"1"`
 	ProviderEpisode     int    `json:"provider_episode" doc:"Episode number in the base order" example:"1"`
 	AirDate             string `json:"air_date,omitempty" example:"1997-07-27"`
+	StillURL            string `json:"still_url,omitempty" format:"uri-reference" doc:"The provider's still for the episode; absent when it has none"`
 	File                string `json:"file,omitempty" doc:"Name of the file the episode links to; absent when none" example:"Stargate SG-1 - S01E01.mkv"`
 	PlacedAutomatically bool   `json:"placed_automatically" doc:"The saved arrangement did not place this episode (it is new since); it went to the end of the last season" example:"false"`
 }
 
 // CustomSeasonsSeason is one season in the arranger; number 0 is Specials.
 type CustomSeasonsSeason struct {
-	Number           int                    `json:"number" minimum:"0" example:"1"`
-	Title            string                 `json:"title" maxLength:"500" doc:"The admin's title; empty shows provider_title" example:""`
-	Overview         string                 `json:"overview" maxLength:"20000" doc:"The admin's description; empty shows provider_overview" example:""`
-	ProviderTitle    string                 `json:"provider_title" doc:"Title of the base order's season with this number" example:"Season 1"`
-	ProviderOverview string                 `json:"provider_overview" doc:"Description of the base order's season with this number"`
-	Episodes         []CustomSeasonsEpisode `json:"episodes" doc:"In order"`
+	Number            int                    `json:"number" minimum:"0" example:"1"`
+	Title             string                 `json:"title" maxLength:"500" doc:"The admin's title; empty shows provider_title" example:""`
+	Overview          string                 `json:"overview" maxLength:"20000" doc:"The admin's description; empty shows provider_overview" example:""`
+	ProviderTitle     string                 `json:"provider_title" doc:"Title of the base order's season with this number" example:"Season 1"`
+	ProviderOverview  string                 `json:"provider_overview" doc:"Description of the base order's season with this number"`
+	Poster            *CustomSeasonPoster    `json:"poster,omitempty" doc:"The admin's uploaded poster; absent shows provider_poster_url"`
+	PosterURL         string                 `json:"poster_url,omitempty" format:"uri-reference" doc:"URL of poster"`
+	ProviderPosterURL string                 `json:"provider_poster_url,omitempty" format:"uri-reference" doc:"Poster of the base order's season with this number"`
+	Episodes          []CustomSeasonsEpisode `json:"episodes" doc:"In order"`
 }
 
 // AdminCustomSeasons is a series' arranged seasons, or a starting point taken
@@ -323,10 +345,11 @@ type AdminCustomSeasonsSaveInput struct {
 		OrderID   string `json:"order_id" maxLength:"200" doc:"One of the provider's orders; empty is its default"`
 		FileOrder string `json:"file_order" pattern:"^(?:tvdb|tmdb)?$" doc:"The order the file names follow"`
 		Seasons   []struct {
-			Number   int      `json:"number" minimum:"0" doc:"Regular seasons are numbered 1 to N without gaps; 0 holds the specials"`
-			Title    string   `json:"title" maxLength:"500" doc:"Empty shows the base order's title for this number"`
-			Overview string   `json:"overview" maxLength:"20000" doc:"Empty shows the base order's description for this number"`
-			Episodes []string `json:"episodes" maxItems:"10000" doc:"Episode keys in order"`
+			Number   int                 `json:"number" minimum:"0" doc:"Regular seasons are numbered 1 to N without gaps; 0 holds the specials"`
+			Title    string              `json:"title" maxLength:"500" doc:"Empty shows the base order's title for this number"`
+			Overview string              `json:"overview" maxLength:"20000" doc:"Empty shows the base order's description for this number"`
+			Poster   *CustomSeasonPoster `json:"poster,omitempty" doc:"A poster from uploadAdminCustomSeasonPoster; absent shows the base order's poster for this number"`
+			Episodes []string            `json:"episodes" maxItems:"10000" doc:"Episode keys in order"`
 		} `json:"seasons" minItems:"1" maxItems:"500"`
 	}
 }
@@ -341,6 +364,11 @@ func registerAdminCustomSeasons(reg *Registry) {
 	set := op(http.MethodPut, "setAdminCustomSeasons", "Save a series' arranged seasons, switch it to them and queue the refresh that renumbers it. Guarded by the series' episode order ETag.")
 	set.Guarded, set.GuardedReceipt, set.DefaultStatus = true, true, http.StatusAccepted
 	Register(reg, set, reg.setAdminCustomSeasons)
+	upload := Operation{Operation: humaOp(http.MethodPost, Prefix+"/admin/items/{id}/custom-seasons/posters", "uploadAdminCustomSeasonPoster", "admin-catalog",
+		"Store an uploaded poster for an arranged season without publishing it; saving an arrangement that names it puts it on that season."),
+		Class: ClassPermissionGated, Permission: policy.PermissionMetadataCuration, ServiceBacked: true, DemoRestricted: true,
+		RetrySafety: RetrySafetyNaturalIdempotent, MaxBodyBytes: maxPosterBytes + posterFormOverhead}
+	Register(reg, upload, reg.uploadAdminCustomSeasonPoster)
 }
 
 func (reg *Registry) getAdminCustomSeasons(ctx context.Context, in *AdminCustomSeasonsInput) (*AdminCustomSeasonsOutput, error) {
@@ -360,12 +388,18 @@ func (reg *Registry) getAdminCustomSeasons(ctx context.Context, in *AdminCustomS
 		Choice:  EpisodeOrderChoice{Provider: custom.Settings.Provider, OrderID: custom.Settings.OrderID, FileOrder: custom.Settings.FileOrder, Layout: episodeOrderLayoutCustom},
 		Seasons: make([]CustomSeasonsSeason, 0, len(custom.Seasons)),
 	}
+	posters, stills := reg.customSeasonImages(ctx, custom.Seasons)
 	for _, s := range custom.Seasons {
 		season := CustomSeasonsSeason{Number: s.Number, Title: s.Title, Overview: s.Overview, ProviderTitle: s.ProviderTitle, ProviderOverview: s.ProviderOverview,
-			Episodes: make([]CustomSeasonsEpisode, 0, len(s.Episodes))}
+			ProviderPosterURL: posters[s.ProviderPosterPath],
+			Episodes:          make([]CustomSeasonsEpisode, 0, len(s.Episodes))}
 		for _, e := range s.Episodes {
 			season.Episodes = append(season.Episodes, CustomSeasonsEpisode{Key: e.Key, Title: e.Title, ProviderSeason: e.ProviderSeason, ProviderEpisode: e.ProviderEpisode,
-				AirDate: e.AirDate, File: e.File, PlacedAutomatically: e.PlacedAutomatically})
+				AirDate: e.AirDate, File: e.File, PlacedAutomatically: e.PlacedAutomatically, StillURL: stills[e.StillPath]})
+		}
+		if s.Poster.Path != "" {
+			season.Poster = &CustomSeasonPoster{Path: s.Poster.Path, Source: s.Poster.Source, Thumbhash: s.Poster.Thumbhash}
+			season.PosterURL = posters[s.Poster.Path]
 		}
 		out.Seasons = append(out.Seasons, season)
 	}
@@ -381,6 +415,9 @@ func (reg *Registry) setAdminCustomSeasons(ctx context.Context, in *AdminCustomS
 	}
 	for _, s := range in.Body.Seasons {
 		season := metadata.CustomSeasonsSeason{Number: s.Number, Title: s.Title, Overview: s.Overview}
+		if s.Poster != nil && s.Poster.Path != "" {
+			season.Poster = metadata.CustomSeasonPoster{Path: s.Poster.Path, Source: s.Poster.Source, Thumbhash: s.Poster.Thumbhash}
+		}
 		for _, key := range s.Episodes {
 			season.Episodes = append(season.Episodes, metadata.CustomSeasonsEpisode{Key: key})
 		}
@@ -389,4 +426,85 @@ func (reg *Registry) setAdminCustomSeasons(ctx context.Context, in *AdminCustomS
 	return reg.saveEpisodeOrderGuarded(ctx, in.ID, in.IfMatch, in.IfNoneMatch, func(revision *int64, userID int) (int64, error) {
 		return reg.deps.AdminCustomSeasons.SaveCustomSeasons(ctx, in.ID, save, revision, userID)
 	})
+}
+
+// customSeasonImages resolves the arranger's posters and stills to URLs,
+// small sizes; an image that does not resolve is left out.
+func (reg *Registry) customSeasonImages(ctx context.Context, seasons []metadata.CustomSeasonsSeason) (map[string]string, map[string]string) {
+	if reg.deps.AdminImagePresigner == nil {
+		return map[string]string{}, map[string]string{}
+	}
+	var posters, stills []string
+	for _, s := range seasons {
+		for _, path := range []string{s.Poster.Path, s.ProviderPosterPath} {
+			if path != "" {
+				posters = append(posters, path)
+			}
+		}
+		for _, e := range s.Episodes {
+			if e.StillPath != "" {
+				stills = append(stills, e.StillPath)
+			}
+		}
+	}
+	return reg.deps.AdminImagePresigner.PresignImageURLs(ctx, posters, "poster", "small"),
+		reg.deps.AdminImagePresigner.PresignImageURLs(ctx, stills, "still", "small")
+}
+
+// AdminCustomSeasonPosterUploadForm is the poster upload's form.
+type AdminCustomSeasonPosterUploadForm struct {
+	Image huma.FormFile `form:"image" contentType:"image/jpeg,image/png,image/webp,application/octet-stream" required:"true" doc:"The poster: JPEG, PNG or WebP, at most 10 MiB; its bytes decide the format"`
+}
+
+type AdminCustomSeasonPosterUploadInput struct {
+	ID      string `path:"id" minLength:"1" maxLength:"512"`
+	RawBody huma.MultipartFormFiles[AdminCustomSeasonPosterUploadForm]
+}
+
+// AdminCustomSeasonPosterUploaded is a stored poster for an arranged season.
+type AdminCustomSeasonPosterUploaded struct {
+	Poster    CustomSeasonPoster `json:"poster" doc:"Send it as a season's poster in setAdminCustomSeasons"`
+	PosterURL string             `json:"poster_url,omitempty" format:"uri-reference"`
+}
+
+type AdminCustomSeasonPosterUploadOutput struct {
+	Body AdminCustomSeasonPosterUploaded
+}
+
+func (reg *Registry) uploadAdminCustomSeasonPoster(ctx context.Context, in *AdminCustomSeasonPosterUploadInput) (*AdminCustomSeasonPosterUploadOutput, error) {
+	if reg.deps.AdminCustomSeasons == nil {
+		return nil, unavailable("custom seasons")
+	}
+	form := in.RawBody.Data()
+	if form == nil || !form.Image.IsSet {
+		return nil, NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
+			WithErrors(ProblemError{Location: "body.image", Code: codeRequired, Detail: detailImageFileRequired})
+	}
+	defer func() { _ = form.Image.Close() }()
+	tooLarge := NewProblem(TypePayloadTooLarge, "The image exceeds 10 MiB.")
+	if form.Image.Size > metadata.MaxUploadedImageBytes {
+		return nil, tooLarge
+	}
+	data, err := io.ReadAll(io.LimitReader(form.Image, metadata.MaxUploadedImageBytes+1))
+	if err != nil {
+		return nil, NewProblem(TypeInternalError, "Could not read the image.")
+	}
+	if len(data) > metadata.MaxUploadedImageBytes {
+		return nil, tooLarge
+	}
+	poster, err := reg.deps.AdminCustomSeasons.UploadCustomSeasonPoster(ctx, in.ID, data)
+	switch {
+	case errors.Is(err, metadata.ErrUnsupportedUploadedImage):
+		return nil, NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
+			WithErrors(ProblemError{Location: "body.image", Code: codeInvalid, Detail: "the file is not a JPEG, PNG or WebP image"})
+	case errors.Is(err, metadata.ErrImageUploadUnavailable):
+		return nil, NewProblem(TypeCapabilityNotConfigured, "Uploading images needs artwork storage")
+	case err != nil:
+		return nil, episodeOrderProblem(err)
+	}
+	out := AdminCustomSeasonPosterUploaded{Poster: CustomSeasonPoster{Path: poster.Path, Source: poster.Source, Thumbhash: poster.Thumbhash}}
+	if reg.deps.AdminImagePresigner != nil {
+		out.PosterURL = reg.deps.AdminImagePresigner.PresignImageURLs(ctx, []string{poster.Path}, "poster", "small")[poster.Path]
+	}
+	return &AdminCustomSeasonPosterUploadOutput{Body: out}, nil
 }

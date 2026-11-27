@@ -208,6 +208,7 @@ type Dependencies struct {
 	AdminItemMetadata              AdminItemMetadataService
 	AdminEpisodeOrders             AdminEpisodeOrderService
 	AdminCustomSeasons             AdminCustomSeasonsService
+	AdminImagePresigner            AdminImagePresigner
 	AdminMetadataTranslation       AdminMetadataTranslationService
 	AdminPeople                    AdminPeopleService
 	AdminDiagnosticDownloads       AdminDiagnosticDownloadService

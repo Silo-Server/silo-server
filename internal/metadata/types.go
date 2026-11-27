@@ -607,6 +607,9 @@ type SeasonResult struct {
 	// this provider poster instead.
 	remotePosterPath      string
 	remotePosterThumbhash string
+	// customPoster is an admin's uploaded poster for an arranged season
+	// (applyCustomLayout); it replaces the provider's poster on the row.
+	customPoster *CustomSeasonPoster
 }
 
 // EpisodeResult carries episode data from a provider.

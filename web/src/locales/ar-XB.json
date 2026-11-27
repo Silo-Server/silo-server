@@ -129967,6 +129967,20 @@
       "value": "\u202E by season number. Move this season and it takes the details of its new number; a custom title or description stays with it. Change the poster on the season's page after saving.\u202C"
     }
   ],
+  "web.item.arrangeSeasons.metaNoteSeasons": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESeason details come from \u202C"
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "\u202E by season number. Move this season and it takes the details of its new number; a custom title, description or poster stays with it.\u202C"
+    }
+  ],
   "web.item.arrangeSeasons.moveTo": [
     {
       "type": 0,
@@ -130049,6 +130063,42 @@
     {
       "type": 0,
       "value": "\u200F\u202EPlaced automatically\u202C"
+    }
+  ],
+  "web.item.arrangeSeasons.posterAdded": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPoster added\u202C"
+    }
+  ],
+  "web.item.arrangeSeasons.posterFailed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECouldn't upload the poster. Use a JPEG, PNG or WebP image of at most 10 MB.\u202C"
+    }
+  ],
+  "web.item.arrangeSeasons.posterNone": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo poster\u202C"
+    }
+  ],
+  "web.item.arrangeSeasons.posterRemove": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERemove\u202C"
+    }
+  ],
+  "web.item.arrangeSeasons.posterReplace": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EReplace\u202C"
+    }
+  ],
+  "web.item.arrangeSeasons.posterUpload": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EUpload poster\u202C"
     }
   ],
   "web.item.arrangeSeasons.rename": [

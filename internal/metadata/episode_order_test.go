@@ -123,7 +123,7 @@ func TestApplyCustomLayout(t *testing.T) {
 	}
 	layout := customLayout{
 		Seasons: []customSeason{
-			{Number: 1, Title: "Arc one"},
+			{Number: 1, Title: "Arc one", Poster: CustomSeasonPoster{Path: "series/x/poster/original.ab.webp", Source: "upload://sha256:ab"}},
 			{Number: 2, Overview: "My words."},
 		},
 		// c moves into season 1; d is new to the layout (aired after it was
@@ -151,8 +151,12 @@ func TestApplyCustomLayout(t *testing.T) {
 	if s := byNumber[1]; s.Title != "Arc one" || s.Overview != "Ichigo gets his powers." || s.PosterPath != "/s1.jpg" {
 		t.Fatalf("season 1 = %+v", s)
 	}
-	if s := byNumber[2]; s.Title != "The Entry" || s.Overview != "My words." || s.PosterPath != "/s2.jpg" {
+	if s := byNumber[2]; s.Title != "The Entry" || s.Overview != "My words." || s.PosterPath != "/s2.jpg" || s.customPoster != nil {
 		t.Fatalf("season 2 = %+v", s)
+	}
+	// The uploaded poster goes with the arranged season it was set on.
+	if p := byNumber[1].customPoster; p == nil || p.Source != "upload://sha256:ab" {
+		t.Fatalf("season 1 custom poster = %+v", p)
 	}
 	if _, ok := byNumber[0]; !ok || len(gotSeasons) != 3 {
 		t.Fatalf("seasons = %+v, want specials and two custom seasons", gotSeasons)

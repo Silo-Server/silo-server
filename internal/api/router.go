@@ -3250,6 +3250,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 	if seasons, ok := deps.MetadataService.(apiv2.AdminCustomSeasonsService); ok {
 		v2deps.AdminCustomSeasons = seasons
 	}
+	if detailSvc != nil {
+		v2deps.AdminImagePresigner = detailSvc
+	}
 	if adminHandler != nil {
 		v2deps.AdminUnmatchedFiles = adminHandler
 	}

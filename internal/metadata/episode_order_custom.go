@@ -17,14 +17,15 @@ func loadCustomLayout(ctx context.Context, q interface {
 }, seriesID string) (customLayout, bool, error) {
 	layout := customLayout{Slots: map[string]episodeSlot{}}
 	rows, err := q.Query(ctx, `
-		SELECT number, title, overview FROM series_custom_seasons
+		SELECT number, title, overview, poster_path, poster_source, poster_thumbhash FROM series_custom_seasons
 		WHERE series_id = $1 ORDER BY number`, seriesID)
 	if err != nil {
 		return layout, false, fmt.Errorf("loading custom seasons: %w", err)
 	}
 	for rows.Next() {
 		var season customSeason
-		if err := rows.Scan(&season.Number, &season.Title, &season.Overview); err != nil {
+		if err := rows.Scan(&season.Number, &season.Title, &season.Overview,
+			&season.Poster.Path, &season.Poster.Source, &season.Poster.Thumbhash); err != nil {
 			rows.Close()
 			return layout, false, fmt.Errorf("loading custom seasons: %w", err)
 		}
@@ -68,6 +69,8 @@ type CustomSeasonsEpisode struct {
 	File string
 	// PlacedAutomatically marks an episode a saved layout did not place.
 	PlacedAutomatically bool
+	// StillPath is the provider's still, a provider image path.
+	StillPath string
 
 	position int
 }
@@ -78,7 +81,11 @@ type CustomSeasonsSeason struct {
 	// Title and Overview are the admin's; empty takes the provider's.
 	Title, Overview                 string
 	ProviderTitle, ProviderOverview string
-	Episodes                        []CustomSeasonsEpisode
+	// Poster is the admin's uploaded poster; ProviderPosterPath the poster
+	// of the base order's season with this number (a provider image path).
+	Poster             CustomSeasonPoster
+	ProviderPosterPath string
+	Episodes           []CustomSeasonsEpisode
 }
 
 // CustomSeasons is a series' arranged seasons, or a starting point taken from
@@ -199,11 +206,13 @@ func arrangerSeasons(seasons, arrangedSeasons []SeasonResult, arranged, inOrder 
 	byNumber := map[int]*CustomSeasonsSeason{}
 	for _, season := range arrangedSeasons {
 		entry := &CustomSeasonsSeason{
-			Number:           season.SeasonNumber,
-			Title:            custom[season.SeasonNumber].Title,
-			Overview:         custom[season.SeasonNumber].Overview,
-			ProviderTitle:    strings.TrimSpace(provider[season.SeasonNumber].Title),
-			ProviderOverview: provider[season.SeasonNumber].Overview,
+			Number:             season.SeasonNumber,
+			Title:              custom[season.SeasonNumber].Title,
+			Overview:           custom[season.SeasonNumber].Overview,
+			ProviderTitle:      strings.TrimSpace(provider[season.SeasonNumber].Title),
+			ProviderOverview:   provider[season.SeasonNumber].Overview,
+			Poster:             custom[season.SeasonNumber].Poster,
+			ProviderPosterPath: provider[season.SeasonNumber].PosterPath,
 		}
 		if entry.ProviderTitle == "" {
 			entry.ProviderTitle = fallbackSeasonTitle(season.SeasonNumber)
@@ -226,7 +235,8 @@ func arrangerSeasons(seasons, arrangedSeasons []SeasonResult, arranged, inOrder 
 			Key: key, Title: ep.Title, AirDate: ep.AirDate,
 			ProviderSeason: inOrder[i].SeasonNumber, ProviderEpisode: inOrder[i].EpisodeNumber,
 			File: files[fileSlot], PlacedAutomatically: saved && !inLayout,
-			position: ep.EpisodeNumber,
+			StillPath: ep.StillPath,
+			position:  ep.EpisodeNumber,
 		})
 	}
 	for _, season := range byNumber {
@@ -361,7 +371,7 @@ func replaceCustomLayout(ctx context.Context, tx pgx.Tx, seriesID string, season
 		return fmt.Errorf("replacing custom seasons: %w", err)
 	}
 	var numbers []int32
-	var titles, overviews []string
+	var titles, overviews, posterPaths, posterSources, posterThumbhashes []string
 	var keys []string
 	var slotSeasons, positions []int32
 	for _, season := range seasons {
@@ -369,6 +379,9 @@ func replaceCustomLayout(ctx context.Context, tx pgx.Tx, seriesID string, season
 			numbers = append(numbers, int32(season.Number)) //nolint:gosec // SaveCustomSeasons numbers seasons 0…len(seasons)
 			titles = append(titles, strings.TrimSpace(season.Title))
 			overviews = append(overviews, strings.TrimSpace(season.Overview))
+			posterPaths = append(posterPaths, season.Poster.Path)
+			posterSources = append(posterSources, season.Poster.Source)
+			posterThumbhashes = append(posterThumbhashes, season.Poster.Thumbhash)
 		}
 		for i, ep := range season.Episodes {
 			keys = append(keys, ep.Key)
@@ -377,9 +390,10 @@ func replaceCustomLayout(ctx context.Context, tx pgx.Tx, seriesID string, season
 		}
 	}
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO series_custom_seasons (series_id, number, title, overview)
-		SELECT $1, n, t, o FROM unnest($2::int[], $3::text[], $4::text[]) AS v(n, t, o)`,
-		seriesID, numbers, titles, overviews); err != nil {
+		INSERT INTO series_custom_seasons (series_id, number, title, overview, poster_path, poster_source, poster_thumbhash)
+		SELECT $1, n, t, o, pp, ps, pt
+		FROM unnest($2::int[], $3::text[], $4::text[], $5::text[], $6::text[], $7::text[]) AS v(n, t, o, pp, ps, pt)`,
+		seriesID, numbers, titles, overviews, posterPaths, posterSources, posterThumbhashes); err != nil {
 		return fmt.Errorf("storing custom seasons: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `
@@ -389,4 +403,26 @@ func replaceCustomLayout(ctx context.Context, tx pgx.Tx, seriesID string, season
 		return fmt.Errorf("storing custom episode slots: %w", err)
 	}
 	return nil
+}
+
+// UploadCustomSeasonPoster stores an uploaded season poster in artwork
+// storage for the series' arranged seasons, without publishing it: the
+// arrangement that names it puts it on a season when it is saved and the
+// series refreshes. A poster belongs to its arranged season, whatever number
+// the season takes.
+func (s *MetadataService) UploadCustomSeasonPoster(ctx context.Context, seriesID string, data []byte) (CustomSeasonPoster, error) {
+	item, err := s.itemRepo.GetByID(ctx, seriesID)
+	if err != nil {
+		return CustomSeasonPoster{}, err
+	}
+	if item.Type != anchoredItemTypeSeries {
+		return CustomSeasonPoster{}, ErrEpisodeOrderNotSeries
+	}
+	uploaded, err := s.ApplyUploadedItemImage(ctx, ApplyUploadedItemImageRequest{
+		ContentID: seriesID, ContentType: anchoredItemTypeSeries, ImageType: ImagePoster, Data: data,
+	})
+	if err != nil {
+		return CustomSeasonPoster{}, err
+	}
+	return CustomSeasonPoster{Path: uploaded.StoredPath, Source: uploaded.SourcePath, Thumbhash: uploaded.Thumbhash}, nil
 }

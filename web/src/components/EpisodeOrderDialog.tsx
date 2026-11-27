@@ -41,7 +41,7 @@ import {
 } from "@/hooks/queries/episodeOrder";
 import { useT, type MessageKey, type Translate } from "@/i18n";
 import { joinList } from "@/lib/appLocale";
-import { EPISODE_PROVIDER_LABEL, episodeOrderLabel } from "@/lib/episodeOrder";
+import { providerLabel, episodeOrderLabel } from "@/lib/episodeOrder";
 import { cn } from "@/lib/utils";
 
 type Provider = "tvdb" | "tmdb";
@@ -58,7 +58,6 @@ interface Draft {
 }
 
 // Provider names are brands, the same in every language.
-const PROVIDER_LABEL = EPISODE_PROVIDER_LABEL;
 const otherProvider = (p: Provider): Provider => (p === "tvdb" ? "tmdb" : "tvdb");
 const asProvider = (v: string | undefined): Provider => (v === "tmdb" ? "tmdb" : "tvdb");
 
@@ -314,13 +313,13 @@ function Settings({
             selected={draft.source === "library"}
             disabled={false}
             title={t("web.item.episodeOrder.source.library", {
-              provider: PROVIDER_LABEL[libraryProvider],
+              provider: providerLabel(libraryProvider),
             })}
             onSelect={() => update({ source: "library", orderId: "" })}
           >
             {t("web.item.episodeOrder.source.libraryBody", {
-              provider: PROVIDER_LABEL[libraryProvider],
-              other: PROVIDER_LABEL[otherProvider(libraryProvider)],
+              provider: providerLabel(libraryProvider),
+              other: providerLabel(otherProvider(libraryProvider)),
             })}
           </ChoiceOption>
           {(["tvdb", "tmdb"] as Provider[]).map((p) => (
@@ -330,7 +329,7 @@ function Settings({
               value={p}
               selected={draft.source === p}
               disabled={!state.providers.some((entry) => entry.provider === p)}
-              title={PROVIDER_LABEL[p]}
+              title={providerLabel(p)}
               onSelect={() =>
                 update({
                   source: p,
@@ -457,7 +456,7 @@ function Settings({
             title={t("web.item.episodeOrder.layout.seasons")}
             onSelect={() => update({ layout: "seasons" })}
           >
-            {t("web.item.episodeOrder.layout.seasonsBody", { provider: PROVIDER_LABEL[structure] })}
+            {t("web.item.episodeOrder.layout.seasonsBody", { provider: providerLabel(structure) })}
           </ChoiceOption>
           <ChoiceOption
             name="episode-order-layout"
@@ -597,8 +596,8 @@ function PreviewPane({
             <Notice
               tone="info"
               title={t("web.item.episodeOrder.preview.fallback", {
-                provider: PROVIDER_LABEL[structure],
-                other: PROVIDER_LABEL[asProvider(preview.structure_provider)],
+                provider: providerLabel(structure),
+                other: providerLabel(asProvider(preview.structure_provider)),
               })}
             />
           )}

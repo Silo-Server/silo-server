@@ -2,7 +2,16 @@
 // rename, reorder and delete seasons, and move episodes between them by drag
 // and drop or selection. Only Silo's catalog changes; files on disk are never
 // touched.
-import { useMemo, useState, type CSSProperties } from "react";
+import {
+  useCallback,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import {
@@ -26,6 +35,7 @@ import {
   FileVideo,
   GripVertical,
   History,
+  ImagePlus,
   Info,
   Loader2,
   Pencil,
@@ -60,6 +70,8 @@ import {
   useCustomSeasons,
   useEpisodeOrder,
   useSaveCustomSeasons,
+  useUploadCustomSeasonPoster,
+  type CustomSeason,
   type CustomSeasonEpisode,
   type CustomSeasons,
   type EpisodeOrderChoice,
@@ -67,28 +79,31 @@ import {
 import { useGripDragSensors } from "@/hooks/useSortableList";
 import { useT } from "@/i18n";
 import { joinList } from "@/lib/appLocale";
-import {
-  EPISODE_PROVIDER_LABEL,
-  episodeOrderLabel,
-  isNumberedSeasonTitle,
-} from "@/lib/episodeOrder";
+import { providerLabel, episodeOrderLabel, isNumberedSeasonTitle } from "@/lib/episodeOrder";
 import { cn } from "@/lib/utils";
 
 const SPECIALS = "specials";
 // Provider names are brands, the same in every language.
-const PROVIDER_LABEL = EPISODE_PROVIDER_LABEL;
 
 interface ArrangedSeason {
   /** Stable while the arranger is open; numbers follow the list order. */
   id: string;
   title: string;
   overview: string;
+  /** An uploaded poster, which stays with the season wherever it moves. */
+  poster?: CustomSeasonPosterUpload;
   episodeKeys: string[];
+}
+
+interface CustomSeasonPosterUpload {
+  ref: NonNullable<CustomSeason["poster"]>;
+  url?: string;
 }
 
 interface ProviderSeason {
   title: string;
   overview: string;
+  posterUrl?: string;
 }
 
 let seq = 0;
@@ -186,6 +201,7 @@ function arrangedOf(data: CustomSeasons): { seasons: ArrangedSeason[]; specials:
         id: newId(),
         title: season.title,
         overview: season.overview,
+        poster: season.poster ? { ref: season.poster, url: season.poster_url } : undefined,
         episodeKeys: keys,
       });
   }
@@ -217,12 +233,16 @@ function Arranger({
   const providerSeasons = useMemo(() => {
     const map = new Map<number, ProviderSeason>();
     for (const s of data.seasons)
-      map.set(s.number, { title: s.provider_title, overview: s.provider_overview });
+      map.set(s.number, {
+        title: s.provider_title,
+        overview: s.provider_overview,
+        posterUrl: s.provider_poster_url,
+      });
     return map;
   }, [data]);
   const orders = useEpisodeOrder(contentId, true, true).data;
   const save = useSaveCustomSeasons(contentId);
-  const provider = PROVIDER_LABEL[data.structure_provider] ?? data.structure_provider;
+  const provider = providerLabel(data.structure_provider);
 
   const [seasons, setSeasons] = useState<ArrangedSeason[]>(initial.seasons);
   const [specials, setSpecials] = useState<string[]>(initial.specials);
@@ -234,6 +254,14 @@ function Arranger({
   const [dirty, setDirty] = useState(dirtyFromStart || !data.saved);
   const [discarding, setDiscarding] = useState(false);
   const sensors = useGripDragSensors();
+  // The episode list scrolls in the details pane on wide screens and with
+  // the whole dialog body on narrow ones; the virtual list follows whichever.
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const paneRef = useRef<HTMLElement>(null);
+  const scrollElement = useCallback(() => {
+    const pane = paneRef.current;
+    return pane && getComputedStyle(pane).overflowY !== "visible" ? pane : bodyRef.current;
+  }, []);
 
   const activeIndex = seasons.findIndex((s) => s.id === activeId);
   const activeSeason = seasons[activeIndex];
@@ -338,6 +366,7 @@ function Arranger({
               number: i + 1,
               title: s.title,
               overview: s.overview,
+              poster: s.poster?.ref,
               episodes: s.episodeKeys,
             })),
             { number: 0, title: "", overview: "", episodes: specials },
@@ -465,7 +494,7 @@ function Arranger({
       p.orders.map((o) => ({
         value: JSON.stringify({ provider: p.provider, order_id: o.is_default ? "" : o.id }),
         label: t("web.item.arrangeSeasons.startOverOption", {
-          provider: PROVIDER_LABEL[p.provider] ?? p.provider,
+          provider: providerLabel(p.provider),
           order: o.name,
         }),
       })),
@@ -495,7 +524,10 @@ function Arranger({
           onDragStart={onDragStart}
           onDragEnd={onDragEnd}
         >
-          <div className="flex max-h-[70vh] min-h-0 flex-1 flex-col overflow-y-auto md:max-h-none md:flex-row md:overflow-hidden">
+          <div
+            ref={bodyRef}
+            className="flex max-h-[70vh] min-h-0 flex-1 flex-col overflow-y-auto md:max-h-none md:flex-row md:overflow-hidden"
+          >
             <aside className="border-border/10 min-h-0 shrink-0 p-3 md:w-[420px] md:overflow-y-auto md:border-e">
               <div className="flex items-center justify-between px-1.5 pb-2">
                 <h2 className="text-sm font-semibold">{t("web.item.arrangeSeasons.seasons")}</h2>
@@ -513,6 +545,7 @@ function Arranger({
                       key={s.id}
                       season={s}
                       name={seasonName(i)}
+                      posterUrl={s.poster?.url ?? providerSeasons.get(i + 1)?.posterUrl}
                       providerTitle={providerSeasons.get(i + 1)?.title}
                       active={activeId === s.id}
                       editing={editing === s.id}
@@ -577,7 +610,7 @@ function Arranger({
               )}
             </aside>
 
-            <section className="min-h-0 min-w-0 flex-1 p-5 md:overflow-y-auto">
+            <section ref={paneRef} className="min-h-0 min-w-0 flex-1 p-5 md:overflow-y-auto">
               <div className="mb-3 flex flex-wrap items-center gap-3">
                 <h2 className="text-xl font-semibold tracking-tight">{nameOf(activeId)}</h2>
                 <span className="text-muted-foreground text-sm">
@@ -592,6 +625,13 @@ function Arranger({
                   number={activeIndex + 1}
                   provider={provider}
                   inherited={providerSeasons.get(activeIndex + 1)}
+                  contentId={contentId}
+                  onPoster={(poster) => {
+                    setSeasons((all) =>
+                      all.map((x) => (x.id === activeSeason.id ? { ...x, poster } : x)),
+                    );
+                    touch();
+                  }}
                   onTitle={(value) => {
                     if (value === activeSeason.title) return;
                     setSeasons((all) =>
@@ -664,12 +704,15 @@ function Arranger({
                   items={activeEpisodes.map((k) => `ep:${k}`)}
                   strategy={verticalListSortingStrategy}
                 >
-                  <ul className="surface-panel divide-border/40 divide-y overflow-hidden rounded-2xl">
-                    {activeEpisodes.map((key, i) => {
+                  <VirtualEpisodeList
+                    // Each season scrolls from its top.
+                    key={activeId}
+                    keys={activeEpisodes}
+                    scrollElement={scrollElement}
+                    renderRow={(key, i) => {
                       const episode = episodes.get(key);
                       return episode ? (
                         <EpisodeRow
-                          key={key}
                           episode={episode}
                           provider={provider}
                           number={i + 1}
@@ -678,8 +721,8 @@ function Arranger({
                           onSplit={activeId !== SPECIALS && i > 0 ? () => splitAt(key) : undefined}
                         />
                       ) : null;
-                    })}
-                  </ul>
+                    }}
+                  />
                 </SortableContext>
               )}
             </section>
@@ -790,92 +833,225 @@ function SeasonDetails({
   number,
   provider,
   inherited,
+  contentId,
   onTitle,
   onOverview,
+  onPoster,
 }: {
   season: ArrangedSeason;
   number: number;
   provider: string;
   inherited?: ProviderSeason;
+  contentId: string;
   onTitle: (title: string) => void;
   onOverview: (overview: string) => void;
+  onPoster: (poster: CustomSeasonPosterUpload | undefined) => void;
 }) {
   const t = useT();
   const [overviewKey, setOverviewKey] = useState(0);
   const from = t("web.item.arrangeSeasons.fromProvider", { provider, number });
+  const input = useRef<HTMLInputElement>(null);
+  const upload = useUploadCustomSeasonPoster(contentId);
+  const poster = season.poster?.url ?? inherited?.posterUrl;
   return (
-    <div className="surface-panel mb-4 space-y-3 rounded-2xl p-4">
-      <div className="space-y-1.5">
-        <div className="flex items-center justify-between gap-2">
-          <Label
-            htmlFor={`season-title-${season.id}`}
-            className="text-muted-foreground text-[0.75rem] font-medium"
-          >
-            {t("web.item.arrangeSeasons.titleLabel")}
-          </Label>
-          <span className="text-muted-foreground text-[0.6875rem]">
-            {season.title ? t("web.item.arrangeSeasons.custom") : from}
-          </span>
-        </div>
-        <Input
-          id={`season-title-${season.id}`}
-          defaultValue={season.title}
-          placeholder={inherited?.title || t("web.item.arrangeSeasons.season", { number })}
-          onBlur={(e) => onTitle(e.target.value.trim())}
-          onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
-        />
-      </div>
-      <div className="space-y-1.5">
-        <div className="flex items-center justify-between gap-2">
-          <Label
-            htmlFor={`season-overview-${season.id}`}
-            className="text-muted-foreground text-[0.75rem] font-medium"
-          >
-            {t("web.item.arrangeSeasons.descriptionLabel")}
-          </Label>
-          <span className="text-muted-foreground flex items-center gap-2 text-[0.6875rem]">
-            {season.overview
+    <div className="surface-panel mb-4 flex flex-col gap-4 rounded-2xl p-4 sm:flex-row">
+      <div className="shrink-0">
+        <div className="bg-surface border-border relative aspect-[2/3] w-32 overflow-hidden rounded-xl border">
+          {poster ? (
+            <img src={poster} alt="" className="h-full w-full object-cover" />
+          ) : (
+            <div className="text-muted-foreground flex h-full items-center justify-center p-3 text-center text-xs font-medium">
+              {season.title || inherited?.title || t("web.item.arrangeSeasons.season", { number })}
+            </div>
+          )}
+          <span className="absolute start-1.5 bottom-1.5 rounded bg-black/70 px-1.5 py-0.5 text-[0.625rem] font-medium text-white/85">
+            {season.poster
               ? t("web.item.arrangeSeasons.custom")
-              : inherited?.overview
+              : inherited?.posterUrl
                 ? from
-                : t("web.item.arrangeSeasons.none")}
-            {season.overview && (
-              <Button
-                variant="ghost"
-                size="xs"
-                onClick={() => {
-                  onOverview("");
-                  setOverviewKey((k) => k + 1);
-                }}
-              >
-                <RotateCcw className="size-3" aria-hidden="true" />
-                {inherited?.overview
-                  ? t("web.item.arrangeSeasons.useProvider", { provider })
-                  : t("web.item.arrangeSeasons.clear")}
-              </Button>
-            )}
+                : t("web.item.arrangeSeasons.posterNone")}
           </span>
+          {upload.isPending && (
+            <span className="absolute inset-0 grid place-items-center bg-black/50">
+              <Loader2 className="size-5 animate-spin text-white" aria-hidden="true" />
+            </span>
+          )}
         </div>
-        <Textarea
-          id={`season-overview-${season.id}`}
-          key={overviewKey}
-          defaultValue={season.overview || inherited?.overview || ""}
-          placeholder={t("web.item.arrangeSeasons.descriptionPlaceholder")}
-          rows={4}
-          style={{ fieldSizing: "content" } as CSSProperties}
-          className="max-h-64 min-h-24 text-sm leading-relaxed"
-          onBlur={(e) => {
-            const text = e.target.value.trim();
-            const providerText = (inherited?.overview ?? "").trim();
-            onOverview(text === providerText ? "" : text);
+        <input
+          ref={input}
+          type="file"
+          accept="image/jpeg,image/png,image/webp"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            e.target.value = "";
+            if (!file) return;
+            upload.mutate(file, {
+              onSuccess: (uploaded) => {
+                onPoster({ ref: uploaded.poster, url: uploaded.poster_url });
+                toast.success(t("web.item.arrangeSeasons.posterAdded"));
+              },
+              onError: () => toast.error(t("web.item.arrangeSeasons.posterFailed")),
+            });
           }}
         />
+        <div className="mt-2 flex w-32 flex-col gap-1.5">
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={upload.isPending}
+            onClick={() => input.current?.click()}
+          >
+            <ImagePlus className="size-3.5" aria-hidden="true" />
+            {season.poster
+              ? t("web.item.arrangeSeasons.posterReplace")
+              : t("web.item.arrangeSeasons.posterUpload")}
+          </Button>
+          {season.poster && (
+            <Button size="sm" variant="ghost" onClick={() => onPoster(undefined)}>
+              <RotateCcw className="size-3.5" aria-hidden="true" />
+              {inherited?.posterUrl
+                ? t("web.item.arrangeSeasons.useProvider", { provider })
+                : t("web.item.arrangeSeasons.posterRemove")}
+            </Button>
+          )}
+        </div>
       </div>
-      <p className="text-muted-foreground/80 flex gap-1.5 text-xs leading-relaxed">
-        <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
-        {t("web.item.arrangeSeasons.metaNote", { provider })}
-      </p>
+      <div className="min-w-0 flex-1 space-y-3">
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between gap-2">
+            <Label
+              htmlFor={`season-title-${season.id}`}
+              className="text-muted-foreground text-[0.75rem] font-medium"
+            >
+              {t("web.item.arrangeSeasons.titleLabel")}
+            </Label>
+            <span className="text-muted-foreground text-[0.6875rem]">
+              {season.title ? t("web.item.arrangeSeasons.custom") : from}
+            </span>
+          </div>
+          <Input
+            id={`season-title-${season.id}`}
+            defaultValue={season.title}
+            placeholder={inherited?.title || t("web.item.arrangeSeasons.season", { number })}
+            onBlur={(e) => onTitle(e.target.value.trim())}
+            onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between gap-2">
+            <Label
+              htmlFor={`season-overview-${season.id}`}
+              className="text-muted-foreground text-[0.75rem] font-medium"
+            >
+              {t("web.item.arrangeSeasons.descriptionLabel")}
+            </Label>
+            <span className="text-muted-foreground flex items-center gap-2 text-[0.6875rem]">
+              {season.overview
+                ? t("web.item.arrangeSeasons.custom")
+                : inherited?.overview
+                  ? from
+                  : t("web.item.arrangeSeasons.none")}
+              {season.overview && (
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  onClick={() => {
+                    onOverview("");
+                    setOverviewKey((k) => k + 1);
+                  }}
+                >
+                  <RotateCcw className="size-3" aria-hidden="true" />
+                  {inherited?.overview
+                    ? t("web.item.arrangeSeasons.useProvider", { provider })
+                    : t("web.item.arrangeSeasons.clear")}
+                </Button>
+              )}
+            </span>
+          </div>
+          <Textarea
+            id={`season-overview-${season.id}`}
+            key={overviewKey}
+            defaultValue={season.overview || inherited?.overview || ""}
+            placeholder={t("web.item.arrangeSeasons.descriptionPlaceholder")}
+            rows={4}
+            style={{ fieldSizing: "content" } as CSSProperties}
+            className="max-h-64 min-h-24 text-sm leading-relaxed"
+            onBlur={(e) => {
+              const text = e.target.value.trim();
+              const providerText = (inherited?.overview ?? "").trim();
+              onOverview(text === providerText ? "" : text);
+            }}
+          />
+        </div>
+        <p className="text-muted-foreground/80 flex gap-1.5 text-xs leading-relaxed">
+          <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+          {t("web.item.arrangeSeasons.metaNoteSeasons", { provider })}
+        </p>
+      </div>
     </div>
+  );
+}
+
+/**
+ * The episodes of one season, of which only the rows in view are mounted: a
+ * long season (One Piece, Bleach on TMDB) would otherwise render hundreds of
+ * sortable rows on every pointer move of a drag.
+ */
+function VirtualEpisodeList({
+  keys,
+  scrollElement,
+  renderRow,
+}: {
+  keys: string[];
+  scrollElement: () => HTMLElement | null;
+  renderRow: (key: string, index: number) => ReactNode;
+}) {
+  const listRef = useRef<HTMLUListElement>(null);
+  const [offset, setOffset] = useState(0);
+  // The list starts below the season details, inside the scroll element.
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    const scroller = scrollElement();
+    if (!list || !scroller) return;
+    const measure = () =>
+      setOffset(
+        list.getBoundingClientRect().top -
+          scroller.getBoundingClientRect().top +
+          scroller.scrollTop,
+      );
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(scroller);
+    if (list.parentElement) observer.observe(list.parentElement);
+    return () => observer.disconnect();
+  }, [scrollElement]);
+  const virtualizer = useVirtualizer({
+    count: keys.length,
+    getScrollElement: scrollElement,
+    estimateSize: () => 60,
+    overscan: 8,
+    scrollMargin: offset,
+    getItemKey: (index) => keys[index] ?? index,
+  });
+  return (
+    <ul
+      ref={listRef}
+      className="surface-panel relative overflow-hidden rounded-2xl"
+      style={{ height: virtualizer.getTotalSize() }}
+    >
+      {virtualizer.getVirtualItems().map((item) => (
+        <li
+          key={item.key}
+          data-index={item.index}
+          ref={virtualizer.measureElement}
+          className="absolute inset-x-0 top-0"
+          style={{ transform: `translateY(${item.start - offset}px)` }}
+        >
+          {renderRow(keys[item.index] ?? "", item.index)}
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -883,6 +1059,7 @@ function SeasonRow({
   season,
   name,
   providerTitle,
+  posterUrl,
   active,
   editing,
   dropTarget,
@@ -895,6 +1072,7 @@ function SeasonRow({
   season: ArrangedSeason;
   name: string;
   providerTitle?: string;
+  posterUrl?: string;
   active: boolean;
   editing: boolean;
   dropTarget: boolean;
@@ -945,11 +1123,22 @@ function SeasonRow({
           }}
         />
       ) : (
-        <button type="button" onClick={onSelect} className="min-w-0 flex-1 text-start">
-          <div className="text-sm leading-snug font-medium text-pretty">{name}</div>
-          <div className="text-muted-foreground text-xs">
-            {t("web.item.arrangeSeasons.episodeCount", { count: season.episodeKeys.length })}
-          </div>
+        <button
+          type="button"
+          onClick={onSelect}
+          className="flex min-w-0 flex-1 items-center gap-2.5 text-start"
+        >
+          <span className="bg-surface border-border/60 h-12 w-8 shrink-0 overflow-hidden rounded-md border">
+            {posterUrl && (
+              <img src={posterUrl} alt="" className="h-full w-full object-cover" loading="lazy" />
+            )}
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm leading-snug font-medium text-pretty">{name}</span>
+            <span className="text-muted-foreground block text-xs">
+              {t("web.item.arrangeSeasons.episodeCount", { count: season.episodeKeys.length })}
+            </span>
+          </span>
         </button>
       )}
       {!editing && (
@@ -1041,13 +1230,13 @@ function EpisodeRow({
   ].join(" ");
   const year = episode.air_date?.slice(0, 4);
   return (
-    <li
+    <div
       ref={setNodeRef}
       style={{ transform: CSS.Transform.toString(transform), transition }}
       className={cn(
-        "group relative flex items-center gap-3 px-3 py-2",
+        "group border-border/40 relative flex items-center gap-3 border-b px-3 py-2",
         selected && "bg-primary/8",
-        isDragging && "opacity-50",
+        isDragging && "opacity-0",
       )}
     >
       <input
@@ -1070,6 +1259,16 @@ function EpisodeRow({
       </button>
       <span className="text-muted-foreground/70 w-8 shrink-0 text-center text-sm font-semibold tabular-nums">
         {number}
+      </span>
+      <span className="bg-muted/50 hidden h-11 w-[78px] shrink-0 overflow-hidden rounded-md sm:block">
+        {episode.still_url && (
+          <img
+            src={episode.still_url}
+            alt=""
+            className="h-full w-full object-cover"
+            loading="lazy"
+          />
+        )}
       </span>
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-2">
@@ -1105,6 +1304,6 @@ function EpisodeRow({
           {t("web.item.arrangeSeasons.splitHere")}
         </button>
       )}
-    </li>
+    </div>
   );
 }
