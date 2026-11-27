@@ -123890,7 +123890,7 @@
   "web.item.arrangeSeasons.savedBody": [
     {
       "type": 0,
-      "value": "Silo is renumbering the episodes. Watch history moves with each episode."
+      "value": "Silo is renumbering the episodes. Watch history stays with each episode."
     }
   ],
   "web.item.arrangeSeasons.seasonCount": [
@@ -124712,7 +124712,7 @@
   "web.item.episodeOrder.appliedBody": [
     {
       "type": 0,
-      "value": "Silo is renumbering the episodes. Watch history moves with each episode."
+      "value": "Silo is renumbering the episodes. Watch history stays with each episode."
     }
   ],
   "web.item.episodeOrder.apply": [
@@ -124761,12 +124761,34 @@
       "value": " of "
     },
     {
-      "type": 1,
-      "value": "total"
-    },
-    {
-      "type": 0,
-      "value": " files"
+      "type": 6,
+      "value": "total",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " file"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " files"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.item.episodeOrder.files.fitsAll": [
@@ -125058,7 +125080,7 @@
   "web.item.episodeOrder.preview.empty": [
     {
       "type": 0,
-      "value": "Neither TVDB nor TMDB has episodes for this show, so it keeps the numbers from its file names."
+      "value": "Neither TVDB nor TMDB returned episodes for this show, so it keeps the numbers from its file names."
     }
   ],
   "web.item.episodeOrder.preview.episodes": [
@@ -125127,12 +125149,38 @@
       "value": "/"
     },
     {
-      "type": 1,
-      "value": "total"
+      "type": 6,
+      "value": "total",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " file"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " files"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     },
     {
       "type": 0,
-      "value": " files placed"
+      "value": " placed"
     }
   ],
   "web.item.episodeOrder.preview.help": [
@@ -125303,12 +125351,40 @@
   ],
   "web.item.episodeOrder.preview.unmatchedBody": [
     {
-      "type": 1,
-      "value": "files"
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "files"
+            },
+            {
+              "type": 0,
+              "value": " names an episode this order doesn't have. It stays"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "files"
+            },
+            {
+              "type": 0,
+              "value": " name episodes this order doesn't have. They stay"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     },
     {
       "type": 0,
-      "value": " name episodes this order doesn't have. They stay unplaced until the file naming or the order changes."
+      "value": " unplaced until the file naming or the order changes."
     }
   ],
   "web.item.episodeOrder.preview.unmatchedTitle": [

@@ -609,7 +609,10 @@ function PreviewPane({
                   : undefined
               }
             >
-              {t("web.item.episodeOrder.preview.unmatchedBody", { files: unmatched })}
+              {t("web.item.episodeOrder.preview.unmatchedBody", {
+                files: unmatched,
+                count: missingFiles,
+              })}
             </Notice>
           )}
 
