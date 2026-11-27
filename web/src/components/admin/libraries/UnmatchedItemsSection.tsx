@@ -41,12 +41,30 @@ import {
   useUnmatchedLibraryItems,
 } from "@/hooks/queries/admin/libraries";
 import { useDebounce } from "@/hooks/useDebounce";
-import { useT } from "@/i18n";
+import { useT, type Translate } from "@/i18n";
+import { itemTypeLabel } from "@/lib/itemTypeLabels";
 import { cn } from "@/lib/utils";
 
 // IGNORABLE_UNMATCHED_TYPES are the content types an admin can mark as
 // intentionally unmatched.
 const IGNORABLE_UNMATCHED_TYPES = new Set(["movie", "series"]);
+
+/**
+ * The label for an item's match status, which the API sends as English
+ * data. A status the server doesn't send shows as sent.
+ */
+function statusLabel(t: Translate, status: string): string {
+  switch (status) {
+    case "unmatched":
+      return t("web.admin.libraries.unmatched.status.unmatched");
+    case "pending":
+      return t("web.admin.libraries.unmatched.status.pending");
+    case "ambiguous":
+      return t("web.admin.libraries.unmatched.status.ambiguous");
+    default:
+      return status;
+  }
+}
 
 export function UnmatchedItemsSection({ embedded = false }: { embedded?: boolean } = {}) {
   const t = useT();
@@ -268,10 +286,10 @@ export function UnmatchedItemsSection({ embedded = false }: { embedded?: boolean
                     <TableCell className="font-medium">{titleWithYear(u)}</TableCell>
                     <TableCell className="text-sm">{u.library_name}</TableCell>
                     <TableCell>
-                      <Badge variant="outline">{u.content_type}</Badge>
+                      <Badge variant="outline">{itemTypeLabel(t, u.content_type)}</Badge>
                     </TableCell>
                     <TableCell>
-                      <Badge variant="secondary">{u.status}</Badge>
+                      <Badge variant="secondary">{statusLabel(t, u.status)}</Badge>
                     </TableCell>
                     <TableCell>
                       <div className="flex gap-1">{rowActions(u, "h-7 text-xs")}</div>
@@ -294,11 +312,13 @@ export function UnmatchedItemsSection({ embedded = false }: { embedded?: boolean
                   {u.library_name}
                 </CardField>
                 <CardField label={t("web.admin.libraries.column.type")}>
-                  <Badge variant="outline">{u.content_type}</Badge>
+                  <Badge variant="outline" className="max-w-full whitespace-normal">
+                    {itemTypeLabel(t, u.content_type)}
+                  </Badge>
                 </CardField>
                 <CardField label={t("web.admin.libraries.column.status")}>
                   <Badge variant="secondary" className="max-w-full whitespace-normal">
-                    {u.status}
+                    {statusLabel(t, u.status)}
                   </Badge>
                 </CardField>
               </CardFields>
