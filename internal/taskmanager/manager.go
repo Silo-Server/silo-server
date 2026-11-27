@@ -229,13 +229,19 @@ func (m *TaskManager) Start(ctx context.Context) {
 func (m *TaskManager) loadWorker(ctx context.Context, w *taskWorker) error {
 	key := w.task.Key()
 	latest, err := m.historyRepo.GetLatest(ctx, key)
-	if err == nil && latest != nil {
-		w.mu.Lock()
-		w.lastResult = latest
-		w.mu.Unlock()
-	} else {
+	if err != nil {
 		latest = nil
 	}
+	// A run can complete while history is read: a watcher may start the task
+	// before startup reaches it. That run is newer than what the read
+	// returned, so it stays the last result and the schedule counts from it.
+	w.mu.Lock()
+	if latest != nil && (w.lastResult == nil || latest.CompletedAt.After(w.lastResult.CompletedAt)) {
+		w.lastResult = latest
+	} else if w.lastResult != nil {
+		latest = w.lastResult
+	}
+	w.mu.Unlock()
 
 	base := m.scheduleBase(ctx, key, latest)
 
