@@ -28356,7 +28356,11 @@ export interface components {
       source: string;
     };
     CustomSeasonsEpisode: {
-      /** @example 1997-07-27 */
+      /**
+       * Format: date
+       * @description Air date, YYYY-MM-DD; absent when unknown
+       * @example 1997-07-27
+       */
       air_date?: string;
       /**
        * @description Name of the file the episode links to; absent when none

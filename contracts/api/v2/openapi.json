@@ -35680,9 +35680,11 @@
         "additionalProperties": false,
         "properties": {
           "air_date": {
+            "description": "Air date, YYYY-MM-DD; absent when unknown",
             "examples": [
               "1997-07-27"
             ],
+            "format": "date",
             "type": "string"
           },
           "file": {

@@ -292,7 +292,7 @@ type CustomSeasonsEpisode struct {
 	Title               string `json:"title" example:"Children of the Gods"`
 	ProviderSeason      int    `json:"provider_season" doc:"Season in the base order" example:"1"`
 	ProviderEpisode     int    `json:"provider_episode" doc:"Episode number in the base order" example:"1"`
-	AirDate             string `json:"air_date,omitempty" example:"1997-07-27"`
+	AirDate             string `json:"air_date,omitempty" format:"date" doc:"Air date, YYYY-MM-DD; absent when unknown" example:"1997-07-27"`
 	StillURL            string `json:"still_url,omitempty" format:"uri-reference" doc:"The provider's still for the episode; absent when it has none"`
 	File                string `json:"file,omitempty" doc:"Name of the file the episode links to; absent when none" example:"Stargate SG-1 - S01E01.mkv"`
 	PlacedAutomatically bool   `json:"placed_automatically" doc:"The saved arrangement did not place this episode (it is new since); it went to the end of the last season" example:"false"`
