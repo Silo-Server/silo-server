@@ -79756,6 +79756,52 @@
       "value": "Let users create API keys"
     }
   ],
+  "web.admin.settings.signIn.passwordsOff.blockedExplain": [
+    {
+      "type": 0,
+      "value": "Password sign-in can't be turned off while these accounts are listed. Link each one to a "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " account from its page in Users, or give a break-glass admin a password."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.blockedHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " account would be left with only Silo app keys, or no way in"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " accounts would be left with only Silo app keys, or no way in"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.settings.signIn.passwordsOff.confirm": [
     {
       "type": 0,
@@ -79954,10 +80000,22 @@
       "value": "Email matching is off"
     }
   ],
+  "web.admin.settings.signIn.passwordsOff.reason.keysOnly": [
+    {
+      "type": 0,
+      "value": "Only app keys would sign it in"
+    }
+  ],
   "web.admin.settings.signIn.passwordsOff.reason.noEmail": [
     {
       "type": 0,
       "value": "No email"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.noWayIn": [
+    {
+      "type": 0,
+      "value": "Couldn't sign in at all"
     }
   ],
   "web.admin.settings.signIn.passwordsOff.sessions": [

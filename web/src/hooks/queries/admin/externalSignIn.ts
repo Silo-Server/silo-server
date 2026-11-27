@@ -35,7 +35,7 @@ export type AdminUserIdentityInput = V2Body<"POST /api/v2/admin/users/{id}/ident
 export type SignInBindingWrite =
   V2Body<"PUT /api/v2/admin/plugins/installations/{id}/auth-binding">;
 
-export type LocalPasswordOffGroup = "email_match" | "admin_link";
+export type LocalPasswordOffGroup = "email_match" | "admin_link" | "blocking";
 export type LocalPasswordOffAccounts =
   V2Result<"GET /api/v2/admin/sign-in/local-password-off/accounts">;
 

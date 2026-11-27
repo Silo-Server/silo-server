@@ -83904,6 +83904,60 @@
       "value": "\u200F\u202ELet users create API keys\u202C"
     }
   ],
+  "web.admin.settings.signIn.passwordsOff.blockedExplain": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPassword sign-in can't be turned off while these accounts are listed. Link each one to a \u202C"
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "\u202E account from its page in Users, or give a break-glass admin a password.\u202C"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.blockedHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "\u202E account would be left with only Silo app keys, or no way in\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "\u202E accounts would be left with only Silo app keys, or no way in\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.settings.signIn.passwordsOff.confirm": [
     {
       "type": 0,
@@ -84122,10 +84176,22 @@
       "value": "\u200F\u202EEmail matching is off\u202C"
     }
   ],
+  "web.admin.settings.signIn.passwordsOff.reason.keysOnly": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EOnly app keys would sign it in\u202C"
+    }
+  ],
   "web.admin.settings.signIn.passwordsOff.reason.noEmail": [
     {
       "type": 0,
       "value": "\u200F\u202ENo email\u202C"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.noWayIn": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECouldn't sign in at all\u202C"
     }
   ],
   "web.admin.settings.signIn.passwordsOff.sessions": [
