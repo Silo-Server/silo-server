@@ -1016,9 +1016,13 @@ and resending invitations stays refused while local passwords are off.
 
 An account can have app keys as its only credential (an app-code join makes
 one), so this is a rule for the settings changes below, not a fact about every
-account: none of them may leave an account with no way in, or with keys as
-its only way in, where it had a password or a sign-in provider account that
-worked. Both switches refuse a change that would, with `last_sign_in_method` and a detail naming the
+account. It protects an account from being left with keys as its only way in,
+and from losing its last way in when that way in is its keys: app keys going
+off, or local passwords going off for an account with no usable password whose
+keys need them. Turning local passwords off still ends password sign-in for
+every account that is not break-glass, as it always has, and with it the local
+keys of an account that also had a password. Both switches refuse a change the
+rule forbids, with `last_sign_in_method` and a detail naming the
 accounts (`auth.AccountsAtRiskError`). One query decides who is at risk
 (`auth.AccountsAtRisk`), and `GET /admin/sign-in/accounts-at-risk` serves the
 same list to the settings page:
