@@ -314,6 +314,12 @@ func (h *LibraryHandler) UpdateLibrary(ctx context.Context, id, userID int, req 
 		return LibraryView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to fetch library")
 	}
 
+	if req.EpisodeOrderProvider != nil && *req.EpisodeOrderProvider != oldFolder.EpisodeOrderProvider {
+		if err := h.requireNoLibraryRefresh(ctx, id); err != nil {
+			return LibraryView{}, err
+		}
+	}
+
 	libraryType := oldFolder.Type
 	if req.Type != nil {
 		libraryType = *req.Type
@@ -435,6 +441,30 @@ func (h *LibraryHandler) publishLibraryEnabledChanged(ctx context.Context, libra
 	}); err != nil {
 		slog.WarnContext(ctx, "publish library enabled change", "component", "api", "library_id", libraryID, "error", err)
 	}
+}
+
+// requireNoLibraryRefresh refuses a new episode order while a metadata
+// refresh of the library is queued or running: that refresh may already have
+// passed some shows, which would keep the old numbering with no full refresh
+// able to queue behind it.
+func (h *LibraryHandler) requireNoLibraryRefresh(ctx context.Context, libraryID int) error {
+	lookup, ok := h.JobRepo.(interface {
+		GetActiveLibraryRefreshByLibraryID(context.Context, int) (*models.AdminJob, error)
+	})
+	if !ok {
+		return nil
+	}
+	job, err := lookup.GetActiveLibraryRefreshByLibraryID(ctx, libraryID)
+	switch {
+	case err == nil && job != nil:
+		return &APIError{Status: http.StatusConflict, Code: policyErrorConflict,
+			Message: "A metadata refresh of this library is running; change its episode order when it finishes",
+			cause:   &adminjob.ActiveJobConflictError{Job: job}}
+	case err != nil && !errors.Is(err, adminjob.ErrJobNotFound):
+		slog.ErrorContext(ctx, "checking for a running library refresh", "component", "api", "library_id", libraryID, "error", err)
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to check the library's metadata refresh")
+	}
+	return nil
 }
 
 // queueSettingsRefresh queues a metadata refresh of folder in mode after a

@@ -1614,6 +1614,7 @@
 
 # Turning a library off or on sends catalog.library.changed, so catalog mirrors re-list.
 ./internal/api/handlers TestLibraryEnabledTogglePublishesCatalogLibraryChangedDB
+./internal/api/handlers TestLibraryEpisodeOrderChangeWaitsForRunningRefreshDB
 ./internal/api/handlers TestLibraryDisableAfterConcurrentEnablePublishesDB
 
 # A book's work ids are claims many editions may share, kept out of the
