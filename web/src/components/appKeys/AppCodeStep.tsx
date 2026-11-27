@@ -92,8 +92,8 @@ export function JoinCodeStep({ appCode, onRenew, renewing }: StepProps<JoinAppCo
  * and the code, to scan, type or paste in the Silo app. Never a link or a
  * scannable link (a URL in a QR code): a link can be received by an app other
  * than Silo, which would redeem the code first and get a key on this existing
- * account. The scan code is not such a link: it is text any QR reader can
- * read but only the Silo app acts on, and nothing opens it.
+ * account. The scan code is not such a link: it is text for the Silo app's
+ * scanner, which any QR reader can read and nothing opens.
  */
 export function SessionCodeStep({
   appCode,
@@ -121,7 +121,7 @@ export function SessionCodeStep({
 
 /**
  * A code whose answer said link_allowed: false, for the person to move by
- * hand: the scan code (a QR code of text only the Silo app acts on,
+ * hand: the scan code (a QR code of text for the Silo app's scanner,
  * never a link), the server address and the code as text to type, and Copy
  * code for a device that can't scan. A server address over 128 bytes has no
  * scan code, so the address and the code are all there is. The QR code grows

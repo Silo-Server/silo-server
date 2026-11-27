@@ -1618,8 +1618,8 @@ to type or copy, and the scan code (`docs/architecture/app-keys.md`, "The scan
 code"), and never builds a link, a scannable link or anything a device could
 open from them: a link can be received by an app other than Silo, which would
 redeem the code first. A scan code is not such a link: it is text with no
-scheme that any QR reader can read but only the Silo app acts on, and a server
-address over 128 bytes has none. For an ordinary invitation that risk is accepted (the
+scheme, written for the Silo app's scanner, that any QR reader can read, and a
+server address over 128 bytes has none. For an ordinary invitation that risk is accepted (the
 intercepting app gets a new, empty account the invited person notices at
 once); for an administrator's invitation or a session code it is not.
 

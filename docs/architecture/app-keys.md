@@ -834,10 +834,10 @@ lifted out of a link, so the protection is that no page makes such a link.
 **The scan code** is not a link. It is the text
 `SILOSCANA <app code> <server address>`, each byte written as two letters from
 `A` to `P`, drawn as a QR code: it has no `:`, `.`, `/`, `@` or digit, so
-nothing takes it for a URL, an email address or a phone number. Any QR reader
-can read the text, but only the Silo app acts on it. The text carries the app
-code, so a person shows the scan code only to their own Silo app, as they would
-a code they type. A server address longer than 128 bytes has
+nothing takes it for a URL, an email address or a phone number. It is written for the
+Silo app's scanner, but any QR reader can read the text, and nothing in the
+format stops another program from using the app code it carries. So a person
+shows the scan code only to their own Silo app, as they would a code they type. A server address longer than 128 bytes has
 no scan code; the page shows the address and the code to type or copy. The web
 app writes it in `web/src/lib/scanCode.ts` and checks the writer against the
 format's test vectors (`web/src/lib/scanCode.vectors.json`). How phone cameras

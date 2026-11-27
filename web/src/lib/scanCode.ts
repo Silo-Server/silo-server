@@ -1,6 +1,6 @@
 /**
  * The scan code: an app code and the server address as text, drawn as a QR
- * code. Any QR reader can read it; only the Silo app acts on it.
+ * code for the Silo app's scanner. Any QR reader can read it.
  *
  *   SILOSCANA <app code: 64 letters> <server address: two letters a byte>
  *

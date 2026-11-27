@@ -26013,7 +26013,7 @@ export interface components {
        */
       expires_in: number;
       /**
-       * @description Whether a page may put this code in a link (the join link). True only for a join code whose redeem creates an account with no administrative power. When false, show the server address and the code as text to type or copy in the app, and never build a link, a scannable link or anything a device could open from them: a link can be received by an app other than Silo, which would redeem the code first. A scan code (text drawn as a QR code that any reader can read but only the Silo app acts on; see docs/architecture/app-keys.md) is not such a link. Always false for createAppCode
+       * @description Whether a page may put this code in a link (the join link). True only for a join code whose redeem creates an account with no administrative power. When false, show the server address and the code as text to type or copy in the app, and never build a link, a scannable link or anything a device could open from them: a link can be received by an app other than Silo, which would redeem the code first. A scan code (text with no scheme, drawn as a QR code for the Silo app's scanner; any QR reader can read it; see docs/architecture/app-keys.md) is not such a link. Always false for createAppCode
        * @example true
        */
       link_allowed: boolean;
@@ -38594,7 +38594,7 @@ export interface components {
        */
       expires_in?: number;
       /**
-       * @description Present with code, and always false: show the server address and the code as text to type or copy in the app, and never build a link or anything a device could open from them. A scan code (text drawn as a QR code that any reader can read but only the Silo app acts on) is not such a link
+       * @description Present with code, and always false: show the server address and the code as text to type or copy in the app, and never build a link or anything a device could open from them. A scan code (text with no scheme, drawn as a QR code for the Silo app's scanner; any QR reader can read it) is not such a link
        * @example false
        */
       link_allowed?: boolean;
