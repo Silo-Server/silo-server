@@ -109,6 +109,7 @@
         "httpstream.CompressWithExclusions(skipNativeMediaCompression, apiv2.IdentityEncoded)",
         "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID, deps.LogStreamHub) [when deps.ActivityLogWriter != nil]",
         "apimw.Recoverer",
+        "httpstream.AbandonOnPanic",
         "apimw.ProvideActingAdmin(actingAdmin)"
       ]
     },
@@ -125,6 +126,7 @@
         "httpstream.CompressWithExclusions(skipNativeMediaCompression, apiv2.IdentityEncoded)",
         "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID, deps.LogStreamHub) [when deps.ActivityLogWriter != nil]",
         "apimw.Recoverer",
+        "httpstream.AbandonOnPanic",
         "apimw.ProvideActingAdmin(actingAdmin)",
         "nodecontrol.RequireNode(deps.NodeKeyRegistry)"
       ]
@@ -142,6 +144,7 @@
         "httpstream.CompressWithExclusions(skipNativeMediaCompression, apiv2.IdentityEncoded)",
         "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID, deps.LogStreamHub) [when deps.ActivityLogWriter != nil]",
         "apimw.Recoverer",
+        "httpstream.AbandonOnPanic",
         "apimw.ProvideActingAdmin(actingAdmin)",
         "nodecontrol.RequireNode(deps.NodeKeyRegistry)",
         "nodeControl.LimitNode"
@@ -160,6 +163,7 @@
         "httpstream.CompressWithExclusions(skipNativeMediaCompression, apiv2.IdentityEncoded)",
         "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID, deps.LogStreamHub) [when deps.ActivityLogWriter != nil]",
         "apimw.Recoverer",
+        "httpstream.AbandonOnPanic",
         "apimw.ProvideActingAdmin(actingAdmin)",
         "nodecontrol.RequireNode(deps.NodeKeyRegistry)",
         "nodeControl.LimitNodePlayback"
@@ -178,6 +182,7 @@
         "httpstream.CompressWithExclusions(skipNativeMediaCompression, apiv2.IdentityEncoded)",
         "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID, deps.LogStreamHub) [when deps.ActivityLogWriter != nil]",
         "apimw.Recoverer",
+        "httpstream.AbandonOnPanic",
         "apimw.ProvideActingAdmin(actingAdmin)",
         "nodecontrol.RequireNode(deps.NodeKeyRegistry)",
         "nodeControl.LimitNodeRegistration"
