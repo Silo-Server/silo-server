@@ -2344,6 +2344,9 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 			if err != nil {
 				return nil, err
 			}
+			for _, p := range episodeChain {
+				structures.episodeChain = append(structures.episodeChain, p.Slug())
+			}
 			showFiles := showFilePaths(childCtx.episodeFilePaths)
 			for _, seasonNumber := range episodeSeasonNumbers {
 				for _, p := range episodeChain {
@@ -2398,7 +2401,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 			}
 		}
 		var structureSlug string
-		allSeasons, allEpisodes, structureSlug = mergeSeriesStructure(structures.list, episodeOrder.Provider, req.Language)
+		allSeasons, allEpisodes, structureSlug = mergeSeriesStructure(structures.list, structures.episodeChain, episodeOrder.Provider, req.Language)
 		if slices.Contains(renumberIDKeys, structureSlug) {
 			ctx = withEpisodeStructure(ctx, structureSlug)
 			var fileNumbersKnown bool
@@ -7201,6 +7204,11 @@ func (s *MetadataService) linkSeriesFilesToEpisodesWithOptions(ctx context.Conte
 		order, err := s.seriesEpisodeOrder(ctx, seriesID)
 		if err != nil {
 			return err
+		}
+		if order.Override {
+			if seriesEpisodes, err = s.episodesOfCurrentNumbering(ctx, seriesID, seriesEpisodes); err != nil {
+				return err
+			}
 		}
 		unseasonedEpisodes = newUnseasonedEpisodeIndex(seriesEpisodes, order.Override)
 	}

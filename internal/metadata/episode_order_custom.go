@@ -146,7 +146,7 @@ func (s *MetadataService) CustomSeasons(ctx context.Context, seriesID string, ba
 	if err != nil {
 		return result, err
 	}
-	seasons, episodes, structureSlug := mergeSeriesStructure(structures.list, order.Provider, language)
+	seasons, episodes, structureSlug := mergeSeriesStructure(structures.list, structures.episodeChain, order.Provider, language)
 	result.StructureProvider = structureSlug
 	if structureSlug == "" {
 		return result, nil

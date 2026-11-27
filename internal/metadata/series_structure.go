@@ -3,6 +3,7 @@ package metadata
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -30,8 +31,8 @@ type providerStructure struct {
 //
 // It also returns the structure provider's slug, empty when no remote
 // provider numbered the series.
-func mergeSeriesStructure(providers []providerStructure, preferred, language string) ([]SeasonResult, []EpisodeResult, string) {
-	structure := structureProvider(providers, preferred)
+func mergeSeriesStructure(providers []providerStructure, episodeChain []string, preferred, language string) ([]SeasonResult, []EpisodeResult, string) {
+	structure := structureProvider(providers, episodeChain, preferred)
 	structureSlug := ""
 	if structure != nil {
 		structureSlug = structure.slug
@@ -80,22 +81,31 @@ func episodeStructureOf(ctx context.Context) string {
 }
 
 // structureProvider picks the remote provider that numbers the series: the
-// preferred one when it has episodes, else the next remote provider in chain
-// order that has any. Only providers enabled for the library's episodes are
-// in the chain, so a disabled provider is never a fallback. A provider that
+// preferred one when it has episodes, else the next remote provider of the
+// Episodes chain (episodeChain, its slugs in order) that has any. Only
+// providers enabled for the library's episodes are in that chain, so a
+// disabled or season-only provider is never a candidate. A candidate that
 // failed stops the search: falling past it would renumber the show to
 // another order for as long as it is down, so the refresh takes no remote
 // structure and the stored episodes stay.
-func structureProvider(providers []providerStructure, preferred string) *providerStructure {
-	candidates := make([]*providerStructure, 0, len(providers))
-	for i := range providers {
-		if !providers[i].local && providers[i].slug == preferred {
-			candidates = append(candidates, &providers[i])
+func structureProvider(providers []providerStructure, episodeChain []string, preferred string) *providerStructure {
+	remote := func(slug string) *providerStructure {
+		for i := range providers {
+			if !providers[i].local && providers[i].slug == slug {
+				return &providers[i]
+			}
+		}
+		return nil
+	}
+	candidates := make([]*providerStructure, 0, len(episodeChain))
+	if slices.Contains(episodeChain, preferred) {
+		if p := remote(preferred); p != nil {
+			candidates = append(candidates, p)
 		}
 	}
-	for i := range providers {
-		if !providers[i].local && providers[i].slug != preferred {
-			candidates = append(candidates, &providers[i])
+	for _, slug := range episodeChain {
+		if p := remote(slug); p != nil && slug != preferred {
+			candidates = append(candidates, p)
 		}
 	}
 	for _, candidate := range candidates {
@@ -308,6 +318,9 @@ func episodeAirDate(value string) string {
 type providerStructures struct {
 	list  []providerStructure
 	index map[string]int
+	// episodeChain is the slugs of the Episodes chain, in order: the
+	// providers that may number the series (structureProvider).
+	episodeChain []string
 }
 
 func newProviderStructures() *providerStructures {

@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -386,6 +388,82 @@ func TestSaveCustomSeasonsDB(t *testing.T) {
 	layout, _, err = loadCustomLayout(ctx, pool, series)
 	if err != nil || layout.Seasons[0].Poster.Path != "series/x/poster/original.ab.webp" {
 		t.Fatalf("stored poster = %+v (%v), want the upload's stored path", layout.Seasons, err)
+	}
+
+	// Switching back to the arrangement keeps the provider its episode keys
+	// belong to: another provider's keys would match none of its slots.
+	other := EpisodeOrderSettings{Provider: "tmdb", Layout: episodeLayoutCustom}
+	if _, err := svc.SaveEpisodeOrder(ctx, series, other, nil, 0); !errors.Is(err, ErrEpisodeOrderInvalid) {
+		t.Fatalf("custom layout on another provider = %v, want ErrEpisodeOrderInvalid", err)
+	}
+	if _, err := svc.SaveEpisodeOrder(ctx, series, EpisodeOrderSettings{Layout: episodeLayoutCustom}, nil, 0); err != nil {
+		t.Fatalf("custom layout on the library's provider = %v", err)
+	}
+	if order, err := svc.seriesEpisodeOrder(ctx, series); err != nil || order.Provider != "tvdb" {
+		t.Fatalf("seriesEpisodeOrder = %+v, %v; want the arrangement's provider", order, err)
+	}
+}
+
+// A bare number counts through the episodes the last refresh numbered: a
+// row the structure provider no longer lists (parked by a renumber) must not
+// shift every later file by one.
+func TestEpisodesOfCurrentNumberingDB(t *testing.T) {
+	pool := chainBuiltinTestPool(t)
+	ctx := t.Context()
+	episodes := catalog.NewEpisodeRepository(pool)
+	svc := &MetadataService{dbPool: pool}
+
+	series, tvdb, _ := insertRenumberTestSeries(t, pool, 660_000_000, "Absolute show")
+	var all []*models.Episode
+	for number := 1; number <= 3; number++ {
+		id, ok := contentid.ForEpisode(series, 1, number)
+		if !ok {
+			t.Fatal("content id did not compose")
+		}
+		episode := &models.Episode{
+			ContentID: id, SeriesID: series, SeasonNumber: 1, EpisodeNumber: number, TvdbID: fmt.Sprint(tvdb, number),
+			Title: fmt.Sprint("Episode ", number), DefaultMetadataLanguage: "en", MetadataSource: "provider",
+		}
+		if err := episodes.Upsert(ctx, episode); err != nil {
+			t.Fatal(err)
+		}
+		all = append(all, episode)
+	}
+	write := func(slug string, numbers ...int) {
+		t.Helper()
+		targets := make([]EpisodeResult, 0, len(numbers))
+		for _, n := range numbers {
+			targets = append(targets, EpisodeResult{SeasonNumber: 1, EpisodeNumber: n, FileNumbered: true,
+				FileSeasonNumber: 1, FileEpisodeNumber: n})
+		}
+		if err := pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
+			return writeEpisodeFileNumbers(ctx, tx, series, slug, targets)
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	current := func() []int {
+		t.Helper()
+		kept, err := svc.episodesOfCurrentNumbering(ctx, series, all)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var numbers []int
+		for _, e := range kept {
+			numbers = append(numbers, e.EpisodeNumber)
+		}
+		sort.Ints(numbers)
+		return numbers
+	}
+
+	write("tmdb", 1, 2, 3)
+	if got := current(); fmt.Sprint(got) != "[1 2 3]" {
+		t.Fatalf("after numbering all three = %v, want [1 2 3]", got)
+	}
+	// TVDB lists two of them; the third is parked and no longer counts.
+	write("tvdb", 1, 3)
+	if got := current(); fmt.Sprint(got) != "[1 3]" {
+		t.Fatalf("after TVDB numbered two = %v, want [1 3]", got)
 	}
 }
 

@@ -68,6 +68,7 @@ export function useSaveEpisodeOrder(contentId: string) {
       }),
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: ["episode-order", contentId] });
+      void queryClient.invalidateQueries({ queryKey: ["episode-order-preview", contentId] });
     },
   });
 }
@@ -123,6 +124,7 @@ export function useSaveCustomSeasons(contentId: string) {
       }),
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: ["episode-order", contentId] });
+      void queryClient.invalidateQueries({ queryKey: ["episode-order-preview", contentId] });
       void queryClient.invalidateQueries({ queryKey: ["custom-seasons", contentId] });
     },
   });

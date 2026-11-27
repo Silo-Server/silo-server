@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -11,6 +12,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/contentid"
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 // Episode order layouts (series_episode_orders.layout).
@@ -267,7 +269,44 @@ func writeEpisodeFileNumbers(ctx context.Context, tx pgx.Tx, seriesID, structure
 		seriesID, seasons, numbers, fileSeasons, fileNumbers, providerSeasons, providerNumbers, structureSlug); err != nil {
 		return fmt.Errorf("writing episode file numbers of %s: %w", seriesID, err)
 	}
+	if structureSlug == "" {
+		return nil
+	}
+	// A row the structure provider no longer lists (parked by a renumber) is
+	// no longer of its numbering (episodesOfCurrentNumbering).
+	if _, err := tx.Exec(ctx, `
+		UPDATE episodes e SET provider_numbering = NULL
+		WHERE e.series_id = $1 AND e.provider_numbering IS NOT NULL
+		  AND NOT EXISTS (SELECT 1 FROM unnest($2::int[], $3::int[]) AS v(s, n)
+		                  WHERE v.s = e.season_number AND v.n = e.episode_number)`,
+		seriesID, seasons, numbers); err != nil {
+		return fmt.Errorf("clearing the numbering of unlisted episodes of %s: %w", seriesID, err)
+	}
 	return nil
+}
+
+// episodesOfCurrentNumbering keeps the episodes the series' last full refresh
+// numbered (provider_numbering set), dropping rows its structure provider no
+// longer lists. Episodes stored before any refresh marked them are all kept.
+func (s *MetadataService) episodesOfCurrentNumbering(ctx context.Context, seriesID string, episodes []*models.Episode) ([]*models.Episode, error) {
+	rows, err := s.dbPool.Query(ctx, `SELECT content_id FROM episodes WHERE series_id = $1 AND provider_numbering IS NOT NULL`, seriesID)
+	if err != nil {
+		return nil, fmt.Errorf("loading the numbered episodes of %s: %w", seriesID, err)
+	}
+	numbered, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("loading the numbered episodes of %s: %w", seriesID, err)
+	}
+	if len(numbered) == 0 {
+		return episodes, nil
+	}
+	kept := make([]*models.Episode, 0, len(numbered))
+	for _, episode := range episodes {
+		if episode != nil && slices.Contains(numbered, episode.ContentID) {
+			kept = append(kept, episode)
+		}
+	}
+	return kept, nil
 }
 
 // storeEpisodeFileNumbers is writeEpisodeFileNumbers in a transaction of its

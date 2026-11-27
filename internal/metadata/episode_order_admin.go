@@ -230,13 +230,18 @@ func (s *MetadataService) SaveEpisodeOrder(ctx context.Context, seriesID string,
 	}
 	if settings.Layout == episodeLayoutCustom {
 		// Seasons are arranged in the arranger (SaveCustomSeasons); this
-		// switches back to an arrangement already stored.
-		var arranged bool
-		if err := s.dbPool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM series_custom_seasons WHERE series_id = $1)`,
-			seriesID).Scan(&arranged); err != nil {
+		// switches back to an arrangement already stored, on the provider its
+		// episode keys belong to (any of that provider's orders shares them).
+		base, arranged, err := s.customLayoutBase(ctx, seriesID)
+		switch {
+		case err != nil:
 			return 0, err
-		} else if !arranged {
+		case !arranged:
 			return 0, fmt.Errorf("%w: arrange the seasons first", ErrEpisodeOrderInvalid)
+		case settings.Provider == "":
+			settings.Provider = base.Provider
+		case settings.Provider != base.Provider:
+			return 0, fmt.Errorf("%w: the seasons were arranged from %s episodes", ErrEpisodeOrderInvalid, base.Provider)
 		}
 	}
 	orderName := s.episodeOrderName(ctx, seriesID, settings)
@@ -313,7 +318,7 @@ func (s *MetadataService) PreviewEpisodeOrder(ctx context.Context, seriesID stri
 	if err != nil {
 		return preview, err
 	}
-	seasons, episodes, structureSlug := mergeSeriesStructure(structures.list, order.Provider, language)
+	seasons, episodes, structureSlug := mergeSeriesStructure(structures.list, structures.episodeChain, order.Provider, language)
 	preview.StructureProvider = structureSlug
 	var files []seriesFileLink
 	if s.dbPool != nil {
@@ -499,6 +504,9 @@ func (s *MetadataService) fetchRemoteStructures(ctx context.Context, ids map[str
 	}
 
 	episodeProviders := remote(episodeChain)
+	for _, ep := range episodeProviders {
+		structures.episodeChain = append(structures.episodeChain, ep.Slug())
+	}
 	numbers := structures.seasonNumbers()
 	episodeCalls := make([]func() answer, 0, len(numbers)*len(episodeProviders))
 	for _, seasonNumber := range numbers {

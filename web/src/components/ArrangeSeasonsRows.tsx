@@ -29,10 +29,22 @@ export function VirtualEpisodeList({
 }) {
   const listRef = useRef<HTMLUListElement>(null);
   const [offset, setOffset] = useState(0);
+  // The scroll element can still be detached when the list mounts (the
+  // arranger remounts in its dialog on a start over), so it is looked up
+  // again a frame later; the virtualizer only reads it on a render.
+  const [scroller, setScroller] = useState<HTMLElement | null>(null);
+  useLayoutEffect(() => {
+    const found = scrollElement();
+    if (found) {
+      setScroller(found);
+      return;
+    }
+    const frame = requestAnimationFrame(() => setScroller(scrollElement()));
+    return () => cancelAnimationFrame(frame);
+  }, [scrollElement]);
   // The list starts below the season details, inside the scroll element.
   useLayoutEffect(() => {
     const list = listRef.current;
-    const scroller = scrollElement();
     if (!list || !scroller) return;
     const measure = () =>
       setOffset(
@@ -45,10 +57,10 @@ export function VirtualEpisodeList({
     observer.observe(scroller);
     if (list.parentElement) observer.observe(list.parentElement);
     return () => observer.disconnect();
-  }, [scrollElement]);
+  }, [scroller]);
   const virtualizer = useVirtualizer({
     count: keys.length,
-    getScrollElement: scrollElement,
+    getScrollElement: () => scroller,
     estimateSize: () => 60,
     overscan: 8,
     scrollMargin: offset,

@@ -42,7 +42,7 @@ func TestMergeSeriesStructure_OneProviderNumbersTheShow(t *testing.T) {
 		},
 	}
 
-	seasons, episodes, _ := mergeSeriesStructure([]providerStructure{tvdb, tmdb}, "tvdb", "en")
+	seasons, episodes, _ := mergeSeriesStructure([]providerStructure{tvdb, tmdb}, []string{"tvdb", "tmdb"}, "tvdb", "en")
 
 	if len(seasons) != 2 || seasons[0].Title != "The Substitute" || seasons[1].Title != "The Entry" {
 		t.Fatalf("seasons = %+v, want TVDB's two seasons only", seasons)
@@ -70,7 +70,7 @@ func TestMergeSeriesStructure_FallsBackWhenPreferredHasNoEpisodes(t *testing.T) 
 		episodes: []EpisodeResult{structureEpisode(1, 1, "Pilot", map[string]string{"tmdb": "m1"})},
 	}
 
-	seasons, episodes, _ := mergeSeriesStructure([]providerStructure{tvdb, tmdb}, "tvdb", "en")
+	seasons, episodes, _ := mergeSeriesStructure([]providerStructure{tvdb, tmdb}, []string{"tvdb", "tmdb"}, "tvdb", "en")
 
 	if len(seasons) != 1 || len(episodes) != 1 || episodes[0].Title != "Pilot" {
 		t.Fatalf("seasons = %+v, episodes = %+v; want TMDB's season and episode", seasons, episodes)
@@ -87,7 +87,7 @@ func TestMergeSeriesStructure_NoFallbackWhenPreferredFailed(t *testing.T) {
 		episodes: []EpisodeResult{structureEpisode(1, 21, "Enter!", map[string]string{"tmdb": "m21"})},
 	}
 
-	seasons, episodes, _ := mergeSeriesStructure([]providerStructure{tvdb, tmdb}, "tvdb", "en")
+	seasons, episodes, _ := mergeSeriesStructure([]providerStructure{tvdb, tmdb}, []string{"tvdb", "tmdb"}, "tvdb", "en")
 
 	if len(seasons) != 0 || len(episodes) != 0 {
 		t.Fatalf("seasons = %+v, episodes = %+v; want none while TVDB is failing", seasons, episodes)
@@ -165,7 +165,7 @@ func TestMergeSeriesStructure_BridgesByAirDate(t *testing.T) {
 		},
 	}
 
-	_, episodes, _ := mergeSeriesStructure([]providerStructure{tvdb, tmdb}, "tvdb", "en")
+	_, episodes, _ := mergeSeriesStructure([]providerStructure{tvdb, tmdb}, []string{"tvdb", "tmdb"}, "tvdb", "en")
 
 	got := episodesByKey(episodes)
 	if len(got) != 3 {
@@ -198,7 +198,7 @@ func TestMergeSeriesStructure_BridgesSameDayPairsInOrder(t *testing.T) {
 		ep(1, 53, "2005-10-04", map[string]string{"tmdb": "m53"}),
 	}}
 
-	_, episodes, _ := mergeSeriesStructure([]providerStructure{tvdb, tmdb}, "tvdb", "en")
+	_, episodes, _ := mergeSeriesStructure([]providerStructure{tvdb, tmdb}, []string{"tvdb", "tmdb"}, "tvdb", "en")
 
 	got := episodesByKey(episodes)
 	if got[structureKey{3, 11}].ProviderIDs["tmdb"] != "m52" || got[structureKey{3, 12}].ProviderIDs["tmdb"] != "m53" {
@@ -226,7 +226,7 @@ func TestMergeSeriesStructure_BridgesGapsBetweenMatchedNeighbours(t *testing.T) 
 		ep(1, 35, "2005-06-07", map[string]string{"tmdb": "m35"}),
 	}}
 
-	_, episodes, _ := mergeSeriesStructure([]providerStructure{tvdb, tmdb}, "tvdb", "en")
+	_, episodes, _ := mergeSeriesStructure([]providerStructure{tvdb, tmdb}, []string{"tvdb", "tmdb"}, "tvdb", "en")
 
 	got := episodesByKey(episodes)
 	for number, want := range map[int]string{12: "m32", 13: "m33", 14: "m34", 15: "m35"} {
@@ -256,7 +256,7 @@ func TestMergeSeriesStructure_BridgesTheRunsAtEitherEnd(t *testing.T) {
 		ep(2, 50, "2026-10-27", map[string]string{"tmdb": "m50"}),
 	}}
 
-	_, episodes, _ := mergeSeriesStructure([]providerStructure{tvdb, tmdb}, "tvdb", "en")
+	_, episodes, _ := mergeSeriesStructure([]providerStructure{tvdb, tmdb}, []string{"tvdb", "tmdb"}, "tvdb", "en")
 
 	got := episodesByKey(episodes)
 	for number, want := range map[int]string{1: "m1", 48: "m48", 49: "m49", 50: "m50"} {
@@ -277,9 +277,44 @@ func TestMergeSeriesStructure_BridgeKeepsTheStructureNumbers(t *testing.T) {
 		{SeasonNumber: 15, EpisodeNumber: 99, AirDate: "2013-04-07", Overview: "Crossover.", ProviderIDs: map[string]string{"tmdb": "1154317"}},
 	}}
 
-	_, episodes, _ := mergeSeriesStructure([]providerStructure{tvdb, tmdb}, "tvdb", "en")
+	_, episodes, _ := mergeSeriesStructure([]providerStructure{tvdb, tmdb}, []string{"tvdb", "tmdb"}, "tvdb", "en")
 
 	if len(episodes) != 1 || episodes[0].SeasonNumber != 0 || episodes[0].EpisodeNumber != 39 || episodes[0].Overview != "Crossover." {
 		t.Fatalf("episodes = %+v, want TVDB's S0E39 with TMDB's overview", episodes)
+	}
+}
+
+// With no chosen provider, the first remote provider of the Episodes chain
+// numbers the series, whatever order the Seasons chain fetched them in. A
+// provider only in the Seasons chain never numbers it, and its failure does
+// not block the episode providers.
+func TestStructureProvider_FollowsTheEpisodesChain(t *testing.T) {
+	withEpisodes := func(slug string) providerStructure {
+		return providerStructure{slug: slug, seasons: []SeasonResult{{SeasonNumber: 1}},
+			episodes: []EpisodeResult{structureEpisode(1, 1, "", map[string]string{slug: "1"})}}
+	}
+	failedTVDB := providerStructure{slug: "tvdb", failed: true}
+	cases := []struct {
+		name      string
+		providers []providerStructure
+		chain     []string
+		preferred string
+		want      string
+	}{
+		{"episodes chain order", []providerStructure{withEpisodes("tvdb"), withEpisodes("tmdb")}, []string{"tmdb", "tvdb"}, "", "tmdb"},
+		{"preferred first", []providerStructure{withEpisodes("tvdb"), withEpisodes("tmdb")}, []string{"tmdb", "tvdb"}, "tvdb", "tvdb"},
+		{"season-only failure", []providerStructure{failedTVDB, withEpisodes("tmdb")}, []string{"tmdb"}, "", "tmdb"},
+		{"episode provider failure", []providerStructure{failedTVDB, withEpisodes("tmdb")}, []string{"tvdb", "tmdb"}, "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ""
+			if p := structureProvider(tc.providers, tc.chain, tc.preferred); p != nil {
+				got = p.slug
+			}
+			if got != tc.want {
+				t.Fatalf("structure provider = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }

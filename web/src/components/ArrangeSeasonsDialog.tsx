@@ -328,6 +328,8 @@ function Arranger({
     );
   }
 
+  const [restarting, setRestarting] = useState<EpisodeOrderChoice | null>(null);
+
   function requestClose() {
     if (dirty) setDiscarding(true);
     else onClose();
@@ -462,12 +464,15 @@ function Arranger({
                 // Files keep the naming they have: an empty file order meant
                 // the provider being replaced.
                 const files = data.choice.file_order || data.structure_provider;
-                onStartOver({
+                const choice: EpisodeOrderChoice = {
                   provider: picked.provider,
                   order_id: picked.order_id,
                   file_order: files === picked.provider ? "" : files,
                   layout: "custom",
-                });
+                };
+                // Starting over replaces the arrangement being edited.
+                if (dirty) setRestarting(choice);
+                else onStartOver(choice);
               }}
             >
               <SelectTrigger className="w-full sm:w-auto sm:min-w-[240px]">
@@ -589,7 +594,8 @@ function Arranger({
 
               {activeSeason && (
                 <SeasonDetails
-                  key={activeSeason.id}
+                  // A rename in the sidebar refreshes the uncontrolled title field.
+                  key={`${activeSeason.id}:${activeSeason.title}`}
                   season={activeSeason}
                   number={activeIndex + 1}
                   provider={provider}
@@ -759,6 +765,19 @@ function Arranger({
           onConfirm={() => {
             setDiscarding(false);
             onClose();
+          }}
+        />
+        <ConfirmDialog
+          open={restarting !== null}
+          onOpenChange={(next) => !next && setRestarting(null)}
+          title={t("web.item.arrangeSeasons.discardTitle")}
+          description={t("web.item.arrangeSeasons.discardBody")}
+          confirmLabel={t("web.item.arrangeSeasons.discard")}
+          cancelLabel={t("web.item.arrangeSeasons.keepEditing")}
+          variant="destructive"
+          onConfirm={() => {
+            if (restarting) onStartOver(restarting);
+            setRestarting(null);
           }}
         />
       </DialogContent>
