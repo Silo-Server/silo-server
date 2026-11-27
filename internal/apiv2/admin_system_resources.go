@@ -83,9 +83,9 @@ type AdminChildStats struct {
 	Sampled       int      `json:"sampled" doc:"Live owned child processes successfully read in this sample."`
 	Unavailable   int      `json:"unavailable" doc:"Live owned child processes whose /proc entries could not be read."`
 	Truncated     bool     `json:"truncated" doc:"True when more live owned child processes existed than the per-sample cap (256)."`
-	ResidentBytes uint64   `json:"resident_bytes" doc:"Summed resident memory (RSS) in bytes across sampled live owned child processes (transcodes, remuxes, trickplay, thumbnails, probes); may count shared pages more than once."`
+	ResidentBytes uint64   `json:"resident_bytes" doc:"Summed resident memory (RSS) in bytes across sampled live owned child processes (transcodes, remuxes, media analysis, trickplay and chapter thumbnails); may count shared pages more than once."`
 	CPUSeconds    float64  `json:"cpu_seconds" doc:"Summed lifetime CPU seconds of currently live owned child processes. Decreases when a child exits; do not diff as a monotonic counter."`
-	CPUPct        *float64 `json:"cpu_pct,omitempty" minimum:"0" maximum:"100" doc:"CPU of live owned FFmpeg children over the last sample window, on the same scale and capacity as system.cpu_pct. A lower bound: a child's last partial window and children shorter than one window are missed. Omitted when the window was not measured, including a truncated pass."`
+	CPUPct        *float64 `json:"cpu_pct,omitempty" minimum:"0" maximum:"100" doc:"CPU of live owned FFmpeg children over the last sample window, on the same scale and capacity as system.cpu_pct. A lower bound: a child's last partial window and a child that starts and exits between two samples are missed. Omitted when the window was not measured, including a truncated pass."`
 }
 
 // AdminDiskDetails extends operational snapshots without adding fields to the frozen

@@ -1279,7 +1279,7 @@ The `attribution` object contains:
 live FFmpeg children used over the last sample window, on the same 0–100 scale
 and against the same capacity as `system.cpu_pct`, so a monitor can chart them
 beside it: the host's CPUs when nothing caps Silo, or the cgroup quota in
-`cgroup_cpu` when one binds. Children are the processes named `ffmpeg` that Silo
+`cgroup_cpu` when one binds. Children are the processes whose name contains `ffmpeg` that Silo
 started directly (transcodes, remuxes, media analysis, trickplay and chapter
 thumbnails), not only playback; `ffprobe` runs are not counted. Each value is
 rounded to 0.01. Omitted means the window was not
@@ -1287,8 +1287,8 @@ measured: the first two passes after start, a pass where `system.cpu_pct` or the
 process's own counters were unavailable, a change in what `system.cpu_pct` is
 measured against, the pass after any of those, and for children a truncated
 pass and the one after it. A measured idle process reports `0`. `children.cpu_pct`
-is a lower bound: a child's last partial window before it exits, children that
-live less than one window, and the window in which a child could not be read
+is a lower bound: a child's last partial window before it exits, a child that
+starts and exits between two samples, and the window in which a child could not be read
 are not counted; completed-child totals cover those. Proxy and transcode nodes
 on a build with this field report it in their attribution in
 `GET /api/v2/admin/nodes/summary`; a node on an older build leaves it out.

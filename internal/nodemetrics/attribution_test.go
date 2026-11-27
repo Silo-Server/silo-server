@@ -108,10 +108,14 @@ type cpuPctView struct {
 			CPUPct *float64 `json:"cpu_pct"`
 		} `json:"process"`
 		Children struct {
-			Truncated bool     `json:"truncated"`
-			CPUPct    *float64 `json:"cpu_pct"`
+			Unavailable int      `json:"unavailable"`
+			Truncated   bool     `json:"truncated"`
+			CPUPct      *float64 `json:"cpu_pct"`
 		} `json:"children"`
 	} `json:"attribution"`
+	GPU []struct {
+		VideoBusyPct *int `json:"video_busy_pct"`
+	} `json:"gpu"`
 }
 
 // cpuPctHarness drives the sampler over a fake /proc in which the test sets the
@@ -286,6 +290,11 @@ func TestProcessAndChildCPUPercent(t *testing.T) {
 		h.setProcess(1300)
 		a = h.pass()
 		wantPct(t, "2 cores process", a.Attribution.Process.CPUPct, 10)
+
+		// A process counter that ran backwards is a reset, not an idle window.
+		h.setProcess(1250)
+		a = h.pass()
+		wantOmitted(t, "process counter reset", a.Attribution.Process.CPUPct)
 	})
 
 	t.Run("cgroup quota", func(t *testing.T) {
@@ -312,6 +321,15 @@ func TestProcessAndChildCPUPercent(t *testing.T) {
 		}
 		wantPct(t, "cgroup process", a.Attribution.Process.CPUPct, 10)
 		wantPct(t, "cgroup children", a.Attribution.Children.CPUPct, 0)
+
+		// CFS enforces the quota per 100 ms period, so a child born just inside
+		// the window can use a little more than quota times the window: 1005
+		// ticks against 1000. It is still credited, not mistaken for earlier
+		// work, because no CPU the machine has could have run it for longer.
+		h.children = []int{300}
+		h.setChild(300, h.uptimeTicks()+5*testUserHZ-499, 1005)
+		a = cgroupPass()
+		wantPct(t, "cgroup child above quota", a.Attribution.Children.CPUPct, 100)
 	})
 }
 
@@ -387,6 +405,15 @@ func TestChildCPUShareSurvivesDiscoveryGaps(t *testing.T) {
 	h.children = []int{200, 201, 202}
 	h.setChild(202, h.uptimeTicks()+6*testUserHZ+testUserHZ/2, 50)
 	wantPct(t, "born after the window closed", pass().Attribution.Children.CPUPct, 10)
+
+	// 201 and 202 exit, and the kernel hands PID 202 to an ffprobe. It is not
+	// the baseline child, so it is not read as an unreadable one.
+	h.children = []int{200}
+	h.removeChild(201)
+	h.tree.write("202/stat", procStatTicksFixture(202, h.pid, "ffprobe", h.uptimeTicks()+testUserHZ, 1, 0))
+	if a := pass(); a.Attribution.Children.Unavailable != 0 {
+		t.Fatalf("reused PID counted as %d unavailable children", a.Attribution.Children.Unavailable)
+	}
 }
 
 // Listing children takes a varying time. The window spans the counter reads,
@@ -411,6 +438,38 @@ func TestChildCPUShareWindowIgnoresDiscoveryDelay(t *testing.T) {
 		h.clock.advance(-delays[i]) // keep passes five seconds apart
 		if i >= 2 {
 			wantPct(t, fmt.Sprintf("pass %d children", i+1), a.Attribution.Children.CPUPct, 12.5)
+		}
+	}
+}
+
+// GPU engine counters keep running while the system and attribution passes
+// before them take a varying time, so GPU busyness is timed at the counter
+// reads: an FFmpeg child keeping the video engine busy half the time reads 50%
+// whatever the delay.
+func TestGPUBusyWindowIgnoresEarlierPassDelay(t *testing.T) {
+	h := newCPUPctHarness(t, 4)
+	start := h.clock.now()
+	delays := []time.Duration{0, 0, 0, time.Second, 0, 0}
+	var pending time.Duration // the attribution listing's delay; GPU sampling lists next
+	h.children = []int{200}
+	h.setChild(200, 1, 100)
+	h.s.ffmpegPIDs = func() []int {
+		h.clock.advance(pending)
+		pending = 0
+		busyNS := h.clock.now().Sub(start).Nanoseconds() / 2
+		h.tree.write("200/fdinfo/5", fmt.Sprintf("drm-pdev:\t0000:00:02.0\ndrm-client-id:\t7\ndrm-engine-video:\t%d ns\n", busyNS))
+		return h.children
+	}
+	h.setProcess(1000)
+	for i := range delays {
+		pending = delays[i]
+		a := h.pass()
+		h.clock.advance(-delays[i]) // keep passes five seconds apart
+		if i < 1 {
+			continue
+		}
+		if len(a.GPU) != 1 || a.GPU[0].VideoBusyPct == nil || *a.GPU[0].VideoBusyPct != 50 {
+			t.Fatalf("pass %d gpu = %+v, want video 50%%", i+1, a.GPU)
 		}
 	}
 }

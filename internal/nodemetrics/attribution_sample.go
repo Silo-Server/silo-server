@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/metrics"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -23,16 +24,21 @@ const procfsUserHZ = 100
 // the same window, so they stay on System.CPUPct's scale without borrowing
 // System.CPUPct's own window, which the disk pass between the two reads can
 // stretch or shrink.
+//
+// machine is the CPUs a process can run on at all, which bounds what a new
+// child can have used. A quota is not such a bound: CFS enforces it per period,
+// and a window that overlaps one more period than it spans can hold more than
+// quota times its length.
 type cpuShareBasis struct {
 	source    string  // ResourceSource.Source: procfs, lxcfs, cgroup_v1, cgroup_v2
 	capacity  float64 // cores
+	machine   float64 // cores
 	available bool    // System.CPUPct was measured this pass
 }
 
-// capacityTicks is the CPU, in USER_HZ ticks, that capacity can supply over
-// elapsed.
-func (b cpuShareBasis) capacityTicks(elapsed time.Duration) float64 {
-	return b.capacity * elapsed.Seconds() * procfsUserHZ
+// coreTicks is the CPU, in USER_HZ ticks, that cores can supply over elapsed.
+func coreTicks(cores float64, elapsed time.Duration) float64 {
+	return cores * elapsed.Seconds() * procfsUserHZ
 }
 
 // childKey identifies one process lifetime: a PID the kernel reuses arrives
@@ -88,6 +94,11 @@ func (s *Sampler) childPIDs() []int {
 	if len(s.prevChildTicks) == 0 {
 		return pids
 	}
+	fs, err := procfs.NewFS(s.procDir)
+	if err != nil {
+		return pids
+	}
+	pids = slices.Clip(pids) // appending must not write into the lister's array
 	listed := make(map[int]bool, len(pids))
 	for _, pid := range pids {
 		listed[pid] = true
@@ -96,8 +107,13 @@ func (s *Sampler) childPIDs() []int {
 		if listed[key.pid] {
 			continue
 		}
-		if _, err := os.Stat(filepath.Join(s.procDir, strconv.Itoa(key.pid))); err == nil {
-			pids = append(pids, key.pid)
+		// Only the same lifetime: a PID the kernel handed to another process
+		// since would otherwise be counted as an unreadable child, and could
+		// push a full listing over the cap.
+		if p, err := fs.Proc(key.pid); err == nil {
+			if stat, err := p.Stat(); err == nil && stat.Starttime == key.start {
+				pids = append(pids, key.pid)
+			}
 		}
 	}
 	return pids
@@ -140,8 +156,11 @@ func (s *Sampler) attributeCPU(out *ResourceAttribution, at time.Time, boot uint
 // publishCPUShares sets the shares for a window that has a usable baseline.
 // Children need their own: a truncated pass leaves none behind.
 func (s *Sampler) publishCPUShares(out *ResourceAttribution, basis cpuShareBasis, elapsed time.Duration, closeBoot, procTicks uint64, children map[childKey]uint64) {
-	if pct, ok := cpuSharePercent(tickDelta(procTicks, s.prevProcTicks), basis, elapsed); ok {
-		out.Process.CPUPct = new(pct)
+	// A counter that ran backwards is a reset, not an idle window.
+	if procTicks >= s.prevProcTicks {
+		if pct, ok := cpuSharePercent(procTicks-s.prevProcTicks, basis, elapsed); ok {
+			out.Process.CPUPct = new(pct)
+		}
 	}
 	if out.Children == nil || out.Children.Truncated || s.prevChildTicks == nil {
 		return
@@ -163,17 +182,17 @@ func (s *Sampler) publishCPUShares(out *ResourceAttribution, basis cpuShareBasis
 //
 // Start times count on the kernel's boot clock, which is read directly because
 // lxcfs replaces /proc/uptime with a container's own. A lifetime larger than
-// the window's whole capacity cannot have been earned inside it either way, so
-// it stays a baseline.
+// what every CPU it can run on could supply over the window cannot have been
+// earned inside it either way, so it stays a baseline.
 func (s *Sampler) childTickDelta(children map[childKey]uint64, basis cpuShareBasis, elapsed time.Duration, closeBoot uint64) uint64 {
-	capacityTicks := basis.capacityTicks(elapsed)
+	limitTicks := coreTicks(max(basis.capacity, basis.machine), elapsed)
 	var total uint64
 	for key, ticks := range children {
 		if previous, seen := s.prevChildTicks[key]; seen {
 			total += tickDelta(ticks, previous)
 			continue
 		}
-		if s.prevBootOK && key.start >= s.prevBoot && key.start < closeBoot && float64(ticks) <= capacityTicks {
+		if s.prevBootOK && key.start >= s.prevBoot && key.start < closeBoot && float64(ticks) <= limitTicks {
 			total += ticks
 		}
 	}
@@ -191,7 +210,7 @@ func tickDelta(current, previous uint64) uint64 {
 // what basis's capacity could supply over it, rounded to 0.01 and clamped to
 // 0-100.
 func cpuSharePercent(ticks uint64, basis cpuShareBasis, elapsed time.Duration) (float64, bool) {
-	capacity := basis.capacityTicks(elapsed)
+	capacity := coreTicks(basis.capacity, elapsed)
 	if capacity <= 0 {
 		return 0, false
 	}

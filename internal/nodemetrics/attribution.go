@@ -96,8 +96,8 @@ type CgroupMemoryStats struct {
 //
 // CPUPct is the CPU those children used over the last sample window, on the
 // same scale as ProcessStats.CPUPct. It is a lower bound: a child's last partial
-// window before it exits, and a child that lives less than one window, are not
-// counted. It is omitted when the window could not be measured, including a
+// window before it exits, and a child that starts and exits between two
+// samples, are not counted. It is omitted when the window could not be measured, including a
 // truncated pass.
 type ChildStats struct {
 	Workload      string   `json:"workload"`

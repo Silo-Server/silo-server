@@ -282,7 +282,7 @@ func (s *Sampler) sample(ctx context.Context) {
 		Available:   true,
 		SampledAt:   now,
 		System:      system,
-		GPU:         s.sampleGPU(ctx, now),
+		GPU:         s.sampleGPU(ctx),
 		Attribution: attribution,
 	}
 	snapshot.Attribution.SampleDurationSeconds = time.Since(started).Seconds()
@@ -361,9 +361,10 @@ func (s *Sampler) cpuStats(now time.Time) (busyPct, cores int) {
 		// process beyond what the machine already does, and treating it as a cap
 		// moves the measurement to a domain that answers a different question.
 		s.prevCgroupCPU = cgroupCPUSample{}
-		s.cpuShare = cpuShareBasis{source: s.cpuSource.Source, capacity: float64(cores), available: available}
+		s.cpuShare = cpuShareBasis{source: s.cpuSource.Source, capacity: float64(cores), machine: float64(cores), available: available}
 		return busyPct, cores
 	}
+	machine := float64(cores)
 	cores = cgroupQuotaCores(quota, hostCores)
 	if !sample.valid {
 		return busyPct, cores
@@ -381,7 +382,7 @@ func (s *Sampler) cpuStats(now time.Time) (busyPct, cores int) {
 	// across intervals.
 	cgroupPct, available := cgroupCPUPercent(s.prevCgroupCPU, sample, quota)
 	s.cpuSource = ResourceSource{Scope: scopeCgroup, Source: "cgroup_" + s.cgroupCPUDetails.Version, Available: available}
-	s.cpuShare = cpuShareBasis{source: s.cpuSource.Source, capacity: quota, available: available}
+	s.cpuShare = cpuShareBasis{source: s.cpuSource.Source, capacity: quota, machine: machine, available: available}
 	s.prevCgroupCPU = sample
 	return cgroupPct, cores
 }
@@ -451,7 +452,7 @@ func (s *Sampler) noteDroppedRoots(dropped int) {
 // Devices are keyed by normalized PCI address wherever one is known, because
 // that is the only identifier all three views share — /dev/dri paths are an
 // enumeration order and CUDA indices are an nvidia-smi ordering.
-func (s *Sampler) sampleGPU(ctx context.Context, now time.Time) []GPUStats {
+func (s *Sampler) sampleGPU(ctx context.Context) []GPUStats {
 	sessions := map[string]int{}
 	if s.sessions != nil {
 		sessions = s.sessions()
@@ -503,12 +504,8 @@ func (s *Sampler) sampleGPU(ctx context.Context, now time.Time) []GPUStats {
 	}
 
 	// 2. DRM fdinfo deltas for our own ffmpeg children.
-	clients := readFdinfoCounters(s.procDir, s.ffmpegPIDs())
-	elapsedNS := int64(0)
-	if !s.prevGPUAt.IsZero() {
-		elapsedNS = now.Sub(s.prevGPUAt).Nanoseconds()
-	}
-	for pdev, delta := range deviceEngineDeltas(s.prevGPU, clients) {
+	deltas, elapsedNS := s.fdinfoDeltas()
+	for pdev, delta := range deltas {
 		entry := upsert(pdev)
 		if path, ok := pathByPCI[pdev]; ok {
 			entry.Device = path
@@ -523,11 +520,6 @@ func (s *Sampler) sampleGPU(ctx context.Context, now time.Time) []GPUStats {
 		}
 		entry.Source = SourceFdinfo
 	}
-	// Clients that vanished (their transcode exited) drop out of the baseline
-	// with their counters, so the next client on that device is not measured
-	// against a stale origin.
-	s.prevGPU = clients
-	s.prevGPUAt = now
 
 	// 3. nvidia-smi enrichment: the only signal for NVIDIA, and whole-GPU
 	// (other tenants included) where it applies.
@@ -547,23 +539,7 @@ func (s *Sampler) sampleGPU(ctx context.Context, now time.Time) []GPUStats {
 		// the device is displayed by its render path, so both have to resolve to
 		// this entry.
 		alias(key, cudaName, gpu.UUID)
-		entry.Vendor = vendorNVIDIA
-		// Each column is carried only when the driver actually reported it: a
-		// successful row can still answer "[N/A]" for engines or memory it
-		// cannot see, and publishing those as zero would show an unobservable
-		// video engine as idle and unsupported VRAM as 0 bytes.
-		entry.TotalBusyPct = gpu.GPUUtil
-		entry.VRAMUsedMB = gpu.MemUsedMB
-		entry.VRAMTotalMB = gpu.MemTotalMB
-		if entry.Source == SourceFdinfo {
-			entry.Source = SourceFdinfoNVIDIASMI
-		} else {
-			entry.Source = SourceNVIDIASMI
-			// fdinfo is unimplemented by the proprietary driver, so the video
-			// engines only have an nvidia-smi reading — which stays unset when
-			// the driver answered "[N/A]" for both of them.
-			entry.VideoBusyPct = gpu.videoUtil()
-		}
+		applyNVIDIA(entry, gpu)
 	}
 
 	// 4. Workloads this process knows it started, on devices nothing above
@@ -599,6 +575,49 @@ func (s *Sampler) sampleGPU(ctx context.Context, now time.Time) []GPUStats {
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Device < out[j].Device })
 	return out
+}
+
+// applyNVIDIA adds one nvidia-smi row's readings to its device entry.
+func applyNVIDIA(entry *GPUStats, gpu nvidiaGPU) {
+	entry.Vendor = vendorNVIDIA
+	// Each column is carried only when the driver actually reported it: a
+	// successful row can still answer "[N/A]" for engines or memory it
+	// cannot see, and publishing those as zero would show an unobservable
+	// video engine as idle and unsupported VRAM as 0 bytes.
+	entry.TotalBusyPct = gpu.GPUUtil
+	entry.VRAMUsedMB = gpu.MemUsedMB
+	entry.VRAMTotalMB = gpu.MemTotalMB
+	if entry.Source == SourceFdinfo {
+		entry.Source = SourceFdinfoNVIDIASMI
+	} else {
+		entry.Source = SourceNVIDIASMI
+		// fdinfo is unimplemented by the proprietary driver, so the video
+		// engines only have an nvidia-smi reading — which stays unset when
+		// the driver answered "[N/A]" for both of them.
+		entry.VideoBusyPct = gpu.videoUtil()
+	}
+}
+
+// fdinfoDeltas reads our ffmpeg children's DRM engine counters and returns
+// each device's engine time since the previous read, with the nanoseconds
+// between the two reads (0 before there is a previous one). The window is timed
+// at the counter reads, not the pass start: the system and attribution passes
+// before this take a varying time, and the counters keep running meanwhile.
+func (s *Sampler) fdinfoDeltas() (map[string]engineCounters, int64) {
+	pids := s.ffmpegPIDs()
+	readAt := s.now()
+	clients := readFdinfoCounters(s.procDir, pids)
+	elapsedNS := int64(0)
+	if !s.prevGPUAt.IsZero() {
+		elapsedNS = readAt.Sub(s.prevGPUAt).Nanoseconds()
+	}
+	deltas := deviceEngineDeltas(s.prevGPU, clients)
+	// Clients that vanished (their transcode exited) drop out of the baseline
+	// with their counters, so the next client on that device is not measured
+	// against a stale origin.
+	s.prevGPU = clients
+	s.prevGPUAt = readAt
+	return deltas, elapsedNS
 }
 
 // deviceSessions totals the balancer's workload counts for one device.
