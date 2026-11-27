@@ -29,6 +29,18 @@ describe("episode card text with a stored default title", () => {
     );
   });
 
+  it("shows and speaks the air date for a dated episode in air-date mode", () => {
+    const dated = { ...untitled, air_date: "2026-02-18" };
+
+    expect(episodeCardTitleParts(dated, "air_date")).toEqual({ prefix: "Feb 18, 2026" });
+    expect(episodeCardSpokenTitle(dated, "air_date")).toBe("Feb 18, 2026");
+  });
+
+  it("shows and speaks the episode code for an undated episode in air-date mode", () => {
+    expect(episodeCardTitleParts(untitled, "air_date")).toEqual({ prefix: "S01E03" });
+    expect(episodeCardSpokenTitle(untitled, "air_date")).toBe("S01E03");
+  });
+
   it("keeps a real title", () => {
     expect(episodeCardTitleParts({ ...untitled, title: "Pilot" })).toEqual({
       prefix: "S01E03 · ",
