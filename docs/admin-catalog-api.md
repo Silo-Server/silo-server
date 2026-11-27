@@ -503,28 +503,33 @@ episodes ([architecture/episode-ordering.md](architecture/episode-ordering.md)).
 - `GET /api/v2/admin/items/{id}/episode-order` (`getAdminEpisodeOrder`) answers
   the series' `choice` (`provider`, `order_id`, `file_order`, `layout`),
   `inherited` while it follows its library, `library_provider`, the stored
-  `order_name` and `revision`, and each remote episode provider's `orders`.
-  `?orders=false` skips asking the providers.
+  `order_name`, and each remote episode provider's `orders`, with the order's
+  `ETag`. `?orders=false` skips asking the providers.
 - `POST …/episode-order/preview` (`previewAdminEpisodeOrder`) takes a choice and
   answers the seasons and episodes it would give, which file each episode would
   link to, the files it would not place, and `file_order_fits`: how many files
   each file order would place. Nothing is stored.
-- `PUT …/episode-order` (`setAdminEpisodeOrder`) stores a choice and queues the
-  series' metadata refresh that applies it; the answer carries the new
-  `revision` and the `job_id`. A body `revision` that is not the stored one
-  answers `409`. Default values (empty provider, order and file order, layout
-  `seasons`) return the series to its library's order. Layout `custom` needs an
-  arrangement saved first, else `422`.
+- `PUT …/episode-order` (`setAdminEpisodeOrder`) requires `If-Match` with the
+  order's `ETag` (`428` without it, `412` with the current tag when stale),
+  stores the choice and answers `202` with the metadata refresh job that applies
+  it. Default values (empty provider, order and file order, layout `seasons`)
+  return the series to its library's order; an arrangement stays stored. Layout
+  `custom` needs an arrangement saved first, else `422`.
 - `GET /api/v2/admin/items/{id}/custom-seasons` (`getAdminCustomSeasons`)
   answers the arranged seasons, each with its admin `title` and `overview`, the
   base order's `provider_title` and `provider_overview` for its number, and its
   episodes in order (`key`, provider numbers, linked `file`,
   `placed_automatically`). Without an arrangement (`saved: false`), or with
   `start_over=true` and a base order in `provider`, `order_id` and `file_order`,
-  it starts from that order's seasons.
+  it starts from that order's seasons. It carries the order's `ETag`.
 - `PUT …/custom-seasons` (`setAdminCustomSeasons`) stores the arrangement, with
   regular seasons numbered 1…N and season 0 for specials, switches the series
-  to the `custom` layout and queues the refresh, like `setAdminEpisodeOrder`.
+  to the `custom` layout and to the provider its episode keys belong to, and
+  queues the refresh, guarded and answered like `setAdminEpisodeOrder`.
+
+Series detail carries `episode_order` (provider, order and its name, layout,
+file order, `custom_arrangement`) while the series has its own order, and
+`getLibraryCapabilities` reports `episode_ordering`.
 
 ## Episode and movie marker analysis
 

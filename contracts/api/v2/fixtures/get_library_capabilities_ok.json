@@ -1,10 +1,11 @@
 {
-  "revision": "160ec1ce4b69b216c999f29715ed4ddda5458d4075c48748406c3e993537fa18",
+  "revision": "b93cfec12436fabad75570e9dcc9d71f4618c24d986a436ac1d36db6f53acc52",
   "state": "available",
   "allowed": true,
   "realtime_monitoring": true,
   "trickplay": true,
   "trickplay_supported": false,
   "ignore_unmatched": true,
-  "box_sets": true
+  "box_sets": true,
+  "episode_ordering": true
 }

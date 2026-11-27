@@ -4828,9 +4828,23 @@ func (s *MetadataService) refreshSeriesChildTarget(
 	} else if ignored {
 		return ErrMetadataNotFound
 	}
+	unscopedCtx := ctx
 	ctx, err = s.withItemChainScope(ctx, seriesID, folderID)
 	if err != nil {
 		return err
+	}
+	// A season or episode fetch asks providers for the shown numbers in
+	// their default order and merges the answers by number. A series shown
+	// in another order would get another episode's data, so it refreshes
+	// whole: only the series pipeline knows its order.
+	if reordered, err := s.seriesShowsOtherNumbering(ctx, seriesID, folderID); err != nil {
+		return err
+	} else if reordered {
+		if reset != nil {
+			slog.InfoContext(ctx, "metadata: a reordered series resets as a whole-series refresh; its season and episode locks stay",
+				"component", "metadata", "series_id", seriesID)
+		}
+		return s.refreshItemTarget(unscopedCtx, seriesID, folderID, mode, false, false)
 	}
 
 	languages, err := s.resolveProcessLanguages(ctx, ProcessRequest{

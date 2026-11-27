@@ -337,12 +337,6 @@ func applyEpisodeRenumber(ctx context.Context, tx pgx.Tx, seriesID string, moves
 			seriesID, finalIDs[i], move.ToSeason, move.ToEpisode); err != nil {
 			return fmt.Errorf("renumber: move %s to S%dE%d: %w", finalIDs[i], move.ToSeason, move.ToEpisode, err)
 		}
-		if _, err := tx.Exec(ctx, `
-			UPDATE media_files SET season_number = $2, episode_number = $3
-			WHERE episode_id = $1`,
-			finalIDs[i], move.ToSeason, move.ToEpisode); err != nil {
-			return fmt.Errorf("renumber: renumber files of %s: %w", finalIDs[i], err)
-		}
 	}
 	return nil
 }
@@ -427,8 +421,9 @@ func (s *MetadataService) renumberSeriesEpisodes(ctx context.Context, seriesID s
 
 // applyEpisodeMerges folds each duplicate row into the row of the same
 // episode, inside tx: user state moves (reattribute.MovePairs, after the
-// history cutoffs merge), files and library memberships relink with the
-// surviving row's numbers, and the duplicate row is deleted.
+// history cutoffs merge), files and library memberships relink to the
+// surviving row (a file keeps the numbers its name gives), and the duplicate
+// row is deleted.
 func applyEpisodeMerges(ctx context.Context, tx pgx.Tx, seriesID string, merges []episodeMerge) error {
 	if len(merges) == 0 {
 		return nil
@@ -450,7 +445,7 @@ func applyEpisodeMerges(ctx context.Context, tx pgx.Tx, seriesID string, merges 
 	for _, merge := range merges {
 		if _, err := tx.Exec(ctx, `
 			UPDATE media_files f
-			SET episode_id = e.content_id, season_number = e.season_number, episode_number = e.episode_number
+			SET episode_id = e.content_id
 			FROM episodes e
 			WHERE f.episode_id = $1 AND e.content_id = $2 AND e.series_id = $3`,
 			merge.From, merge.Into, seriesID); err != nil {

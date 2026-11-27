@@ -1,7 +1,6 @@
 {
   "inherited": false,
   "library_provider": "tvdb",
-  "revision": 2,
   "choice": {
     "provider": "tvdb",
     "order_id": "dvd",

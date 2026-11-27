@@ -65,13 +65,14 @@ import {
   type EpisodeOrderChoice,
 } from "@/hooks/queries/episodeOrder";
 import { useGripDragSensors } from "@/hooks/useSortableList";
-import { useT, type Translate } from "@/i18n";
+import { useT } from "@/i18n";
 import { joinList } from "@/lib/appLocale";
+import { EPISODE_PROVIDER_LABEL, episodeOrderLabel, isNumberedSeasonTitle } from "@/lib/episodeOrder";
 import { cn } from "@/lib/utils";
 
 const SPECIALS = "specials";
 // Provider names are brands, the same in every language.
-const PROVIDER_LABEL: Record<string, string> = { tvdb: "TVDB", tmdb: "TMDB" };
+const PROVIDER_LABEL = EPISODE_PROVIDER_LABEL;
 
 interface ArrangedSeason {
   /** Stable while the arranger is open; numbers follow the list order. */
@@ -191,7 +192,7 @@ function Arranger({
 }: {
   contentId: string;
   title: string;
-  data: CustomSeasons;
+  data: CustomSeasons & { etag: string };
   dirtyFromStart: boolean;
   onStartOver: (base: EpisodeOrderChoice) => void;
   onClose: () => void;
@@ -232,7 +233,7 @@ function Arranger({
   const seasonName = (index: number) => {
     const season = seasons[index];
     const shown = season?.title || providerSeasons.get(index + 1)?.title || "";
-    return shown && !/^season \d+$/i.test(shown)
+    return shown && !isNumberedSeasonTitle(t, shown, index + 1)
       ? t("web.item.arrangeSeasons.seasonTitled", { number: index + 1, title: shown })
       : t("web.item.arrangeSeasons.season", { number: index + 1 });
   };
@@ -317,19 +318,21 @@ function Arranger({
   function submit() {
     save.mutate(
       {
-        provider: data.choice.provider,
-        order_id: data.choice.order_id,
-        file_order: data.choice.file_order,
-        revision: data.revision,
-        seasons: [
-          ...seasons.map((s, i) => ({
-            number: i + 1,
-            title: s.title,
-            overview: s.overview,
-            episodes: s.episodeKeys,
-          })),
-          { number: 0, title: "", overview: "", episodes: specials },
-        ],
+        etag: data.etag,
+        body: {
+          provider: data.choice.provider,
+          order_id: data.choice.order_id,
+          file_order: data.choice.file_order,
+          seasons: [
+            ...seasons.map((s, i) => ({
+              number: i + 1,
+              title: s.title,
+              overview: s.overview,
+              episodes: s.episodeKeys,
+            })),
+            { number: 0, title: "", overview: "", episodes: specials },
+          ],
+        },
       },
       {
         onSuccess: () => {
@@ -339,11 +342,14 @@ function Arranger({
           onClose();
         },
         onError: (err) => {
-          toast.error(
-            err instanceof V2ProblemError && err.status === 409
-              ? t("web.item.episodeOrder.conflict")
-              : t("web.item.episodeOrder.saveFailed"),
-          );
+          // Someone saved in between: close so the next opening starts from
+          // their seasons instead of saving over them.
+          if (err instanceof V2ProblemError && err.status === 412) {
+            toast.error(t("web.item.episodeOrder.conflict"));
+            onClose();
+            return;
+          }
+          toast.error(t("web.item.episodeOrder.saveFailed"));
         },
       },
     );
@@ -433,7 +439,12 @@ function Arranger({
   const emptySeasons = seasons
     .map((s, i) => (s.episodeKeys.length === 0 ? i : -1))
     .filter((i) => i >= 0);
-  const orderName = orderLabel(t, data.choice, orders?.order_name);
+  const orderName = episodeOrderLabel(
+    t,
+    data.choice.provider || data.structure_provider,
+    data.choice.order_id,
+    orders?.order_name,
+  );
   const summary = [
     t("web.item.arrangeSeasons.from", { order: orderName }),
     t("web.item.arrangeSeasons.seasonCount", { count: seasons.length }),
@@ -685,10 +696,13 @@ function Arranger({
             value=""
             onValueChange={(value) => {
               const picked = JSON.parse(value) as { provider: string; order_id: string };
+              // Files keep the naming they have: an empty file order meant
+              // the provider being replaced.
+              const files = data.choice.file_order || data.structure_provider;
               onStartOver({
                 provider: picked.provider,
                 order_id: picked.order_id,
-                file_order: data.choice.file_order,
+                file_order: files === picked.provider ? "" : files,
                 layout: "custom",
               });
             }}
@@ -759,19 +773,6 @@ function Arranger({
       </DialogContent>
     </Dialog>
   );
-}
-
-/** Names an episode order: TVDB aired order, TMDB default order, or the order's own name. */
-function orderLabel(
-  t: Translate,
-  choice: EpisodeOrderChoice,
-  orderName?: string,
-  libraryProvider?: string,
-) {
-  const provider = choice.provider || libraryProvider || "tvdb";
-  const label = PROVIDER_LABEL[provider] ?? provider;
-  if (choice.order_id) return `${label} “${orderName || choice.order_id}”`;
-  return `${label} ${t(provider === "tvdb" ? "web.item.episodeOrder.airedOrder" : "web.item.episodeOrder.defaultOrder")}`;
 }
 
 function SeasonDetails({

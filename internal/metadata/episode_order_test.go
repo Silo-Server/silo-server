@@ -212,3 +212,18 @@ func TestUnseasonedAbsoluteNumbers(t *testing.T) {
 		t.Fatal("without a chosen order, a number past season 1 must not resolve")
 	}
 }
+
+// An arrangement saved with one provider's episodes leaves a series numbered
+// by the other provider (a fallback) in that provider's seasons.
+func TestApplyCustomLayoutOfAnotherProvider(t *testing.T) {
+	seasons := []SeasonResult{{SeasonNumber: 1}, {SeasonNumber: 2}}
+	episodes := []EpisodeResult{
+		{SeasonNumber: 1, EpisodeNumber: 1, ProviderIDs: map[string]string{"tmdb": "m1"}},
+		{SeasonNumber: 2, EpisodeNumber: 1, ProviderIDs: map[string]string{"tmdb": "m2"}},
+	}
+	layout := customLayout{Seasons: []customSeason{{Number: 1}}, Slots: map[string]episodeSlot{"tvdb:a": {1, 1}}}
+	gotSeasons, got := applyCustomLayout(seasons, episodes, "tmdb", layout)
+	if len(gotSeasons) != 2 || got[1].SeasonNumber != 2 || got[1].EpisodeNumber != 1 {
+		t.Fatalf("custom layout of tvdb keys renumbered tmdb episodes: %+v", got)
+	}
+}

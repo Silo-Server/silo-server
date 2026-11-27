@@ -299,7 +299,10 @@ type ItemDetail struct {
 	// EpisodeLabels is the series' models.EpisodeLabelsAirDate choice, on the
 	// series and on its seasons and episodes. Not part of the frozen v1
 	// contract; apiv2 emits it.
-	EpisodeLabels string `json:"-"`
+	// EpisodeOrder names a series' own episode order; nil while it follows
+	// its library. Not part of the frozen v1 contract.
+	EpisodeOrder  *EpisodeOrderSummary `json:"-"`
+	EpisodeLabels string               `json:"-"`
 	// EpisodeMetadataIncomplete is the series row's flag that some episodes
 	// still lack metadata, so item detail can request a refresh without
 	// reading the row again. Not part of any JSON contract.
@@ -2658,6 +2661,9 @@ func (s *DetailService) buildMediaItemDetail(ctx context.Context, item *models.M
 	detail.BackdropURL = s.PresignImageURL(ctx, item.BackdropPath, "backdrop", string(filter.ImageSizeFor(imagesize.SlotBackdrop)))
 	detail.LogoURL = s.PresignImageURL(ctx, item.LogoPath, "logo", string(filter.ImageSizeFor(imagesize.SlotLogo)))
 	detail.PosterPath = item.PosterPath
+	if item.Type == "series" {
+		detail.EpisodeOrder = s.episodeOrderSummary(ctx, item.ContentID)
+	}
 	detail.BackdropPath = item.BackdropPath
 	detail.LogoPath = item.LogoPath
 	detail.UpdatedAt = item.UpdatedAt
@@ -5582,4 +5588,31 @@ func cachedImageVariantKey(imageType, size string) string {
 		}
 		return "w500"
 	}
+}
+
+// EpisodeOrderSummary names the episode order an admin chose for a series.
+type EpisodeOrderSummary struct {
+	Provider  string
+	OrderID   string
+	OrderName string
+	Layout    string
+	FileOrder string
+}
+
+// episodeOrderSummary reads the series' own episode order; nil while it
+// follows its library or on a read failure, which only hides the label.
+func (s *DetailService) episodeOrderSummary(ctx context.Context, seriesID string) *EpisodeOrderSummary {
+	if s.itemRepo == nil || s.itemRepo.pool == nil {
+		return nil
+	}
+	var o EpisodeOrderSummary
+	err := s.itemRepo.pool.QueryRow(ctx, `
+		SELECT provider, order_id, order_name, layout, file_order FROM series_episode_orders
+		WHERE series_id = $1
+		  AND (provider <> '' OR order_id <> '' OR file_order <> '' OR layout <> 'seasons')`, seriesID).
+		Scan(&o.Provider, &o.OrderID, &o.OrderName, &o.Layout, &o.FileOrder)
+	if err != nil {
+		return nil
+	}
+	return &o
 }

@@ -7594,14 +7594,6 @@
             "$ref": "#/components/schemas/EpisodeOrderChoice",
             "description": "The base order; layout is custom"
           },
-          "revision": {
-            "description": "Send back on save",
-            "examples": [
-              4
-            ],
-            "format": "int64",
-            "type": "integer"
-          },
           "saved": {
             "description": "False when the series has no arrangement yet and this one starts from the base order",
             "examples": [
@@ -7626,7 +7618,6 @@
         },
         "required": [
           "saved",
-          "revision",
           "choice",
           "structure_provider",
           "seasons"
@@ -7650,12 +7641,6 @@
             "description": "The base order's provider; empty follows the library",
             "pattern": "^(?:tvdb|tmdb)?$",
             "type": "string"
-          },
-          "revision": {
-            "description": "The revision the arrangement was based on; a different stored revision answers 409",
-            "format": "int64",
-            "minimum": 0,
-            "type": "integer"
           },
           "seasons": {
             "items": {
@@ -11303,20 +11288,11 @@
               "$ref": "#/components/schemas/EpisodeOrderProvider"
             },
             "type": "array"
-          },
-          "revision": {
-            "description": "Send back on save to refuse a save over a newer one; 0 while inherited",
-            "examples": [
-              0
-            ],
-            "format": "int64",
-            "type": "integer"
           }
         },
         "required": [
           "inherited",
           "library_provider",
-          "revision",
           "choice",
           "order_name",
           "providers"
@@ -11386,83 +11362,6 @@
           "matched_files",
           "unmatched_files",
           "file_order_fits"
-        ],
-        "type": "object"
-      },
-      "AdminEpisodeOrderSaveInputBody": {
-        "additionalProperties": false,
-        "properties": {
-          "file_order": {
-            "description": "Provider whose default order the file names follow (S02E05 is that order's season 2, episode 5); empty means the series' provider",
-            "examples": [
-              "tvdb"
-            ],
-            "pattern": "^(?:tvdb|tmdb)?$",
-            "type": "string"
-          },
-          "layout": {
-            "description": "seasons keeps the order's seasons; absolute numbers every regular episode in one season, specials apart; custom uses the seasons arranged with setAdminCustomSeasons (a save answers 422 before there are any)",
-            "enum": [
-              "seasons",
-              "absolute",
-              "custom"
-            ],
-            "examples": [
-              "seasons"
-            ],
-            "type": "string"
-          },
-          "order_id": {
-            "description": "One of the provider's orders (the id of an EpisodeOrderOption); empty is its default order. Needs a provider",
-            "examples": [
-              "5e2b0c1bfe5ee0001a5d5b58"
-            ],
-            "maxLength": 200,
-            "type": "string"
-          },
-          "provider": {
-            "description": "Provider whose order the series follows; empty follows its library",
-            "examples": [
-              "tmdb"
-            ],
-            "pattern": "^(?:tvdb|tmdb)?$",
-            "type": "string"
-          },
-          "revision": {
-            "description": "The revision the choice was based on; a different stored revision answers 409",
-            "format": "int64",
-            "minimum": 0,
-            "type": "integer"
-          }
-        },
-        "required": [
-          "provider",
-          "order_id",
-          "file_order",
-          "layout"
-        ],
-        "type": "object"
-      },
-      "AdminEpisodeOrderSaved": {
-        "additionalProperties": false,
-        "properties": {
-          "job_id": {
-            "description": "Metadata refresh that applies the order; absent when queuing it failed, and the next refresh applies it",
-            "examples": [
-              "01J9Z8"
-            ],
-            "type": "string"
-          },
-          "revision": {
-            "examples": [
-              3
-            ],
-            "format": "int64",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "revision"
         ],
         "type": "object"
       },
@@ -31704,6 +31603,10 @@
             "format": "int64",
             "type": "integer"
           },
+          "episode_order": {
+            "$ref": "#/components/schemas/SeriesEpisodeOrder",
+            "description": "The episode order an admin chose for this series; absent while it follows its library"
+          },
           "extras": {
             "items": {
               "$ref": "#/components/schemas/ItemExtraInfo"
@@ -43051,6 +42954,13 @@
             ],
             "type": "boolean"
           },
+          "episode_ordering": {
+            "description": "This build supports the library episode_order_provider setting and the series episode order and custom season operations (getAdminEpisodeOrder, getAdminCustomSeasons)",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
           "ignore_unmatched": {
             "description": "This build supports marking unmatched items as intentionally unmatched with ignoreUnmatchedItem, and listing them with listUnmatchedItems' ignored filter",
             "examples": [
@@ -43100,6 +43010,7 @@
           "trickplay_supported",
           "ignore_unmatched",
           "box_sets",
+          "episode_ordering",
           "revision",
           "state",
           "allowed"
@@ -57019,6 +56930,62 @@
             "$ref": "#/components/schemas/TrackIdentityV3"
           }
         },
+        "type": "object"
+      },
+      "SeriesEpisodeOrder": {
+        "additionalProperties": false,
+        "properties": {
+          "custom_arrangement": {
+            "description": "The seasons are arranged by an admin, so they may differ from every provider's",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
+          "file_order": {
+            "description": "tvdb or tmdb when the files are named in another provider's order than the series follows; empty otherwise",
+            "examples": [
+              ""
+            ],
+            "type": "string"
+          },
+          "layout": {
+            "description": "seasons, absolute or custom; treat an unknown value as seasons",
+            "examples": [
+              "seasons"
+            ],
+            "type": "string"
+          },
+          "order_id": {
+            "description": "The provider's order; empty is its default",
+            "examples": [
+              "dvd"
+            ],
+            "type": "string"
+          },
+          "order_name": {
+            "description": "The order's name as the provider gave it; empty for the default order",
+            "examples": [
+              "DVD Order"
+            ],
+            "type": "string"
+          },
+          "provider": {
+            "description": "tvdb or tmdb; empty follows the library's provider",
+            "examples": [
+              "tvdb"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "order_id",
+          "order_name",
+          "layout",
+          "file_order",
+          "custom_arrangement"
+        ],
         "type": "object"
       },
       "SeriesMatchQueueEntry": {
@@ -101298,7 +101265,14 @@
                 }
               }
             },
-            "description": "OK"
+            "description": "OK",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "400": {
             "content": {
@@ -101408,6 +101382,23 @@
         "operationId": "setAdminCustomSeasons",
         "parameters": [
           {
+            "description": "The resource's current ETag, or \"*\" to overwrite deliberately. A missing field is 428 precondition_required; a stale tag is 412 precondition_failed with the current ETag.",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional second precondition, evaluated after If-Match succeeds: \"*\" or any tag matching the current representation is 412 precondition_failed with the current ETag.",
+            "in": "header",
+            "name": "If-None-Match",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "description": "Optional. When present, it must name a profile of the authenticated account.",
             "in": "header",
             "name": "X-Profile-Id",
@@ -101451,15 +101442,27 @@
           "required": true
         },
         "responses": {
-          "200": {
+          "202": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminEpisodeOrderSaved"
+                  "$ref": "#/components/schemas/AdminTaskJob"
                 }
               }
             },
-            "description": "OK"
+            "description": "Accepted",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "400": {
             "content": {
@@ -101521,6 +101524,24 @@
             },
             "description": "Request Timeout"
           },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
           "413": {
             "content": {
               "application/problem+json": {
@@ -101550,6 +101571,16 @@
               }
             },
             "description": "Unprocessable Entity"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Required"
           },
           "429": {
             "content": {
@@ -101587,12 +101618,13 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Save a series' arranged seasons, switch it to them and queue the refresh that renumbers it.",
+        "summary": "Save a series' arranged seasons, switch it to them and queue the refresh that renumbers it. Guarded by the series' episode order ETag.",
         "tags": [
           "admin-catalog"
         ],
         "x-silo-class": "permission_gated",
         "x-silo-demo-restricted": true,
+        "x-silo-guarded": true,
         "x-silo-permission": "metadata_curation",
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
@@ -101655,7 +101687,14 @@
                 }
               }
             },
-            "description": "OK"
+            "description": "OK",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "400": {
             "content": {
@@ -101765,6 +101804,23 @@
         "operationId": "setAdminEpisodeOrder",
         "parameters": [
           {
+            "description": "The resource's current ETag, or \"*\" to overwrite deliberately. A missing field is 428 precondition_required; a stale tag is 412 precondition_failed with the current ETag.",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional second precondition, evaluated after If-Match succeeds: \"*\" or any tag matching the current representation is 412 precondition_failed with the current ETag.",
+            "in": "header",
+            "name": "If-None-Match",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "description": "Optional. When present, it must name a profile of the authenticated account.",
             "in": "header",
             "name": "X-Profile-Id",
@@ -101801,22 +101857,34 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AdminEpisodeOrderSaveInputBody"
+                "$ref": "#/components/schemas/EpisodeOrderChoice"
               }
             }
           },
           "required": true
         },
         "responses": {
-          "200": {
+          "202": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminEpisodeOrderSaved"
+                  "$ref": "#/components/schemas/AdminTaskJob"
                 }
               }
             },
-            "description": "OK"
+            "description": "Accepted",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "400": {
             "content": {
@@ -101878,6 +101946,24 @@
             },
             "description": "Request Timeout"
           },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
           "413": {
             "content": {
               "application/problem+json": {
@@ -101907,6 +101993,16 @@
               }
             },
             "description": "Unprocessable Entity"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Required"
           },
           "429": {
             "content": {
@@ -101950,6 +102046,7 @@
         ],
         "x-silo-class": "permission_gated",
         "x-silo-demo-restricted": true,
+        "x-silo-guarded": true,
         "x-silo-permission": "metadata_curation",
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true

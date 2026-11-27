@@ -76,7 +76,7 @@ A file name such as `S02E05` is season 2, episode 5 of the order the files are
 named in: one provider's default order, the structure provider's unless the
 series sets `file_order`. Each episode records the numbers its file would carry
 in `episodes.file_season_number`/`file_episode_number` (NULL when they are its
-own numbers): the provider's default numbers when the series shows another of
+own numbers, -1 when the file order lacks the episode): the provider's default numbers when the series shows another of
 its orders, or the bridged episode's numbers in the other provider's order.
 Linking matches files on those numbers.
 
@@ -87,9 +87,21 @@ the episode its numbers name; a file whose numbers no episode has is unlinked,
 unless it sits on a scanner placeholder. A placeholder whose files all moved
 to one real episode merges into it.
 
+A link never rewrites a file's `season_number`/`episode_number`: they stay the
+numbers its name gives.
+
+A multi-episode file (`S01E01-E02`) still spans episodes by the numbers the
+series shows, so arranging its episodes apart leaves the second one without
+the file.
+
 A bare number (`Show - 045`) is the 45th regular episode of the provider's
 default order once an admin chose the series' order; otherwise it is read only
 within season 1, where per-season and absolute numbering agree.
+
+A season or episode refresh of a series shown in another order than its
+providers' default refreshes the whole series: the per-target fetch asks
+providers for the shown numbers in their default order and would write another
+episode's data.
 
 ## Services that address episodes by number
 
@@ -101,8 +113,8 @@ place in its provider's default order in `episodes.provider_season_number`,
 ## Applying a change
 
 Saving a series' order (`PUT /api/v2/admin/items/{id}/episode-order` or
-`/custom-seasons`) stores it with a revision and queues the series' metadata
-refresh, which applies it as above; a library change queues a full library
+`/custom-seasons`, guarded by the order's ETag) stores it and queues the
+series' metadata refresh, which applies it as above; a library change queues a full library
 refresh. A refresh is idempotent: it computes the target numbering and
 converges, so a node that dies mid-refresh is fixed by the next one.
 `POST …/episode-order/preview` runs the same fetch, structure and layout

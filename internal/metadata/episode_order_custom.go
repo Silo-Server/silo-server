@@ -109,7 +109,9 @@ func (s *MetadataService) CustomSeasons(ctx context.Context, seriesID string, ba
 	}
 	result.Revision = state.Revision
 	result.Settings = state.Settings
-	stored := state.Override && state.Settings.Layout == episodeLayoutCustom
+	// A stored arrangement opens whatever layout the series shows now, so
+	// switching to another layout and back keeps it.
+	stored := true
 	if base != nil {
 		result.Settings = *base
 		stored = false
@@ -188,7 +190,7 @@ func (s *MetadataService) CustomSeasons(ctx context.Context, seriesID string, ba
 	}
 	for i, ep := range arranged {
 		key := customEpisodeKey(ep, structureSlug)
-		fileSlot := episodeSlot{inOrder[i].SeasonNumber, inOrder[i].EpisodeNumber}
+		fileSlot := episodeSlot{-1, -1}
 		if inOrder[i].FileNumbered {
 			fileSlot = episodeSlot{inOrder[i].FileSeasonNumber, inOrder[i].FileEpisodeNumber}
 		}
@@ -276,6 +278,26 @@ func (s *MetadataService) SaveCustomSeasons(ctx context.Context, seriesID string
 	if regular == 0 {
 		return 0, fmt.Errorf("%w: keep at least one season", ErrEpisodeOrderInvalid)
 	}
+	// Episode keys name the provider that numbered the arrangement. The
+	// series follows that provider from now on, so a later library change
+	// cannot leave the keys matching nothing.
+	keyProvider := ""
+	for key := range seenKey {
+		provider, _, _ := strings.Cut(key, ":")
+		if keyProvider != "" && provider != keyProvider {
+			return 0, fmt.Errorf("%w: episodes come from one provider", ErrEpisodeOrderInvalid)
+		}
+		keyProvider = provider
+	}
+	if keyProvider != "" {
+		if save.Settings.Provider != "" && save.Settings.Provider != keyProvider {
+			return 0, fmt.Errorf("%w: the episodes are %s's, not %s's", ErrEpisodeOrderInvalid, keyProvider, save.Settings.Provider)
+		}
+		save.Settings.Provider = keyProvider
+		if err := save.Settings.Validate(); err != nil {
+			return 0, err
+		}
+	}
 	for n := 1; n <= regular; n++ {
 		if !seenSeason[n] {
 			return 0, fmt.Errorf("%w: seasons are numbered 1 to %d without gaps", ErrEpisodeOrderInvalid, regular)
@@ -291,34 +313,11 @@ func (s *MetadataService) SaveCustomSeasons(ctx context.Context, seriesID string
 	orderName := s.episodeOrderName(ctx, seriesID, save.Settings)
 	var saved int64
 	err = pgx.BeginFunc(ctx, s.dbPool, func(tx pgx.Tx) error {
-		var stored int64
-		if err := tx.QueryRow(ctx, `SELECT revision FROM series_episode_orders WHERE series_id = $1 FOR UPDATE`, seriesID).
-			Scan(&stored); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		var err error
+		if saved, err = storeSeriesOrder(ctx, tx, seriesID, save.Settings, orderName, revision, userID); err != nil {
 			return err
 		}
-		if revision != nil && *revision != stored {
-			return ErrEpisodeOrderConflict
-		}
-		var updatedBy any
-		if userID > 0 {
-			updatedBy = userID
-		}
-		if err := tx.QueryRow(ctx, `
-			INSERT INTO series_episode_orders (series_id, provider, order_id, order_name, file_order, layout, updated_by)
-			VALUES ($1, $2, $3, $4, $5, 'custom', $6)
-			ON CONFLICT (series_id) DO UPDATE SET
-				provider = EXCLUDED.provider, order_id = EXCLUDED.order_id, order_name = EXCLUDED.order_name,
-				file_order = EXCLUDED.file_order, layout = 'custom',
-				updated_by = EXCLUDED.updated_by, updated_at = now(),
-				revision = series_episode_orders.revision + 1
-			RETURNING revision`,
-			seriesID, save.Settings.Provider, save.Settings.OrderID, orderName, save.Settings.FileOrder, updatedBy).Scan(&saved); err != nil {
-			return err
-		}
-		if err := replaceCustomLayout(ctx, tx, seriesID, save.Seasons); err != nil {
-			return err
-		}
-		return nil
+		return replaceCustomLayout(ctx, tx, seriesID, save.Seasons)
 	})
 	if err != nil {
 		if errors.Is(err, ErrEpisodeOrderConflict) {

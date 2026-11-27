@@ -23,7 +23,8 @@ CREATE TABLE public.series_episode_orders (
 );
 
 -- The numbers a file name gives each episode, in the order the show's files
--- are named in. NULL means the episode's own numbers.
+-- are named in. NULL means the episode's own numbers; -1 means the file
+-- order lacks the episode, so no file name names it.
 ALTER TABLE public.episodes
     ADD COLUMN file_season_number integer,
     ADD COLUMN file_episode_number integer;

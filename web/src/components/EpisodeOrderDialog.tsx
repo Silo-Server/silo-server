@@ -41,6 +41,7 @@ import {
 } from "@/hooks/queries/episodeOrder";
 import { useT, type MessageKey, type Translate } from "@/i18n";
 import { joinList } from "@/lib/appLocale";
+import { EPISODE_PROVIDER_LABEL, episodeOrderLabel } from "@/lib/episodeOrder";
 import { cn } from "@/lib/utils";
 
 type Provider = "tvdb" | "tmdb";
@@ -57,7 +58,7 @@ interface Draft {
 }
 
 // Provider names are brands, the same in every language.
-const PROVIDER_LABEL: Record<Provider, string> = { tvdb: "TVDB", tmdb: "TMDB" };
+const PROVIDER_LABEL = EPISODE_PROVIDER_LABEL;
 const otherProvider = (p: Provider): Provider => (p === "tvdb" ? "tmdb" : "tvdb");
 const asProvider = (v: string | undefined): Provider => (v === "tmdb" ? "tmdb" : "tvdb");
 
@@ -146,7 +147,7 @@ export default function EpisodeOrderDialog({
   function apply() {
     if (!choice || !state) return;
     save.mutate(
-      { ...choice, revision: state.revision },
+      { etag: state.etag, body: choice },
       {
         onSuccess: () => {
           changeOpen(false);
@@ -155,11 +156,14 @@ export default function EpisodeOrderDialog({
           });
         },
         onError: (err) => {
-          toast.error(
-            err instanceof V2ProblemError && err.status === 409
-              ? t("web.item.episodeOrder.conflict")
-              : t("web.item.episodeOrder.saveFailed"),
-          );
+          // Someone saved in between: close so the next opening starts from
+          // their choice instead of saving over it.
+          if (err instanceof V2ProblemError && err.status === 412) {
+            toast.error(t("web.item.episodeOrder.conflict"));
+            changeOpen(false);
+            return;
+          }
+          toast.error(t("web.item.episodeOrder.saveFailed"));
         },
       },
     );
@@ -788,15 +792,7 @@ export function EpisodeOrderSummary({
   if (!data) return null;
   const { choice } = data;
   const provider = asProvider(choice.provider || data.library_provider);
-  let summary = `${PROVIDER_LABEL[provider]} ${
-    choice.order_id
-      ? `“${data.order_name || choice.order_id}”`
-      : t(
-          provider === "tvdb"
-            ? "web.item.episodeOrder.airedOrder"
-            : "web.item.episodeOrder.defaultOrder",
-        )
-  }`;
+  let summary = episodeOrderLabel(t, provider, choice.order_id, data.order_name);
   if (choice.layout === "absolute")
     summary = t("web.item.episodeOrder.summaryAbsolute", { order: summary });
   if (choice.layout === "custom")

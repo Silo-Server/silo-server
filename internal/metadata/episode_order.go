@@ -163,7 +163,8 @@ func (s *MetadataService) seriesEpisodeOrder(ctx context.Context, contentID stri
 	if err != nil {
 		return settings, fmt.Errorf("loading the series episode order: %w", err)
 	}
-	settings.Override = true
+	settings.Override = override.Provider != "" || override.OrderID != "" || override.FileOrder != "" ||
+		(override.Layout != "" && override.Layout != episodeLayoutSeasons)
 	if override.Provider != "" {
 		settings.Provider, settings.OrderID = override.Provider, override.OrderID
 	}
@@ -198,9 +199,12 @@ func episodeFileNumbersOf(ctx context.Context) bool {
 	return known
 }
 
+// noFileNumber is the file number of an episode the file order lacks.
+var noFileNumber int32 = -1
+
 // writeEpisodeFileNumbers stores each target's file numbers and provider
 // numbers on the row at its numbers inside tx: NULL when they equal the row's
-// own numbers, or for file numbers when the file order lacks the episode.
+// own numbers, and -1 file numbers when the file order lacks the episode.
 // structureSlug names the provider the provider numbers belong to.
 func writeEpisodeFileNumbers(ctx context.Context, tx pgx.Tx, seriesID, structureSlug string, targets []EpisodeResult) error {
 	n := len(targets)
@@ -223,6 +227,11 @@ func writeEpisodeFileNumbers(ctx context.Context, tx pgx.Tx, seriesID, structure
 		seasons = append(seasons, int32(ep.SeasonNumber))
 		numbers = append(numbers, int32(ep.EpisodeNumber))
 		fs, fe := pair(ep.FileNumbered, ep.FileSeasonNumber, ep.FileEpisodeNumber, ep)
+		if !ep.FileNumbered {
+			// The file order lacks the episode: no file name names it, and
+			// -1 matches no parsed number where NULL would mean its own.
+			fs, fe = &noFileNumber, &noFileNumber
+		}
 		fileSeasons, fileNumbers = append(fileSeasons, fs), append(fileNumbers, fe)
 		ps, pe := pair(ep.ProviderEpisodeNumber > 0 || ep.ProviderSeasonNumber > 0, ep.ProviderSeasonNumber, ep.ProviderEpisodeNumber, ep)
 		providerSeasons, providerNumbers = append(providerSeasons, ps), append(providerNumbers, pe)
@@ -289,6 +298,19 @@ func customEpisodeKey(ep EpisodeResult, structureSlug string) string {
 // overview, else those of the order's season with the same number, and that
 // season's artwork and air date.
 func applyCustomLayout(seasons []SeasonResult, episodes []EpisodeResult, structureSlug string, layout customLayout) ([]SeasonResult, []EpisodeResult) {
+	// An arrangement of another provider's episodes (the series fell back
+	// to the other provider) places none of these; the order's own seasons
+	// stand rather than every episode piling into the last season.
+	placesAny := false
+	for _, ep := range episodes {
+		if _, ok := layout.Slots[customEpisodeKey(ep, structureSlug)]; ok {
+			placesAny = true
+			break
+		}
+	}
+	if !placesAny {
+		return seasons, episodes
+	}
 	out := make([]EpisodeResult, len(episodes))
 	copy(out, episodes)
 	lastSeason := 1
@@ -372,4 +394,41 @@ func assignProviderNumbers(episodes []EpisodeResult) {
 			ep.ProviderSeasonNumber, ep.ProviderEpisodeNumber = *ep.DefaultSeasonNumber, *ep.DefaultEpisodeNumber
 		}
 	}
+}
+
+// seriesShowsOtherNumbering reports whether the series' shown numbers may
+// differ from those its episode providers number it by in their default
+// order: an admin chose its order, its episodes record other provider
+// numbers, or its library follows a provider other than the first remote
+// one of its episode chain.
+func (s *MetadataService) seriesShowsOtherNumbering(ctx context.Context, seriesID string, folderID int) (bool, error) {
+	order, err := s.seriesEpisodeOrder(ctx, seriesID)
+	if err != nil || order.Override {
+		return order.Override, err
+	}
+	if s.dbPool != nil {
+		var renumbered bool
+		if err := s.dbPool.QueryRow(ctx, `
+			SELECT EXISTS (SELECT 1 FROM episodes WHERE series_id = $1
+			  AND (provider_season_number IS NOT NULL OR file_season_number IS NOT NULL))`, seriesID).
+			Scan(&renumbered); err != nil {
+			return false, fmt.Errorf("checking the series' episode numbering: %w", err)
+		}
+		if renumbered {
+			return true, nil
+		}
+	}
+	if order.Provider == "" {
+		return false, nil
+	}
+	chain, err := s.resolveChainCached(ctx, folderID, "episode")
+	if err != nil {
+		return false, err
+	}
+	for _, p := range chain {
+		if slug := p.Slug(); slug == "tvdb" || slug == "tmdb" {
+			return slug != order.Provider, nil
+		}
+	}
+	return false, nil
 }

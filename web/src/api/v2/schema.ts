@@ -2635,7 +2635,7 @@ export interface paths {
     };
     /** Read a series' arranged seasons, or a starting arrangement from an episode order. */
     get: operations["getAdminCustomSeasons"];
-    /** Save a series' arranged seasons, switch it to them and queue the refresh that renumbers it. */
+    /** Save a series' arranged seasons, switch it to them and queue the refresh that renumbers it. Guarded by the series' episode order ETag. */
     put: operations["setAdminCustomSeasons"];
     post?: never;
     delete?: never;
@@ -17181,12 +17181,6 @@ export interface components {
       /** @description The base order; layout is custom */
       choice: components["schemas"]["EpisodeOrderChoice"];
       /**
-       * Format: int64
-       * @description Send back on save
-       * @example 4
-       */
-      revision: number;
-      /**
        * @description False when the series has no arrangement yet and this one starts from the base order
        * @example true
        */
@@ -17206,11 +17200,6 @@ export interface components {
       order_id: string;
       /** @description The base order's provider; empty follows the library */
       provider: string;
-      /**
-       * Format: int64
-       * @description The revision the arrangement was based on; a different stored revision answers 409
-       */
-      revision?: number;
       seasons: components["schemas"]["Item"][];
     };
     AdminDashboardCapabilities: {
@@ -18792,12 +18781,6 @@ export interface components {
       order_name: string;
       /** @description The series' remote episode providers, in chain order */
       providers: components["schemas"]["EpisodeOrderProvider"][];
-      /**
-       * Format: int64
-       * @description Send back on save to refuse a save over a newer one; 0 while inherited
-       * @example 0
-       */
-      revision: number;
     };
     AdminEpisodeOrderPreview: {
       /**
@@ -18828,46 +18811,6 @@ export interface components {
       structure_provider: string;
       /** @description File names the order does not place, at most 50 */
       unmatched_files: string[];
-    };
-    AdminEpisodeOrderSaved: {
-      /**
-       * @description Metadata refresh that applies the order; absent when queuing it failed, and the next refresh applies it
-       * @example 01J9Z8
-       */
-      job_id?: string;
-      /**
-       * Format: int64
-       * @example 3
-       */
-      revision: number;
-    };
-    AdminEpisodeOrderSaveInputBody: {
-      /**
-       * @description Provider whose default order the file names follow (S02E05 is that order's season 2, episode 5); empty means the series' provider
-       * @example tvdb
-       */
-      file_order: string;
-      /**
-       * @description seasons keeps the order's seasons; absolute numbers every regular episode in one season, specials apart; custom uses the seasons arranged with setAdminCustomSeasons (a save answers 422 before there are any)
-       * @example seasons
-       * @enum {string}
-       */
-      layout: "seasons" | "absolute" | "custom";
-      /**
-       * @description One of the provider's orders (the id of an EpisodeOrderOption); empty is its default order. Needs a provider
-       * @example 5e2b0c1bfe5ee0001a5d5b58
-       */
-      order_id: string;
-      /**
-       * @description Provider whose order the series follows; empty follows its library
-       * @example tmdb
-       */
-      provider: string;
-      /**
-       * Format: int64
-       * @description The revision the choice was based on; a different stored revision answers 409
-       */
-      revision?: number;
     };
     AdminFilesystemEntry: {
       name: string;
@@ -26857,6 +26800,8 @@ export interface components {
       episode_labels?: "air_date";
       /** Format: int64 */
       episode_number?: number;
+      /** @description The episode order an admin chose for this series; absent while it follows its library */
+      episode_order?: components["schemas"]["SeriesEpisodeOrder"];
       extras?: components["schemas"]["ItemExtraInfo"][];
       /**
        * Format: date
@@ -31497,6 +31442,11 @@ export interface components {
        * @example true
        */
       box_sets: boolean;
+      /**
+       * @description This build supports the library episode_order_provider setting and the series episode order and custom season operations (getAdminEpisodeOrder, getAdminCustomSeasons)
+       * @example true
+       */
+      episode_ordering: boolean;
       /**
        * @description This build supports marking unmatched items as intentionally unmatched with ignoreUnmatchedItem, and listing them with listUnmatchedItems' ignored filter
        * @example true
@@ -37553,6 +37503,38 @@ export interface components {
     SelectedTracksV3: {
       audio?: components["schemas"]["TrackIdentityV3"];
       subtitle?: components["schemas"]["TrackIdentityV3"];
+    };
+    SeriesEpisodeOrder: {
+      /**
+       * @description The seasons are arranged by an admin, so they may differ from every provider's
+       * @example false
+       */
+      custom_arrangement: boolean;
+      /**
+       * @description tvdb or tmdb when the files are named in another provider's order than the series follows; empty otherwise
+       * @example
+       */
+      file_order: string;
+      /**
+       * @description seasons, absolute or custom; treat an unknown value as seasons
+       * @example seasons
+       */
+      layout: string;
+      /**
+       * @description The provider's order; empty is its default
+       * @example dvd
+       */
+      order_id: string;
+      /**
+       * @description The order's name as the provider gave it; empty for the default order
+       * @example DVD Order
+       */
+      order_name: string;
+      /**
+       * @description tvdb or tmdb; empty follows the library's provider
+       * @example tvdb
+       */
+      provider: string;
     };
     SeriesMatchQueueEntry: {
       /**
@@ -65295,6 +65277,7 @@ export interface operations {
       /** @description OK */
       200: {
         headers: {
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -65387,7 +65370,11 @@ export interface operations {
   setAdminCustomSeasons: {
     parameters: {
       query?: never;
-      header?: {
+      header: {
+        /** @description The resource's current ETag, or "*" to overwrite deliberately. A missing field is 428 precondition_required; a stale tag is 412 precondition_failed with the current ETag. */
+        "If-Match": string;
+        /** @description Optional second precondition, evaluated after If-Match succeeds: "*" or any tag matching the current representation is 412 precondition_failed with the current ETag. */
+        "If-None-Match"?: string;
         /** @description Optional. When present, it must name a profile of the authenticated account. */
         "X-Profile-Id"?: string;
         /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
@@ -65404,13 +65391,15 @@ export interface operations {
       };
     };
     responses: {
-      /** @description OK */
-      200: {
+      /** @description Accepted */
+      202: {
         headers: {
+          Location?: string;
+          "Retry-After"?: string;
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["AdminEpisodeOrderSaved"];
+          "application/json": components["schemas"]["AdminTaskJob"];
         };
       };
       /** @description Bad Request */
@@ -65467,6 +65456,17 @@ export interface operations {
           "application/problem+json": components["schemas"]["Problem"];
         };
       };
+      /** @description Precondition Failed */
+      412: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
       /** @description Request Entity Too Large */
       413: {
         headers: {
@@ -65487,6 +65487,15 @@ export interface operations {
       };
       /** @description Unprocessable Entity */
       422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Precondition Required */
+      428: {
         headers: {
           [name: string]: unknown;
         };
@@ -65545,6 +65554,7 @@ export interface operations {
       /** @description OK */
       200: {
         headers: {
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -65637,7 +65647,11 @@ export interface operations {
   setAdminEpisodeOrder: {
     parameters: {
       query?: never;
-      header?: {
+      header: {
+        /** @description The resource's current ETag, or "*" to overwrite deliberately. A missing field is 428 precondition_required; a stale tag is 412 precondition_failed with the current ETag. */
+        "If-Match": string;
+        /** @description Optional second precondition, evaluated after If-Match succeeds: "*" or any tag matching the current representation is 412 precondition_failed with the current ETag. */
+        "If-None-Match"?: string;
         /** @description Optional. When present, it must name a profile of the authenticated account. */
         "X-Profile-Id"?: string;
         /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
@@ -65650,17 +65664,19 @@ export interface operations {
     };
     requestBody: {
       content: {
-        "application/json": components["schemas"]["AdminEpisodeOrderSaveInputBody"];
+        "application/json": components["schemas"]["EpisodeOrderChoice"];
       };
     };
     responses: {
-      /** @description OK */
-      200: {
+      /** @description Accepted */
+      202: {
         headers: {
+          Location?: string;
+          "Retry-After"?: string;
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["AdminEpisodeOrderSaved"];
+          "application/json": components["schemas"]["AdminTaskJob"];
         };
       };
       /** @description Bad Request */
@@ -65717,6 +65733,17 @@ export interface operations {
           "application/problem+json": components["schemas"]["Problem"];
         };
       };
+      /** @description Precondition Failed */
+      412: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
       /** @description Request Entity Too Large */
       413: {
         headers: {
@@ -65737,6 +65764,15 @@ export interface operations {
       };
       /** @description Unprocessable Entity */
       422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Precondition Required */
+      428: {
         headers: {
           [name: string]: unknown;
         };

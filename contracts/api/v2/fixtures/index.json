@@ -1252,7 +1252,8 @@
       },
       "expected_status": 200,
       "response_headers": {
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "ETag": "\"19db14412ea53425b548bb89.1xu7zqbpzqo1p\""
       },
       "response_media_type": "application/json",
       "schema": "#/components/schemas/AdminCustomSeasons",
@@ -1266,16 +1267,19 @@
         "method": "PUT",
         "path": "/api/v2/admin/items/item-1/custom-seasons",
         "headers": {
-          "Authorization": "Bearer tok-member"
+          "Authorization": "Bearer tok-member",
+          "If-Match": "\"19db14412ea53425b548bb89.1xu7zqbpzqo1n\""
         },
-        "body": "{\"provider\":\"tvdb\",\"order_id\":\"\",\"file_order\":\"\",\"revision\":4,\"seasons\":[{\"number\":1,\"title\":\"Arc one\",\"overview\":\"\",\"episodes\":[\"tvdb:85173\"]},{\"number\":0,\"title\":\"\",\"overview\":\"\",\"episodes\":[]}]}"
+        "body": "{\"provider\":\"tvdb\",\"order_id\":\"\",\"file_order\":\"\",\"seasons\":[{\"number\":1,\"title\":\"Arc one\",\"overview\":\"\",\"episodes\":[\"tvdb:85173\"]},{\"number\":0,\"title\":\"\",\"overview\":\"\",\"episodes\":[]}]}"
       },
-      "expected_status": 200,
+      "expected_status": 202,
       "response_headers": {
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "Location": "/api/v2/admin/jobs/item-refresh-1",
+        "Retry-After": "5"
       },
       "response_media_type": "application/json",
-      "schema": "#/components/schemas/AdminEpisodeOrderSaved",
+      "schema": "#/components/schemas/AdminTaskJob",
       "body_file": "admin_custom_seasons_saved.json"
     },
     {
@@ -1743,7 +1747,8 @@
       },
       "expected_status": 200,
       "response_headers": {
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "ETag": "\"19db14412ea53425b548bb89.1xu7zqbpzqo1n\""
       },
       "response_media_type": "application/json",
       "schema": "#/components/schemas/AdminEpisodeOrder",
@@ -1757,16 +1762,19 @@
         "method": "PUT",
         "path": "/api/v2/admin/items/item-1/episode-order",
         "headers": {
-          "Authorization": "Bearer tok-member"
+          "Authorization": "Bearer tok-member",
+          "If-Match": "\"19db14412ea53425b548bb89.1xu7zqbpzqo1n\""
         },
-        "body": "{\"provider\":\"tvdb\",\"order_id\":\"dvd\",\"file_order\":\"\",\"layout\":\"seasons\",\"revision\":2}"
+        "body": "{\"provider\":\"tvdb\",\"order_id\":\"dvd\",\"file_order\":\"\",\"layout\":\"seasons\"}"
       },
-      "expected_status": 200,
+      "expected_status": 202,
       "response_headers": {
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "Location": "/api/v2/admin/jobs/item-refresh-1",
+        "Retry-After": "5"
       },
       "response_media_type": "application/json",
-      "schema": "#/components/schemas/AdminEpisodeOrderSaved",
+      "schema": "#/components/schemas/AdminTaskJob",
       "body_file": "admin_episode_order_saved.json"
     },
     {

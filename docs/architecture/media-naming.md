@@ -106,10 +106,17 @@ episode number but no known season through `unseasonedEpisodeIndex`
   per-season numbering read the same. A non-generic title in the file name must match that
   episode's title. Requiring season 1 also defers the link until season 1 metadata is stored.
 - Nothing derives a cumulative absolute order from season lengths, because stored seasons may be
-  incomplete. A file that fails these rules stays unlinked; it is not moved to season 0.
+  incomplete, unless an admin chose the series' episode order
+  ([episode-ordering.md](episode-ordering.md)). Then the number counts through the regular
+  episodes of the provider's default order (`absoluteEpisodePositions`): `Show - 045` is its
+  45th episode. A file that fails these rules stays unlinked; it is not moved to season 0.
+- A file named by season and episode (`S02E05`) links by the numbers its name gives in the order
+  the series' files are named in, which episodes record in `file_season_number` and
+  `file_episode_number` when they differ from the numbers the series shows.
 
-`TestUnseasonedEpisodeResolution`, `TestUnseasonedEpisodeLinksUseProviderEvidence`, and
-`TestUnseasonedEpisodeRetriesWhenProviderMetadataArrives` cover these rules.
+`TestUnseasonedEpisodeResolution`, `TestUnseasonedEpisodeLinksUseProviderEvidence`,
+`TestUnseasonedEpisodeRetriesWhenProviderMetadataArrives` and `TestUnseasonedAbsoluteNumbers`
+cover these rules.
 
 Air-date names link through `selectAirDateEpisodeCandidate` in the same file: one candidate
 links; several are narrowed by the series' TVDB, then TMDB, then IMDb ID; a date that stays

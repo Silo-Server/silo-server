@@ -164,7 +164,7 @@ func (s *MetadataService) EpisodeOrderState(ctx context.Context, seriesID string
 			Scan(&state.Settings.Provider, &state.Settings.OrderID, &state.OrderName, &state.Settings.FileOrder, &state.Settings.Layout, &state.Revision)
 		switch {
 		case err == nil:
-			state.Override = true
+			state.Override = !state.Settings.isDefault()
 		case !errors.Is(err, pgx.ErrNoRows):
 			return state, fmt.Errorf("loading the series episode order: %w", err)
 		}
@@ -202,8 +202,7 @@ func (s *MetadataService) EpisodeOrderState(ctx context.Context, seriesID string
 }
 
 // SaveEpisodeOrder stores the series' settings and returns the new revision.
-// Default settings remove the override, so the series follows its library
-// again. A non-nil revision must match the stored one (zero when the series
+// Default settings make the series follow its library again. A non-nil revision must match the stored one (zero when the series
 // has none), or the save fails with ErrEpisodeOrderConflict.
 func (s *MetadataService) SaveEpisodeOrder(ctx context.Context, seriesID string, settings EpisodeOrderSettings, revision *int64, userID int) (int64, error) {
 	if err := settings.Validate(); err != nil {
@@ -228,32 +227,9 @@ func (s *MetadataService) SaveEpisodeOrder(ctx context.Context, seriesID string,
 	orderName := s.episodeOrderName(ctx, seriesID, settings)
 	var saved int64
 	err = pgx.BeginFunc(ctx, s.dbPool, func(tx pgx.Tx) error {
-		var stored int64
-		if err := tx.QueryRow(ctx, `SELECT revision FROM series_episode_orders WHERE series_id = $1 FOR UPDATE`, seriesID).
-			Scan(&stored); err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return err
-		}
-		if revision != nil && *revision != stored {
-			return ErrEpisodeOrderConflict
-		}
-		if settings.isDefault() {
-			_, err := tx.Exec(ctx, `DELETE FROM series_episode_orders WHERE series_id = $1`, seriesID)
-			return err
-		}
-		var updatedBy any
-		if userID > 0 {
-			updatedBy = userID
-		}
-		return tx.QueryRow(ctx, `
-			INSERT INTO series_episode_orders (series_id, provider, order_id, file_order, layout, updated_by, order_name)
-			VALUES ($1, $2, $3, $4, $5, $6, $7)
-			ON CONFLICT (series_id) DO UPDATE SET
-				provider = EXCLUDED.provider, order_id = EXCLUDED.order_id, order_name = EXCLUDED.order_name,
-				file_order = EXCLUDED.file_order, layout = EXCLUDED.layout,
-				updated_by = EXCLUDED.updated_by, updated_at = now(),
-				revision = series_episode_orders.revision + 1
-			RETURNING revision`,
-			seriesID, settings.Provider, settings.OrderID, settings.FileOrder, settings.Layout, updatedBy, orderName).Scan(&saved)
+		var err error
+		saved, err = storeSeriesOrder(ctx, tx, seriesID, settings, orderName, revision, userID)
+		return err
 	})
 	if err != nil {
 		if errors.Is(err, ErrEpisodeOrderConflict) {
@@ -262,6 +238,42 @@ func (s *MetadataService) SaveEpisodeOrder(ctx context.Context, seriesID string,
 		return 0, fmt.Errorf("saving the series episode order: %w", err)
 	}
 	return saved, nil
+}
+
+// storeSeriesOrder writes the series' order row inside tx and returns its new
+// revision. The series row lock serializes saves, including the first one,
+// so two admins saving at once cannot both pass the revision check. A
+// non-nil revision must equal the stored one (0 before the first save). The
+// row is kept when the settings return to the defaults, so its revision
+// never starts over and the custom arrangement stays stored.
+func storeSeriesOrder(ctx context.Context, tx pgx.Tx, seriesID string, settings EpisodeOrderSettings, orderName string, revision *int64, userID int) (int64, error) {
+	if _, err := tx.Exec(ctx, `SELECT 1 FROM media_items WHERE content_id = $1 FOR UPDATE`, seriesID); err != nil {
+		return 0, err
+	}
+	var stored int64
+	if err := tx.QueryRow(ctx, `SELECT revision FROM series_episode_orders WHERE series_id = $1`, seriesID).
+		Scan(&stored); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return 0, err
+	}
+	if revision != nil && *revision != stored {
+		return 0, ErrEpisodeOrderConflict
+	}
+	var updatedBy any
+	if userID > 0 {
+		updatedBy = userID
+	}
+	var saved int64
+	err := tx.QueryRow(ctx, `
+		INSERT INTO series_episode_orders (series_id, provider, order_id, order_name, file_order, layout, updated_by)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		ON CONFLICT (series_id) DO UPDATE SET
+			provider = EXCLUDED.provider, order_id = EXCLUDED.order_id, order_name = EXCLUDED.order_name,
+			file_order = EXCLUDED.file_order, layout = EXCLUDED.layout,
+			updated_by = EXCLUDED.updated_by, updated_at = now(),
+			revision = series_episode_orders.revision + 1
+		RETURNING revision`,
+		seriesID, settings.Provider, settings.OrderID, orderName, settings.FileOrder, settings.Layout, updatedBy).Scan(&saved)
+	return saved, err
 }
 
 // PreviewEpisodeOrder fetches the series' seasons and episodes from its
@@ -329,11 +341,9 @@ func (s *MetadataService) PreviewEpisodeOrder(ctx context.Context, seriesID stri
 
 	fileSlots := make(map[episodeSlot]int, len(episodes))
 	for i, ep := range episodes {
-		slot := episodeSlot{ep.SeasonNumber, ep.EpisodeNumber}
 		if ep.FileNumbered {
-			slot = episodeSlot{ep.FileSeasonNumber, ep.FileEpisodeNumber}
+			fileSlots[episodeSlot{ep.FileSeasonNumber, ep.FileEpisodeNumber}] = i
 		}
-		fileSlots[slot] = i
 	}
 	filesBySeason := make(map[int]int)
 	fileOf := make(map[int]string)
@@ -449,8 +459,6 @@ func countPlacedFiles(files []seriesFileLink, episodes []EpisodeResult) int {
 	for _, ep := range episodes {
 		if ep.FileNumbered {
 			slots[episodeSlot{ep.FileSeasonNumber, ep.FileEpisodeNumber}] = true
-		} else {
-			slots[episodeSlot{ep.SeasonNumber, ep.EpisodeNumber}] = true
 		}
 	}
 	placed := 0

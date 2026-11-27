@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/Silo-Server/silo-server/internal/adminjob"
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	catalogrepo "github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/policy"
@@ -50,7 +51,6 @@ type EpisodeOrderProvider struct {
 type AdminEpisodeOrder struct {
 	Inherited       bool                   `json:"inherited" doc:"True while the series follows its library; the choice then shows the defaults" example:"true"`
 	LibraryProvider string                 `json:"library_provider" doc:"Provider the series follows without its own choice: its library's episode_order_provider, else the first remote provider of the episode chain" example:"tvdb"`
-	Revision        int64                  `json:"revision" doc:"Send back on save to refuse a save over a newer one; 0 while inherited" example:"0"`
 	Choice          EpisodeOrderChoice     `json:"choice"`
 	OrderName       string                 `json:"order_name" doc:"Name of choice.order_id as the provider gave it when the choice was saved; empty for the default order" example:"DVD Order"`
 	Providers       []EpisodeOrderProvider `json:"providers" doc:"The series' remote episode providers, in chain order"`
@@ -91,31 +91,25 @@ type EpisodeOrderFileFit struct {
 	MatchedFiles int    `json:"matched_files" example:"63"`
 }
 
-// AdminEpisodeOrderSaved answers a save: the stored order and the refresh job
-// that renumbers the series.
-type AdminEpisodeOrderSaved struct {
-	Revision int64  `json:"revision" example:"3"`
-	JobID    string `json:"job_id,omitempty" doc:"Metadata refresh that applies the order; absent when queuing it failed, and the next refresh applies it" example:"01J9Z8"`
-}
-
 type AdminEpisodeOrderInput struct {
 	ID     string `path:"id" minLength:"1" maxLength:"512"`
 	Orders bool   `query:"orders" default:"true" doc:"List each provider's orders; false skips asking the providers and answers empty orders lists"`
 }
-type AdminEpisodeOrderOutput struct{ Body AdminEpisodeOrder }
+type AdminEpisodeOrderOutput struct {
+	ETag string `header:"ETag"`
+	Body AdminEpisodeOrder
+}
 type AdminEpisodeOrderPreviewInput struct {
 	ID   string `path:"id" minLength:"1" maxLength:"512"`
 	Body EpisodeOrderChoice
 }
 type AdminEpisodeOrderPreviewOutput struct{ Body AdminEpisodeOrderPreview }
 type AdminEpisodeOrderSaveInput struct {
-	ID   string `path:"id" minLength:"1" maxLength:"512"`
-	Body struct {
-		EpisodeOrderChoice
-		Revision *int64 `json:"revision,omitempty" nullable:"false" minimum:"0" doc:"The revision the choice was based on; a different stored revision answers 409"`
-	}
+	ID          string `path:"id" minLength:"1" maxLength:"512"`
+	IfMatch     string `header:"If-Match"`
+	IfNoneMatch string `header:"If-None-Match"`
+	Body        EpisodeOrderChoice
 }
-type AdminEpisodeOrderSaveOutput struct{ Body AdminEpisodeOrderSaved }
 
 func registerAdminEpisodeOrder(reg *Registry) {
 	op := func(method, suffix, id, summary string) Operation {
@@ -127,7 +121,9 @@ func registerAdminEpisodeOrder(reg *Registry) {
 	preview := op(http.MethodPost, "/preview", "previewAdminEpisodeOrder", "Show how a series would be numbered under an episode order, without changing it.")
 	preview.RetrySafety = RetrySafetyNaturalIdempotent
 	Register(reg, preview, reg.previewAdminEpisodeOrder)
-	Register(reg, op(http.MethodPut, "", "setAdminEpisodeOrder", "Save a series' episode order and queue the refresh that renumbers it. Default values return the series to its library's order."), reg.setAdminEpisodeOrder)
+	set := op(http.MethodPut, "", "setAdminEpisodeOrder", "Save a series' episode order and queue the refresh that renumbers it. Default values return the series to its library's order.")
+	set.Guarded, set.GuardedReceipt, set.DefaultStatus = true, true, http.StatusAccepted
+	Register(reg, set, reg.setAdminEpisodeOrder)
 }
 
 func episodeOrderProblem(err error) *Problem {
@@ -140,8 +136,6 @@ func episodeOrderProblem(err error) *Problem {
 	case errors.Is(err, metadata.ErrEpisodeOrderInvalid):
 		return NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
 			WithErrors(ProblemError{Location: locationBody, Code: codeInvalid, Detail: err.Error()})
-	case errors.Is(err, metadata.ErrEpisodeOrderConflict):
-		return NewProblem(TypeConflict, "The episode order changed since it was read; reload it")
 	}
 	return serviceProblem(err)
 }
@@ -165,7 +159,6 @@ func (reg *Registry) getAdminEpisodeOrder(ctx context.Context, in *AdminEpisodeO
 	out := AdminEpisodeOrder{
 		Inherited:       !state.Override,
 		LibraryProvider: state.LibraryProvider,
-		Revision:        state.Revision,
 		OrderName:       state.OrderName,
 		Choice: EpisodeOrderChoice{
 			Provider: state.Settings.Provider, OrderID: state.Settings.OrderID,
@@ -183,7 +176,7 @@ func (reg *Registry) getAdminEpisodeOrder(ctx context.Context, in *AdminEpisodeO
 		}
 		out.Providers = append(out.Providers, entry)
 	}
-	return &AdminEpisodeOrderOutput{Body: out}, nil
+	return &AdminEpisodeOrderOutput{ETag: episodeOrderTag(in.ID, state.Revision).String(), Body: out}, nil
 }
 
 func (reg *Registry) previewAdminEpisodeOrder(ctx context.Context, in *AdminEpisodeOrderPreviewInput) (*AdminEpisodeOrderPreviewOutput, error) {
@@ -217,24 +210,58 @@ func (reg *Registry) previewAdminEpisodeOrder(ctx context.Context, in *AdminEpis
 	return &AdminEpisodeOrderPreviewOutput{Body: out}, nil
 }
 
-func (reg *Registry) setAdminEpisodeOrder(ctx context.Context, in *AdminEpisodeOrderSaveInput) (*AdminEpisodeOrderSaveOutput, error) {
+func (reg *Registry) setAdminEpisodeOrder(ctx context.Context, in *AdminEpisodeOrderSaveInput) (*AdminCatalogJobAcceptedOutput, error) {
 	if reg.deps.AdminEpisodeOrders == nil {
 		return nil, unavailable("episode orders")
 	}
-	claims := claimsFrom(ctx)
-	revision, err := reg.deps.AdminEpisodeOrders.SaveEpisodeOrder(ctx, in.ID, episodeOrderSettingsOf(in.Body.EpisodeOrderChoice), in.Body.Revision, claims.UserID)
+	return reg.saveEpisodeOrderGuarded(ctx, in.ID, in.IfMatch, in.IfNoneMatch, func(revision *int64, userID int) (int64, error) {
+		return reg.deps.AdminEpisodeOrders.SaveEpisodeOrder(ctx, in.ID, episodeOrderSettingsOf(in.Body), revision, userID)
+	})
+}
+
+// episodeOrderTag is the validator of a series' episode order: the order
+// row's revision, which an arrangement save advances too.
+func episodeOrderTag(id string, revision int64) EntityTag {
+	return RenderETag("admin-episode-order", id, revision)
+}
+
+// saveEpisodeOrderGuarded runs a guarded save of the series' episode order
+// (If-Match on the order's revision; 412 when stale, 428 when missing) and
+// queues the refresh that applies it: 202 with the job. The order is stored
+// before the job is queued, so a failed enqueue answers a problem and the
+// series' next refresh applies the order.
+func (reg *Registry) saveEpisodeOrderGuarded(ctx context.Context, id, ifMatch, ifNoneMatch string, save func(revision *int64, userID int) (int64, error)) (*AdminCatalogJobAcceptedOutput, error) {
+	state, err := reg.deps.AdminEpisodeOrders.EpisodeOrderState(ctx, id, false)
 	if err != nil {
 		return nil, episodeOrderProblem(err)
 	}
-	out := AdminEpisodeOrderSaved{Revision: revision}
-	// The order is saved; a refresh that cannot be queued now applies with
-	// the series' next refresh.
-	if reg.deps.AdminItemMetadata != nil {
-		if job, err := reg.deps.AdminItemMetadata.CreateItemMetadataRefresh(ctx, in.ID, adminjob.ItemRefreshModeQuick, claims.UserID); err == nil {
-			out.JobID = job.ID
-		}
+	current := episodeOrderTag(id, state.Revision)
+	if p := EvaluateGuardedPreconditions(ifMatch, ifNoneMatch, current); p != nil {
+		return nil, p
 	}
-	return &AdminEpisodeOrderSaveOutput{Body: out}, nil
+	expected := &state.Revision
+	if ifMatch == "*" {
+		expected = nil
+	}
+	claims := claimsFrom(ctx)
+	if _, err := save(expected, claims.UserID); err != nil {
+		if errors.Is(err, metadata.ErrEpisodeOrderConflict) {
+			if latest, readErr := reg.deps.AdminEpisodeOrders.EpisodeOrderState(ctx, id, false); readErr == nil {
+				current = episodeOrderTag(id, latest.Revision)
+			}
+			return nil, StaleVersionProblem(current)
+		}
+		return nil, episodeOrderProblem(err)
+	}
+	if reg.deps.AdminItemMetadata == nil {
+		return nil, unavailable("item metadata")
+	}
+	job, err := reg.deps.AdminItemMetadata.CreateItemMetadataRefresh(ctx, id, adminjob.ItemRefreshModeQuick, claims.UserID)
+	if err != nil {
+		return nil, collectionProblem(err)
+	}
+	actingAdmin, _ := apimw.ActingAdmin(ctx)
+	return &AdminCatalogJobAcceptedOutput{Location: Prefix + "/admin/jobs/" + job.ID, RetryAfter: "5", Body: reg.adminTaskJobOf(ctx, job, actingAdmin)}, nil
 }
 
 // AdminCustomSeasonsService reads and saves a series' arranged seasons.
@@ -268,7 +295,6 @@ type CustomSeasonsSeason struct {
 // from its base order.
 type AdminCustomSeasons struct {
 	Saved             bool                  `json:"saved" doc:"False when the series has no arrangement yet and this one starts from the base order" example:"true"`
-	Revision          int64                 `json:"revision" doc:"Send back on save" example:"4"`
 	Choice            EpisodeOrderChoice    `json:"choice" doc:"The base order; layout is custom"`
 	StructureProvider string                `json:"structure_provider" doc:"Provider that numbered the base order; empty when no provider has episodes for the series" example:"tvdb"`
 	Seasons           []CustomSeasonsSeason `json:"seasons" doc:"Regular seasons in order, then Specials"`
@@ -281,14 +307,18 @@ type AdminCustomSeasonsInput struct {
 	OrderID   string `query:"order_id" maxLength:"200" doc:"With start_over: one of the provider's orders; empty is its default"`
 	FileOrder string `query:"file_order" pattern:"^(?:tvdb|tmdb)?$" doc:"With start_over: the order the file names follow"`
 }
-type AdminCustomSeasonsOutput struct{ Body AdminCustomSeasons }
+type AdminCustomSeasonsOutput struct {
+	ETag string `header:"ETag"`
+	Body AdminCustomSeasons
+}
 type AdminCustomSeasonsSaveInput struct {
-	ID   string `path:"id" minLength:"1" maxLength:"512"`
-	Body struct {
+	ID          string `path:"id" minLength:"1" maxLength:"512"`
+	IfMatch     string `header:"If-Match"`
+	IfNoneMatch string `header:"If-None-Match"`
+	Body        struct {
 		Provider  string `json:"provider" pattern:"^(?:tvdb|tmdb)?$" doc:"The base order's provider; empty follows the library"`
 		OrderID   string `json:"order_id" maxLength:"200" doc:"One of the provider's orders; empty is its default"`
 		FileOrder string `json:"file_order" pattern:"^(?:tvdb|tmdb)?$" doc:"The order the file names follow"`
-		Revision  *int64 `json:"revision,omitempty" nullable:"false" minimum:"0" doc:"The revision the arrangement was based on; a different stored revision answers 409"`
 		Seasons   []struct {
 			Number   int      `json:"number" minimum:"0" doc:"Regular seasons are numbered 1 to N without gaps; 0 holds the specials"`
 			Title    string   `json:"title" maxLength:"500" doc:"Empty shows the base order's title for this number"`
@@ -305,7 +335,9 @@ func registerAdminCustomSeasons(reg *Registry) {
 	get := op(http.MethodGet, "getAdminCustomSeasons", "Read a series' arranged seasons, or a starting arrangement from an episode order.")
 	get.RetrySafety = ""
 	Register(reg, get, reg.getAdminCustomSeasons)
-	Register(reg, op(http.MethodPut, "setAdminCustomSeasons", "Save a series' arranged seasons, switch it to them and queue the refresh that renumbers it."), reg.setAdminCustomSeasons)
+	set := op(http.MethodPut, "setAdminCustomSeasons", "Save a series' arranged seasons, switch it to them and queue the refresh that renumbers it. Guarded by the series' episode order ETag.")
+	set.Guarded, set.GuardedReceipt, set.DefaultStatus = true, true, http.StatusAccepted
+	Register(reg, set, reg.setAdminCustomSeasons)
 }
 
 func (reg *Registry) getAdminCustomSeasons(ctx context.Context, in *AdminCustomSeasonsInput) (*AdminCustomSeasonsOutput, error) {
@@ -321,7 +353,7 @@ func (reg *Registry) getAdminCustomSeasons(ctx context.Context, in *AdminCustomS
 		return nil, episodeOrderProblem(err)
 	}
 	out := AdminCustomSeasons{
-		Saved: custom.Saved, Revision: custom.Revision, StructureProvider: custom.StructureProvider,
+		Saved: custom.Saved, StructureProvider: custom.StructureProvider,
 		Choice:  EpisodeOrderChoice{Provider: custom.Settings.Provider, OrderID: custom.Settings.OrderID, FileOrder: custom.Settings.FileOrder, Layout: "custom"},
 		Seasons: make([]CustomSeasonsSeason, 0, len(custom.Seasons)),
 	}
@@ -334,11 +366,11 @@ func (reg *Registry) getAdminCustomSeasons(ctx context.Context, in *AdminCustomS
 		}
 		out.Seasons = append(out.Seasons, season)
 	}
-	return &AdminCustomSeasonsOutput{Body: out}, nil
+	return &AdminCustomSeasonsOutput{ETag: episodeOrderTag(in.ID, custom.Revision).String(), Body: out}, nil
 }
 
-func (reg *Registry) setAdminCustomSeasons(ctx context.Context, in *AdminCustomSeasonsSaveInput) (*AdminEpisodeOrderSaveOutput, error) {
-	if reg.deps.AdminCustomSeasons == nil {
+func (reg *Registry) setAdminCustomSeasons(ctx context.Context, in *AdminCustomSeasonsSaveInput) (*AdminCatalogJobAcceptedOutput, error) {
+	if reg.deps.AdminCustomSeasons == nil || reg.deps.AdminEpisodeOrders == nil {
 		return nil, unavailable("custom seasons")
 	}
 	save := metadata.CustomSeasonsSave{
@@ -351,16 +383,7 @@ func (reg *Registry) setAdminCustomSeasons(ctx context.Context, in *AdminCustomS
 		}
 		save.Seasons = append(save.Seasons, season)
 	}
-	claims := claimsFrom(ctx)
-	revision, err := reg.deps.AdminCustomSeasons.SaveCustomSeasons(ctx, in.ID, save, in.Body.Revision, claims.UserID)
-	if err != nil {
-		return nil, episodeOrderProblem(err)
-	}
-	out := AdminEpisodeOrderSaved{Revision: revision}
-	if reg.deps.AdminItemMetadata != nil {
-		if job, err := reg.deps.AdminItemMetadata.CreateItemMetadataRefresh(ctx, in.ID, adminjob.ItemRefreshModeQuick, claims.UserID); err == nil {
-			out.JobID = job.ID
-		}
-	}
-	return &AdminEpisodeOrderSaveOutput{Body: out}, nil
+	return reg.saveEpisodeOrderGuarded(ctx, in.ID, in.IfMatch, in.IfNoneMatch, func(revision *int64, userID int) (int64, error) {
+		return reg.deps.AdminCustomSeasons.SaveCustomSeasons(ctx, in.ID, save, revision, userID)
+	})
 }

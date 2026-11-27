@@ -135753,6 +135753,28 @@
       "value": " ļîšţš ţĥéɱ îñ ţĥîš öŕđéŕ.~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
+  "web.item.episodeOrder.namedOrder": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " “"
+    },
+    {
+      "type": 1,
+      "value": "order"
+    },
+    {
+      "type": 0,
+      "value": "”~~⟧"
+    }
+  ],
   "web.item.episodeOrder.order.episodes": [
     {
       "type": 6,
@@ -136249,6 +136271,28 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.item.episodeOrder.providerOrder": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "order"
+    },
+    {
+      "type": 0,
+      "value": "~⟧"
     }
   ],
   "web.item.episodeOrder.saveFailed": [

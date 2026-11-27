@@ -124893,6 +124893,24 @@
       "value": " lists them in this order."
     }
   ],
+  "web.item.episodeOrder.namedOrder": [
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " “"
+    },
+    {
+      "type": 1,
+      "value": "order"
+    },
+    {
+      "type": 0,
+      "value": "”"
+    }
+  ],
   "web.item.episodeOrder.order.episodes": [
     {
       "type": 6,
@@ -125313,6 +125331,20 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.item.episodeOrder.providerOrder": [
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "order"
     }
   ],
   "web.item.episodeOrder.saveFailed": [

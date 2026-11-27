@@ -219,8 +219,9 @@ func TestApplyEpisodeMergesDB(t *testing.T) {
 		Scan(&episodeID, &season, &number); err != nil {
 		t.Fatal(err)
 	}
-	if episodeID != keep || season != 2 || number != 1 {
-		t.Fatalf("file linked to %s S%dE%d, want %s S2E1", episodeID, season, number, keep)
+	// The file keeps the numbers its name gives; only its link moves.
+	if episodeID != keep || season != 1 || number != 21 {
+		t.Fatalf("file linked to %s S%dE%d, want %s with its own S1E21", episodeID, season, number, keep)
 	}
 }
 

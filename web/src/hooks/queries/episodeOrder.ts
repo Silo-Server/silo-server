@@ -1,4 +1,5 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { withETag } from "@/api/v2/etag";
 import { v2 } from "@/api/v2/request";
 import type { V2Body, V2Result } from "@/api/v2/request";
 
@@ -19,11 +20,14 @@ const episodeOrderKey = (contentId: string, withOrders: boolean) =>
 export function useEpisodeOrder(contentId: string, enabled: boolean, withOrders: boolean) {
   return useQuery({
     queryKey: episodeOrderKey(contentId, withOrders),
-    queryFn: () =>
-      v2("GET /api/v2/admin/items/{id}/episode-order", {
+    // The ETag guards the next save of the order or the arranged seasons.
+    queryFn: async (): Promise<EpisodeOrderState & { etag: string }> => {
+      const { body, etag } = await withETag("GET /api/v2/admin/items/{id}/episode-order", {
         path: { id: contentId },
         query: { orders: withOrders },
-      }),
+      });
+      return { ...body, etag };
+    },
     enabled,
     staleTime: withOrders ? 5 * 60_000 : 30_000,
   });
@@ -56,8 +60,12 @@ export function useSaveEpisodeOrder(contentId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     retry: false,
-    mutationFn: (body: EpisodeOrderSave) =>
-      v2("PUT /api/v2/admin/items/{id}/episode-order", { path: { id: contentId }, body }),
+    mutationFn: ({ etag, body }: { etag: string; body: EpisodeOrderSave }) =>
+      v2("PUT /api/v2/admin/items/{id}/episode-order", {
+        path: { id: contentId },
+        headers: { "If-Match": etag },
+        body,
+      }),
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: ["episode-order", contentId] });
     },
@@ -80,8 +88,8 @@ export function useCustomSeasons(
 ) {
   return useQuery({
     queryKey: ["custom-seasons", contentId, startFrom] as const,
-    queryFn: ({ signal }) =>
-      v2("GET /api/v2/admin/items/{id}/custom-seasons", {
+    queryFn: async ({ signal }): Promise<CustomSeasons & { etag: string }> => {
+      const { body, etag } = await withETag("GET /api/v2/admin/items/{id}/custom-seasons", {
         path: { id: contentId },
         query: startFrom
           ? {
@@ -93,7 +101,9 @@ export function useCustomSeasons(
           : {},
         signal,
         timeoutMs: 60_000,
-      }),
+      });
+      return { ...body, etag };
+    },
     enabled,
     staleTime: Infinity,
     gcTime: 0,
@@ -105,8 +115,12 @@ export function useSaveCustomSeasons(contentId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     retry: false,
-    mutationFn: (body: CustomSeasonsSave) =>
-      v2("PUT /api/v2/admin/items/{id}/custom-seasons", { path: { id: contentId }, body }),
+    mutationFn: ({ etag, body }: { etag: string; body: CustomSeasonsSave }) =>
+      v2("PUT /api/v2/admin/items/{id}/custom-seasons", {
+        path: { id: contentId },
+        headers: { "If-Match": etag },
+        body,
+      }),
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: ["episode-order", contentId] });
       void queryClient.invalidateQueries({ queryKey: ["custom-seasons", contentId] });
