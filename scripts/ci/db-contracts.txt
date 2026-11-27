@@ -330,6 +330,7 @@
 ./internal/auth TestAPIKeyCreationRefusesRevokedCredentialDB
 ./internal/auth TestPasswordSignInForRoutesDB
 ./internal/auth TestExternalSignInDemoModeDB
+./internal/auth TestOwnSignInKeysSkipNonAddressEmailDB
 ./internal/auth TestDemoSignInNameBudgetDB
 ./internal/auth TestDemoSignInFailsClosedDB
 ./internal/auth TestDemoSignInCanceledAttemptDB

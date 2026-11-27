@@ -239,10 +239,19 @@ export default function SignInSettings() {
     form.getPersistedValue(EMAIL_MATCH_KEY).trim() === "true";
   const showEmailMatch = !providerKnown || primaryInstalled || emailMatchSet;
   const demoAccountId = form.getValue(DEMO_ACCOUNT_KEY).trim();
+  // The status names the account only while it would get the exemption, as
+  // far as the user list tells: not an administrator, enabled, and signing
+  // in with its Silo password. Otherwise the line stays empty.
   const demoAccount =
     demoAccountId === ""
       ? undefined
-      : users.data?.find((user) => String(user.id) === demoAccountId);
+      : users.data?.find(
+          (user) =>
+            String(user.id) === demoAccountId &&
+            user.role !== "admin" &&
+            user.enabled &&
+            user.password_login,
+        );
 
   return (
     <div className="flex h-full flex-col">

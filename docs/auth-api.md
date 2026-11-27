@@ -548,7 +548,8 @@ same login name, or an `alice#Kids` account signing in through Jellyfin with the
 budget, leaves that budget's counts alone and makes its address known only for its own
 names, so it cannot clear guesses at the account the name finds.
 
-An address becomes known for an account's username and email address when a password
+An address becomes known for an account's username and email address (the email only if
+it looks like an address, since sign-in looks an account up by no other stored value) when a password
 sign-in to the account succeeds from it (including signup, invitation acceptance and a
 completed password reset) or one of the account's login sessions refreshes from it (a
 Jellyfin app's session refreshes its login session as the app keeps using it), and
@@ -608,8 +609,8 @@ its local password, password sign-ins with that account's own sign-in names (its
 and its email address) skip the per-name budget, wherever the local provider checks the
 password. The whole per-name budget is skipped, including the budget it gives an address
 the account is known to sign in from once the name is locked, which exists only within
-it. Nothing else changes: the request rate limits by client address that a listener
-applies to its sign-in route, profile PIN attempts, and every other name's budget apply
+it. Nothing else changes: the limits by client address on each listener's sign-in (see
+below), profile PIN attempts, and every other name's budget apply
 as before, and a sign-in that names another provider, or
 a Jellyfin name whose budget name signs in to a different account, keeps the budget.
 
@@ -634,10 +635,16 @@ budget.
 What an operator gives up by naming an account:
 
 - The per-name limit no longer slows password guessing against that one account. On a
-  demo its password is public by design; a listener's request rate limits by client
-  address still apply.
+  demo its password is public by design. The limits by client address still apply: on the
+  native and Jellyfin-compatible logins while request rate limiting (`ratelimit.enabled`)
+  is on, and always on the Audiobookshelf-compatible login.
 - The server no longer treats that one name like every other, so the promise that the
   budget reveals nothing about which names exist holds for every name but that one.
+
+Name only the account whose password the demo publishes: naming any other account removes
+that account's per-name limit while demo mode is on. Writing the setting accepts a
+disabled account; an account that is disabled, or becomes an administrator, simply gets the
+ordinary limit.
 
 A restore treats the setting as server-specific: it names an account row of this server.
 

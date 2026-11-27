@@ -1426,3 +1426,28 @@ describe("SignInSettings password rules", () => {
     expect(state.setValue).toHaveBeenLastCalledWith("auth.password_require_uppercase", "true");
   });
 });
+
+describe("SignInSettings demo account", () => {
+  const names = /Names the account/;
+  const visitor = (overrides: Partial<AdminUser> = {}) =>
+    admin({ id: 7, username: "demo", role: "user", ...overrides });
+
+  it("names an account that would get the exemption", () => {
+    state.users = [admin({ id: 1, break_glass: true }), visitor()];
+    state.values["demo.account_id"] = "7";
+    mount();
+    expect(screen.getByText("Names the account demo.")).toBeInTheDocument();
+  });
+
+  it.each([
+    ["an administrator", [admin({ id: 7, username: "root", break_glass: true })]],
+    ["a disabled account", [visitor({ enabled: false })]],
+    ["an account without Silo password sign-in", [visitor({ password_login: false })]],
+    ["an id no account has", [visitor({ id: 8 })]],
+  ])("names nothing for %s", (_label, users) => {
+    state.users = users;
+    state.values["demo.account_id"] = "7";
+    mount();
+    expect(screen.queryByText(names)).not.toBeInTheDocument();
+  });
+});
