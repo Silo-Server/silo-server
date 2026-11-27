@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
+	"github.com/Silo-Server/silo-server/internal/nodepool"
 )
 
 func postReprobe(t *testing.T, server *Server) *httptest.ResponseRecorder {
@@ -178,7 +179,7 @@ func TestReprobeCapabilitiesRefusedWhileASessionIsStillClosing(t *testing.T) {
 		busyDuringClose int
 	)
 	// Observed from inside the teardown, which is the only instant that matters.
-	err := server.retireGPUSession(func() error {
+	err := server.retireGPUSession(nodepool.JobKindVideoTranscode, func() error {
 		jobsDuringClose = server.activeJobs.Load()
 		busyDuringClose, reprobeAdmitted = server.gpu.beginReprobe(otherWork(int(jobsDuringClose)))
 		if reprobeAdmitted {

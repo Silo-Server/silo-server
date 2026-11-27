@@ -386,6 +386,7 @@ func (h *PlaybackHandler) moveTranscodeOffNodeV3(
 			EstimatedBitrateKbps: card.TargetBitrateKbps,
 			TranscodeEligible:    eligible,
 			ExcludedShapeIDs:     excludedShapes,
+			TranscodesAudio:      playback.TranscodesAudio(card.TargetCodecAudio),
 		})
 		if resolveErr != nil {
 			return resolveErr
