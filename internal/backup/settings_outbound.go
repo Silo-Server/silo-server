@@ -43,6 +43,11 @@ type outboundBundle struct {
 	// off are the values a cleared bundle is left with: its switch turned
 	// off, or an AI provider registry with no providers.
 	off map[string]string
+	// resetIfConverted clears the bundle also when none of its secrets is
+	// left but the next start would build an AI provider from what remains
+	// (convertsAIProviders), as after a restore with another key deleted the
+	// registry, every key and every binding.
+	resetIfConverted bool
 }
 
 // outboundBundles are the settings a full restore never takes from the
@@ -63,7 +68,8 @@ var outboundBundles = func() []outboundBundle {
 	out := []outboundBundle{
 		{name: "mail (SMTP)", keys: mail.SMTPSettingKeys(), secrets: []string{settingSMTPPassword}, off: map[string]string{settingEmailEnabled: settingOff}},
 		{name: "AI providers", keys: ai, secrets: aiSecrets,
-			off: map[string]string{config.AIProvidersSettingKey: noProviders[config.AIProvidersSettingKey]}},
+			off:              map[string]string{config.AIProvidersSettingKey: noProviders[config.AIProvidersSettingKey]},
+			resetIfConverted: true},
 	}
 	whole := func(keys ...string) outboundBundle { return outboundBundle{name: keys[0], keys: keys, secrets: keys} }
 	out = append(out,
@@ -126,7 +132,16 @@ func (l PGLoader) CarryOutboundSettings(ctx context.Context, dbURL, liveURL stri
 				continue
 			}
 			if !slices.ContainsFunc(b.secrets, func(k string) bool { return restored[k] != "" }) {
-				continue
+				if !b.resetIfConverted {
+					continue
+				}
+				converts, err := convertsAIProviders(ctx, tx)
+				if err != nil {
+					return err
+				}
+				if !converts {
+					continue
+				}
 			}
 			if err := b.clear(ctx, tx, cipher); err != nil {
 				return err
@@ -136,6 +151,26 @@ func (l PGLoader) CarryOutboundSettings(ctx context.Context, dbURL, liveURL stri
 		return nil
 	})
 	return carried, cleared, err
+}
+
+// convertsAIProviders reports whether the next start would build an AI
+// provider from the settings in tx: with no converted registry stored,
+// config.PlanAIProviderConversion adopts a legacy endpoint, such as a
+// leftover ai.base_url, or the Ollama default for recommendations. A
+// registry that is already converted, or settings that configure nothing,
+// build none.
+func convertsAIProviders(ctx context.Context, tx pgx.Tx) (bool, error) {
+	settings, err := allSettings(ctx, tx, func(string) bool { return true })
+	if err != nil {
+		return false, err
+	}
+	writes, _, err := config.PlanAIProviderConversion(settings)
+	if err != nil || writes == nil {
+		// A registry the start cannot parse is reported there, not here.
+		return false, nil //nolint:nilerr // an unreadable registry converts nothing
+	}
+	registry, err := config.ParseAIProviderRegistry(writes[config.AIProvidersSettingKey])
+	return err == nil && len(registry.Providers) > 0, nil
 }
 
 // takeLive replaces the bundle's settings in tx with the live ones.
