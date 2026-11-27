@@ -487,6 +487,10 @@ const (
 	// HEVC decoder as its compatible base layer. The recipe's dynamic_range is
 	// that base range, not dolby_vision.
 	decisionReasonClientDV8BaseLayerV3 = "client_dv8_base_layer"
+
+	// decisionReasonClientDV10BaseLayerV3 is the same for a Profile 10 source
+	// that the client plays through an ordinary AV1 decoder.
+	decisionReasonClientDV10BaseLayerV3 = "client_dv10_base_layer"
 )
 
 func stereoDownmixSourceChannelsV3(sourceChannels, targetChannels int, transcodeAudio bool) int {

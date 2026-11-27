@@ -697,7 +697,7 @@ always send `output.hdr_details` too, because a server without
 `client_capabilities.hdr_details`; the feature token tells the client whether
 the evidence tier is being honored.
 
-There are two delivery-scoped exceptions. An `original_http` capability
+There are three delivery-scoped exceptions. An `original_http` capability
 carrying the validated claim `client_managed_dynamic_range_v1` asserts that its
 executor accepts the declared source range and resolves presentation against
 the live output after receiving the original bytes. The planner may therefore
@@ -727,7 +727,21 @@ DV-capable output) the base-layer route is used instead. The executor reports
 promise, and the plan's attempt key (which includes the effective range) keeps
 the native and base-layer plans distinct in the replan ladder.
 
-Neither exception applies to `progressive` or `hls`: those server-packaged
+`client_dv10_base_layer_fallback_v1` is the same promise for AV1: the
+executor decodes a single-layer Dolby Vision Profile 10 stream through an
+ordinary AV1 decoder. It is a separate claim because the Profile 8 claim
+promises an HEVC decoder, and neither claim covers the other profile. The
+server applies the same gates to an AV1 source tagged Profile 10, with the
+same compatibility ids (`1`, `4`, and `2`; Profile 10.0 has no compatible
+base layer and fails closed), and the AV1 stream must fit the client's decode
+bounds.
+The plan carries `decision_reason: client_dv10_base_layer`,
+`dolby_vision_reason: base_layer_compatible_av1`, and the same
+`dolby_vision_base_layer_only` warning, and the executor reports
+`dv10_base_layer_decoder_unavailable`, `dv10_base_layer_output_mismatch`, or
+`dv10_base_layer_metadata_mismatch` when it cannot honour the promise.
+
+None of these exceptions applies to `progressive` or `hls`: those server-packaged
 streams remain output-gated. The output snapshot is still retained for plan
 identity, diagnostics, output-change replans, explicit Dolby Vision
 transformation selection, and future server tone-map targeting.
@@ -820,10 +834,10 @@ because "the user turned HLS off" and "this device has no HLS player" call for
 different degradation warnings and different diagnostics. A class the client
 omits entirely is unavailable — the server will not guess.
 
-`client_managed_dynamic_range_v1` and `client_dv8_base_layer_fallback_v1` are
-valid only as `validated_claims` entries on `original_http`. Neither is a
-selectable transformation: the server supplies the source and the client
-executor probes and routes it internally. If that
+`client_managed_dynamic_range_v1`, `client_dv8_base_layer_fallback_v1`, and
+`client_dv10_base_layer_fallback_v1` are valid only as `validated_claims`
+entries on `original_http`. None is a selectable transformation: the server
+supplies the source and the client executor probes and routes it internally. If that
 executor later reports a typed load failure, normal attempted-plan-key
 exclusion applies. Until a server tone-map recipe exists, an exhausted HDR
 original route terminates honestly rather than pretending an ordinary video
@@ -1702,7 +1716,8 @@ must not branch on an unrecognized value.
 `validated_original_playback`, `container_normalization`, `audio_adaptation`,
 `hls_audio_adaptation`, `hls_packaging_required`, `subtitle_burn_in_required`,
 `client_dv7_to_dv81`, `client_dv7_to_hdr10`, `client_managed_dynamic_range`,
-`client_dv8_base_layer`, `evidence_insufficient_for_direct`,
+`client_dv8_base_layer`, `client_dv10_base_layer`,
+`evidence_insufficient_for_direct`,
 `surround_bitstream_conversion` (§11; advertised on `/api/v2` as the
 `surround_bitstream_conversion_v1` server feature),
 and the quality reasons `quality_auto_source`, `quality_fixed_rung`,
@@ -1720,7 +1735,7 @@ The plan will play, but something the user might notice was given up.
 | `dolby_vision_removed` | DV metadata stripped |
 | `dolby_vision_strip_unsupported_by_source` | DV could not be stripped |
 | `dolby_vision_enhancement_layer_discarded` | FEL/MEL dropped, base layer kept |
-| `dolby_vision_base_layer_only` | Profile 8 played unchanged through an HEVC decoder as its HDR10/HLG/SDR base layer; DV metadata not presented |
+| `dolby_vision_base_layer_only` | Profile 8 (HEVC) or Profile 10 (AV1) played unchanged through an ordinary decoder as its HDR10/HLG/SDR base layer; DV metadata not presented |
 | `hdr_tone_mapped` | HDR video converted to limited-range BT.709 SDR |
 | `audio_converted` | Audio re-encoded rather than copied |
 | `subtitle_burn_in` | Subtitles rendered into the video |

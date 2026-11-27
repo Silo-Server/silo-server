@@ -546,50 +546,72 @@ func clientSupportsHLGV3(request StartRequestV3) bool {
 	return hdr != nil && hdr.HLG
 }
 
-// clientDV8BaseLayerFallbackV3 reports whether the original_http executor may
-// play a single-layer Dolby Vision Profile 8 source through its ordinary HEVC
-// decoder, and which base range that presents. It is delivery-scoped like the
-// other original_http claims and, unlike clientManagesOriginalDynamicRangeV3,
-// the server keeps every other gate: an eligible profile and enhancement
-// layer, a compatibility id whose base range is standards-defined, that range
-// supported by the active output, and an HEVC decode entry that fits the
-// source (checked by videoEligibleV3 on the caller's side).
-func clientDV8BaseLayerFallbackV3(source SourceDescriptorV3, request StartRequestV3) (bool, string) {
-	if source.DynamicRange != DynamicRangeDolbyVisionV3 || source.DVProfile != 8 ||
+// dvBaseLayerRouteV3 is one Dolby Vision profile's base-layer route: the
+// original_http claim that admits it, the codec the claim's decoder takes
+// (empty when the profile is not checked against one), and what the plan
+// reports.
+type dvBaseLayerRouteV3 struct {
+	claim, codec, decoder, decisionReason, dvReason string
+}
+
+// dvBaseLayerRoutesV3 holds the base-layer routes by Dolby Vision profile.
+// Each claim promises one decoder, so neither covers the other profile.
+var dvBaseLayerRoutesV3 = map[int]dvBaseLayerRouteV3{
+	8:  {claim: ClaimClientDV8BaseLayerFallbackV3, decoder: "HEVC", decisionReason: decisionReasonClientDV8BaseLayerV3, dvReason: "base_layer_compatible_hevc"},
+	10: {claim: ClaimClientDV10BaseLayerFallbackV3, codec: codecAV1, decoder: "AV1", decisionReason: decisionReasonClientDV10BaseLayerV3, dvReason: "base_layer_compatible_av1"},
+}
+
+// clientDVBaseLayerFallbackV3 reports which base-layer route, if any, lets
+// the original_http executor play a single-layer Dolby Vision source through
+// an ordinary decoder for its codec, and which base range that presents:
+// Profile 8 through HEVC, Profile 10 through AV1. It is delivery-scoped like
+// the other original_http claims and, unlike
+// clientManagesOriginalDynamicRangeV3, the server keeps every other gate: an
+// eligible profile and enhancement layer, a compatibility id whose base range
+// is standards-defined, that range supported by the active output, and a
+// decode entry that fits the source (checked by videoEligibleV3 on the
+// caller's side).
+func clientDVBaseLayerFallbackV3(source SourceDescriptorV3, request StartRequestV3) (*dvBaseLayerRouteV3, string) {
+	if source.DynamicRange != DynamicRangeDolbyVisionV3 ||
 		source.DVEnhancementLayer != EnhancementNoneV3 || !source.DVBaseLayerProven {
-		return false, ""
+		return nil, ""
+	}
+	route, ok := dvBaseLayerRoutesV3[source.DVProfile]
+	if !ok || route.codec != "" && !strings.EqualFold(source.VideoCodec, route.codec) {
+		return nil, ""
 	}
 	delivery, ok := request.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3]
 	if !ok || !delivery.Enabled || !delivery.SupportedOnDevice ||
-		!containsFoldV3(delivery.ValidatedClaims, ClaimClientDV8BaseLayerFallbackV3) {
-		return false, ""
+		!containsFoldV3(delivery.ValidatedClaims, route.claim) {
+		return nil, ""
 	}
 	baseRange, ok := dolbyVisionBaseLayerRangeV3(source.DVBLCompatID)
 	if !ok {
-		return false, ""
+		return nil, ""
 	}
 	switch baseRange {
 	case DynamicRangeHDR10V3:
 		if !clientSupportsHDR10V3(request, source) {
-			return false, ""
+			return nil, ""
 		}
 	case DynamicRangeHLGV3:
 		if !clientSupportsHLGV3(request) {
-			return false, ""
+			return nil, ""
 		}
 	case DynamicRangeSDRV3:
 	default:
-		return false, ""
+		return nil, ""
 	}
-	return true, baseRange
+	return &route, baseRange
 }
 
-// dolbyVisionBaseLayerRangeV3 maps a Profile 8 base-layer compatibility id to
-// the dynamic range an ordinary HEVC decoder presents, using only the
-// standard Profile 8 pairings the tone-map path accepts without a source
-// preflight: 1 is PQ (HDR10), 2 is BT.709 SDR, 4 is BT.2100 HLG. Id 6 is a
-// Profile 7 pairing that some Profile 8 files carry, 5 (BT.2020 SDR) needs
-// a gamut conversion, and 0, 3, and reserved ids fail closed.
+// dolbyVisionBaseLayerRangeV3 maps a Profile 8 or 10 base-layer compatibility
+// id to the dynamic range an ordinary decoder presents, using only the
+// standard pairings the tone-map path accepts without a source preflight
+// (Profile 10 defines the same 1, 2, and 4): 1 is PQ (HDR10), 2 is BT.709
+// SDR, 4 is BT.2100 HLG. Id 6 is a Profile 7 pairing that some Profile 8
+// files carry, 5 (BT.2020 SDR) needs a gamut conversion, and 0, 3, and
+// reserved ids fail closed.
 func dolbyVisionBaseLayerRangeV3(compatID int) (string, bool) {
 	switch compatID {
 	case 1:

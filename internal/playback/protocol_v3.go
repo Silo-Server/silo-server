@@ -173,11 +173,17 @@ const (
 	// range the plan promises (from dv_bl_compat_id), still requires the
 	// active output to carry that range, and never claims Dolby Vision output.
 	ClaimClientDV8BaseLayerFallbackV3 = "client_dv8_base_layer_fallback_v1"
-	ClientDV8HDR10PlusSanitizerV3     = "client_dv8_hdr10plus_sanitizer_v1"
-	ClientNativeHLSPlaybackV3         = "native_hls_playback_v1"
-	ClientPostResumeRecoveryV3        = "client_post_resume_video_recovery_v1"
-	ClientSurfaceRecoveryV3           = "client_surface_recovery_v1"
-	DeviceQuirkRegistryRevisionV3     = "2026-07-13.1"
+	// ClaimClientDV10BaseLayerFallbackV3 is the AV1 counterpart, with the same
+	// original_http scope and server gates: the executor decodes a
+	// single-layer Dolby Vision Profile 10 stream through an ordinary AV1
+	// decoder and presents its standards-compatible base layer. It is a
+	// separate claim because the Profile 8 claim promises an HEVC decoder.
+	ClaimClientDV10BaseLayerFallbackV3 = "client_dv10_base_layer_fallback_v1"
+	ClientDV8HDR10PlusSanitizerV3      = "client_dv8_hdr10plus_sanitizer_v1"
+	ClientNativeHLSPlaybackV3          = "native_hls_playback_v1"
+	ClientPostResumeRecoveryV3         = "client_post_resume_video_recovery_v1"
+	ClientSurfaceRecoveryV3            = "client_surface_recovery_v1"
+	DeviceQuirkRegistryRevisionV3      = "2026-07-13.1"
 )
 
 // FeatureHLSVariableSubstitutionV3 is an hls delivery feature: the client

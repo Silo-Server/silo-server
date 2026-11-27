@@ -43,7 +43,7 @@ const (
 	candidateClientHDR10V3
 	candidateServerDV81V3
 	candidateCopyV3
-	candidateDV8BaseLayerV3
+	candidateDVBaseLayerV3
 	candidateClientManagedV3
 	candidateServerStripV3
 	candidateEncodeHEVCV3
