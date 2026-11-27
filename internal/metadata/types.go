@@ -641,6 +641,11 @@ type EpisodeResult struct {
 	FileSeasonNumber  int
 	FileEpisodeNumber int
 	FileNumbered      bool
+	// ProviderSeasonNumber and ProviderEpisodeNumber place the episode in
+	// its structure provider's default order, for services that address
+	// episodes by number. Set by assignProviderNumbers before a layout.
+	ProviderSeasonNumber  int
+	ProviderEpisodeNumber int
 
 	// stillFallback is the remote still a local one displaced while results
 	// merged; the episode shows it until the local copy is cached.

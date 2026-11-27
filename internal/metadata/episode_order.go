@@ -195,37 +195,46 @@ func episodeFileNumbersOf(ctx context.Context) bool {
 	return known
 }
 
-// writeEpisodeFileNumbers stores each target's file numbers on the row at its
-// numbers inside tx: NULL when they equal the row's own numbers or the file
-// order lacks the episode.
-func writeEpisodeFileNumbers(ctx context.Context, tx pgx.Tx, seriesID string, targets []EpisodeResult) error {
-	seasons := make([]int32, 0, len(targets))
-	numbers := make([]int32, 0, len(targets))
-	fileSeasons := make([]*int32, 0, len(targets))
-	fileNumbers := make([]*int32, 0, len(targets))
+// writeEpisodeFileNumbers stores each target's file numbers and provider
+// numbers on the row at its numbers inside tx: NULL when they equal the row's
+// own numbers, or for file numbers when the file order lacks the episode.
+// structureSlug names the provider the provider numbers belong to.
+func writeEpisodeFileNumbers(ctx context.Context, tx pgx.Tx, seriesID, structureSlug string, targets []EpisodeResult) error {
+	n := len(targets)
+	seasons, numbers := make([]int32, 0, n), make([]int32, 0, n)
+	fileSeasons, fileNumbers := make([]*int32, 0, n), make([]*int32, 0, n)
+	providerSeasons, providerNumbers := make([]*int32, 0, n), make([]*int32, 0, n)
+	// pair is nil when (s, e) equals the row's own numbers or does not fit.
+	pair := func(ok bool, s, e int, own EpisodeResult) (*int32, *int32) {
+		if !ok || (s == own.SeasonNumber && e == own.EpisodeNumber) ||
+			!catalog.FitsPostgresInteger(s) || !catalog.FitsPostgresInteger(e) {
+			return nil, nil
+		}
+		a, b := int32(s), int32(e)
+		return &a, &b
+	}
 	for _, ep := range targets {
 		if !catalog.FitsPostgresInteger(ep.SeasonNumber) || !catalog.FitsPostgresInteger(ep.EpisodeNumber) {
 			continue
 		}
 		seasons = append(seasons, int32(ep.SeasonNumber))
 		numbers = append(numbers, int32(ep.EpisodeNumber))
-		if !ep.FileNumbered || (ep.FileSeasonNumber == ep.SeasonNumber && ep.FileEpisodeNumber == ep.EpisodeNumber) ||
-			!catalog.FitsPostgresInteger(ep.FileSeasonNumber) || !catalog.FitsPostgresInteger(ep.FileEpisodeNumber) {
-			fileSeasons = append(fileSeasons, nil)
-			fileNumbers = append(fileNumbers, nil)
-			continue
-		}
-		fs, fe := int32(ep.FileSeasonNumber), int32(ep.FileEpisodeNumber)
-		fileSeasons = append(fileSeasons, &fs)
-		fileNumbers = append(fileNumbers, &fe)
+		fs, fe := pair(ep.FileNumbered, ep.FileSeasonNumber, ep.FileEpisodeNumber, ep)
+		fileSeasons, fileNumbers = append(fileSeasons, fs), append(fileNumbers, fe)
+		ps, pe := pair(ep.ProviderEpisodeNumber > 0 || ep.ProviderSeasonNumber > 0, ep.ProviderSeasonNumber, ep.ProviderEpisodeNumber, ep)
+		providerSeasons, providerNumbers = append(providerSeasons, ps), append(providerNumbers, pe)
 	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE episodes e
-		SET file_season_number = v.fs, file_episode_number = v.fe
-		FROM unnest($2::int[], $3::int[], $4::int[], $5::int[]) AS v(s, n, fs, fe)
+		SET file_season_number = v.fs, file_episode_number = v.fe,
+		    provider_season_number = v.ps, provider_episode_number = v.pe,
+		    provider_numbering = NULLIF($8, '')
+		FROM unnest($2::int[], $3::int[], $4::int[], $5::int[], $6::int[], $7::int[]) AS v(s, n, fs, fe, ps, pe)
 		WHERE e.series_id = $1 AND e.season_number = v.s AND e.episode_number = v.n
-		  AND (e.file_season_number IS DISTINCT FROM v.fs OR e.file_episode_number IS DISTINCT FROM v.fe)`,
-		seriesID, seasons, numbers, fileSeasons, fileNumbers); err != nil {
+		  AND (e.file_season_number IS DISTINCT FROM v.fs OR e.file_episode_number IS DISTINCT FROM v.fe
+		    OR e.provider_season_number IS DISTINCT FROM v.ps OR e.provider_episode_number IS DISTINCT FROM v.pe
+		    OR e.provider_numbering IS DISTINCT FROM NULLIF($8, ''))`,
+		seriesID, seasons, numbers, fileSeasons, fileNumbers, providerSeasons, providerNumbers, structureSlug); err != nil {
 		return fmt.Errorf("writing episode file numbers of %s: %w", seriesID, err)
 	}
 	return nil
@@ -238,7 +247,7 @@ func (s *MetadataService) storeEpisodeFileNumbers(ctx context.Context, seriesID 
 		return nil
 	}
 	return pgx.BeginFunc(ctx, s.dbPool, func(tx pgx.Tx) error {
-		return writeEpisodeFileNumbers(ctx, tx, seriesID, targets)
+		return writeEpisodeFileNumbers(ctx, tx, seriesID, episodeStructureOf(ctx), targets)
 	})
 }
 
@@ -346,4 +355,18 @@ func applyCustomLayout(seasons []SeasonResult, episodes []EpisodeResult, structu
 	}
 	sort.Slice(arranged, func(i, j int) bool { return arranged[i].SeasonNumber < arranged[j].SeasonNumber })
 	return arranged, out
+}
+
+// assignProviderNumbers records each structure episode's place in its
+// provider's default order: the default numbers the provider gave when it was
+// fetched in another order, else its own numbers. It runs before a layout
+// renumbers the episodes.
+func assignProviderNumbers(episodes []EpisodeResult) {
+	for i := range episodes {
+		ep := &episodes[i]
+		ep.ProviderSeasonNumber, ep.ProviderEpisodeNumber = ep.SeasonNumber, ep.EpisodeNumber
+		if ep.DefaultSeasonNumber != nil && ep.DefaultEpisodeNumber != nil {
+			ep.ProviderSeasonNumber, ep.ProviderEpisodeNumber = *ep.DefaultSeasonNumber, *ep.DefaultEpisodeNumber
+		}
+	}
 }

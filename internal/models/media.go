@@ -913,6 +913,11 @@ type Episode struct {
 	SortTitle     string
 	OriginalTitle string
 	Tagline       string
+	// ProviderSeasonNumber and ProviderEpisodeNumber place the episode in its
+	// provider's default order when the series shows another order; nil
+	// means SeasonNumber and EpisodeNumber are that order's.
+	ProviderSeasonNumber  *int
+	ProviderEpisodeNumber *int
 }
 
 // MediaItemRoot represents a row in the media_item_roots table.

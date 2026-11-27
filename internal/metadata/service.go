@@ -2401,6 +2401,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		allSeasons, allEpisodes, structureSlug = mergeSeriesStructure(structures.list, episodeOrder.Provider, req.Language)
 		if slices.Contains(renumberIDKeys, structureSlug) {
 			ctx = withEpisodeStructure(ctx, structureSlug)
+			assignProviderNumbers(allEpisodes)
 			if assignFileNumbers(allEpisodes, structureSlug, episodeOrder.FileOrder, structures.list) {
 				ctx = withEpisodeFileNumbers(ctx)
 			}

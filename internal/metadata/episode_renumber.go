@@ -394,7 +394,7 @@ func (s *MetadataService) renumberSeriesEpisodes(ctx context.Context, seriesID s
 		return err
 	}
 	if episodeFileNumbersOf(ctx) {
-		if err := writeEpisodeFileNumbers(ctx, tx, seriesID, targets); err != nil {
+		if err := writeEpisodeFileNumbers(ctx, tx, seriesID, structureKey, targets); err != nil {
 			return err
 		}
 	}

@@ -40,7 +40,8 @@ const episodeColumns = `content_id, series_id, season_id, season_number, episode
 	still_path, still_source_path, still_thumbhash,
 	metadata_s3_path, metadata_etag, metadata_source,
 	created_at, updated_at, locked_fields,
-	sort_title, original_title, tagline`
+	sort_title, original_title, tagline,
+	provider_season_number, provider_episode_number`
 
 // refreshSeriesAirDatesSQL maintains the denormalized media_items columns
 // last_air_date_at (newest regular episode aired on or before today) and
@@ -251,6 +252,8 @@ func scanEpisode(row pgx.Row) (*models.Episode, error) {
 		&ep.SortTitle,
 		&ep.OriginalTitle,
 		&ep.Tagline,
+		&ep.ProviderSeasonNumber,
+		&ep.ProviderEpisodeNumber,
 	)
 	if seasonID != nil {
 		ep.SeasonID = *seasonID
@@ -338,6 +341,8 @@ func scanEpisodes(rows pgx.Rows) ([]*models.Episode, error) {
 			&ep.SortTitle,
 			&ep.OriginalTitle,
 			&ep.Tagline,
+			&ep.ProviderSeasonNumber,
+			&ep.ProviderEpisodeNumber,
 		)
 		if seasonID != nil {
 			ep.SeasonID = *seasonID

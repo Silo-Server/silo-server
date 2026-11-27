@@ -156,3 +156,25 @@ func TestApplyCustomLayout(t *testing.T) {
 		t.Fatalf("seasons = %+v, want specials and two custom seasons", gotSeasons)
 	}
 }
+
+// Watch sync and marker lookups address episodes by their provider's default
+// numbers: an episode keeps them through an alternate order and a layout.
+func TestAssignProviderNumbers(t *testing.T) {
+	episodes := []EpisodeResult{
+		{SeasonNumber: 1, EpisodeNumber: 1},
+		{SeasonNumber: 1, EpisodeNumber: 2, DefaultSeasonNumber: intRef(1), DefaultEpisodeNumber: intRef(8)},
+		{SeasonNumber: 2, EpisodeNumber: 1},
+	}
+	assignProviderNumbers(episodes)
+	_, laidOut := applyAbsoluteLayout(nil, episodes)
+	var got []slotOf
+	for _, ep := range laidOut {
+		got = append(got, slotOf{ep.ProviderSeasonNumber, ep.ProviderEpisodeNumber})
+	}
+	if want := []slotOf{{1, 1}, {1, 8}, {2, 1}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("provider numbers = %v, want %v", got, want)
+	}
+	if laidOut[2].SeasonNumber != 1 || laidOut[2].EpisodeNumber != 3 {
+		t.Fatalf("absolute numbering = S%dE%d, want S1E3", laidOut[2].SeasonNumber, laidOut[2].EpisodeNumber)
+	}
+}
