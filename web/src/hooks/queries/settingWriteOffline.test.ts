@@ -132,6 +132,19 @@ describe("useShowThenSave after an online failure", () => {
     expect(toastError).not.toHaveBeenCalled();
   });
 
+  // The earlier change may have been stored, so what a later rejection puts
+  // back can be older than the server's value: the re-read decides (#5252).
+  it.each<[string, Array<string | [number, unknown]>]>([
+    ["before", ["large", "x-large", [0, problem(502)], [1, REJECTED]]],
+    ["after", ["large", "x-large", [1, REJECTED], [0, problem(502)]]],
+  ])(
+    "reconciles a rejection that follows an ambiguous failure of a change it replaced (%s it)",
+    async (_order, steps) => {
+      const end = await run(steps);
+      expect(end.reconciled).toBe(1);
+    },
+  );
+
   it("leaves an ambiguous failure superseded by a newer change to that change", async () => {
     expect(await run(["large", "x-large", [0, problem(502)], [1, "saved"]])).toEqual({
       shown: "x-large",
