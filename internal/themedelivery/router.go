@@ -164,6 +164,8 @@ func (r *Router) Resolve(ctx context.Context, req Request) (Result, error) {
 			ProxyEligible:          proxyEligible,
 			ProxyExecutionEligible: proxyExecutionEligible,
 			ExcludedShapeIDs:       excluded,
+			// A converted theme re-encodes its audio to AAC.
+			TranscodesAudio: converted,
 		})
 		if err != nil {
 			return Result{}, fmt.Errorf("%w: %w", ErrPolicyUnsatisfied, err)

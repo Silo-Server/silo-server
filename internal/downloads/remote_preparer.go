@@ -95,7 +95,7 @@ const (
 // eligibleTranscodeWorkPlanner reserves work only on nodes that satisfy a
 // lock-safe capability predicate.
 type eligibleTranscodeWorkPlanner interface {
-	ReserveTranscodeWorkWith(workID string, eligible func(*nodepool.Node) bool) (*nodepool.Node, func())
+	ReserveTranscodeWorkWith(workID string, kind nodepool.JobKind, eligible func(*nodepool.Node) bool) (*nodepool.Node, func())
 }
 
 type transcodeWorkCapacityPlanner interface {
@@ -293,19 +293,22 @@ func (p *NodeAwarePreparer) reserveNode(ctx context.Context, artifactID string, 
 		return false
 	}
 	workID := "download-prepare-" + artifactID
+	// Classed by the work it does, as the node counts it: a download that
+	// re-encodes video competes with playback encodes for the same GPU.
+	downloadJobKind := request.JobKind()
 	selector, selective := p.planner.(eligibleTranscodeWorkPlanner)
 	switch {
 	case request.ToneMapRequested() || request.StereoDownmixBoostRequested() || request.PreparedTracksRequested():
 		if selective {
-			node, release = selector.ReserveTranscodeWorkWith(workID, p.recipeCapable(ctx, request, opts, hasStorage))
+			node, release = selector.ReserveTranscodeWorkWith(workID, downloadJobKind, p.recipeCapable(ctx, request, opts, hasStorage))
 		}
 	case selective && (p.storageFull != nil || len(refusedForStorage) > 0):
-		node, release = selector.ReserveTranscodeWorkWith(workID, hasStorage)
+		node, release = selector.ReserveTranscodeWorkWith(workID, downloadJobKind, hasStorage)
 	case len(refusedForStorage) > 0:
 		// This planner cannot leave a node out, so no other node is tried.
 		storageRejected = true
 	default:
-		node, release = p.planner.ReserveTranscodeWork(workID)
+		node, release = p.planner.ReserveTranscodeWork(workID, downloadJobKind)
 	}
 	return node, release, storageRejected
 }

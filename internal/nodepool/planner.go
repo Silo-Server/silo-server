@@ -37,6 +37,10 @@ type RouteRequest struct {
 	NeedsProxy           bool
 	TranscodeEligible    func(*Node) bool
 	ProxyEligible        func(*Node) bool
+	// JobKind is the kind of work the transcode half runs. Transcode
+	// selection balances jobs of this kind across nodes before it balances
+	// the total; empty balances the total only.
+	JobKind JobKind
 	// Unreachable holds the URLs of nodes the caller found not answering
 	// during this request. They count as unhealthy, so they are never selected
 	// and they degrade their co-location group just as a failed health check
@@ -69,7 +73,7 @@ type DownloadPlanner interface {
 // prepared download. The returned release function must be called after the
 // remote operation ends or falls back locally.
 type TranscodeWorkPlanner interface {
-	ReserveTranscodeWork(workID string) (*Node, func())
+	ReserveTranscodeWork(workID string, kind JobKind) (*Node, func())
 	TranscodeNode(nodeID int) (*Node, bool)
 }
 
@@ -87,7 +91,8 @@ type TranscodeWorkPlanner interface {
 type reservation struct {
 	transcodeURL string
 	proxyURL     string
-	kbps         int // estimated stream bitrate, counted against the proxy
+	kind         JobKind // the transcode half's job kind; empty when unknown
+	kbps         int     // estimated stream bitrate, counted against the proxy
 	createdAt    time.Time
 }
 
@@ -313,7 +318,7 @@ func (p *Planner) PlanSessionWith(sessionID, currentTranscodeURL string, needsTr
 			transcodes = filterNodes(transcodes, eligible)
 		}
 		plan.TranscodeNode = p.pickTranscode(transcodes, pooledTranscodes, proxies, groupHealthy,
-			currentTranscodeURL, estBitrateKbps, now)
+			currentTranscodeURL, "", estBitrateKbps, now)
 		if plan.TranscodeNode != nil {
 			plan.ProxyNode = p.pickProxy(proxies, groupHealthy, plan.TranscodeNode.Group, estBitrateKbps, now)
 		}
@@ -399,7 +404,7 @@ func (p *Planner) PlanRoute(request RouteRequest) Plan {
 	switch {
 	case request.NeedsTranscode && request.NeedsProxy:
 		plan.TranscodeNode = p.pickTranscode(transcodes, pooledTranscodes, proxies, groupHealthy,
-			request.CurrentTranscodeURL, request.EstimatedBitrateKbps, now)
+			request.CurrentTranscodeURL, request.JobKind, request.EstimatedBitrateKbps, now)
 		if plan.TranscodeNode != nil {
 			plan.ProxyNode = p.pickProxy(proxies, groupHealthy, plan.TranscodeNode.Group,
 				request.EstimatedBitrateKbps, now)
@@ -409,7 +414,7 @@ func (p *Planner) PlanRoute(request RouteRequest) Plan {
 		}
 	case request.NeedsTranscode:
 		plan.TranscodeNode = p.pickLocalEgressTranscode(transcodes, pooledTranscodes, groupHealthy,
-			request.CurrentTranscodeURL, now)
+			request.CurrentTranscodeURL, request.JobKind, now)
 	case request.NeedsProxy:
 		plan.ProxyNode = p.pickProxy(proxies, groupHealthy, nil, request.EstimatedBitrateKbps, now)
 	}
@@ -418,6 +423,7 @@ func (p *Planner) PlanRoute(request RouteRequest) Plan {
 		res := &reservation{createdAt: now}
 		if plan.TranscodeNode != nil {
 			res.transcodeURL = plan.TranscodeNode.URL
+			res.kind = request.JobKind
 		}
 		if plan.ProxyNode != nil {
 			res.proxyURL = plan.ProxyNode.URL
@@ -546,15 +552,16 @@ func (p *Planner) ReleaseSessionProxy(sessionID string) {
 // ReserveTranscodeWork selects the least-loaded healthy transcode node while
 // sharing the same health-bridging reservation accounting as playback. Unlike
 // a playback session it does not require a proxy partner: the completed file
-// is written to the configured shared artifact store and served later.
-func (p *Planner) ReserveTranscodeWork(workID string) (*Node, func()) {
-	return p.ReserveTranscodeWorkWith(workID, nil)
+// is written to the configured shared artifact store and served later. kind
+// is the work's JobKind, balanced across nodes the way playback balances it.
+func (p *Planner) ReserveTranscodeWork(workID string, kind JobKind) (*Node, func()) {
+	return p.ReserveTranscodeWorkWith(workID, kind, nil)
 }
 
 // ReserveTranscodeWorkWith is ReserveTranscodeWork with an optional
 // capability predicate. The predicate runs under the planner lock and must not
 // perform I/O.
-func (p *Planner) ReserveTranscodeWorkWith(workID string, eligible func(*Node) bool) (*Node, func()) {
+func (p *Planner) ReserveTranscodeWorkWith(workID string, kind JobKind, eligible func(*Node) bool) (*Node, func()) {
 	if p == nil || p.transcodes == nil || workID == "" {
 		return nil, func() {}
 	}
@@ -563,20 +570,12 @@ func (p *Planner) ReserveTranscodeWorkWith(workID string, eligible func(*Node) b
 	p.pruneReservations(now)
 	reservationID := workID + "-" + uuid.NewString()
 
-	var best *Node
-	for _, node := range p.transcodes.Nodes() {
-		if !node.TakesNewWork() || !p.transcodes.HasKey(node) || !p.underCap(node, now) {
-			continue
-		}
-		if eligible != nil && !eligible(node) {
-			continue
-		}
-		if best == nil || p.effectiveJobs(node, now) < p.effectiveJobs(best, now) {
-			best = node
-		}
-	}
+	best := p.pickNode(p.transcodes.Nodes(), "", now, func(node *Node) bool {
+		return node.TakesNewWork() && p.transcodes.HasKey(node) && p.underCap(node, now) &&
+			(eligible == nil || eligible(node))
+	}, kind, nil)
 	if best != nil {
-		p.reserved[reservationID] = &reservation{transcodeURL: best.URL, createdAt: now}
+		p.reserved[reservationID] = &reservation{transcodeURL: best.URL, kind: kind, createdAt: now}
 	}
 	p.mu.Unlock()
 	if best == nil {
@@ -646,55 +645,113 @@ func groupHealth(proxies, transcodes []*Node) map[string]bool {
 	return health
 }
 
-// pickNode returns the eligible node with the fewest effective jobs, keeping
-// the session on currentURL unless a candidate has at least two fewer jobs
-// (the historical soft-affinity rule). Shared by pickTranscode and
-// pickLocalEgressTranscode, which differ only in their eligibility predicate.
+// pickNode returns the eligible node with the least load, keeping the session
+// on currentURL unless a candidate's load is at least two jobs lower (the
+// historical soft-affinity rule). Shared by every transcode selection, which
+// differ only in their eligibility predicate.
 //
-// tieBreak, when non-nil, scores candidates that are level on effective jobs;
-// the lower score wins. It never overrides the job count or the affinity rule,
-// so a caller that passes nil gets exactly the historical selection.
-func (p *Planner) pickNode(nodes []*Node, currentURL string, now time.Time, eligible func(*Node) bool, tieBreak func(*Node) int) *Node {
-	var best, current *Node
-	bestJobs := 0
+// Load is the node's effective jobs of the requested kind, then its effective
+// jobs of every kind (see jobLoads). Each kind of work therefore spreads evenly
+// across the candidates on its own: video encodes even out between GPUs however
+// many cheap remuxes either node also runs. The affinity rule compares the
+// first of the two.
+//
+// tieBreak, when non-nil, scores candidates that are level on both; the lower
+// score wins. It never overrides the job counts or the affinity rule, so a
+// caller that passes nil and no kind gets exactly the historical selection.
+func (p *Planner) pickNode(nodes []*Node, currentURL string, now time.Time, eligible func(*Node) bool, kind JobKind, tieBreak func(*Node) int) *Node {
+	candidates := make([]*Node, 0, len(nodes))
 	for _, n := range nodes {
-		if !eligible(n) {
-			continue
+		if eligible(n) {
+			candidates = append(candidates, n)
 		}
+	}
+	loads := p.jobLoads(candidates, kind, now)
+	var best, current *Node
+	for _, n := range candidates {
 		if n.URL == currentURL {
 			current = n
 		}
-		jobs := p.effectiveJobs(n, now)
-		switch {
-		case best == nil, jobs < bestJobs:
-			best, bestJobs = n, jobs
-		case jobs == bestJobs && tieBreak != nil && tieBreak(n) < tieBreak(best):
+		switch load := loads[n]; {
+		case best == nil, load.less(loads[best]):
+			best = n
+		case load == loads[best] && tieBreak != nil && tieBreak(n) < tieBreak(best):
 			best = n
 		}
 	}
 	if current == nil || best == nil || current == best {
 		return best
 	}
-	if p.effectiveJobs(best, now)+2 <= p.effectiveJobs(current, now) {
+	if loads[best].kind+2 <= loads[current].kind {
 		return best
 	}
 	return current
 }
 
-// pickTranscode returns the eligible transcode node with the fewest effective
-// jobs, keeping the session on currentURL unless a candidate has at least two
-// fewer jobs (the historical soft-affinity rule). Candidates level on job count
-// are separated by the load on the physical GPU behind them: two pooled nodes
-// can be two containers on one card, and spreading jobs across node records
-// that share silicon does not spread the work.
+// jobLoad is what transcode selection compares between nodes: effective jobs
+// of the requested kind, then effective jobs of every kind.
+type jobLoad struct {
+	kind  int
+	total int
+}
+
+func (l jobLoad) less(other jobLoad) bool {
+	if l.kind != other.kind {
+		return l.kind < other.kind
+	}
+	return l.total < other.total
+}
+
+// jobLoads computes every candidate's jobLoad once per pick.
+//
+// The kind count is the node's last reported jobs of that kind plus this
+// planner's reservations of that kind the report does not include yet. It is
+// used only when kind is set and every candidate reported its jobs by kind;
+// otherwise the kind count is the total, which is the historical least-jobs
+// selection. One node that cannot say (a build from before job kinds, during a
+// rolling upgrade) must not read as idle next to nodes that can.
+//
+// Callers must hold mu.
+func (p *Planner) jobLoads(candidates []*Node, kind JobKind, now time.Time) map[*Node]jobLoad {
+	var reported map[*Node]map[JobKind]int
+	if kind != "" {
+		reported = make(map[*Node]map[JobKind]int, len(candidates))
+		for _, n := range candidates {
+			jobs, ok := reportedJobsByKind(n)
+			if !ok {
+				reported = nil
+				break
+			}
+			reported[n] = jobs
+		}
+	}
+	loads := make(map[*Node]jobLoad, len(candidates))
+	for _, n := range candidates {
+		total := p.effectiveJobs(n, now)
+		load := jobLoad{kind: total, total: total}
+		if reported != nil {
+			load.kind = max(reported[n][kind], 0) + p.pendingTranscodeReservations(n, kind, now)
+		}
+		loads[n] = load
+	}
+	return loads
+}
+
+// pickTranscode returns the eligible transcode node with the least load of the
+// requested kind (see pickNode), keeping the session on currentURL unless a
+// candidate has at least two fewer such jobs (the historical soft-affinity
+// rule). Candidates level on job counts are separated by the load on the
+// physical GPU behind them: two pooled nodes can be two containers on one card,
+// and spreading jobs across node records that share silicon does not spread the
+// work.
 //
 // pool is the full transcode pool the candidates were drawn from; shared-GPU
 // load is summed over all of it, since a job on a node this plan may not select
 // still occupies the same GPU.
-func (p *Planner) pickTranscode(transcodes, pool, proxies []*Node, groupHealthy map[string]bool, currentURL string, estKbps int, now time.Time) *Node {
+func (p *Planner) pickTranscode(transcodes, pool, proxies []*Node, groupHealthy map[string]bool, currentURL string, kind JobKind, estKbps int, now time.Time) *Node {
 	return p.pickWithScratchGuard(transcodes, pool, currentURL, now, func(n *Node) bool {
 		return admitsSession(n, currentURL) && p.transcodeEligible(n, proxies, groupHealthy, estKbps, now)
-	}, p.physicalGPULoadScore(pool, now))
+	}, kind, p.physicalGPULoadScore(pool, now))
 }
 
 // pickWithScratchGuard is pickNode with the scratch-pressure exclusion applied
@@ -714,7 +771,7 @@ func (p *Planner) pickTranscode(transcodes, pool, proxies []*Node, groupHealthy 
 // warning latch, which tracks disks rather than the narrowed candidate set.
 //
 // Callers must hold mu.
-func (p *Planner) pickWithScratchGuard(nodes, pool []*Node, currentURL string, now time.Time, eligible func(*Node) bool, tieBreak func(*Node) int) *Node {
+func (p *Planner) pickWithScratchGuard(nodes, pool []*Node, currentURL string, now time.Time, eligible func(*Node) bool, kind JobKind, tieBreak func(*Node) int) *Node {
 	excluded := false
 	guarded := func(n *Node) bool {
 		if !eligible(n) {
@@ -726,12 +783,12 @@ func (p *Planner) pickWithScratchGuard(nodes, pool []*Node, currentURL string, n
 		}
 		return true
 	}
-	picked := p.pickNode(nodes, currentURL, now, guarded, tieBreak)
+	picked := p.pickNode(nodes, currentURL, now, guarded, kind, tieBreak)
 	guardDropped := false
 	if picked == nil && excluded {
 		// Without an exclusion the unguarded pick would return the same nil:
 		// nothing was eligible in the first place.
-		picked = p.pickNode(nodes, currentURL, now, eligible, tieBreak)
+		picked = p.pickNode(nodes, currentURL, now, eligible, kind, tieBreak)
 		guardDropped = picked != nil
 	}
 	// Logged after the fallback decides, because what an operator needs to know
@@ -887,10 +944,10 @@ func (p *Planner) physicalGPULoadScore(pool []*Node, now time.Time) func(*Node) 
 // suppress an otherwise healthy transcode executor. Passing nil proxies to
 // transcodeEligible reduces it to exactly that: healthy, enabled, under cap,
 // and group-healthy, with no proxy partner required.
-func (p *Planner) pickLocalEgressTranscode(transcodes, pool []*Node, groupHealthy map[string]bool, currentURL string, now time.Time) *Node {
+func (p *Planner) pickLocalEgressTranscode(transcodes, pool []*Node, groupHealthy map[string]bool, currentURL string, kind JobKind, now time.Time) *Node {
 	return p.pickWithScratchGuard(transcodes, pool, currentURL, now, func(n *Node) bool {
 		return admitsSession(n, currentURL) && p.transcodeEligible(n, nil, groupHealthy, 0, now)
-	}, p.physicalGPULoadScore(pool, now))
+	}, kind, p.physicalGPULoadScore(pool, now))
 }
 
 // transcodeEligible reports whether a transcode node may take a new session:
@@ -1020,20 +1077,36 @@ func (p *Planner) effectiveEgressKbps(n *Node, now time.Time) int {
 // effectiveJobs is the node's health-reported job count plus reservations the
 // health checker hasn't had a chance to observe yet.
 func (p *Planner) effectiveJobs(n *Node, now time.Time) int {
-	jobs := n.ActiveJobs
+	return n.ActiveJobs + p.pendingReservations(n, now, func(res *reservation) bool {
+		return res.transcodeURL == n.URL || res.proxyURL == n.URL
+	})
+}
+
+// pendingTranscodeReservations counts this planner's reservations of kind on
+// transcode node n that its last health report does not include yet.
+func (p *Planner) pendingTranscodeReservations(n *Node, kind JobKind, now time.Time) int {
+	return p.pendingReservations(n, now, func(res *reservation) bool {
+		return res.transcodeURL == n.URL && res.kind == kind
+	})
+}
+
+// pendingReservations counts the unexpired reservations on n that match and
+// that n's last health report does not include yet.
+func (p *Planner) pendingReservations(n *Node, now time.Time, match func(*reservation) bool) int {
+	pending := 0
 	for _, res := range p.reserved {
 		if now.Sub(res.createdAt) > maxReservationAge {
 			continue
 		}
-		if res.transcodeURL != n.URL && res.proxyURL != n.URL {
+		if !match(res) {
 			continue
 		}
 		if n.LastHealthCheck != nil && n.LastHealthCheck.After(res.createdAt) {
 			continue // a newer health report already reflects this session
 		}
-		jobs++
+		pending++
 	}
-	return jobs
+	return pending
 }
 
 func (p *Planner) pruneReservations(now time.Time) {

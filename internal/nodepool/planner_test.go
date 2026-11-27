@@ -178,20 +178,20 @@ func TestReserveTranscodeWorkSharesCapacityReservations(t *testing.T) {
 	})
 	planner := NewPlanner(NewProxyPool(), transcodes)
 
-	first, releaseFirst := planner.ReserveTranscodeWork("download-1")
+	first, releaseFirst := planner.ReserveTranscodeWork("download-1", JobKindVideoTranscode)
 	if first == nil || first.URL != "http://transcode-a" {
 		t.Fatalf("first node = %+v", first)
 	}
-	second, releaseSecond := planner.ReserveTranscodeWork("download-2")
+	second, releaseSecond := planner.ReserveTranscodeWork("download-2", JobKindVideoTranscode)
 	if second == nil || second.URL != "http://transcode-b" {
 		t.Fatalf("second node = %+v", second)
 	}
-	if third, _ := planner.ReserveTranscodeWork("download-3"); third != nil {
+	if third, _ := planner.ReserveTranscodeWork("download-3", JobKindVideoTranscode); third != nil {
 		t.Fatalf("third node = %+v, want no capacity", third)
 	}
 
 	releaseFirst()
-	third, releaseThird := planner.ReserveTranscodeWork("download-3")
+	third, releaseThird := planner.ReserveTranscodeWork("download-3", JobKindVideoTranscode)
 	if third == nil || third.URL != "http://transcode-a" {
 		t.Fatalf("third node after release = %+v", third)
 	}
@@ -205,21 +205,21 @@ func TestReserveTranscodeWorkOverlappingAttemptsReleaseOnlyTheirOwnReservation(t
 	transcodes.SetNodes([]*Node{{URL: "http://transcode-a", Enabled: true, Healthy: true, MaxJobs: &capTwo}})
 	planner := NewPlanner(NewProxyPool(), transcodes)
 
-	first, releaseFirst := planner.ReserveTranscodeWork("same-artifact")
-	second, releaseSecond := planner.ReserveTranscodeWork("same-artifact")
+	first, releaseFirst := planner.ReserveTranscodeWork("same-artifact", JobKindVideoTranscode)
+	second, releaseSecond := planner.ReserveTranscodeWork("same-artifact", JobKindVideoTranscode)
 	if first == nil || second == nil {
 		t.Fatalf("overlapping reservations = first %+v second %+v", first, second)
 	}
-	if third, _ := planner.ReserveTranscodeWork("third-attempt"); third != nil {
+	if third, _ := planner.ReserveTranscodeWork("third-attempt", JobKindVideoTranscode); third != nil {
 		t.Fatalf("third reservation = %+v, want full node", third)
 	}
 
 	releaseFirst()
-	third, releaseThird := planner.ReserveTranscodeWork("third-attempt")
+	third, releaseThird := planner.ReserveTranscodeWork("third-attempt", JobKindVideoTranscode)
 	if third == nil {
 		t.Fatal("first release did not free its own reservation")
 	}
-	if fourth, _ := planner.ReserveTranscodeWork("fourth-attempt"); fourth != nil {
+	if fourth, _ := planner.ReserveTranscodeWork("fourth-attempt", JobKindVideoTranscode); fourth != nil {
 		t.Fatalf("second overlapping reservation was lost: fourth = %+v", fourth)
 	}
 
@@ -473,7 +473,7 @@ func TestPlannerSkipsTranscodeNodesWithoutAKey(t *testing.T) {
 	if plan := f.planner.PlanRoute(RouteRequest{SessionID: "s2", NeedsTranscode: true, Unreachable: map[string]struct{}{keyed.URL: {}}}); plan.TranscodeNode != nil {
 		t.Fatalf("a move off the keyed node landed on %s", plan.TranscodeNode.URL)
 	}
-	if node, release := f.planner.ReserveTranscodeWork("job"); node == nil || node.ID != keyed.ID {
+	if node, release := f.planner.ReserveTranscodeWork("job", JobKindVideoTranscode); node == nil || node.ID != keyed.ID {
 		t.Fatalf("ReserveTranscodeWork = %+v, want the keyed node", node)
 	} else {
 		release()

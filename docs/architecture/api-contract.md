@@ -1229,6 +1229,10 @@ contract is:
   with `status` `draining`, then `drained` once it has no work left; the values are additive to
   the frozen shape, and the status code does not change, so probes keep passing while the node
   finishes its sessions. See [node-drain.md](node-drain.md).
+  Revision (2026-11-26, with job kind balancing): a transcode node adds `active_jobs_by_kind`, an
+  object naming every job kind with its count, which the API server stores in the node's
+  `last_stats` and balances placements on; additive to the frozen shape. See
+  [admin-api.md](../admin-api.md#job-kind-balancing).
   Revision (2026-11-26, with process CPU percent): the optional `attribution` object, the same
   type `GET /api/v2/admin/system/resources` returns, gains `process.cpu_pct` and
   `children.cpu_pct`; both are additive and omitted when not measured.
