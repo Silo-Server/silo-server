@@ -869,14 +869,15 @@ func (s *Service) CreateRequest(ctx context.Context, viewer Viewer, input Create
 		status = StatusApproved
 	}
 	record := CreateRequestRecord{
-		ID:        id,
-		Input:     normalized,
-		Status:    status,
-		Outcome:   OutcomeActive,
-		IsAnime:   facts.Anime,
-		Facts:     facts,
-		Requester: viewer,
-		Now:       s.now(),
+		ID:            id,
+		Input:         normalized,
+		Status:        status,
+		Outcome:       OutcomeActive,
+		IsAnime:       facts.Anime,
+		Facts:         facts,
+		SeasonDetails: seasonDetails(detail, normalized.Seasons),
+		Requester:     viewer,
+		Now:           s.now(),
 		// Re-requesting a title that failed for this user (e.g. a transient
 		// integration error) replaces their failed row.
 		ReplaceFailed: true,
@@ -2565,11 +2566,13 @@ func (s *Service) ensureRoutingFacts(ctx context.Context, req *Request, routes [
 		}
 		return errors.New("could not read the title's details from TMDB to route it")
 	}
-	updated, err := s.store.SetRoutingFacts(ctx, req.ID, s.routingFacts(ctx, detail))
+	// A request created while TMDB was unreachable has no season details
+	// either; the same read gives them.
+	updated, err := s.store.SetRoutingFacts(ctx, req.ID, s.routingFacts(ctx, detail), seasonDetails(detail, req.Seasons))
 	if err != nil {
 		return err
 	}
-	req.RoutingFacts, req.IsAnime = updated.RoutingFacts, updated.IsAnime
+	req.RoutingFacts, req.IsAnime, req.SeasonDetails = updated.RoutingFacts, updated.IsAnime, updated.SeasonDetails
 	// Another API server may have stored its capture first, without what
 	// this one reads (a server not yet upgraded has no series status).
 	return s.recheckCapturedFacts(ctx, req, routes)

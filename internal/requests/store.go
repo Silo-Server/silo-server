@@ -107,8 +107,9 @@ type Store interface {
 	ListRoutes(ctx context.Context) ([]Route, error)
 	// SetRoutingFacts stores facts fetched after the request was created (and
 	// the anime flag they imply), unless another API server stored captured
-	// facts first; it returns the request as stored either way.
-	SetRoutingFacts(ctx context.Context, id string, facts RoutingFacts) (*Request, error)
+	// facts first; it returns the request as stored either way. Season
+	// details from the same TMDB read fill a request that has none.
+	SetRoutingFacts(ctx context.Context, id string, facts RoutingFacts, details []SeasonDetail) (*Request, error)
 	// UpdateRoutingFacts writes the facts set in facts over the stored ones,
 	// key by key, and keeps the rest: a fact read again (the rating) replaces
 	// only itself.
@@ -156,14 +157,17 @@ type Store interface {
 }
 
 type CreateRequestRecord struct {
-	ID        string
-	Input     CreateRequestInput
-	Status    Status
-	Outcome   Outcome
-	IsAnime   bool
-	Facts     RoutingFacts
-	Requester Viewer
-	Now       time.Time
+	ID      string
+	Input   CreateRequestInput
+	Status  Status
+	Outcome Outcome
+	IsAnime bool
+	Facts   RoutingFacts
+	// SeasonDetails are the requested seasons' TMDB air dates and episode
+	// counts, stored with the request.
+	SeasonDetails []SeasonDetail
+	Requester     Viewer
+	Now           time.Time
 	// Quota, when non-nil, instructs the store to atomically verify the
 	// requester is below their per-user limit before inserting. The check
 	// runs inside the same transaction as the insert with a per-user

@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/metadata/tmdb"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -1001,6 +1003,7 @@ func (f *fakeStore) CreateRequest(_ context.Context, input CreateRequestRecord) 
 		IsAnime:              input.IsAnime,
 		RoutingFacts:         input.Facts,
 		Seasons:              input.Input.Seasons,
+		SeasonDetails:        input.SeasonDetails,
 		RequestedByUserID:    input.Requester.UserID,
 		RequestedByProfileID: input.Requester.ProfileID,
 		Source:               requestSource(input.Input.Source),
@@ -1624,7 +1627,7 @@ func (f *fakeStore) ListRoutes(context.Context) ([]Route, error) {
 	return slices.Clone(f.routes), nil
 }
 
-func (f *fakeStore) SetRoutingFacts(_ context.Context, id string, facts RoutingFacts) (*Request, error) {
+func (f *fakeStore) SetRoutingFacts(_ context.Context, id string, facts RoutingFacts, details []SeasonDetail) (*Request, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	req := f.lookupLocked(id)
@@ -1641,6 +1644,9 @@ func (f *fakeStore) SetRoutingFacts(_ context.Context, id string, facts RoutingF
 	f.factsSet[id] = facts
 	req.RoutingFacts = facts
 	req.IsAnime = facts.Anime
+	if len(req.SeasonDetails) == 0 {
+		req.SeasonDetails = details
+	}
 	copy := *req
 	return &copy, nil
 }
@@ -2146,8 +2152,8 @@ type fakeRouterProvider struct {
 
 	gotRequesterEmail    string
 	gotRequesterUsername string
-	// gotSeasons records the seasons of each Fulfill call's request.
-	gotSeasons [][]int
+	// gotDescriptors records the descriptor each Fulfill call sends.
+	gotDescriptors []*pluginv1.RequestDescriptor
 
 	// seasonCapable marks the installations whose router declares
 	// supports_seasons; RouterFeatures answers from it.
@@ -2215,11 +2221,7 @@ func (f *fakeRouterProvider) Fulfill(_ context.Context, installationID int, _ st
 	defer f.mu.Unlock()
 	f.gotRequesterEmail = req.RequesterEmail
 	f.gotRequesterUsername = req.RequesterUsername
-	var seasons []int
-	for _, season := range routerDescriptor(req).GetSeasons() {
-		seasons = append(seasons, int(season))
-	}
-	f.gotSeasons = append(f.gotSeasons, seasons)
+	f.gotDescriptors = append(f.gotDescriptors, routerDescriptor(req))
 	f.gotTVDBID = req.TVDBID
 	f.fulfillCalls++
 	f.fulfillLog = append(f.fulfillLog, fulfillCall{installationID: installationID, qualities: slices.Clone(qualities), conns: slices.Clone(conns)})

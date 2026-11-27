@@ -108,9 +108,17 @@ func routerDescriptor(req Request) *pluginv1.RequestDescriptor {
 	// Seasons name the series seasons requested; none means the whole
 	// series. A plugin without supports_seasons ignores them.
 	var seasons []int32
+	var details []*pluginv1.RequestedSeason
 	if req.MediaType == MediaTypeSeries {
 		for _, season := range req.Seasons {
 			seasons = append(seasons, int32(season))
+		}
+		for _, d := range req.SeasonDetails {
+			details = append(details, &pluginv1.RequestedSeason{
+				Number:       int32(d.Number), //nolint:gosec // G115: a TMDB season number
+				FirstAirDate: d.FirstAirDate,
+				EpisodeCount: int32(d.EpisodeCount), //nolint:gosec // G115: a TMDB season's episode count
+			})
 		}
 	}
 	return &pluginv1.RequestDescriptor{
@@ -124,6 +132,7 @@ func routerDescriptor(req Request) *pluginv1.RequestDescriptor {
 		RequesterEmail:     req.RequesterEmail,
 		RequesterUsername:  req.RequesterUsername,
 		Seasons:            seasons,
+		SeasonDetails:      details,
 	}
 }
 

@@ -47,6 +47,41 @@ type SeasonPresenceResolver interface {
 	SeasonAvailability(ctx context.Context, seriesContentIDs []string) (map[string]map[int]SeasonCounts, error)
 }
 
+// SeasonDetail is one requested season as TMDB numbers it: its first air
+// date (YYYY-MM-DD, empty when unknown) and episode count when the request
+// was made. Download services split or merge some series' seasons
+// differently (one 24-episode TMDB season is two 12-episode seasons on
+// Sonarr), so router plugins match a season's episodes by air date with it
+// rather than by number.
+type SeasonDetail struct {
+	Number       int    `json:"number"`
+	FirstAirDate string `json:"first_air_date,omitempty"`
+	EpisodeCount int    `json:"episode_count,omitempty"`
+}
+
+// seasonDetails describes the requested seasons from TMDB's detail, in
+// request order. A season TMDB does not list (no detail) gets no entry, and
+// one without an air date yet gets no episode count either, so a plugin
+// matches it by number.
+func seasonDetails(detail *tmdb.MediaDetail, seasons []int) []SeasonDetail {
+	if detail == nil {
+		return nil
+	}
+	var out []SeasonDetail
+	for _, number := range seasons {
+		i := slices.IndexFunc(detail.Seasons, func(s tmdb.SeasonSummary) bool { return s.Number == number })
+		if i >= 0 {
+			season := detail.Seasons[i]
+			d := SeasonDetail{Number: number, FirstAirDate: season.AirDate}
+			if d.FirstAirDate != "" {
+				d.EpisodeCount = season.EpisodeCount
+			}
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
 // SeasonProgress is one requested season's episode counts.
 type SeasonProgress struct {
 	Season int

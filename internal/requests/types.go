@@ -302,6 +302,10 @@ type Request struct {
 	// season's episode counts once the series is in the library.
 	Seasons        []int            `json:"-"`
 	SeasonProgress []SeasonProgress `json:"-"`
+	// SeasonDetails describe the requested seasons as TMDB had them when the
+	// request was made (see SeasonDetail); empty for whole-series requests
+	// and requests from before they were kept.
+	SeasonDetails []SeasonDetail `json:"-"`
 	// Followers are the profiles, other than the requester's, that asked to be
 	// told when the title is available; loaded for the fulfilled notification.
 	Followers []Follower `json:"-"`

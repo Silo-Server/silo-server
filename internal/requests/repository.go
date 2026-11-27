@@ -394,25 +394,26 @@ func (r *Repository) insertRequest(
 	if err != nil {
 		return nil, err
 	}
+	details := encodeSeasonDetails(input.SeasonDetails)
 	row := exec.QueryRow(ctx, `
 		INSERT INTO media_requests (
 			id, provider, media_type, tmdb_id, tvdb_id, imdb_id, title, year,
 			overview, poster_path, backdrop_path, status, outcome,
 			requested_by_user_id, requested_by_profile_id, is_anime, created_at, updated_at, approved_at,
-			routing_facts, seasons, source
+			routing_facts, seasons, source, season_details
 		)
 		VALUES (
 			$1, 'tmdb', $2, $3, $4, $5, $6, $7,
 			$8, $9, $10, $11, $12,
 			$13, $14, $15, $16, $16, $17,
-			$18, $19, $20
+			$18, $19, $20, $21
 		)
 		RETURNING `+requestColumns(), input.ID, input.Input.MediaType, input.Input.TMDBID, tvdbID,
 		strings.TrimSpace(input.Input.IMDbID), strings.TrimSpace(input.Input.Title), year,
 		strings.TrimSpace(input.Input.Overview), strings.TrimSpace(input.Input.PosterPath),
 		strings.TrimSpace(input.Input.BackdropPath), status, outcome,
 		input.Requester.UserID, input.Requester.ProfileID, input.IsAnime, now, approvedAt,
-		facts, nonNilSeasons(input.Input.Seasons), requestSource(input.Input.Source))
+		facts, nonNilSeasons(input.Input.Seasons), requestSource(input.Input.Source), details)
 	req, err := scanRequest(row)
 	if err != nil {
 		return nil, fmt.Errorf("insert request: %w", err)
@@ -1493,6 +1494,15 @@ func (r *Repository) ListEvents(ctx context.Context, requestID string, limit int
 	return out, rows.Err()
 }
 
+// encodeSeasonDetails stores no details as an empty array, not NULL.
+func encodeSeasonDetails(details []SeasonDetail) []byte {
+	if details == nil {
+		details = []SeasonDetail{}
+	}
+	raw, _ := json.Marshal(details) // plain ints and strings cannot fail
+	return raw
+}
+
 // nonNilSeasons stores no seasons as an empty array, not NULL.
 func nonNilSeasons(seasons []int) []int {
 	if seasons == nil {
@@ -1518,7 +1528,7 @@ func requestColumns() string {
 	        overview, poster_path, backdrop_path, status, outcome,
 	        requested_by_user_id, requested_by_profile_id, is_anime,
 	        last_error, created_at, updated_at, approved_at, completed_at,
-	        submit_attempts, submit_lease_until, next_submit_at, outcome_reason, routing_facts, seasons, source`
+	        submit_attempts, submit_lease_until, next_submit_at, outcome_reason, routing_facts, seasons, source, season_details`
 }
 
 type requestScanner interface {
@@ -1529,7 +1539,7 @@ func scanRequest(row requestScanner) (*Request, error) {
 	var req Request
 	var tvdbID, year sql.NullInt64
 	var approvedAt, completedAt, submitLeaseUntil, nextSubmitAt sql.NullTime
-	var rawFacts []byte
+	var rawFacts, rawDetails []byte
 	if err := row.Scan(
 		&req.ID,
 		&req.Provider,
@@ -1559,8 +1569,12 @@ func scanRequest(row requestScanner) (*Request, error) {
 		&rawFacts,
 		&req.Seasons,
 		&req.Source,
+		&rawDetails,
 	); err != nil {
 		return nil, err
+	}
+	if err := json.Unmarshal(rawDetails, &req.SeasonDetails); err != nil {
+		return nil, fmt.Errorf("decode season details: %w", err)
 	}
 	facts, err := decodeRoutingFacts(rawFacts)
 	if err != nil {

@@ -3,6 +3,7 @@ package requests
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"testing"
 
@@ -88,5 +89,55 @@ func TestReconcileCompletesASeasonRequestOnlyWhenItsSeasonsAre(t *testing.T) {
 	}
 	if got := store.requests["r1"]; got == nil || got.Status != StatusCompleted {
 		t.Fatalf("request = %+v, want completed once season 2 is", got)
+	}
+}
+
+// A season request tells the router each season's first air date and episode
+// count as TMDB has them, so a plugin whose download service numbers the
+// series differently can find the same episodes. A season without an air
+// date yet goes with neither.
+func TestSeasonRequestDescribesItsSeasonsToTheRouter(t *testing.T) {
+	store := newFakeStore()
+	store.settings.RequestsEnabled = true
+	store.settings.GlobalAutoApprovalEnabled = true
+	store.integrations = []Integration{routerInst("router-1")}
+	svc := seasonService(store, &fakePresence{})
+	router := &fakeRouterProvider{seasonCapable: map[int]bool{1: true}}
+	svc.SetRouterProvider(router)
+
+	if _, err := svc.CreateRequest(context.Background(), testViewer(1), CreateRequestInput{MediaType: MediaTypeSeries, TMDBID: 95396, Title: "Severance", Seasons: []int{3, 2}}); err != nil {
+		t.Fatalf("CreateRequest: %v", err)
+	}
+	if len(router.gotDescriptors) != 1 {
+		t.Fatalf("fulfill calls = %d, want 1", len(router.gotDescriptors))
+	}
+	var got []string
+	for _, d := range router.gotDescriptors[0].GetSeasonDetails() {
+		got = append(got, fmt.Sprintf("%d %q %d", d.GetNumber(), d.GetFirstAirDate(), d.GetEpisodeCount()))
+	}
+	want := []string{`2 "2025-01-17" 10`, `3 "" 0`}
+	if !slices.Equal(got, want) {
+		t.Fatalf("season details = %v, want %v", got, want)
+	}
+}
+
+// A season request made while TMDB was unreachable has no season details; the
+// submission reads TMDB for the routing facts and fills them from that read.
+// A season TMDB gives episodes but no air date goes with neither.
+func TestSeasonDetailsAreFilledWithTheRoutingFacts(t *testing.T) {
+	store := routingStore(RoutingFacts{})
+	req := store.requests["r1"]
+	req.MediaType, req.TMDBID, req.Seasons = MediaTypeSeries, 95396, []int{2, 3}
+	detail := severanceDetail()
+	detail.Seasons[3].EpisodeCount = 8
+	svc := newTestServiceWithTMDB(store, &fakeTMDBClient{detail: detail})
+
+	sent := *req
+	if err := svc.ensureRoutingFacts(context.Background(), &sent, testRoutes()); err != nil {
+		t.Fatal(err)
+	}
+	want := []SeasonDetail{{Number: 2, FirstAirDate: "2025-01-17", EpisodeCount: 10}, {Number: 3}}
+	if !slices.Equal(sent.SeasonDetails, want) || !slices.Equal(store.requests["r1"].SeasonDetails, want) {
+		t.Fatalf("season details = %+v sent, %+v stored; want %+v", sent.SeasonDetails, store.requests["r1"].SeasonDetails, want)
 	}
 }

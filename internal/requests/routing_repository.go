@@ -80,15 +80,16 @@ func (r *Repository) mergeRoutingFacts(ctx context.Context, id string, facts Rou
 	return req, nil
 }
 
-func (r *Repository) SetRoutingFacts(ctx context.Context, id string, facts RoutingFacts) (*Request, error) {
+func (r *Repository) SetRoutingFacts(ctx context.Context, id string, facts RoutingFacts, details []SeasonDetail) (*Request, error) {
 	raw, err := encodeRoutingFacts(facts)
 	if err != nil {
 		return nil, err
 	}
 	req, err := scanRequest(r.pool.QueryRow(ctx, `
-		UPDATE media_requests SET routing_facts = $2, is_anime = $3
+		UPDATE media_requests SET routing_facts = $2, is_anime = $3,
+			season_details = CASE WHEN season_details = '[]'::jsonb THEN $4::jsonb ELSE season_details END
 		WHERE id = $1 AND NOT routing_facts ? 'captured_at'
-		RETURNING `+requestColumns(), id, raw, facts.Anime))
+		RETURNING `+requestColumns(), id, raw, facts.Anime, encodeSeasonDetails(details)))
 	if errors.Is(err, pgx.ErrNoRows) {
 		// Another API server captured the facts first; route on its.
 		return r.GetRequest(ctx, id)
