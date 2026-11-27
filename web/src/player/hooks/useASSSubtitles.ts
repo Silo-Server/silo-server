@@ -14,6 +14,7 @@ import {
 } from "../utils/assFillMargins";
 import {
   fallbackFontForSubtitle,
+  fontFamilyNames,
   forceASSFontFamily,
   loadSubtitleFontBundle,
   loadSubtitleFallbackFontData,
@@ -47,10 +48,14 @@ function settleWithin<T>(promise: Promise<T>, ms: number): Promise<T | undefined
 
 interface ASSFillState {
   instance: JASSUB;
+  /** Track content as the server sent it. */
+  sourceContent: string;
   /** Track content before any Fill margin inset. */
   baseContent: string;
   /** The fallback font family forced onto the script, if one was. */
   fallbackFamily?: string;
+  /** Names of the loaded attached fonts; styles naming them keep their font. */
+  attachedFamilies: Set<string>;
   /** Inset currently loaded into the renderer. */
   inset: ASSMarginInset;
   /** JASSUB's own render-resolution settings, restored in Fit. */
@@ -297,10 +302,13 @@ export function useASSSubtitles(
 
       if (cancelled) return;
 
-      const renderedSubContent =
-        fallbackFont && fallbackFontData
-          ? forceASSFontFamily(subContent, fallbackFont.family)
-          : subContent;
+      // Styles that name an attached font keep it; the rest are forced to the
+      // fallback, which also stays the default font for missing glyphs.
+      const attachedFamilies = new Set((attachedFontData ?? []).flatMap(fontFamilyNames));
+      const fallbackFamily = fallbackFont && fallbackFontData ? fallbackFont.family : undefined;
+      const renderedSubContent = fallbackFamily
+        ? forceASSFontFamily(subContent, fallbackFamily, attachedFamilies)
+        : subContent;
       const fonts = [...(attachedFontData ?? []), ...(fallbackFontData ?? [])];
 
       const JASSUBClass = await classPromise;
@@ -342,8 +350,10 @@ export function useASSSubtitles(
       };
       const fill: ASSFillState = {
         instance,
+        sourceContent: subContent,
         baseContent: renderedSubContent,
-        fallbackFamily: fallbackFont && fallbackFontData ? fallbackFont.family : undefined,
+        fallbackFamily,
+        attachedFamilies,
         inset: initialInset,
         prescaleFactor: instance.prescaleFactor,
         prescaleHeightLimit: instance.prescaleHeightLimit,
@@ -358,6 +368,22 @@ export function useASSSubtitles(
             await instance.ready;
             if (!isCurrent()) return;
             await instance.renderer.addFonts(lateFonts);
+            if (!isCurrent()) return;
+            if (fill.fallbackFamily) {
+              for (const font of lateFonts) {
+                for (const name of fontFamilyNames(font)) fill.attachedFamilies.add(name);
+              }
+              const content = forceASSFontFamily(
+                fill.sourceContent,
+                fill.fallbackFamily,
+                fill.attachedFamilies,
+              );
+              if (content !== fill.baseContent) {
+                fill.baseContent = content;
+                fill.inset = fillInset(content, videoFitRef.current, coverCropRef.current);
+                await instance.renderer.setTrack(applyASSMarginInset(content, fill.inset));
+              }
+            }
             repaintASS(instance, isCurrent);
           })
           .catch((err) => {
@@ -456,7 +482,10 @@ export function useASSSubtitles(
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const text = await response.text();
         if (controller.signal.aborted || jassubRef.current !== instance) return;
-        const content = fill.fallbackFamily ? forceASSFontFamily(text, fill.fallbackFamily) : text;
+        const content = fill.fallbackFamily
+          ? forceASSFontFamily(text, fill.fallbackFamily, fill.attachedFamilies)
+          : text;
+        fill.sourceContent = text;
         fill.baseContent = content;
         fill.inset = fillInset(content, videoFitRef.current, coverCropRef.current);
         await instance.renderer.setTrack(applyASSMarginInset(content, fill.inset));
