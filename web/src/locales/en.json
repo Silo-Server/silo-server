@@ -26502,6 +26502,70 @@
       "value": "When providers have no translation for this library's language, translate descriptions with AI after each refresh. Requires AI description translation in Admin Settings → AI."
     }
   ],
+  "web.admin.common.libraryEditor.metadata.episodeOrder": [
+    {
+      "type": 0,
+      "value": "Episode order"
+    }
+  ],
+  "web.admin.common.libraryEditor.metadata.episodeOrderChange": [
+    {
+      "type": 0,
+      "value": "Saving a new order refreshes the library's shows and renumbers their episodes. Watch history stays with each episode."
+    }
+  ],
+  "web.admin.common.libraryEditor.metadata.episodeOrderFallback": [
+    {
+      "type": 0,
+      "value": "When "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " has no episodes for a show, Silo uses "
+    },
+    {
+      "type": 1,
+      "value": "other"
+    },
+    {
+      "type": 0,
+      "value": "'s order instead."
+    }
+  ],
+  "web.admin.common.libraryEditor.metadata.episodeOrderHelp": [
+    {
+      "type": 0,
+      "value": "Which provider's seasons and episode numbers this library's shows follow. File names are read in this order."
+    }
+  ],
+  "web.admin.common.libraryEditor.metadata.episodeOrderNoFallback": [
+    {
+      "type": 1,
+      "value": "other"
+    },
+    {
+      "type": 0,
+      "value": " is turned off for episodes, so a show "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " doesn't know keeps the numbers from its file names."
+    }
+  ],
+  "web.admin.common.libraryEditor.metadata.episodeOrderOverride": [
+    {
+      "type": 0,
+      "value": "Any show can override this from its page: Manage → Episode order."
+    }
+  ],
   "web.admin.common.libraryEditor.metadata.language": [
     {
       "type": 0,

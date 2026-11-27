@@ -297,6 +297,9 @@ func (h *LibraryHandler) UpdateLibrary(ctx context.Context, id, userID int, req 
 	if req.ChapterThumbnailsEnabled != nil && *req.ChapterThumbnailsEnabled && h.ArtworkStore == nil {
 		return LibraryView{}, fieldError("chapter_thumbnails_enabled", "Chapter thumbnails require configured artwork storage")
 	}
+	if req.EpisodeOrderProvider != nil && !models.ValidEpisodeOrderProvider(*req.EpisodeOrderProvider) {
+		return LibraryView{}, fieldError("episode_order_provider", "Invalid episode_order_provider; must be tvdb, tmdb or empty")
+	}
 	if req.TrickplayEnabled != nil && *req.TrickplayEnabled && h.ArtworkStore == nil {
 		return LibraryView{}, fieldError("trickplay_enabled", "Seek previews require configured artwork storage")
 	}
@@ -334,6 +337,7 @@ func (h *LibraryHandler) UpdateLibrary(ctx context.Context, id, userID int, req 
 		BoxSetsEnabled:           req.BoxSetsEnabled,
 		BoxSetMinMovies:          req.BoxSetMinMovies,
 		BoxSetsInSearch:          req.BoxSetsInSearch,
+		EpisodeOrderProvider:     req.EpisodeOrderProvider,
 	})
 	if err != nil {
 		if errors.Is(err, catalog.ErrFolderNotFound) {
@@ -379,7 +383,23 @@ func (h *LibraryHandler) UpdateLibrary(ctx context.Context, id, userID int, req 
 	if languageChanged {
 		h.wakeMetadataMatcher(ctx, folder.ID)
 	}
-	if h.JobRepo != nil && languageChanged {
+	// A new episode order renumbers the library's shows, which a full
+	// refresh does as it fetches each show's episodes.
+	if h.JobRepo != nil && oldFolder.EpisodeOrderProvider != folder.EpisodeOrderProvider {
+		job, jobErr := h.JobRepo.CreateLibraryRefresh(ctx, userID, adminjob.LibraryRefreshRequest{
+			LibraryID:   folder.ID,
+			LibraryName: folder.Name,
+			Mode:        adminjob.LibraryRefreshModeFull,
+		}, "Queued metadata refresh after episode order change")
+		if jobErr != nil {
+			var conflict *adminjob.ActiveJobConflictError
+			if !errors.As(jobErr, &conflict) {
+				slog.WarnContext(ctx, "queue episode-order metadata refresh failed", "component", "api", "library_id", folder.ID, "error", jobErr)
+			}
+		} else {
+			publishEventJob(ctx, h.EventsHub, "job.created", job)
+		}
+	} else if h.JobRepo != nil && languageChanged {
 		job, jobErr := h.JobRepo.CreateLibraryRefresh(ctx, userID, adminjob.LibraryRefreshRequest{
 			LibraryID:   folder.ID,
 			LibraryName: folder.Name,

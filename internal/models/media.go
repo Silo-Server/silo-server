@@ -54,6 +54,12 @@ type MediaFolder struct {
 	EpisodeOrderProvider string
 }
 
+// ValidEpisodeOrderProvider reports whether v is a value
+// MediaFolder.EpisodeOrderProvider accepts.
+func ValidEpisodeOrderProvider(v string) bool {
+	return v == "" || v == "tvdb" || v == "tmdb"
+}
+
 // MediaFile represents a row in the media_files table.
 type MediaFile struct {
 	ID                           int

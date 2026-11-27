@@ -42183,6 +42183,14 @@
             ],
             "type": "boolean"
           },
+          "episode_order_provider": {
+            "description": "Metadata provider whose seasons and episode numbers the library's shows follow: tvdb or tmdb. Empty follows the library's provider order for episodes (TVDB first on a default install). A show the provider has no episodes for falls back to the other enabled provider",
+            "examples": [
+              "tvdb"
+            ],
+            "pattern": "^(?:tvdb|tmdb)?$",
+            "type": "string"
+          },
           "id": {
             "description": "Opaque identifier",
             "examples": [
@@ -42320,6 +42328,7 @@
           "box_sets_in_search",
           "trailer_kinds",
           "realtime_monitoring",
+          "episode_order_provider",
           "sort_order"
         ],
         "type": "object"
@@ -43434,6 +43443,14 @@
               true
             ],
             "type": "boolean"
+          },
+          "episode_order_provider": {
+            "description": "tvdb, tmdb, or empty for the library's provider order; a change queues a full metadata refresh that renumbers the library's shows",
+            "examples": [
+              "tmdb"
+            ],
+            "pattern": "^(?:tvdb|tmdb)?$",
+            "type": "string"
           },
           "intro_detection_enabled": {
             "examples": [

@@ -31020,6 +31020,11 @@ export interface components {
       /** @example true */
       enabled: boolean;
       /**
+       * @description Metadata provider whose seasons and episode numbers the library's shows follow: tvdb or tmdb. Empty follows the library's provider order for episodes (TVDB first on a default install). A show the provider has no episodes for falls back to the other enabled provider
+       * @example tvdb
+       */
+      episode_order_provider: string;
+      /**
        * @description Opaque identifier
        * @example 1
        */
@@ -31595,6 +31600,11 @@ export interface components {
       chapter_thumbnails_enabled?: boolean;
       /** @example true */
       enabled?: boolean;
+      /**
+       * @description tvdb, tmdb, or empty for the library's provider order; a change queues a full metadata refresh that renumbers the library's shows
+       * @example tmdb
+       */
+      episode_order_provider?: string;
       /** @example false */
       intro_detection_enabled?: boolean;
       /**

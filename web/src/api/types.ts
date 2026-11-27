@@ -3595,6 +3595,8 @@ export interface Library {
    * The library's own real-time monitoring switch. It only takes effect while
    * the server-wide scanner.realtime_monitoring setting is on.
    */
+  /** tvdb, tmdb, or "" to follow the library's provider order for episodes. */
+  episode_order_provider?: string;
   realtime_monitoring: boolean;
   sort_order: number;
   poster_url?: string;
@@ -3747,6 +3749,8 @@ export interface CreateLibraryRequest {
   trailer_kinds?: string[];
   /** Omitted on create means on. */
   realtime_monitoring?: boolean;
+  /** Update only, and sent only when it changes: tvdb, tmdb, or "" for the provider order. */
+  episode_order_provider?: string;
 }
 
 /**

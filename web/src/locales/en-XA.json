@@ -28870,6 +28870,74 @@
       "value": "⟦Ŵĥéñ þŕöṽîđéŕš ĥåṽé ñö ţŕåñšļåţîöñ ƒöŕ ţĥîš ļîƀŕåŕý'š ļåñĝûåĝé, ţŕåñšļåţé đéšçŕîþţîöñš ŵîţĥ ÅÎ åƒţéŕ éåçĥ ŕéƒŕéšĥ. Ŕéǫûîŕéš ÅÎ đéšçŕîþţîöñ ţŕåñšļåţîöñ îñ Åđɱîñ Šéţţîñĝš → ÅÎ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
+  "web.admin.common.libraryEditor.metadata.episodeOrder": [
+    {
+      "type": 0,
+      "value": "⟦Éþîšöđé öŕđéŕ~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.libraryEditor.metadata.episodeOrderChange": [
+    {
+      "type": 0,
+      "value": "⟦Šåṽîñĝ å ñéŵ öŕđéŕ ŕéƒŕéšĥéš ţĥé ļîƀŕåŕý'š šĥöŵš åñđ ŕéñûɱƀéŕš ţĥéîŕ éþîšöđéš. Ŵåţçĥ ĥîšţöŕý šţåýš ŵîţĥ éåçĥ éþîšöđé.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.libraryEditor.metadata.episodeOrderFallback": [
+    {
+      "type": 0,
+      "value": "⟦Ŵĥéñ "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " ĥåš ñö éþîšöđéš ƒöŕ å šĥöŵ, Šîļö ûšéš "
+    },
+    {
+      "type": 1,
+      "value": "other"
+    },
+    {
+      "type": 0,
+      "value": "'š öŕđéŕ îñšţéåđ.~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.libraryEditor.metadata.episodeOrderHelp": [
+    {
+      "type": 0,
+      "value": "⟦Ŵĥîçĥ þŕöṽîđéŕ'š šéåšöñš åñđ éþîšöđé ñûɱƀéŕš ţĥîš ļîƀŕåŕý'š šĥöŵš ƒöļļöŵ. Ƒîļé ñåɱéš åŕé ŕéåđ îñ ţĥîš öŕđéŕ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.libraryEditor.metadata.episodeOrderNoFallback": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "other"
+    },
+    {
+      "type": 0,
+      "value": " îš ţûŕñéđ öƒƒ ƒöŕ éþîšöđéš, šö å šĥöŵ "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " đöéšñ'ţ ķñöŵ ķééþš ţĥé ñûɱƀéŕš ƒŕöɱ îţš ƒîļé ñåɱéš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.libraryEditor.metadata.episodeOrderOverride": [
+    {
+      "type": 0,
+      "value": "⟦Åñý šĥöŵ çåñ öṽéŕŕîđé ţĥîš ƒŕöɱ îţš þåĝé: Ṁåñåĝé → Éþîšöđé öŕđéŕ.~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.admin.common.libraryEditor.metadata.language": [
     {
       "type": 0,

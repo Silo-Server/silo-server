@@ -41,6 +41,7 @@ type Library struct {
 	BoxSetsInSearch            bool     `json:"box_sets_in_search" doc:"List matching box sets of this library in search, ahead of their movies" example:"true"`
 	TrailerKinds               []string `json:"trailer_kinds" doc:"Remote video kinds fetched during metadata refresh; empty disables them" example:"[\"trailer\"]"`
 	RealtimeMonitoring         bool     `json:"realtime_monitoring" doc:"Scan automatically when files in the library's folders change. Takes effect only while the server-wide scanner.realtime_monitoring setting is on." example:"true"`
+	EpisodeOrderProvider       string   `json:"episode_order_provider" pattern:"^(?:tvdb|tmdb)?$" doc:"Metadata provider whose seasons and episode numbers the library's shows follow: tvdb or tmdb. Empty follows the library's provider order for episodes (TVDB first on a default install). A show the provider has no episodes for falls back to the other enabled provider" example:"tvdb"`
 	SortOrder                  int      `json:"sort_order" doc:"Position among libraries, lowest first" example:"0"`
 	PosterURL                  string   `json:"poster_url,omitempty" format:"uri-reference" doc:"Presigned poster URL; absent when the library has no poster"`
 	LastScannedAt              *Instant `json:"last_scanned_at,omitempty" doc:"Absent until the first scan completes"`
@@ -82,6 +83,7 @@ type LibraryUpdate struct {
 	BoxSetsInSearch          *bool     `json:"box_sets_in_search,omitempty" nullable:"false" doc:"List matching box sets in search" example:"true"`
 	TrailerKinds             *[]string `json:"trailer_kinds,omitempty" nullable:"false" doc:"Replaces the allow-list; empty disables remote videos" example:"[\"trailer\"]"`
 	RealtimeMonitoring       *bool     `json:"realtime_monitoring,omitempty" nullable:"false" doc:"Scan automatically when files in the library's folders change. Takes effect only while the server-wide scanner.realtime_monitoring setting is on." example:"true"`
+	EpisodeOrderProvider     *string   `json:"episode_order_provider,omitempty" nullable:"false" pattern:"^(?:tvdb|tmdb)?$" doc:"tvdb, tmdb, or empty for the library's provider order; a change queues a full metadata refresh that renumbers the library's shows" example:"tmdb"`
 }
 
 // LibraryCreateInput is the createLibrary request.
@@ -1139,6 +1141,7 @@ func (reg *Registry) updateLibrary(ctx context.Context, in *LibraryUpdateInput) 
 		BoxSetsEnabled:           in.Body.BoxSetsEnabled,
 		BoxSetMinMovies:          in.Body.BoxSetMinMovies,
 		BoxSetsInSearch:          in.Body.BoxSetsInSearch,
+		EpisodeOrderProvider:     in.Body.EpisodeOrderProvider,
 	})
 	if err != nil {
 		return nil, libraryProblem(err)
@@ -1570,6 +1573,7 @@ func libraryOf(v handlers.LibraryView) Library {
 		BoxSetsInSearch:            v.BoxSetsInSearch,
 		TrailerKinds:               NonNil(v.TrailerKinds),
 		RealtimeMonitoring:         v.RealtimeMonitoring,
+		EpisodeOrderProvider:       v.EpisodeOrderProvider,
 		SortOrder:                  v.SortOrder,
 		PosterURL:                  v.PosterURL,
 		LastScannedAt:              instantPtr(v.LastScannedAt),
