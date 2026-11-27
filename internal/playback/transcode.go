@@ -62,7 +62,7 @@ type TranscodeOpts struct {
 	SourceVideoProfile   string
 	SourceVideoBitDepth  int
 	VideoBitstreamFilter string // validated copy-mode BSF: DV7ToHDR10BitstreamFilter
-	VideoSampleEntry     string // allowlisted copy-HLS sample entry: dvh1 or hvc1
+	VideoSampleEntry     string // allowlisted copy-HLS sample entry: dvh1, dav1, av01, or hvc1
 	// VideoRange is the HLS VIDEO-RANGE a copy remux's subtitle rendition
 	// variant names (CopyHLSVideoRange): "", PQ, or HLG.
 	VideoRange string
@@ -266,11 +266,19 @@ const CopyFMP4RecipeVersion = "2"
 
 const (
 	VideoSampleEntryDVH1 = "dvh1"
+	// Dolby Vision AV1 (profile 10) copies that keep their dvvC record. FFmpeg
+	// writes the record for a base layer without a compatible signal (10.0)
+	// only into a dav1 entry, and for 10.1 and 10.4 into av01 too. av01 is
+	// preferred where it works: FFmpeg's own demuxer (6.1 to 8.1) has no codec
+	// for a dav1 entry, while Media3 selects Dolby Vision from the record in
+	// either entry.
+	VideoSampleEntryDAV1 = "dav1"
+	VideoSampleEntryAV01 = "av01"
 	VideoSampleEntryHVC1 = "hvc1"
 )
 
 func validVideoSampleEntry(value string) bool {
-	return value == "" || value == VideoSampleEntryDVH1 || value == VideoSampleEntryHVC1
+	return value == "" || value == VideoSampleEntryDVH1 || value == VideoSampleEntryDAV1 || value == VideoSampleEntryAV01 || value == VideoSampleEntryHVC1
 }
 
 // VideoSampleEntryForDVCopy returns the sample entry a copy-video HLS session
@@ -1113,10 +1121,12 @@ func buildFFmpegArgs(opts TranscodeOpts) []string {
 	}
 	// Chrome and Edge require HEVC fMP4 tracks to be hvc1-tagged so parameter
 	// sets are carried in the initialization box. hvc1 is valid for copied
-	// HEVC and for server-encoded HEVC; dvh1 remains copy-only.
+	// HEVC and for server-encoded HEVC; the Dolby Vision entries remain
+	// copy-only. FFmpeg writes a Dolby Vision configuration record (dvcC/dvvC)
+	// for any codec only under -strict unofficial.
 	switch opts.VideoSampleEntry {
-	case VideoSampleEntryDVH1:
-		args = append(args, "-tag:v", VideoSampleEntryDVH1, "-strict", "unofficial")
+	case VideoSampleEntryDVH1, VideoSampleEntryDAV1, VideoSampleEntryAV01:
+		args = append(args, "-tag:v", opts.VideoSampleEntry, "-strict", "unofficial")
 	case VideoSampleEntryHVC1:
 		args = append(args, "-tag:v", VideoSampleEntryHVC1)
 	}

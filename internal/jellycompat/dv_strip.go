@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -265,10 +266,21 @@ func (h *PlaybackHandler) compatDVStripRouting(
 
 // compatCopyVideoRecipe returns the sample entry and bitstream filter for a
 // copy-video HLS session: the HDR10 strip tags the base layer hvc1, and an
-// unstripped Dolby Vision copy keeps its dvh1 entry.
-func compatCopyVideoRecipe(source PlaybackMediaSource, dvProfile int) (sampleEntry, bitstreamFilter string) {
+// unstripped Dolby Vision copy keeps its dvh1 entry. An AV1 profile 10 copy
+// for a client that asked for Dolby Vision (DOVIVariant, whose master
+// advertises dav1.10.LL) keeps its dvvC record: FFmpeg writes it into a dav1
+// entry when the base layer isn't compatible (10.0) and into av01 otherwise.
+// Other AV1 copies are written as before, without it.
+func compatCopyVideoRecipe(source PlaybackMediaSource, file *models.MediaFile) (sampleEntry, bitstreamFilter string) {
 	if source.DVStripToHDR10 {
 		return playback.VideoSampleEntryHVC1, playback.DV7ToHDR10BitstreamFilter
+	}
+	dvProfile := file.PrimaryDVProfile()
+	if source.DOVIVariant && dvProfile == 10 {
+		if video := file.VideoTracks[0]; video.DVBLCompatIDPresent && video.DVBLCompatID == 0 {
+			return playback.VideoSampleEntryDAV1, ""
+		}
+		return playback.VideoSampleEntryAV01, ""
 	}
 	return playback.VideoSampleEntryForDVCopy(dvProfile), ""
 }

@@ -648,6 +648,24 @@ var buildFFmpegArgsEmitsRecipeTokensCases = []ffmpegArgsTokenCase{
 		want: []string{"-c:v copy -bsf:v hevc_mp4toannexb -tag:v dvh1 -strict unofficial"},
 	},
 	{
+		// Without -strict unofficial FFmpeg drops the AV1 dvvC record.
+		name: "copy video sample entry Dolby Vision AV1",
+		opts: TranscodeOpts{
+			InputPath: "/media/movie.mkv", SourceVideoCodec: "av1", TargetCodecVideo: "copy", TargetCodecAudio: "copy",
+			VideoSampleEntry: VideoSampleEntryAV01, SegmentDuration: 2,
+		},
+		want: []string{"-c:v copy -tag:v av01 -strict unofficial"},
+	},
+	{
+		// FFmpeg writes a 10.0 stream's dvvC record only into a dav1 entry.
+		name: "copy video sample entry Dolby Vision AV1 without a compatible base layer",
+		opts: TranscodeOpts{
+			InputPath: "/media/movie.mkv", SourceVideoCodec: "av1", TargetCodecVideo: "copy", TargetCodecAudio: "copy",
+			VideoSampleEntry: VideoSampleEntryDAV1, SegmentDuration: 2,
+		},
+		want: []string{"-c:v copy -tag:v dav1 -strict unofficial"},
+	},
+	{
 		// MPEG-TS has no sample entry, but -strict unofficial is what makes the
 		// MPEG-TS muxer write the DOVI video stream descriptor, so a preserved
 		// Dolby Vision copy keeps its configuration in TS as well.

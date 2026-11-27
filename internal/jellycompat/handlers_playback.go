@@ -1984,7 +1984,7 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 	}
 	if compatHLSCopiesVideo(source) {
 		reqBody.TargetCodecVideo = compatCopyCodec
-		reqBody.VideoSampleEntry, reqBody.VideoBitstreamFilter = compatCopyVideoRecipe(source, file.PrimaryDVProfile())
+		reqBody.VideoSampleEntry, reqBody.VideoBitstreamFilter = compatCopyVideoRecipe(source, file)
 		reqBody.CopyVideoMPEGTS = source.HLSRemuxMPEGTS
 		reqBody.KeyframePlaylist = source.KeyframePlaylist
 		reqBody.CopyFMP4RecipeVersion = playback.CopyFMP4RecipeVersion
