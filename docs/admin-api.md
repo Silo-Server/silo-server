@@ -708,8 +708,8 @@ A prepared download is classed by the same work: one that re-encodes video is a
 It comes from the same health response as `active_jobs`, and both count work
 the node has admitted and not yet started, so a start still waiting for its
 first segment counts against the node from the moment the node accepts it.
-Their sums can differ briefly while a job stops. Node selection reads it: see "Job kind balancing" below. Omitted on a
-node predating job kinds.
+Their sums can differ briefly while a job stops. Node selection reads it: see
+"Job kind balancing" below. Omitted on a node predating job kinds.
 
 ### Job kind balancing
 
