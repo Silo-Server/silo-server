@@ -30,6 +30,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/demomode"
 	"github.com/Silo-Server/silo-server/internal/diagnostics"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/markers"
@@ -1561,6 +1562,28 @@ func localLoginSettingError(err error, was auth.LocalLoginSettings) error {
 	return apiError(http.StatusConflict, "sign_in_provider_required", "Turn on a sign-in provider that can sign people in before turning local password sign-in off; an OpenID Connect provider also needs server.public_url")
 }
 
+// checkDemoAccountSetting refuses naming, as the demo account, an account
+// that does not exist or is an administrator's, at the request member field.
+func (h *AdminHandler) checkDemoAccountSetting(ctx context.Context, tx pgx.Tx, before, after map[string]string, field string) error {
+	key := demomode.AccountSettingKey
+	if before[key] == after[key] {
+		return nil
+	}
+	var err error
+	switch {
+	case tx != nil:
+		err = auth.CheckDemoAccountSetting(ctx, tx, after[key])
+	case h.pool != nil:
+		err = auth.CheckDemoAccountSetting(ctx, h.pool, after[key])
+	default:
+		return ErrAdminSettingsUnavailable
+	}
+	if errors.Is(err, auth.ErrDemoAccountNotFound) || errors.Is(err, auth.ErrDemoAccountAdmin) {
+		return &APIError{Status: http.StatusBadRequest, Code: adminInvalidSettingsCode, Message: err.Error(), Field: field}
+	}
+	return err
+}
+
 // errBackupKeyNotConfirmed refuses switching backups to S3 before the admin
 // confirmed keeping a copy of this server's SECRET_KEY.
 var errBackupKeyNotConfirmed = &APIError{
@@ -1732,6 +1755,10 @@ func (h *AdminHandler) updateAdminSettings(ctx context.Context, tx pgx.Tx, value
 			before := h.effectiveAdminSettings(stored)
 			after = h.effectiveAdminSettings(prospective)
 			if err := h.checkLocalLoginSetting(ctx, tx, before, after); err != nil {
+				preconditionErr = err
+				return nil, err
+			}
+			if err := h.checkDemoAccountSetting(ctx, tx, before, after, "values."+demomode.AccountSettingKey); err != nil {
 				preconditionErr = err
 				return nil, err
 			}
@@ -2141,6 +2168,10 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 			before := h.effectiveAdminSettings(stored)
 			after = h.effectiveAdminSettings(prospective)
 			if err := h.checkLocalLoginSetting(ctx, tx, before, after); err != nil {
+				preconditionErr = err
+				return nil, err
+			}
+			if err := h.checkDemoAccountSetting(ctx, tx, before, after, "value"); err != nil {
 				preconditionErr = err
 				return nil, err
 			}

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/ai/reasoning"
+	"github.com/Silo-Server/silo-server/internal/demomode"
 	"github.com/Silo-Server/silo-server/internal/lang"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -457,6 +458,8 @@ var adminSettingDefaults = map[string]string{
 	AuthPasswordRequireSpecialSettingKey:      "false",
 	AuthProviderRecheckIntervalSettingKey:     "12h",
 	AuthProviderRecheckOutagePolicySettingKey: AuthRecheckFailOpen,
+	// The demo's shared account, by account ID; empty names none.
+	demomode.AccountSettingKey: "",
 
 	"database.max_connections":   "20",
 	"s3.public_path_style":       "true",
@@ -817,6 +820,12 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		BackupEnabledSettingKey, BackupIncludeIntroFingerprintsSettingKey, BackupIncludeSubtitlesSettingKey,
 		BackupS3PathStyleSettingKey:
 		return normalizeAdminBool(key, value)
+
+	case demomode.AccountSettingKey:
+		if value == "" {
+			return "", nil
+		}
+		return normalizeAdminInt(key, value, 1, math.MaxInt32)
 
 	case BackupTimeSettingKey:
 		hour, minute, ok := ParseBackupTime(value)

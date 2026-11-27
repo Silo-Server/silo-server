@@ -548,7 +548,8 @@ same login name, or an `alice#Kids` account signing in through Jellyfin with the
 budget, leaves that budget's counts alone and makes its address known only for its own
 names, so it cannot clear guesses at the account the name finds.
 
-An address becomes known for an account's username and email address when a password
+An address becomes known for an account's username and email address (the email only if
+it looks like an address, since sign-in looks an account up by no other stored value) when a password
 sign-in to the account succeeds from it (including signup, invitation acceptance and a
 completed password reset) or one of the account's login sessions refreshes from it (a
 Jellyfin app's session refreshes its login session as the app keeps using it), and
@@ -597,6 +598,55 @@ every 15 minutes. While that lasts, the account's people still sign in from know
 addresses, existing sessions keep working and refreshing, completing a password reset or
 an invitation signs in without spending the budget, and a signed-in device can approve a
 new one through device sign-in.
+
+### The demo account
+
+On a [demo](#demo-mode) server, the per-name limit on failed sign-ins is shared by every
+visitor of the demo's shared account. The `demo.account_id` server setting names that
+account by its account ID (empty by default, naming none). While demo mode is on and the
+setting names an existing, enabled account that is not an administrator and signs in with
+its local password, password sign-ins with that account's own sign-in names (its username
+and its email address) skip the per-name budget, wherever the local provider checks the
+password. The whole per-name budget is skipped, including the budget it gives an address
+the account is known to sign in from once the name is locked, which exists only within
+it. Nothing else changes: the limits by client address on each listener's sign-in (see
+below), profile PIN attempts, and every other name's budget apply
+as before, and a sign-in that names another provider, or
+a Jellyfin name whose budget name signs in to a different account, keeps the budget.
+
+Writing the setting refuses an account that does not exist or is an administrator's, with
+the usual settings validation answer at the setting's field. The exemption fails closed to
+the ordinary budget: with demo mode off, the setting empty, the account deleted, disabled,
+without local password sign-in or promoted to administrator since, or a read of the
+settings or the account that fails. The two settings deliberately differ when a read
+fails. The demo refusals tighten what a visitor may do, so they keep the last value this
+process read (`demomode.Setting`). The exemption loosens a limit, so it reads the
+settings store directly and applies only on a read that just succeeded. The account's
+names are worked out off the sign-in path (`auth.DemoSignIn`, refreshed in the
+background), and an attempt only compares its name's budget key with them: an attempt for
+any other name runs the same reads as without the setting. An attempt whose name matches
+re-reads the settings and the account before it skips the budget; names an earlier
+refresh found only choose which attempts re-read, and never skip the budget on their own;
+a refresh or re-read that fails holds no names until a read succeeds. A re-read cut
+short because the attempt's own request ended denies that attempt and leaves the names
+in place for every other attempt. A rename or a newly set email takes effect at the next refresh; until then that name keeps the ordinary
+budget.
+
+What an operator gives up by naming an account:
+
+- The per-name limit no longer slows password guessing against that one account. On a
+  demo its password is public by design. The limits by client address still apply: on the
+  native and Jellyfin-compatible logins while request rate limiting (`ratelimit.enabled`)
+  is on, and always on the Audiobookshelf-compatible login.
+- The server no longer treats that one name like every other, so the promise that the
+  budget reveals nothing about which names exist holds for every name but that one.
+
+Name only the account whose password the demo publishes: naming any other account removes
+that account's per-name limit while demo mode is on. Writing the setting accepts a
+disabled account; an account that is disabled, or becomes an administrator, simply gets the
+ordinary limit.
+
+A restore treats the setting as server-specific: it names an account row of this server.
 
 ## Authenticated account allowance
 
@@ -1188,6 +1238,9 @@ cookie) when it verifies as one of the same account and profile. It closes no pl
 (none records which token opened it). A refresh token the request does not carry stays live
 until it expires. When the account's role can't be read, or the process has never read the
 setting, sign-out takes the demo path. An expired access token revokes nothing.
+
+`demo.account_id` names the shared account so the per-name limit on failed sign-ins does
+not apply to it; see [The demo account](#the-demo-account).
 
 `TestDemoModeCoversAccountOperations` in `internal/apiv2` fails when an operation tagged
 `account`, `api-keys`, `auth`, `device-login`, `notifications` or `profiles` that a

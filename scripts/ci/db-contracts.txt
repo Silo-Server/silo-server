@@ -36,6 +36,7 @@
 ./internal/catalog TestCatalogQueryWithoutLibraryLeavesOutItemsInNoLibraryDB
 ./internal/catalog TestCountsAndListingsLeaveOutItemsHeldByRemovalGraceDB
 ./internal/catalog TestSearchLeavesOutItemsInNoLibraryPostgres
+./internal/api/handlers TestDemoAccountSettingRefusedDB
 ./internal/api/handlers TestUnmatchedItemsLeaveOutItemsInNoLibraryDB
 ./internal/api/handlers TestPersonalListPagesKeepVisibleEpisodesDB
 ./internal/catalog TestPersonalListPageFollowsAccessDB
@@ -329,6 +330,12 @@
 ./internal/auth TestAPIKeyCreationRefusesRevokedCredentialDB
 ./internal/auth TestPasswordSignInForRoutesDB
 ./internal/auth TestExternalSignInDemoModeDB
+./internal/auth TestOwnSignInKeysSkipNonAddressEmailDB
+./internal/auth TestDemoSignInNameBudgetDB
+./internal/auth TestDemoSignInFailsClosedDB
+./internal/auth TestDemoSignInCanceledAttemptDB
+./internal/auth TestDemoSignInGuardsDB
+./internal/auth TestCheckDemoAccountSettingDB
 ./internal/auth TestExternalAccountCannotPreemptInitialSetupDB
 ./internal/auth TestPluginAuthBindingCallbackModeDB
 ./internal/auth TestLocalPasswordOffAccountsDB

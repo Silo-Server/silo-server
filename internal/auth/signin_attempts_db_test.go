@@ -346,3 +346,58 @@ func TestSignInNameBudgetDB(t *testing.T) {
 		}
 	})
 }
+
+// TestOwnSignInKeysSkipNonAddressEmailDB: on a server without a demo
+// account, a successful sign-in resets the name it spent and makes the
+// address known for the account's own names: its username, and its email
+// only when that looks like an address, since sign-in never looks an account
+// up by any other stored value. Catches a stored value that is not an
+// address being trusted or cleared as one of the account's names, while an
+// account whose email is an address keeps both.
+func TestOwnSignInKeysSkipNonAddressEmailDB(t *testing.T) {
+	env := newExternalSignInEnv(t)
+	env.setSetting(t, config.AuthLocalPasswordLoginSettingKey, "true")
+	users, sessions := NewUserRepository(env.pool), NewSessionRepository(env.pool)
+	svc := NewService(NewLocalProvider(users, sessions), NewJWTService("synthetic-own-keys-secret-0123456789", time.Minute, 24*time.Hour), sessions, users, nil, nil, nil)
+	limiter := newCountingSignInAttempts(3)
+	svc.SetSignInAttempts(limiter)
+	key := func(name string) string { return signInKey(strings.ToLower(name)) }
+	known := func(name string) bool { return limiter.known[key(name)+"|"] }
+
+	for _, tc := range []struct {
+		label, email string
+		emailKnown   bool
+	}{
+		{"an email that is not an address", env.name("own-keys-no-at"), false},
+		{"an email that is an address", env.name("own-keys-mail") + "@example.test", true},
+	} {
+		t.Run(tc.label, func(t *testing.T) {
+			defer func() { limiter.expire(); clear(limiter.known) }()
+			account := env.localAccount(t, "own-keys-"+strings.ReplaceAll(tc.label, " ", "-"), models.RoleUser)
+			if _, err := env.pool.Exec(t.Context(), `UPDATE users SET email = $1 WHERE id = $2`, tc.email, account.ID); err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := svc.LoginWithProvider(t.Context(), "", account.Username, "wrong horse battery", "test", ""); !errors.Is(err, ErrInvalidCredentials) {
+				t.Fatalf("wrong password: %v", err)
+			}
+			if _, _, err := svc.LoginWithProvider(t.Context(), "", account.Username, "correct horse battery", "test", ""); err != nil {
+				t.Fatalf("sign-in: %v", err)
+			}
+			if n := limiter.counts[key(account.Username)]; n != 0 {
+				t.Fatalf("the username's count is %d after a successful sign-in, want it reset", n)
+			}
+			if !known(account.Username) || known(tc.email) != tc.emailKnown {
+				t.Fatalf("known: username %v, email %v; want username true, email %v", known(account.Username), known(tc.email), tc.emailKnown)
+			}
+			// A sign-in that spends no budget (signup, invitation, reset)
+			// trusts the same names.
+			clear(limiter.known)
+			if _, _, err := svc.Login(t.Context(), account.Username, "correct horse battery", "test", ""); err != nil {
+				t.Fatalf("login: %v", err)
+			}
+			if !known(account.Username) || known(tc.email) != tc.emailKnown {
+				t.Fatalf("after Login, known: username %v, email %v; want username true, email %v", known(account.Username), known(tc.email), tc.emailKnown)
+			}
+		})
+	}
+}

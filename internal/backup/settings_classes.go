@@ -36,7 +36,8 @@ const (
 // serverSpecificSettings are the server-specific keys and prefixes (ending
 // in "." or "_"). The AI sign-in mode and models are this server's choice
 // among what its own AI providers and ChatGPT account offer, which only
-// they can validate.
+// they can validate. The demo account names an account row by its ID, which
+// means that account only among this server's accounts.
 var serverSpecificSettings = append(strings.Fields(`
 	server.identity_id server.public_url server.local_url server.web_media_url
 	database. redis. userdb. storage. artwork. s3. backup. setup.
@@ -53,6 +54,7 @@ var serverSpecificSettings = append(strings.Fields(`
 	recommendations.embedding_provider_id recommendations.embedding_lock recommendations.policy_marked_generation
 	media_images. chapter_thumbnails. ui.dashboard.hidden_attention
 	direct_connections.
+	demo.account_id
 `), plugins.ProvisionRestoreHoldKey)
 
 // restoredSettings are the keys and prefixes restored as the backup has

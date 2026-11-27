@@ -243,7 +243,11 @@ type Dependencies struct {
 	// (the v2 gate, external sign-in, the Audiobookshelf-compatible
 	// sign-out), remembering the last value read for when a read fails.
 	// Nil reads the settings store directly.
-	DemoMode         *demomode.Setting
+	DemoMode *demomode.Setting
+	// DemoSignIn exempts the demo account named by demo.account_id from the
+	// per-name sign-in limit, shared with the Jellyfin and Audiobookshelf
+	// sign-ins. Nil exempts no name.
+	DemoSignIn       *auth.DemoSignIn
 	ClientIPResolver *clientip.Resolver
 	// NetworkAccess is the ingress-token registry and provider status cache
 	// for network access provider plugins on this host. The token middleware
@@ -730,6 +734,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 			signInAttempts = ratelimit.NewMemorySignInLimiter(ratelimit.SignInNamePolicy, ratelimit.SignInSourcePolicy)
 		}
 		authService.SetSignInAttempts(signInAttempts)
+		authService.SetDemoSignIn(deps.DemoSignIn)
 		if settingsRepo != nil {
 			invitationService = invitations.NewService(
 				invitations.NewRepository(deps.DB),

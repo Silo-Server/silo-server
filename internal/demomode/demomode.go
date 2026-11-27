@@ -13,6 +13,13 @@ import (
 // whose visitors share one account that is not an administrator.
 const SettingKey = "demo.enabled"
 
+// AccountSettingKey names the demo's shared account by its account ID, or
+// is empty. While demo mode is on, the per-name limit on failed password
+// sign-ins does not apply to that account's sign-in names (auth.DemoSignIn).
+// It is not read through Setting: the exemption loosens a limit, so it
+// rests only on a read that just succeeded.
+const AccountSettingKey = "demo.account_id"
+
 // OnValue is the only stored value that turns demo mode on. Every reader
 // compares the raw stored value with it, untrimmed.
 const OnValue = "true"
