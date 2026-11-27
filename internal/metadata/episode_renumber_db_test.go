@@ -457,10 +457,13 @@ func TestEpisodesOfCurrentNumberingDB(t *testing.T) {
 		}
 		all = append(all, episode)
 	}
+	// shown are the seasons the refresh shows; a season whose episodes
+	// failed to load is shown without targets.
+	shown := []int32{1, 2}
 	markTargets := func(targets ...EpisodeResult) {
 		t.Helper()
 		if err := pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
-			_, err := markListedEpisodes(ctx, tx, series, "tvdb", targets)
+			_, err := markListedEpisodes(ctx, tx, series, "tvdb", shown, targets)
 			return err
 		}); err != nil {
 			t.Fatal(err)
@@ -475,19 +478,7 @@ func TestEpisodesOfCurrentNumberingDB(t *testing.T) {
 		}
 		markTargets(targets...)
 	}
-	current := func() string {
-		t.Helper()
-		kept, err := svc.episodesOfCurrentNumbering(ctx, series, all)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var slots []string
-		for _, e := range kept {
-			slots = append(slots, fmt.Sprintf("%d.%d", e.SeasonNumber, e.EpisodeNumber))
-		}
-		sort.Strings(slots)
-		return strings.Join(slots, " ")
-	}
+	current := func() string { t.Helper(); return currentNumberingSlots(t, svc, series, all) }
 
 	add(1, 1)
 	add(1, 2)
@@ -542,6 +533,28 @@ func TestEpisodesOfCurrentNumberingDB(t *testing.T) {
 	if got := current(); got != "1.1 1.2 1.3 2.1" {
 		t.Fatalf("after a refresh that lacks the other provider's 1.4 = %q", got)
 	}
+	// An order without season 2 at all lets go of its row.
+	shown = []int32{1}
+	mark("1.1", "1.2", "1.3")
+	if got := current(); got != "1.1 1.2 1.3" {
+		t.Fatalf("after an order without season 2 = %q", got)
+	}
+}
+
+// currentNumberingSlots lists the episodes episodesOfCurrentNumbering keeps,
+// as sorted "season.episode" slots.
+func currentNumberingSlots(t *testing.T, svc *MetadataService, series string, all []*models.Episode) string {
+	t.Helper()
+	kept, err := svc.episodesOfCurrentNumbering(t.Context(), series, all)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var slots []string
+	for _, e := range kept {
+		slots = append(slots, fmt.Sprintf("%d.%d", e.SeasonNumber, e.EpisodeNumber))
+	}
+	sort.Strings(slots)
+	return strings.Join(slots, " ")
 }
 
 // insertRenumberTestSeries stores a matched series titled title under a TVDB

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"sort"
 	"strings"
 
@@ -280,9 +279,11 @@ func writeEpisodeFileNumbers(ctx context.Context, tx pgx.Tx, seriesID, structure
 // episodes. Seasons are the structure provider's default ones (its provider
 // numbers, else the shown ones), since the absolute layout shows every
 // season as one; a row another provider numbered goes by its shown season.
-// It runs before this refresh's provider numbers are written. It returns how
-// many rows changed.
-func markListedEpisodes(ctx context.Context, tx pgx.Tx, seriesID, structureSlug string, targets []EpisodeResult) (int64, error) {
+// A row in a season the refresh does not show at all (shownSeasons, the
+// order's seasons and the targets') is not listed either: the order has no
+// such season. It runs before this refresh's provider numbers are written.
+// It returns how many rows changed.
+func markListedEpisodes(ctx context.Context, tx pgx.Tx, seriesID, structureSlug string, shownSeasons []int32, targets []EpisodeResult) (int64, error) {
 	n := len(targets)
 	seasons, numbers, providerSeasons := make([]int32, 0, n), make([]int32, 0, n), make([]int32, 0, n)
 	for _, target := range targets {
@@ -303,12 +304,13 @@ func markListedEpisodes(ctx context.Context, tx pgx.Tx, seriesID, structureSlug 
 			SELECT e.content_id,
 			       EXISTS (SELECT 1 FROM listed WHERE s = e.season_number AND n = e.episode_number) AS at_target,
 			       CASE WHEN e.provider_numbering = $5 THEN COALESCE(e.provider_season_number, e.season_number)
-			            ELSE e.season_number END IN (SELECT ps FROM listed) AS loaded
+			            ELSE e.season_number END IN (SELECT ps FROM listed)
+			       OR NOT (e.season_number = ANY($6::int[])) AS loaded
 			FROM episodes e WHERE e.series_id = $1)
 		UPDATE episodes e SET unlisted = NOT m.at_target
 		FROM marks m
 		WHERE e.content_id = m.content_id AND (m.at_target OR m.loaded) AND e.unlisted = m.at_target`,
-		seriesID, seasons, numbers, providerSeasons, structureSlug)
+		seriesID, seasons, numbers, providerSeasons, structureSlug, shownSeasons)
 	if err != nil {
 		return 0, fmt.Errorf("marking the listed episodes of %s: %w", seriesID, err)
 	}
@@ -330,9 +332,13 @@ func (s *MetadataService) episodesOfCurrentNumbering(ctx context.Context, series
 	if len(unlisted) == 0 {
 		return episodes, nil
 	}
+	skip := make(map[string]bool, len(unlisted))
+	for _, id := range unlisted {
+		skip[id] = true
+	}
 	kept := make([]*models.Episode, 0, len(episodes))
 	for _, episode := range episodes {
-		if episode != nil && !slices.Contains(unlisted, episode.ContentID) {
+		if episode != nil && !skip[episode.ContentID] {
 			kept = append(kept, episode)
 		}
 	}
