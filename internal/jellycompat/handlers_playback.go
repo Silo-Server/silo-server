@@ -1186,6 +1186,7 @@ func (h *PlaybackHandler) compatHLSResolveRequest(
 		// path; nil on the default path, so every healthy proxy stays eligible.
 		ProxyEligible:    nodepool.ClientReachableVia(netaccess.PathFromContext(ctx), nil),
 		ExcludedShapeIDs: excludedShapes,
+		TranscodesAudio:  compatHLSTranscodesAudio(source),
 	}, nil
 }
 

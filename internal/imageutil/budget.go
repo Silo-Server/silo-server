@@ -48,7 +48,23 @@ var maxDecodeWait = 30 * time.Second
 type decodeBudget struct {
 	pixels int64
 	slots  *semaphore.Weighted
+
+	// freeMemory runs once the budget has been empty for idleReleaseDelay;
+	// releaseFreeMemory outside tests.
+	freeMemory func()
+	// held counts the reservations held now. idle numbers the times the
+	// budget emptied, so a delayed release can tell whether it is still the
+	// latest. Guarded by mu.
+	mu   sync.Mutex
+	held int
+	idle uint64
 }
+
+// idleReleaseDelay is how long the budget stays empty before the memory the
+// decodes freed goes back to the operating system (releaseFreeMemory). A
+// burst of artwork, such as the images of a newly added library, holds
+// reservations nearly without a break; the release follows its end.
+const idleReleaseDelay = 5 * time.Second
 
 // newDecodeBudget sizes the budget to memoryBytes, the process's memory
 // limit, or to unboundedDecodePixels when that is zero.
@@ -57,7 +73,7 @@ func newDecodeBudget(memoryBytes int64) *decodeBudget {
 	if memoryBytes > 0 {
 		pixels = memoryBytes / decodeMemoryShare / decodeBytesPerPixel
 	}
-	return &decodeBudget{pixels: pixels, slots: semaphore.NewWeighted(pixels)}
+	return &decodeBudget{pixels: pixels, slots: semaphore.NewWeighted(pixels), freeMemory: releaseFreeMemory}
 }
 
 // decodes is the process's budget, sized on first use.
@@ -88,7 +104,32 @@ func (b *decodeBudget) reserve(size bimg.ImageSize) (release func(), err error) 
 	if err := b.slots.Acquire(ctx, pixels); err != nil {
 		return nil, ErrBusy
 	}
-	return func() { b.slots.Release(pixels) }, nil
+	b.mu.Lock()
+	b.held++
+	b.mu.Unlock()
+	return func() {
+		b.slots.Release(pixels)
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		if b.held--; b.held == 0 {
+			// A timer, not a stopped and reset one: a reservation from a
+			// testing/synctest bubble must not stop a timer created outside it.
+			b.idle++
+			idle := b.idle
+			time.AfterFunc(idleReleaseDelay, func() { b.releaseIfIdle(idle) })
+		}
+	}, nil
+}
+
+// releaseIfIdle runs freeMemory if the budget has stayed empty since it
+// emptied for the idle'th time.
+func (b *decodeBudget) releaseIfIdle(idle uint64) {
+	b.mu.Lock()
+	still := b.held == 0 && b.idle == idle
+	b.mu.Unlock()
+	if still {
+		b.freeMemory()
+	}
 }
 
 // NeedsRasterizing reports whether data is in a format libvips reads but the

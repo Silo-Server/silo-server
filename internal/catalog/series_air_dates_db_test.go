@@ -186,6 +186,49 @@ func TestSeriesAirDatesFollowEpisodesAndCalendarDB(t *testing.T) {
 		assertAirDates(t, seriesID, day(-7), day(7))
 	})
 
+	t.Run("specials do not extend the last aired date", func(t *testing.T) {
+		// Issue #5393: a special that aired after the finale must not move
+		// the series' end date past what the item endpoint reports.
+		seriesID, seasonID := seedSeries(t, "specials")
+		eps := episodes(seriesID, seasonID, day(-30), day(-20))
+		special := &models.Episode{
+			ContentID:      seriesID + "-special-1",
+			SeriesID:       seriesID,
+			SeasonNumber:   0,
+			EpisodeNumber:  1,
+			Title:          "Special",
+			AirDate:        day(-1),
+			MetadataSource: "provider",
+		}
+		upcomingSpecial := &models.Episode{
+			ContentID:      seriesID + "-special-2",
+			SeriesID:       seriesID,
+			SeasonNumber:   0,
+			EpisodeNumber:  2,
+			Title:          "Upcoming special",
+			AirDate:        day(5),
+			MetadataSource: "provider",
+		}
+		if err := repo.BulkUpsert(ctx, seriesID, append(eps, special, upcomingSpecial)); err != nil {
+			t.Fatalf("BulkUpsert: %v", err)
+		}
+		// The upcoming special still schedules the sweep's next visit.
+		assertAirDates(t, seriesID, day(-20), day(5))
+		// A special with a file is still the newest episode a viewer can play.
+		onDisk(t, eps[0], special)
+		assertAvailable(t, seriesID, day(-1))
+
+		// A series with no aired regular episode keeps its newest special
+		// rather than falling back to its premiere date.
+		onlySpecials, _ := seedSeries(t, "only-specials")
+		ova := *special
+		ova.ContentID, ova.SeriesID = onlySpecials+"-special-1", onlySpecials
+		if err := repo.BulkUpsert(ctx, onlySpecials, []*models.Episode{&ova}); err != nil {
+			t.Fatalf("BulkUpsert only specials: %v", err)
+		}
+		assertAirDates(t, onlySpecials, day(-1), nil)
+	})
+
 	t.Run("latest available air date counts only episodes on disk", func(t *testing.T) {
 		seriesID, seasonID := seedSeries(t, "on-disk")
 		// Issue #2741: the provider knows today's episode, which has no file

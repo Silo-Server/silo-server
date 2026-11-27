@@ -1717,6 +1717,7 @@ func (h *PlaybackHandler) resolveHLSRouteWithPolicyV3(
 		EstimatedBitrateKbps: result.TargetBitrateKbps,
 		TranscodeEligible:    eligible, ProxyEligible: proxyEligible, ExcludedShapeIDs: excludedShapes,
 		UnreachableNodes: unreachableRouteNodesV3(ctx),
+		TranscodesAudio:  result.TranscodeAudio,
 	})
 	if err != nil {
 		slog.ErrorContext(ctx, "compile playback node route", "component", "noderouting", "error", err)
@@ -3647,6 +3648,7 @@ func (h *PlaybackHandler) resolveIdentityRouteV3(r *http.Request, sessionID stri
 		ProxyExecutionEligible: excludeUnreachableRouteNodesV3(r.Context(), nodepool.ClientReachableVia(accessPath, h.identityProxyEligibilityV3(r.Context(), result))),
 		ExcludedShapeIDs:       excludedShapes,
 		UnreachableNodes:       unreachableRouteNodesV3(r.Context()),
+		TranscodesAudio:        result.TranscodeAudio,
 	})
 	if err != nil {
 		return noderouting.Decision{}, &transportErrorV3{reason: string(noderouting.OutcomePolicyUnsatisfied), message: "The playback routing policy is invalid.", retryable: false, cause: err}

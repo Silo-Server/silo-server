@@ -752,6 +752,13 @@ describe("useAudiobookPlayback", () => {
     expect(audio.pause).toHaveBeenCalled();
   });
 
+  it("setSleep reports the full duration when armed long after the player opened", () => {
+    const { result } = renderAudiobookPlayback();
+    vi.setSystemTime(Date.now() + 40_000);
+    act(() => result.current.setSleep({ kind: "duration", seconds: 300 }));
+    expect(result.current.sleep.remainingMs).toBe(300_000);
+  });
+
   it("setSleep with off clears any armed timer", () => {
     const { result } = renderAudiobookPlayback();
     act(() => result.current.setSleep({ kind: "duration", seconds: 5 }));

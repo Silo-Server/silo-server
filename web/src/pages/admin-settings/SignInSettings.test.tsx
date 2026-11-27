@@ -464,7 +464,7 @@ describe("SignInSettings turning a provider on and off", () => {
     mount();
     await user.click(screen.getByRole("button", { name: "Turn on" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Another sign-in provider is already on",
+      "Another sign-in provider is active",
     );
   });
 
@@ -474,7 +474,7 @@ describe("SignInSettings turning a provider on and off", () => {
     const oidc = providerPanel("OpenID Connect");
     await user.click(within(oidc).getByRole("button", { name: "Turn off" }));
     const dialog = await screen.findByRole("alertdialog");
-    expect(dialog).toHaveTextContent("can't sign in until it's back on");
+    expect(dialog).toHaveTextContent("won’t be able to sign in until you turn it back on");
     await user.click(within(dialog).getByRole("button", { name: "Turn off" }));
     await waitFor(() =>
       expect(
@@ -862,7 +862,9 @@ describe("SignInSettings connection test", () => {
     const issuer = within(oidc).getByLabelText("Issuer URL");
     await user.clear(issuer);
     await user.type(issuer, "https://id.example.test/new");
-    expect(within(oidc).getByText(/Tests your unsaved changes/)).toBeInTheDocument();
+    expect(
+      within(oidc).getByText(/Tests your current settings, including unsaved changes/),
+    ).toBeInTheDocument();
     await user.click(await within(oidc).findByRole("button", { name: "Test connection" }));
     expect(await within(oidc).findByText("Every check passed.")).toBeInTheDocument();
     const call = opCalls("POST /api/v2/admin/plugins/installations/{id}/auth-binding/test")[0]!;
@@ -962,11 +964,11 @@ describe("SignInSettings password sign-in", () => {
     const user = userEvent.setup();
     state.users = [admin({ break_glass: false })];
     mount();
-    expect(screen.getByText(/No break-glass admin yet/)).toBeInTheDocument();
+    expect(screen.getByText(/No break-glass admins yet/)).toBeInTheDocument();
     await user.click(screen.getByRole("switch", { name: "Allow password sign-in" }));
     expect(state.setValue).not.toHaveBeenCalled();
     const alert = screen.getByRole("alert");
-    expect(alert).toHaveTextContent("Password sign-in can't be turned off yet");
+    expect(alert).toHaveTextContent("Password sign-in can’t be turned off yet");
     await waitFor(() => expect(document.activeElement).toBe(alert));
   });
 
