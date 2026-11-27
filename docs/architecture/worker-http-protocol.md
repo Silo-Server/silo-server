@@ -74,8 +74,9 @@ A transcode node that declares a job cap (`SILO_NODE_MAX_TRANSCODES`, see
 [transcode nodes](transcode-nodes.md#what-the-node-enforces)) refuses new work
 past it with `503`, `Retry-After: 5` and `X-Silo-Node-Refusal: at_capacity`
 (`nodepool.NodeRefusalHeader`). It counts what health reports as
-`active_jobs`, plus work it has admitted and not yet counted, under one lock,
-so two starts arriving at the cap less one cannot both pass. The routes that
+`active_jobs`, which includes work it has admitted and not yet started (a
+start still waiting for its first segment), under one lock, so two starts
+arriving at the cap less one cannot both pass. The routes that
 count a job refuse: `POST /transcode/start` (plain text, as when draining),
 `POST /downloads/prepare` (plain text), `POST /trickplay/extract` (reason
 `node_busy`) and a progressive remux `GET`. Work that continues a job the node

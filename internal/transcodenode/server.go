@@ -475,13 +475,15 @@ type Server struct {
 	// jobKinds breaks activeJobs down by kind; see countJob and endJob.
 	jobKinds jobKindCounts
 	// jobCap is the node's own job cap, 0 for none; admission guards
-	// admitted, the new work it let in that activeJobs does not count yet,
+	// admitted, the new work it let in that activeJobs does not count yet
+	// (admittedKinds by kind; health reports both, see reportedJobs),
 	// remuxSeen, when each progressive remux transport was last served, and
 	// continuing, the overlap allowances granted per playback session and
 	// not yet registered. See jobcap.go.
 	jobCap          atomic.Int32
 	admission       sync.Mutex
 	admitted        int
+	admittedKinds   map[nodepool.JobKind]int
 	remuxSeen       map[string]time.Time
 	continuing      map[string]int
 	remuxSeenPruned time.Time
@@ -1166,7 +1168,7 @@ func (s *Server) handleDownloadPrepare(w http.ResponseWriter, r *http.Request) {
 		// (another recipe), so the node has to encode after all. Admitted
 		// before the receipt goes, so a refusal leaves the artifact that is
 		// there usable for the recipe it answers.
-		admitted, refused := s.admitNewPreparation(w)
+		admitted, refused := s.admitNewPreparation(w, req.JobKind())
 		if refused {
 			return
 		}
@@ -1441,11 +1443,13 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 		redacted := usage.RedactPath()
 		artifacts = &redacted
 	}
+	status := s.healthStatus()
+	activeJobs, activeJobsByKind := s.reportedJobs(status == HealthStatusDrained)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(HealthResponse{
-		Status:             s.healthStatus(),
-		ActiveJobs:         s.activeJobs.Load(),
-		ActiveJobsByKind:   s.jobKinds.snapshot(),
+		Status:             status,
+		ActiveJobs:         activeJobs,
+		ActiveJobsByKind:   activeJobsByKind,
 		CapabilitiesHash:   s.storedCapabilityHash(),
 		System:             snapshot.System,
 		GPU:                snapshot.GPU,
@@ -2458,7 +2462,7 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 		overlap, continues = s.claimContinuation(playbackSessionID, time.Now())
 		defer overlap.release()
 		if !continues {
-			admitted, ok := s.admitJob()
+			admitted, ok := s.admitJob(nodepool.StreamJobKind(false, claims.TranscodeAudio))
 			if !ok {
 				writeAtCapacity(w)
 				return

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"hash"
 	"math"
 	"sort"
 	"strconv"
@@ -61,14 +62,32 @@ type PublisherValue struct {
 }
 
 type GlobalSessionView struct {
-	Subject                     Subject
-	ProfileID                   string
-	SessionID                   string
-	MediaFileID                 int
-	StartedAt                   time.Time
-	StartedAtSource             StartedAtSource
-	StartedAtDegraded           bool
-	ViewerBytesAccepted         int64
+	Subject             Subject
+	ProfileID           string
+	SessionID           string
+	MediaFileID         int
+	StartedAt           time.Time
+	StartedAtSource     StartedAtSource
+	StartedAtDegraded   bool
+	ViewerBytesAccepted int64
+	// ViewerBytesMeasuredAt is the latest CapturedAt among the publishers whose
+	// viewer-egress routes make up ViewerBytesAccepted. It is the publishers'
+	// clock, not this view's BuiltAt, so every replica reading the same
+	// publisher state reports the same instant for the same byte count.
+	ViewerBytesMeasuredAt time.Time
+	// ViewerBytesSeries is an opaque token over the (PublisherID,
+	// PublisherEpoch) of those publishers. It changes when a viewer-edge
+	// publisher joins, leaves the view (stale or departed) or restarts, each
+	// of which can move ViewerBytesAccepted by a publisher's whole count, so a
+	// client diffs bytes only within one series. It is empty when no publisher
+	// has a viewer edge.
+	ViewerBytesSeries string
+	// ViewerBytesClockAhead is set when one of those publishers captured its
+	// snapshot further ahead of this view's clock than Freshness allows, so
+	// ViewerBytesMeasuredAt comes from a clock running ahead. A client that
+	// took it as a baseline would discard every later observation until the
+	// other servers' clocks caught up with it.
+	ViewerBytesClockAhead       bool
 	RelayBytesAccepted          int64
 	BytesDegraded               bool
 	LastByteAccepted            time.Time
@@ -177,11 +196,17 @@ func (r *Registry) GlobalView(ctx context.Context) (GlobalMonitoringView, error)
 type publisherContribution struct {
 	ref      PublisherRef
 	snapshot Snapshot
+	// clockAhead is set when the snapshot's capture time is ahead of the
+	// view's clock by more than Freshness.
+	clockAhead bool
 }
 
 type sessionContribution struct {
-	ref  PublisherRef
-	view SessionView
+	ref        PublisherRef
+	epoch      int64
+	capturedAt time.Time
+	clockAhead bool
+	view       SessionView
 }
 
 func BuildGlobalView(set PublisherSet, at time.Time, params ViewParams) GlobalMonitoringView {
@@ -259,7 +284,7 @@ func BuildGlobalView(set PublisherSet, at time.Time, params ViewParams) GlobalMo
 			status.State = PublisherDegraded
 		}
 		view.Publishers = append(view.Publishers, status)
-		contributions = append(contributions, publisherContribution{ref: ref, snapshot: snapshot})
+		contributions = append(contributions, publisherContribution{ref: ref, snapshot: snapshot, clockAhead: capturedAge < -params.Freshness})
 	}
 	sort.Slice(view.MissingPublishers, func(i, j int) bool { return refLess(view.MissingPublishers[i], view.MissingPublishers[j]) })
 	if len(view.MissingPublishers) > 0 {
@@ -302,7 +327,9 @@ func mergeContributions(view *GlobalMonitoringView, contributions []publisherCon
 		view.UnattributedBytes = saturatingAdd(view.UnattributedBytes, contribution.snapshot.UnattributedBytes)
 		view.Truncated = view.Truncated || contribution.snapshot.Truncated
 		for _, session := range contribution.snapshot.Sessions {
-			bySession[session.SessionID] = append(bySession[session.SessionID], sessionContribution{ref: contribution.ref, view: session})
+			bySession[session.SessionID] = append(bySession[session.SessionID], sessionContribution{ref: contribution.ref,
+				epoch: contribution.snapshot.PublisherEpoch, capturedAt: contribution.snapshot.CapturedAt,
+				clockAhead: contribution.clockAhead, view: session})
 		}
 		for _, transfer := range contribution.snapshot.Transfers {
 			view.Transfers = append(view.Transfers, GlobalTransferView{TransferView: cloneTransfer(transfer), Publisher: contribution.ref})
@@ -345,6 +372,7 @@ func mergeSession(id string, contributions []sessionContribution, params ViewPar
 	winningRank := 0
 	winningTimes := map[int64]struct{}{}
 	hasViewerEdge := false
+	var series hash.Hash
 	for _, contribution := range contributions {
 		for _, route := range contribution.view.Routes {
 			if route.Role == RoleViewerEgress {
@@ -368,6 +396,14 @@ func mergeSession(id string, contributions []sessionContribution, params ViewPar
 		}
 		if viewerEdge {
 			result.ViewerEdgePublishers = append(result.ViewerEdgePublishers, ref)
+			if series == nil {
+				series = sha256.New()
+			}
+			_, _ = fmt.Fprintf(series, "%s\x00%d\n", ref.PublisherID, contribution.epoch)
+			if contribution.capturedAt.After(result.ViewerBytesMeasuredAt) {
+				result.ViewerBytesMeasuredAt = contribution.capturedAt
+			}
+			result.ViewerBytesClockAhead = result.ViewerBytesClockAhead || contribution.clockAhead
 			if session.Subject.Kind != "" && session.Subject.ID != "" {
 				key := string(session.Subject.Kind) + "\x00" + session.Subject.ID
 				subjectValues[key] = append(subjectValues[key], ref)
@@ -479,6 +515,9 @@ func mergeSession(id string, contributions []sessionContribution, params ViewPar
 	}
 	if winningRank == 1 || len(winningTimes) > 1 {
 		result.StartedAtDegraded = true
+	}
+	if series != nil {
+		result.ViewerBytesSeries = hex.EncodeToString(series.Sum(nil)[:8])
 	}
 	applyIdentity(&result, identityFieldSubject, subjectValues)
 	applyIdentity(&result, identityFieldProfileID, profileValues)

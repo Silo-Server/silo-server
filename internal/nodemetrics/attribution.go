@@ -39,10 +39,16 @@ type ResourceSource struct {
 // waited-for children; CPU and RSS describe the process itself. HeapLiveBytes is the last GC's
 // marked live Go heap; RSS includes resident native allocations and mappings.
 // Their difference is not an exact native allocation measurement.
+//
+// CPUPct is this process's CPU over the last sample window on the same 0-100
+// scale and against the same capacity as System.CPUPct. It is omitted when the
+// window could not be measured (the first passes, a counter reset, or a change
+// in what System.CPUPct is measured against); a measured idle process is 0.
 type ProcessStats struct {
 	ResidentBytes *uint64  `json:"resident_bytes,omitempty"`
 	VirtualBytes  *uint64  `json:"virtual_bytes,omitempty"`
 	CPUSeconds    *float64 `json:"cpu_seconds,omitempty"`
+	CPUPct        *float64 `json:"cpu_pct,omitempty"`
 	Threads       *uint64  `json:"threads,omitempty"`
 	OpenFDs       *uint64  `json:"open_fds,omitempty"`
 	MaxFDs        *uint64  `json:"max_fds,omitempty"`
@@ -82,17 +88,25 @@ type CgroupMemoryStats struct {
 	PressureFullPct *float64 `json:"pressure_full_pct,omitempty"`
 }
 
-// ChildStats is a bounded point-in-time view of owned FFmpeg processes. CPU and
-// RSS are sums of live processes; CPU can decrease when a child exits. RSS can
-// count shared pages more than once. Short-lived work requires owner lifecycle
-// counters and is deliberately not represented as a cumulative total here.
+// ChildStats is a bounded point-in-time view of owned FFmpeg processes. CPU
+// seconds and RSS are sums of live processes; CPU seconds can decrease when a
+// child exits. RSS can count shared pages more than once. Short-lived work
+// requires owner lifecycle counters and is deliberately not represented as a
+// cumulative total here.
+//
+// CPUPct is the CPU those children used over the last sample window, on the
+// same scale as ProcessStats.CPUPct. It is a lower bound: a child's last partial
+// window before it exits, and a child that starts and exits between two
+// samples, are not counted. It is omitted when the window could not be measured, including a
+// truncated pass.
 type ChildStats struct {
-	Workload      string  `json:"workload"`
-	Sampled       int     `json:"sampled"`
-	Unavailable   int     `json:"unavailable"`
-	Truncated     bool    `json:"truncated"`
-	ResidentBytes uint64  `json:"resident_bytes"`
-	CPUSeconds    float64 `json:"cpu_seconds"`
+	Workload      string   `json:"workload"`
+	Sampled       int      `json:"sampled"`
+	Unavailable   int      `json:"unavailable"`
+	Truncated     bool     `json:"truncated"`
+	ResidentBytes uint64   `json:"resident_bytes"`
+	CPUSeconds    float64  `json:"cpu_seconds"`
+	CPUPct        *float64 `json:"cpu_pct,omitempty"`
 }
 
 // DiskDetails extends operational snapshots without adding fields to the frozen

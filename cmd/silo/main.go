@@ -389,6 +389,9 @@ func newStreamTelemetryRegistry(ctx context.Context, nodeID string, redisClient 
 			pingCancel()
 		} else {
 			slog.ErrorContext(ctx, "stream telemetry distributed mode requested but redis is not configured; using local store")
+			// The registry reports this mode to readers of its merged view, which
+			// then holds only this process.
+			streamTelemetryConfig.Distributed = false
 		}
 	}
 	if streamTelemetryConfig.Enabled {
@@ -1561,7 +1564,21 @@ func main() {
 	}
 
 	if mode == "" || mode == "integrated" || mode == "api" {
-		streamTelemetryRegistry = newStreamTelemetryRegistry(appCtx, nodeID, apiRedisClient)
+		// The merged view's rebuild bounds its Redis reads with a timeout and
+		// the admin sessions list waits on it, so this client's sockets must
+		// give up at that deadline rather than at the URL's read timeout,
+		// which may be unlimited.
+		var streamTelemetryRedis *redis.Client
+		if apiRedisClient != nil {
+			telemetryClient, telemetryErr := cache.NewDeadlineRedisClientForRole(cfg.Redis, "api")
+			if telemetryErr != nil {
+				slog.Warn("redis client init failed; stream telemetry stays local to this process", "error", telemetryErr)
+			} else if telemetryClient != nil {
+				defer func() { _ = cache.CloseRedisClient(telemetryClient) }()
+				streamTelemetryRedis = telemetryClient
+			}
+		}
+		streamTelemetryRegistry = newStreamTelemetryRegistry(appCtx, nodeID, streamTelemetryRedis)
 		streamTelemetryRegistry.Start(appCtx)
 		streamTelemetryViewCache = newStreamTelemetryViewCache(streamTelemetryRegistry)
 	}

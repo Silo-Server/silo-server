@@ -330,6 +330,7 @@
 ./internal/auth TestExpiredSessionCleanupSkipsHeldRequestDB
 ./internal/auth TestAPIKeyCreationRefusesRevokedCredentialDB
 ./internal/auth TestPasswordSignInForRoutesDB
+./internal/auth TestDemoLoginDB
 ./internal/auth TestExternalSignInDemoModeDB
 ./internal/auth TestExternalAccountCannotPreemptInitialSetupDB
 ./internal/auth TestPluginAuthBindingCallbackModeDB

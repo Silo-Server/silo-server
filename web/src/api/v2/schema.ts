@@ -6931,6 +6931,43 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/auth/demo": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Sign in to the public demo account of a server run as a public demo.
+     * @description Only a server whose operator runs it as a public demo offers this: demo mode (the demo.enabled setting) is on and the demo.username setting names an account that is not an administrator. Every other server answers 409 capability_disabled, or capability_not_configured on a demo server with no usable demo account; getDemoLoginCapability tells a client which before it offers the action. The session opened is the one a visitor gets by typing the demo account's password, restricted by demo mode in the same way. Send an empty JSON object as the body.
+     */
+    post: operations["demoLogin"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/auth/demo/capability": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Describe whether this server offers demo sign-in: available only on a public demo, disabled when demo mode is off, not_configured when no demo account is named. */
+    get: operations["getDemoLoginCapability"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/auth/device": {
     parameters: {
       query?: never;
@@ -17438,12 +17475,17 @@ export interface components {
     AdminChildStats: {
       /**
        * Format: double
+       * @description CPU of live owned FFmpeg children over the last sample window, on the same scale and capacity as system.cpu_pct. A lower bound: a child's last partial window and a child that starts and exits between two samples are missed. Omitted when the window was not measured, including a truncated pass.
+       */
+      cpu_pct?: number;
+      /**
+       * Format: double
        * @description Summed lifetime CPU seconds of currently live owned child processes. Decreases when a child exits; do not diff as a monotonic counter.
        */
       cpu_seconds: number;
       /**
        * Format: int64
-       * @description Summed resident memory (RSS) in bytes across sampled live owned child processes (transcodes, remuxes, trickplay, thumbnails, probes); may count shared pages more than once.
+       * @description Summed resident memory (RSS) in bytes across sampled live owned child processes (transcodes, remuxes, media analysis, trickplay and chapter thumbnails); may count shared pages more than once.
        */
       resident_bytes: number;
       /**
@@ -22431,6 +22473,8 @@ export interface components {
       device_platform?: string;
       /** @description Whole-session method: direct, remux, direct_stream (copied video, converted audio) or transcode; absent when unknown */
       effective_play_method?: string;
+      /** @description Viewer egress of the session, only when the list was read with include_egress=true. Absent when it is unknown: stream telemetry is off, its merged view is not built, its last refresh failed, the session's routes exceeded the telemetry route cap, a counting server's clock runs ahead of this server's beyond the telemetry tolerance, telemetry has no record of the session, or a proxy node served the session while telemetry is not shared between servers. Never present in session.* events. */
+      egress?: components["schemas"]["AdminPlaybackSessionEgress"];
       /**
        * Format: int64
        * @description Episode number; absent when not an episode
@@ -22609,6 +22653,8 @@ export interface components {
       device_identity: boolean;
       effective_play_method: boolean;
       effective_play_method_values: string[];
+      /** @description Stream telemetry is enabled: the list accepts include_egress and rows may then carry egress */
+      egress: boolean;
       is_jellyfin_client: boolean;
       /** @description The admin sessions channel carries session.started, session.paused, session.resumed and session.stopped, and rows may carry lifecycle_seq */
       lifecycle_events: boolean;
@@ -22635,6 +22681,20 @@ export interface components {
       tone_map_mode_values: string[];
       transcode_hw_accel: boolean;
       user_filter: boolean;
+    };
+    AdminPlaybackSessionEgress: {
+      /**
+       * Format: int64
+       * @description Bytes Silo has sent to the viewer for this playback session so far, summed across every API server and proxy node; hops between Silo's own nodes are not counted
+       */
+      bytes: number;
+      /**
+       * Format: date-time
+       * @description When the newest of the counting servers took its count, on that server's clock; the same on every API server for the same reports. Servers report about once a second and their clocks can differ slightly, so rates over short intervals jitter. Divide a change in bytes by the change in this, not by the time between polls
+       */
+      measured_at: string;
+      /** @description Opaque token naming the set of servers that make up bytes. Ignore an observation whose measured_at is not newer than the baseline's, whatever its series. Otherwise start a new baseline when series differs from the baseline's or bytes fell, and compare bytes only within one series */
+      series: string;
     };
     AdminPlaybackSessionMessageInputBody: {
       /**
@@ -23401,6 +23461,11 @@ export interface components {
       source: string;
     };
     AdminProcessStats: {
+      /**
+       * Format: double
+       * @description This process's CPU over the last sample window, on the same scale and capacity as system.cpu_pct. Omitted when the window was not measured; a measured idle process is 0.
+       */
+      cpu_pct?: number;
       /**
        * Format: double
        * @description Cumulative CPU time consumed by this Silo process in seconds (user + system).
@@ -24372,6 +24437,8 @@ export interface components {
       cgroup_resources: boolean;
       /** @description Responses include attribution.instance_id and per-metric scope and source metadata. */
       instance_attribution: boolean;
+      /** @description Responses may include attribution.process.cpu_pct and attribution.children.cpu_pct. */
+      process_cpu_percent: boolean;
       /** @description Responses may include attribution.process and attribution.children. */
       process_resources: boolean;
       /** @description Opaque revision of this document */
@@ -29307,6 +29374,18 @@ export interface components {
       sidecar_bitmap: boolean;
       sidecar_text: boolean;
     };
+    DemoLoginCapability: {
+      /** @description Whether the current principal may use the capability */
+      allowed?: boolean;
+      /** @description Opaque revision of this document */
+      revision: string;
+      /**
+       * @description Support and configuration state, not health
+       * @enum {string}
+       */
+      state: "available" | "disabled" | "not_configured" | "unsupported";
+    };
+    DemoLoginInputBody: Record<string, never>;
     DetectedBackend: {
       backend: string;
       device?: string;
@@ -90165,6 +90244,8 @@ export interface operations {
     parameters: {
       query?: {
         cursor?: string;
+        /** @description Add egress to the rows. Send it only when the capabilities report egress true. */
+        include_egress?: boolean;
         /** @description Page size; default 50, maximum 200 */
         limit?: number;
         /** @description Only live observations belonging to this login account */
@@ -103596,6 +103677,210 @@ export interface operations {
         headers: {
           /** @description Seconds to wait before asking again, on a fresh challenge. */
           "Retry-After"?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  demoLogin: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description The client's stable device identifier, recorded on the login session this sign-in opens */
+        "X-Silo-Device-Id"?: string;
+        /** @description Optional device name recorded on the login session (first 120 characters) */
+        "X-Silo-Device-Name"?: string;
+        /** @description Optional platform recorded on the login session (first 40 characters) */
+        "X-Silo-Device-Platform"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["DemoLoginInputBody"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TokenPair"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getDemoLoginCapability: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed. */
+        "If-Match"?: string;
+        "If-None-Match"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          "Cache-Control"?: string;
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DemoLoginCapability"];
+        };
+      };
+      /** @description The representation named by If-None-Match is current; no body. */
+      304: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Precondition Failed */
+      412: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
           [name: string]: unknown;
         };
         content: {

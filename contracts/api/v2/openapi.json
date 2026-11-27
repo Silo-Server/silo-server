@@ -6881,13 +6881,20 @@
       "AdminChildStats": {
         "additionalProperties": false,
         "properties": {
+          "cpu_pct": {
+            "description": "CPU of live owned FFmpeg children over the last sample window, on the same scale and capacity as system.cpu_pct. A lower bound: a child's last partial window and a child that starts and exits between two samples are missed. Omitted when the window was not measured, including a truncated pass.",
+            "format": "double",
+            "maximum": 100,
+            "minimum": 0,
+            "type": "number"
+          },
           "cpu_seconds": {
             "description": "Summed lifetime CPU seconds of currently live owned child processes. Decreases when a child exits; do not diff as a monotonic counter.",
             "format": "double",
             "type": "number"
           },
           "resident_bytes": {
-            "description": "Summed resident memory (RSS) in bytes across sampled live owned child processes (transcodes, remuxes, trickplay, thumbnails, probes); may count shared pages more than once.",
+            "description": "Summed resident memory (RSS) in bytes across sampled live owned child processes (transcodes, remuxes, media analysis, trickplay and chapter thumbnails); may count shared pages more than once.",
             "format": "int64",
             "minimum": 0,
             "type": "integer"
@@ -19279,6 +19286,10 @@
             "description": "Whole-session method: direct, remux, direct_stream (copied video, converted audio) or transcode; absent when unknown",
             "type": "string"
           },
+          "egress": {
+            "$ref": "#/components/schemas/AdminPlaybackSessionEgress",
+            "description": "Viewer egress of the session, only when the list was read with include_egress=true. Absent when it is unknown: stream telemetry is off, its merged view is not built, its last refresh failed, the session's routes exceeded the telemetry route cap, a counting server's clock runs ahead of this server's beyond the telemetry tolerance, telemetry has no record of the session, or a proxy node served the session while telemetry is not shared between servers. Never present in session.* events."
+          },
           "episode_number": {
             "description": "Episode number; absent when not an episode",
             "format": "int64",
@@ -19683,6 +19694,10 @@
             },
             "type": "array"
           },
+          "egress": {
+            "description": "Stream telemetry is enabled: the list accepts include_egress and rows may then carry egress",
+            "type": "boolean"
+          },
           "is_jellyfin_client": {
             "type": "boolean"
           },
@@ -19773,10 +19788,39 @@
           "lifecycle_events",
           "adaptation_reasons",
           "subtitle",
+          "egress",
           "adaptation_reason_values",
           "revision",
           "state",
           "allowed"
+        ],
+        "type": "object"
+      },
+      "AdminPlaybackSessionEgress": {
+        "additionalProperties": false,
+        "properties": {
+          "bytes": {
+            "description": "Bytes Silo has sent to the viewer for this playback session so far, summed across every API server and proxy node; hops between Silo's own nodes are not counted",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "measured_at": {
+            "description": "When the newest of the counting servers took its count, on that server's clock; the same on every API server for the same reports. Servers report about once a second and their clocks can differ slightly, so rates over short intervals jitter. Divide a change in bytes by the change in this, not by the time between polls",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "series": {
+            "description": "Opaque token naming the set of servers that make up bytes. Ignore an observation whose measured_at is not newer than the baseline's, whatever its series. Otherwise start a new baseline when series differs from the baseline's or bytes fell, and compare bytes only within one series",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bytes",
+          "measured_at",
+          "series"
         ],
         "type": "object"
       },
@@ -21904,6 +21948,13 @@
       "AdminProcessStats": {
         "additionalProperties": false,
         "properties": {
+          "cpu_pct": {
+            "description": "This process's CPU over the last sample window, on the same scale and capacity as system.cpu_pct. Omitted when the window was not measured; a measured idle process is 0.",
+            "format": "double",
+            "maximum": 100,
+            "minimum": 0,
+            "type": "number"
+          },
           "cpu_seconds": {
             "description": "Cumulative CPU time consumed by this Silo process in seconds (user + system).",
             "format": "double",
@@ -24196,6 +24247,10 @@
             "description": "Responses include attribution.instance_id and per-metric scope and source metadata.",
             "type": "boolean"
           },
+          "process_cpu_percent": {
+            "description": "Responses may include attribution.process.cpu_pct and attribution.children.cpu_pct.",
+            "type": "boolean"
+          },
           "process_resources": {
             "description": "Responses may include attribution.process and attribution.children.",
             "type": "boolean"
@@ -24224,6 +24279,7 @@
           "process_resources",
           "cgroup_resources",
           "sample_freshness",
+          "process_cpu_percent",
           "revision",
           "state",
           "allowed"
@@ -36582,6 +36638,38 @@
           "sidecar_bitmap",
           "font_attachments"
         ],
+        "type": "object"
+      },
+      "DemoLoginCapability": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed": {
+            "description": "Whether the current principal may use the capability",
+            "type": "boolean"
+          },
+          "revision": {
+            "description": "Opaque revision of this document",
+            "type": "string"
+          },
+          "state": {
+            "description": "Support and configuration state, not health",
+            "enum": [
+              "available",
+              "disabled",
+              "not_configured",
+              "unsupported"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "revision",
+          "state"
+        ],
+        "type": "object"
+      },
+      "DemoLoginInputBody": {
+        "additionalProperties": false,
         "type": "object"
       },
       "DetectedBackend": {
@@ -137229,6 +137317,16 @@
               "minLength": 1,
               "type": "string"
             }
+          },
+          {
+            "description": "Add egress to the rows. Send it only when the capabilities report egress true.",
+            "explode": false,
+            "in": "query",
+            "name": "include_egress",
+            "schema": {
+              "description": "Add egress to the rows. Send it only when the capabilities report egress true.",
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -157243,6 +157341,302 @@
         "x-silo-class": "public",
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/auth/demo": {
+      "post": {
+        "description": "Only a server whose operator runs it as a public demo offers this: demo mode (the demo.enabled setting) is on and the demo.username setting names an account that is not an administrator. Every other server answers 409 capability_disabled, or capability_not_configured on a demo server with no usable demo account; getDemoLoginCapability tells a client which before it offers the action. The session opened is the one a visitor gets by typing the demo account's password, restricted by demo mode in the same way. Send an empty JSON object as the body.",
+        "operationId": "demoLogin",
+        "parameters": [
+          {
+            "description": "The client's stable device identifier, recorded on the login session this sign-in opens",
+            "in": "header",
+            "name": "X-Silo-Device-Id",
+            "schema": {
+              "description": "The client's stable device identifier, recorded on the login session this sign-in opens",
+              "examples": [
+                "8d2f6a4e-3c1b-4e5f-9a7d-0b1c2d3e4f50"
+              ],
+              "maxLength": 128,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional device name recorded on the login session (first 120 characters)",
+            "in": "header",
+            "name": "X-Silo-Device-Name",
+            "schema": {
+              "description": "Optional device name recorded on the login session (first 120 characters)",
+              "examples": [
+                "Living Room Apple TV"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional platform recorded on the login session (first 40 characters)",
+            "in": "header",
+            "name": "X-Silo-Device-Platform",
+            "schema": {
+              "description": "Optional platform recorded on the login session (first 40 characters)",
+              "examples": [
+                "tvOS"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DemoLoginInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenPair"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Sign in to the public demo account of a server run as a public demo.",
+        "tags": [
+          "auth"
+        ],
+        "x-silo-class": "public",
+        "x-silo-retry-safety": "non_retryable",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/auth/demo/capability": {
+      "get": {
+        "operationId": "getDemoLoginCapability",
+        "parameters": [
+          {
+            "description": "Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed.",
+            "in": "header",
+            "name": "If-Match",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-None-Match",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DemoLoginCapability"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "The representation named by If-None-Match is current; no body.",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Describe whether this server offers demo sign-in: available only on a public demo, disabled when demo mode is off, not_configured when no demo account is named.",
+        "tags": [
+          "auth"
+        ],
+        "x-silo-class": "public",
+        "x-silo-conditional": true
       }
     },
     "/api/v2/auth/device": {
@@ -270219,6 +270613,10 @@
       "nodemetrics_ChildStats": {
         "additionalProperties": false,
         "properties": {
+          "cpu_pct": {
+            "format": "double",
+            "type": "number"
+          },
           "cpu_seconds": {
             "format": "double",
             "type": "number"
@@ -270355,6 +270753,10 @@
       "nodemetrics_ProcessStats": {
         "additionalProperties": false,
         "properties": {
+          "cpu_pct": {
+            "format": "double",
+            "type": "number"
+          },
           "cpu_seconds": {
             "format": "double",
             "type": "number"

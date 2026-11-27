@@ -262,7 +262,13 @@ func (s *RedisStore) LoadAll(ctx context.Context) (PublisherSet, error) {
 		return set, err
 	}
 	maxFields := s.maxFieldsPerPublisher()
-	readPipe := s.client.Pipeline()
+	// Each publish is one transaction; reading every publisher's hash in one
+	// transaction too makes the set a single cut of Redis. A plain pipeline
+	// lets publishes land between its reads, so two API servers could each
+	// build a view that is newer for one publisher and older for another,
+	// and the session egress a client diffs across them would step back
+	// without any write being lost.
+	readPipe := s.client.TxPipeline()
 	reads := make(map[string]*redis.MapStringStringCmd, len(set.Members))
 	for _, member := range set.Members {
 		length, lengthErr := hlens[member.PublisherID].Result()
