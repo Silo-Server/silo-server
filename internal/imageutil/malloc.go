@@ -15,8 +15,9 @@ package imageutil
 // The limit is set from a C constructor because glibc fixes it the first
 // time more than eight arenas exist, and by the time a Go package init runs
 // the runtime's own threads have taken that many. An operator's
-// MALLOC_ARENA_MAX or glibc.malloc.arena_max tunable wins. Other C libraries
-// (musl, macOS) are left alone.
+// MALLOC_ARENA_MAX or glibc.malloc.arena_max tunable wins when it has a
+// value; glibc ignores an empty one, so the limit still applies. Other C
+// libraries (musl, macOS) are left alone.
 
 /*
 #include <stdlib.h>
@@ -24,13 +25,26 @@ package imageutil
 #if defined(__GLIBC__)
 #include <malloc.h>
 
-__attribute__((constructor)) static void silo_limit_malloc_arenas(void) {
-	const char *tunables = getenv("GLIBC_TUNABLES");
-	if (getenv("MALLOC_ARENA_MAX") != NULL ||
-	    (tunables != NULL && strstr(tunables, "glibc.malloc.arena_max") != NULL)) {
-		return;
+static int silo_operator_sets_arena_max(void) {
+	static const char key[] = "glibc.malloc.arena_max=";
+	const char *env = getenv("MALLOC_ARENA_MAX");
+	if (env != NULL && env[0] != '\0') {
+		return 1;
 	}
-	mallopt(M_ARENA_MAX, 2);
+	const char *tunables = getenv("GLIBC_TUNABLES");
+	for (const char *p = tunables; p != NULL && (p = strstr(p, key)) != NULL; p++) {
+		const char *value = p + sizeof(key) - 1;
+		if ((p == tunables || p[-1] == ':') && value[0] != '\0' && value[0] != ':') {
+			return 1;
+		}
+	}
+	return 0;
+}
+
+__attribute__((constructor)) static void silo_limit_malloc_arenas(void) {
+	if (!silo_operator_sets_arena_max()) {
+		mallopt(M_ARENA_MAX, 2);
+	}
 }
 
 static void silo_malloc_trim(void) { malloc_trim(0); }
