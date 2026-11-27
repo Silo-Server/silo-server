@@ -185,7 +185,7 @@ func registerAdminCatalogImages(reg *Registry) {
 		form := in.RawBody.Data()
 		if form == nil || !form.Image.IsSet {
 			return nil, NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
-				WithErrors(ProblemError{Location: "body.image", Code: codeRequired, Detail: detailImageFileRequired})
+				WithErrors(ProblemError{Location: locationBodyImage, Code: codeRequired, Detail: detailImageFileRequired})
 		}
 		defer func() { _ = form.Image.Close() }()
 		tooLarge := NewProblem(TypePayloadTooLarge, "The image exceeds 10 MiB.")

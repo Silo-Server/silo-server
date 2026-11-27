@@ -478,7 +478,7 @@ func (reg *Registry) uploadAdminCustomSeasonPoster(ctx context.Context, in *Admi
 	form := in.RawBody.Data()
 	if form == nil || !form.Image.IsSet {
 		return nil, NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
-			WithErrors(ProblemError{Location: "body.image", Code: codeRequired, Detail: detailImageFileRequired})
+			WithErrors(ProblemError{Location: locationBodyImage, Code: codeRequired, Detail: detailImageFileRequired})
 	}
 	defer func() { _ = form.Image.Close() }()
 	tooLarge := NewProblem(TypePayloadTooLarge, "The image exceeds 10 MiB.")
@@ -496,7 +496,7 @@ func (reg *Registry) uploadAdminCustomSeasonPoster(ctx context.Context, in *Admi
 	switch {
 	case errors.Is(err, metadata.ErrUnsupportedUploadedImage):
 		return nil, NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
-			WithErrors(ProblemError{Location: "body.image", Code: codeInvalid, Detail: "the file is not a JPEG, PNG or WebP image"})
+			WithErrors(ProblemError{Location: locationBodyImage, Code: codeInvalid, Detail: "the file is not a JPEG, PNG or WebP image"})
 	case errors.Is(err, metadata.ErrImageUploadUnavailable):
 		return nil, NewProblem(TypeCapabilityNotConfigured, "Uploading images needs artwork storage")
 	case err != nil:
@@ -508,3 +508,6 @@ func (reg *Registry) uploadAdminCustomSeasonPoster(ctx context.Context, in *Admi
 	}
 	return &AdminCustomSeasonPosterUploadOutput{Body: out}, nil
 }
+
+// locationBodyImage is the problem location of an upload form's image part.
+const locationBodyImage = locationBody + ".image"
