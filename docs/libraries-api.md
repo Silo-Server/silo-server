@@ -71,7 +71,9 @@ The library resource carries `episode_order_provider`: `tvdb` or `tmdb`, the
 provider whose seasons and episode numbers the library's shows follow, or empty
 for the first remote provider of the library's Episodes chain. It is an
 optional, non-nullable member of the `updateLibrary` body; a change queues a full
-metadata refresh of the library, which renumbers its shows. A show the provider
+metadata refresh of the library, which renumbers its shows. While a refresh of
+the library is queued or running, a change answers `409` (`conflict`): retry
+when it finishes. A show the provider
 has no episodes for follows the other enabled provider. A show can override the
 library (see [admin-catalog-api.md](admin-catalog-api.md#episode-order)); the
 rules are in [architecture/episode-ordering.md](architecture/episode-ordering.md).
