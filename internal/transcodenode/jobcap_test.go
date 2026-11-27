@@ -70,7 +70,7 @@ func TestJobCapAdmissionIsRaceFree(t *testing.T) {
 	)
 	for range 64 {
 		wg.Go(func() {
-			if slot, ok := s.admitJob(); ok {
+			if slot, ok := s.admitJob(nodepool.JobKindVideoTranscode); ok {
 				mu.Lock()
 				admitted = append(admitted, slot)
 				mu.Unlock()
@@ -86,7 +86,7 @@ func TestJobCapAdmissionIsRaceFree(t *testing.T) {
 	if s.activeJobs.Load() != 3 || s.admitted != 0 {
 		t.Fatalf("after counting the slot: active %d, admitted %d", s.activeJobs.Load(), s.admitted)
 	}
-	if _, ok := s.admitJob(); ok {
+	if _, ok := s.admitJob(nodepool.JobKindVideoTranscode); ok {
 		t.Fatal("a job was admitted at the cap")
 	}
 }
@@ -214,7 +214,7 @@ func TestHealthCountsAnAdmittedStartBeforeItRuns(t *testing.T) {
 		if time.Now().After(deadline) {
 			t.Fatal("the start was never admitted")
 		}
-		time.Sleep(5 * time.Millisecond)
+		time.Sleep(5 * time.Millisecond) //nolint:forbidigo // polls the admission count, the observable state an admitted start changes
 	}
 
 	health := healthStatusOf(t, s)
