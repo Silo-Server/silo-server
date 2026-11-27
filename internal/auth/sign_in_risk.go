@@ -138,8 +138,81 @@ type AccountAtRisk struct {
 //     account with only a password always has been, and is not listed.
 var accountsAtRiskSQL = map[SignInChange]string{
 	ChangeAppKeysOff: `NOT ` + passwordWorksSQL("$2") + ` AND NOT ` + usableIdentitySQL("$1") + ` AND ` + keyWorksSQL("$2"),
-	ChangeLocalPasswordsOff: `NOT ` + passwordWorksSQL("false") + ` AND NOT ` + usableIdentitySQL("$1") +
-		` AND ((NOT (` + passwordSignsInSQL("u") + `) AND ` + keyWorksSQL("true") + `) OR ` + keyWorksSQL("false") + `)`,
+}
+
+// localPasswordsOffBlocksSQL is the local-passwords-off condition above on
+// an account u, with providers the int[] expression for signInProviders:
+// the write is refused while any enabled account meets it.
+func localPasswordsOffBlocksSQL(providers string) string {
+	return `(NOT ` + passwordWorksSQL("false") + ` AND NOT ` + usableIdentitySQL(providers) +
+		` AND ((NOT (` + passwordSignsInSQL("u") + `) AND ` + keyWorksSQL("true") + `) OR ` + keyWorksSQL("false") + `))`
+}
+
+// Reasons an account blocks turning local passwords off
+// (LocalPasswordOffAccount.Reason, group LocalPasswordOffBlocking).
+const (
+	// LocalPasswordOffReasonKeysOnly: a key keeps signing it in afterwards
+	// (one bound to a provider identity, or a break-glass account's), and it
+	// would be its only way in.
+	LocalPasswordOffReasonKeysOnly = "keys_only"
+	// LocalPasswordOffReasonNoWayIn: it has no password that signs in, and
+	// its keys need local passwords, so it would have no way in at all.
+	LocalPasswordOffReasonNoWayIn = "no_way_in"
+)
+
+// localPasswordOffAffectedSQL is the one answer to who turning local
+// password sign-in off affects, and how; emailMatch is a boolean SQL
+// expression for auth.email_auto_match and providers the int[] expression
+// for signInProviders. Each enabled account it selects is either:
+//
+//   - blocking (reason keys_only or no_way_in): it meets
+//     localPasswordsOffBlocksSQL, so the write is refused naming it
+//     (last_sign_in_method); or
+//   - warned: its password signs in today (passwordSignsInSQL), it is not
+//     break-glass and it has no identity at a provider that can sign people
+//     in, so it loses password sign-in and the write is allowed. Its reason
+//     says whether email auto-match can link it at its first provider sign-in
+//     (emailMatchCandidateSQL): email_match, email_match_off, administrator
+//     or no_email.
+//
+// The refusal (refuseAccountsAtRisk) and listAdminLocalPasswordOffAccounts
+// both read it, so the page and the refusal never disagree. On a server with
+// no key rows keyWorksSQL is false for every account, nobody blocks, and the
+// warned accounts are exactly the accounts with a password that signs in,
+// not break-glass and with no such identity.
+func localPasswordOffAffectedSQL(emailMatch, providers string) string {
+	blocks := localPasswordsOffBlocksSQL(providers)
+	return `SELECT u.id, COALESCE(u.username::text, '') AS username, COALESCE(u.email, '')::text AS email,
+			COALESCE(u.role, '') AS role, COALESCE(u.is_owner, false) AS is_owner, u.break_glass,
+			(` + passwordSignsInSQL("u") + `) AS has_password,
+			CASE
+				WHEN ` + blocks + ` THEN
+					CASE WHEN ` + keyWorksSQL("false") + ` THEN 'keys_only' ELSE 'no_way_in' END
+				WHEN ` + emailMatchCandidateSQL("u") + ` AND btrim(COALESCE(u.email, '')) <> '' THEN
+					CASE WHEN ` + emailMatch + ` THEN 'email_match' ELSE 'email_match_off' END
+				WHEN ` + emailMatchCandidateSQL("u") + ` THEN 'no_email'
+				ELSE 'administrator'
+			END AS reason
+		FROM users u
+		WHERE u.enabled AND ((` + passwordSignsInSQL("u") + ` AND NOT u.break_glass AND NOT ` + usableIdentitySQL(providers) + `)
+			OR ` + blocks + `)`
+}
+
+// localPasswordsOffBlockers lists the accounts that block turning local
+// passwords off, from localPasswordOffAffectedSQL, in username order.
+func localPasswordsOffBlockers(ctx context.Context, db dbQuerier, providers []int) ([]AccountAtRisk, error) {
+	rows, err := db.Query(ctx, `WITH affected AS (`+localPasswordOffAffectedSQL("false", "$1")+`)
+		SELECT id, CASE WHEN username <> '' THEN username ELSE email END, role, is_owner, break_glass, has_password
+		FROM affected WHERE reason IN ('keys_only', 'no_way_in')
+		ORDER BY lower(CASE WHEN username <> '' THEN username ELSE email END), id`, providers)
+	if err != nil {
+		return nil, fmt.Errorf("listing accounts at risk: %w", err)
+	}
+	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (AccountAtRisk, error) {
+		var a AccountAtRisk
+		err := row.Scan(&a.ID, &a.Username, &a.Role, &a.IsOwner, &a.BreakGlass, &a.HasPassword)
+		return a, err
+	})
 }
 
 // AccountsAtRisk lists the enabled accounts change would leave with no way
@@ -185,13 +258,17 @@ func storedSignInSettings(ctx context.Context, db dbQuerier) (SignInSettings, er
 // accountsAtRisk is AccountsAtRisk under settings, and reports whether any
 // provider can sign people in under them (for the remedy).
 func accountsAtRisk(ctx context.Context, db dbQuerier, change SignInChange, settings SignInSettings) ([]AccountAtRisk, bool, error) {
-	where, ok := accountsAtRiskSQL[change]
-	if !ok {
-		return nil, false, fmt.Errorf("unknown sign-in change %q", change)
-	}
 	providers, err := signInProviders(ctx, db, settings.publicURL)
 	if err != nil {
 		return nil, false, err
+	}
+	if change == ChangeLocalPasswordsOff {
+		accounts, err := localPasswordsOffBlockers(ctx, db, providers)
+		return accounts, len(providers) > 0, err
+	}
+	where, ok := accountsAtRiskSQL[change]
+	if !ok {
+		return nil, false, fmt.Errorf("unknown sign-in change %q", change)
 	}
 	args := []any{providers}
 	if change == ChangeAppKeysOff {
