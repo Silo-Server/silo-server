@@ -41,12 +41,11 @@ import {
 } from "@/hooks/queries/episodeOrder";
 import { useT, type MessageKey, type Translate } from "@/i18n";
 import { joinList } from "@/lib/appLocale";
-import { providerLabel, episodeOrderLabel } from "@/lib/episodeOrder";
+import { asProvider, fileOrderLabel, providerLabel, type Provider } from "@/lib/episodeOrder";
 import { formatEpisodeCode } from "@/lib/episodeCardLabels";
 import { seasonDisplayName } from "@/pages/ItemDetail/itemDetailLayout";
 import { cn } from "@/lib/utils";
 
-type Provider = "tvdb" | "tmdb";
 type Source = "library" | Provider;
 type Layout = "seasons" | "absolute" | "custom";
 
@@ -60,7 +59,6 @@ interface Draft {
 }
 
 const otherProvider = (p: Provider): Provider => (p === "tvdb" ? "tmdb" : "tvdb");
-const asProvider = (v: string | undefined): Provider => (v === "tmdb" ? "tmdb" : "tvdb");
 
 const KIND_KEY: Record<string, MessageKey> = {
   aired: "web.item.episodeOrder.kind.aired",
@@ -74,12 +72,6 @@ const KIND_KEY: Record<string, MessageKey> = {
 
 function kindLabel(t: Translate, kind: string) {
   return t(KIND_KEY[kind] ?? "web.item.episodeOrder.kind.alternate");
-}
-
-function fileOrderLabel(t: Translate, provider: Provider) {
-  return t(
-    provider === "tvdb" ? "web.item.episodeOrder.files.tvdb" : "web.item.episodeOrder.files.tmdb",
-  );
 }
 
 function draftOf(state: EpisodeOrderState): Draft {
@@ -772,48 +764,6 @@ function Notice({
           {action.label}
         </Button>
       )}
-    </div>
-  );
-}
-
-/**
- * The series page note naming the show's episode order, with a link that
- * opens the dialog. Shown to admins and metadata curators.
- */
-export function EpisodeOrderSummary({
-  contentId,
-  onChange,
-}: {
-  contentId: string;
-  onChange: () => void;
-}) {
-  const t = useT();
-  const { data } = useEpisodeOrder(contentId, true, false);
-  if (!data) return null;
-  const { choice } = data;
-  const provider = asProvider(choice.provider || data.library_provider);
-  let summary = episodeOrderLabel(t, provider, choice.order_id, data.order_name);
-  if (choice.layout === "absolute")
-    summary = t("web.item.episodeOrder.summaryAbsolute", { order: summary });
-  if (choice.layout === "custom")
-    summary = t("web.item.episodeOrder.summaryCustom", { order: summary });
-  if (choice.file_order && choice.file_order !== provider)
-    summary = t("web.item.episodeOrder.summaryFiles", {
-      order: summary,
-      files: fileOrderLabel(t, asProvider(choice.file_order)),
-    });
-  if (data.inherited) summary = t("web.item.episodeOrder.summaryLibrary", { summary });
-  return (
-    <div className="text-muted-foreground flex flex-wrap items-center gap-2 text-xs">
-      <Info className="size-3.5" aria-hidden="true" />
-      <span>{t("web.item.episodeOrder.summary", { summary })}</span>
-      <button
-        type="button"
-        onClick={onChange}
-        className="text-primary -my-1 rounded px-1 py-1 font-medium hover:underline"
-      >
-        {t("web.item.episodeOrder.change")}
-      </button>
     </div>
   );
 }

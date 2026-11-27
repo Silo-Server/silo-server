@@ -2,16 +2,7 @@
 // rename, reorder and delete seasons, and move episodes between them by drag
 // and drop or selection. Only Silo's catalog changes; files on disk are never
 // touched.
-import {
-  useCallback,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-  type CSSProperties,
-  type ReactNode,
-} from "react";
-import { useVirtualizer } from "@tanstack/react-virtual";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import {
@@ -24,23 +15,7 @@ import {
   type DragStartEvent,
 } from "@dnd-kit/core";
 import { SortableContext, arrayMove, verticalListSortingStrategy } from "@dnd-kit/sortable";
-import { CSS } from "@dnd-kit/utilities";
-import {
-  EyeOff,
-  FileVideo,
-  GripVertical,
-  History,
-  ImagePlus,
-  Info,
-  Loader2,
-  Pencil,
-  Plus,
-  RotateCcw,
-  Scissors,
-  Sparkles,
-  Trash2,
-  X,
-} from "lucide-react";
+import { EyeOff, GripVertical, History, Loader2, Plus, RotateCcw, X } from "lucide-react";
 import { V2ProblemError } from "@/api/v2/request";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Button } from "@/components/ui/button";
@@ -51,8 +26,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -60,56 +33,35 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
 import {
   useCustomSeasons,
   useEpisodeOrder,
   useSaveCustomSeasons,
-  useUploadCustomSeasonPoster,
-  type CustomSeason,
   type CustomSeasonEpisode,
   type CustomSeasons,
   type EpisodeOrderChoice,
 } from "@/hooks/queries/episodeOrder";
-import {
-  useGripDragSensors,
-  useMotionSafeOverlay,
-  useMotionSafeSortable,
-} from "@/hooks/useSortableList";
+import { useGripDragSensors, useMotionSafeOverlay } from "@/hooks/useSortableList";
 import { useT } from "@/i18n";
 import { joinList } from "@/lib/appLocale";
 import { providerLabel, episodeOrderLabel } from "@/lib/episodeOrder";
-import { formatEpisodeCode } from "@/lib/episodeCardLabels";
 import { seasonDisplayName } from "@/pages/ItemDetail/itemDetailLayout";
-import { cn } from "@/lib/utils";
 
-const SPECIALS = "specials";
-
-interface ArrangedSeason {
-  /** Stable while the arranger is open; numbers follow the list order. */
-  id: string;
-  title: string;
-  overview: string;
-  /** An uploaded poster, which stays with the season wherever it moves. */
-  poster?: CustomSeasonPosterUpload;
-  episodeKeys: string[];
-}
-
-interface CustomSeasonPosterUpload {
-  ref: NonNullable<CustomSeason["poster"]>;
-  url?: string;
-}
-
-interface ProviderSeason {
-  title: string;
-  overview: string;
-  posterUrl?: string;
-}
-
-const withoutKeys = (keys: string[], removed: Set<string>) => keys.filter((k) => !removed.has(k));
-
-let seq = 0;
-const newId = () => `season-${Date.now().toString(36)}-${seq++}`;
+import {
+  SPECIALS,
+  arrangedOf,
+  newId,
+  withoutKeys,
+  type ArrangedSeason,
+  type ProviderSeason,
+} from "@/lib/arrangeSeasons";
+import { SeasonDetails } from "@/components/ArrangeSeasonDetails";
+import {
+  EpisodeRow,
+  SeasonRow,
+  SpecialsRow,
+  VirtualEpisodeList,
+} from "@/components/ArrangeSeasonsRows";
 
 export default function ArrangeSeasonsDialog({
   contentId,
@@ -189,24 +141,6 @@ function Loader({
       onClose={onClose}
     />
   );
-}
-
-function arrangedOf(data: CustomSeasons): { seasons: ArrangedSeason[]; specials: string[] } {
-  const seasons: ArrangedSeason[] = [];
-  let specials: string[] = [];
-  for (const season of data.seasons) {
-    const keys = season.episodes.map((e) => e.key);
-    if (season.number === 0) specials = keys;
-    else
-      seasons.push({
-        id: newId(),
-        title: season.title,
-        overview: season.overview,
-        poster: season.poster ? { ref: season.poster, url: season.poster_url } : undefined,
-        episodeKeys: keys,
-      });
-  }
-  return { seasons, specials };
 }
 
 function Arranger({
@@ -829,486 +763,5 @@ function Arranger({
         />
       </DialogContent>
     </Dialog>
-  );
-}
-
-function SeasonDetails({
-  season,
-  number,
-  provider,
-  inherited,
-  contentId,
-  onTitle,
-  onOverview,
-  onPoster,
-}: {
-  season: ArrangedSeason;
-  number: number;
-  provider: string;
-  inherited?: ProviderSeason;
-  contentId: string;
-  onTitle: (title: string) => void;
-  onOverview: (overview: string) => void;
-  onPoster: (poster: CustomSeasonPosterUpload | undefined) => void;
-}) {
-  const t = useT();
-  const [overviewKey, setOverviewKey] = useState(0);
-  const from = t("web.item.arrangeSeasons.fromProvider", { provider, number });
-  const input = useRef<HTMLInputElement>(null);
-  const upload = useUploadCustomSeasonPoster(contentId);
-  const poster = season.poster?.url ?? inherited?.posterUrl;
-  return (
-    <div className="surface-panel mb-4 flex flex-col gap-4 rounded-2xl p-4 sm:flex-row">
-      <div className="shrink-0">
-        <div className="bg-surface border-border relative aspect-[2/3] w-32 overflow-hidden rounded-xl border">
-          {poster ? (
-            <img src={poster} alt="" className="h-full w-full object-cover" />
-          ) : (
-            <div className="text-muted-foreground flex h-full items-center justify-center p-3 text-center text-xs font-medium">
-              {season.title || inherited?.title || seasonDisplayName(number)}
-            </div>
-          )}
-          <span className="absolute start-1.5 bottom-1.5 rounded bg-black/70 px-1.5 py-0.5 text-[0.625rem] font-medium text-white/85">
-            {season.poster
-              ? t("web.item.arrangeSeasons.custom")
-              : inherited?.posterUrl
-                ? from
-                : t("web.item.arrangeSeasons.posterNone")}
-          </span>
-          {upload.isPending && (
-            <span className="absolute inset-0 grid place-items-center bg-black/50">
-              <Loader2 className="size-5 animate-spin text-white" aria-hidden="true" />
-            </span>
-          )}
-        </div>
-        <input
-          ref={input}
-          type="file"
-          accept="image/jpeg,image/png,image/webp"
-          className="hidden"
-          onChange={(e) => {
-            const file = e.target.files?.[0];
-            e.target.value = "";
-            if (!file) return;
-            upload.mutate(file, {
-              onSuccess: (uploaded) => {
-                onPoster({ ref: uploaded.poster, url: uploaded.poster_url });
-                toast.success(t("web.item.arrangeSeasons.posterAdded"));
-              },
-              onError: () => toast.error(t("web.item.arrangeSeasons.posterFailed")),
-            });
-          }}
-        />
-        <div className="mt-2 flex w-32 flex-col gap-1.5">
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={upload.isPending}
-            onClick={() => input.current?.click()}
-          >
-            <ImagePlus className="size-3.5" aria-hidden="true" />
-            {season.poster
-              ? t("web.item.arrangeSeasons.posterReplace")
-              : t("web.item.arrangeSeasons.posterUpload")}
-          </Button>
-          {season.poster && (
-            <Button size="sm" variant="ghost" onClick={() => onPoster(undefined)}>
-              <RotateCcw className="size-3.5" aria-hidden="true" />
-              {inherited?.posterUrl
-                ? t("web.item.arrangeSeasons.useProvider", { provider })
-                : t("web.item.arrangeSeasons.posterRemove")}
-            </Button>
-          )}
-        </div>
-      </div>
-      <div className="min-w-0 flex-1 space-y-3">
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between gap-2">
-            <Label
-              htmlFor={`season-title-${season.id}`}
-              className="text-muted-foreground text-[0.75rem] font-medium"
-            >
-              {t("web.item.arrangeSeasons.titleLabel")}
-            </Label>
-            <span className="text-muted-foreground text-[0.6875rem]">
-              {season.title ? t("web.item.arrangeSeasons.custom") : from}
-            </span>
-          </div>
-          <Input
-            id={`season-title-${season.id}`}
-            defaultValue={season.title}
-            placeholder={inherited?.title || seasonDisplayName(number)}
-            onBlur={(e) => onTitle(e.target.value.trim())}
-            onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
-          />
-        </div>
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between gap-2">
-            <Label
-              htmlFor={`season-overview-${season.id}`}
-              className="text-muted-foreground text-[0.75rem] font-medium"
-            >
-              {t("web.item.arrangeSeasons.descriptionLabel")}
-            </Label>
-            <span className="text-muted-foreground flex items-center gap-2 text-[0.6875rem]">
-              {season.overview
-                ? t("web.item.arrangeSeasons.custom")
-                : inherited?.overview
-                  ? from
-                  : t("web.item.arrangeSeasons.none")}
-              {season.overview && (
-                <Button
-                  variant="ghost"
-                  size="xs"
-                  onClick={() => {
-                    onOverview("");
-                    setOverviewKey((k) => k + 1);
-                  }}
-                >
-                  <RotateCcw className="size-3" aria-hidden="true" />
-                  {inherited?.overview
-                    ? t("web.item.arrangeSeasons.useProvider", { provider })
-                    : t("web.item.arrangeSeasons.clear")}
-                </Button>
-              )}
-            </span>
-          </div>
-          <Textarea
-            id={`season-overview-${season.id}`}
-            key={overviewKey}
-            defaultValue={season.overview || inherited?.overview || ""}
-            placeholder={t("web.item.arrangeSeasons.descriptionPlaceholder")}
-            rows={4}
-            style={{ fieldSizing: "content" } as CSSProperties}
-            className="max-h-64 min-h-24 text-sm leading-relaxed"
-            onBlur={(e) => {
-              const text = e.target.value.trim();
-              const providerText = (inherited?.overview ?? "").trim();
-              onOverview(text === providerText ? "" : text);
-            }}
-          />
-        </div>
-        <p className="text-muted-foreground/80 flex gap-1.5 text-xs leading-relaxed">
-          <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
-          {t("web.item.arrangeSeasons.metaNoteSeasons", { provider })}
-        </p>
-      </div>
-    </div>
-  );
-}
-
-/**
- * The episodes of one season, of which only the rows in view are mounted: a
- * long season (One Piece, Bleach on TMDB) would otherwise render hundreds of
- * sortable rows on every pointer move of a drag.
- */
-function VirtualEpisodeList({
-  keys,
-  scrollElement,
-  renderRow,
-}: {
-  keys: string[];
-  scrollElement: () => HTMLElement | null;
-  renderRow: (key: string, index: number) => ReactNode;
-}) {
-  const listRef = useRef<HTMLUListElement>(null);
-  const [offset, setOffset] = useState(0);
-  // The list starts below the season details, inside the scroll element.
-  useLayoutEffect(() => {
-    const list = listRef.current;
-    const scroller = scrollElement();
-    if (!list || !scroller) return;
-    const measure = () =>
-      setOffset(
-        list.getBoundingClientRect().top -
-          scroller.getBoundingClientRect().top +
-          scroller.scrollTop,
-      );
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(scroller);
-    if (list.parentElement) observer.observe(list.parentElement);
-    return () => observer.disconnect();
-  }, [scrollElement]);
-  const virtualizer = useVirtualizer({
-    count: keys.length,
-    getScrollElement: scrollElement,
-    estimateSize: () => 60,
-    overscan: 8,
-    scrollMargin: offset,
-    getItemKey: (index) => keys[index] ?? index,
-  });
-  return (
-    <ul
-      ref={listRef}
-      className="surface-panel relative overflow-hidden rounded-2xl"
-      style={{ height: virtualizer.getTotalSize() }}
-    >
-      {virtualizer.getVirtualItems().map((item) => (
-        <li
-          key={item.key}
-          data-index={item.index}
-          ref={virtualizer.measureElement}
-          className="absolute inset-x-0 top-0"
-          style={{ transform: `translateY(${item.start - offset}px)` }}
-        >
-          {renderRow(keys[item.index] ?? "", item.index)}
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-function SeasonRow({
-  season,
-  name,
-  providerTitle,
-  posterUrl,
-  active,
-  editing,
-  dropTarget,
-  canDelete,
-  onSelect,
-  onRename,
-  onEdit,
-  onDelete,
-}: {
-  season: ArrangedSeason;
-  name: string;
-  providerTitle?: string;
-  posterUrl?: string;
-  active: boolean;
-  editing: boolean;
-  dropTarget: boolean;
-  canDelete: boolean;
-  onSelect: () => void;
-  onRename: (title: string) => void;
-  onEdit: (on: boolean) => void;
-  onDelete: () => void;
-}) {
-  const t = useT();
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging, isOver } =
-    useMotionSafeSortable({
-      id: `season:${season.id}`,
-    });
-  return (
-    <li
-      ref={setNodeRef}
-      style={{ transform: CSS.Transform.toString(transform), transition }}
-      className={cn(
-        "group flex items-center gap-1.5 rounded-lg border border-transparent px-1.5 py-1.5 transition-colors",
-        active ? "bg-primary/10 border-primary/30" : "hover:bg-accent/50",
-        dropTarget && "border-border border-dashed",
-        dropTarget && isOver && "border-primary bg-primary/15",
-        isDragging && "opacity-60",
-      )}
-    >
-      <button
-        type="button"
-        className="text-muted-foreground/60 hover:text-foreground cursor-grab touch-none p-1"
-        aria-label={t("web.item.arrangeSeasons.drag", { name })}
-        {...attributes}
-        {...listeners}
-      >
-        <GripVertical className="size-4" aria-hidden="true" />
-      </button>
-      {editing ? (
-        <Input
-          autoFocus
-          defaultValue={season.title}
-          placeholder={providerTitle || name}
-          className="h-8 flex-1 text-sm"
-          onBlur={(e) => {
-            onRename(e.target.value.trim());
-            onEdit(false);
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === "Escape") (e.target as HTMLInputElement).blur();
-          }}
-        />
-      ) : (
-        <button
-          type="button"
-          onClick={onSelect}
-          className="flex min-w-0 flex-1 items-center gap-2.5 text-start"
-        >
-          <span className="bg-surface border-border/60 h-12 w-8 shrink-0 overflow-hidden rounded-md border">
-            {posterUrl && (
-              <img src={posterUrl} alt="" className="h-full w-full object-cover" loading="lazy" />
-            )}
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="block text-sm leading-snug font-medium text-pretty">{name}</span>
-            <span className="text-muted-foreground block text-xs">
-              {t("web.item.arrangeSeasons.episodeCount", { count: season.episodeKeys.length })}
-            </span>
-          </span>
-        </button>
-      )}
-      {!editing && (
-        <div className="flex opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-          <button
-            type="button"
-            onClick={() => onEdit(true)}
-            className="text-muted-foreground hover:text-foreground p-1.5"
-            aria-label={t("web.item.arrangeSeasons.rename")}
-          >
-            <Pencil className="size-3.5" aria-hidden="true" />
-          </button>
-          {canDelete && (
-            <button
-              type="button"
-              onClick={onDelete}
-              className="text-muted-foreground p-1.5 hover:text-red-400"
-              aria-label={t("web.item.arrangeSeasons.delete")}
-            >
-              <Trash2 className="size-3.5" aria-hidden="true" />
-            </button>
-          )}
-        </div>
-      )}
-    </li>
-  );
-}
-
-function SpecialsRow({
-  count,
-  active,
-  dropTarget,
-  onSelect,
-}: {
-  count: number;
-  active: boolean;
-  dropTarget: boolean;
-  onSelect: () => void;
-}) {
-  const t = useT();
-  const { setNodeRef, isOver } = useMotionSafeSortable({
-    id: `season:${SPECIALS}`,
-    disabled: { draggable: true },
-  });
-  return (
-    <button
-      ref={setNodeRef}
-      type="button"
-      onClick={onSelect}
-      className={cn(
-        "flex w-full items-center gap-2 rounded-lg border border-transparent px-3 py-2 text-start",
-        active ? "bg-primary/10 border-primary/30" : "hover:bg-accent/50",
-        dropTarget && "border-border border-dashed",
-        dropTarget && isOver && "border-primary bg-primary/15",
-      )}
-    >
-      <div className="min-w-0 flex-1">
-        <div className="text-sm font-medium">{seasonDisplayName(0)}</div>
-        <div className="text-muted-foreground text-xs">
-          {t("web.item.arrangeSeasons.specialsMeta", { count })}
-        </div>
-      </div>
-    </button>
-  );
-}
-
-function EpisodeRow({
-  episode,
-  provider,
-  number,
-  selected,
-  onToggle,
-  onSplit,
-}: {
-  episode: CustomSeasonEpisode;
-  provider: string;
-  number: number;
-  selected: boolean;
-  onToggle: (shift: boolean) => void;
-  onSplit?: () => void;
-}) {
-  const t = useT();
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
-    useMotionSafeSortable({
-      id: `ep:${episode.key}`,
-    });
-  const origin = [
-    provider,
-    formatEpisodeCode(episode.provider_season, episode.provider_episode),
-  ].join(" ");
-  const year = episode.air_date?.slice(0, 4);
-  return (
-    <div
-      ref={setNodeRef}
-      style={{ transform: CSS.Transform.toString(transform), transition }}
-      className={cn(
-        "group border-border/40 relative flex items-center gap-3 border-b px-3 py-2",
-        selected && "bg-primary/8",
-        isDragging && "opacity-0",
-      )}
-    >
-      <input
-        type="checkbox"
-        checked={selected}
-        onChange={() => undefined}
-        onClick={(ev) => onToggle(ev.shiftKey)}
-        className="size-4 shrink-0"
-        style={{ accentColor: "var(--primary)" }}
-        aria-label={t("web.item.arrangeSeasons.select", { title: episode.title })}
-      />
-      <button
-        type="button"
-        className="text-muted-foreground/50 hover:text-foreground cursor-grab touch-none"
-        aria-label={t("web.item.arrangeSeasons.drag", { name: episode.title })}
-        {...attributes}
-        {...listeners}
-      >
-        <GripVertical className="size-4" aria-hidden="true" />
-      </button>
-      <span className="text-muted-foreground/70 w-8 shrink-0 text-center text-sm font-semibold tabular-nums">
-        {number}
-      </span>
-      <span className="bg-muted/50 hidden h-11 w-[78px] shrink-0 overflow-hidden rounded-md sm:block">
-        {episode.still_url && (
-          <img
-            src={episode.still_url}
-            alt=""
-            className="h-full w-full object-cover"
-            loading="lazy"
-          />
-        )}
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="truncate text-sm font-medium">{episode.title}</span>
-          {episode.placed_automatically && (
-            <span className="bg-primary/15 text-primary flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[0.625rem] font-medium">
-              <Sparkles className="size-3" aria-hidden="true" />
-              {t("web.item.arrangeSeasons.placedAutomatically")}
-            </span>
-          )}
-        </div>
-        <div className="text-muted-foreground flex min-w-0 items-center gap-1.5 text-xs">
-          <span className="shrink-0 font-mono">{origin}</span>
-          {year && <span className="shrink-0">{year}</span>}
-          {episode.file ? (
-            <span className="flex min-w-0 items-center gap-1 font-mono text-[0.6875rem]">
-              <FileVideo className="size-3 shrink-0" aria-hidden="true" />
-              <span className="truncate">{episode.file}</span>
-            </span>
-          ) : (
-            <span className="text-muted-foreground/60">{t("web.item.arrangeSeasons.noFile")}</span>
-          )}
-        </div>
-      </div>
-      {onSplit && (
-        <button
-          type="button"
-          onClick={onSplit}
-          className="bg-surface border-border text-muted-foreground hover:text-foreground absolute end-3 top-1/2 flex -translate-y-1/2 items-center gap-1 rounded-md border px-2 py-1 text-xs opacity-0 shadow-sm transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
-          title={t("web.item.arrangeSeasons.splitTitle")}
-        >
-          <Scissors className="size-3.5" aria-hidden="true" />
-          {t("web.item.arrangeSeasons.splitHere")}
-        </button>
-      )}
-    </div>
   );
 }

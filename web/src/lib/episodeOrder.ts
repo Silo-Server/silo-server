@@ -1,5 +1,11 @@
 import type { Translate } from "@/i18n";
 
+/** A provider that numbers a series' episodes. */
+export type Provider = "tvdb" | "tmdb";
+
+/** Reads a stored provider value; anything but "tmdb" is TVDB. */
+export const asProvider = (v: string | undefined): Provider => (v === "tmdb" ? "tmdb" : "tvdb");
+
 // Provider names are brands, the same in every language.
 const PROVIDER_LABELS: Record<string, string | undefined> = { tvdb: "TVDB", tmdb: "TMDB" };
 
@@ -30,4 +36,11 @@ export function episodeOrderLabel(
         : "web.item.episodeOrder.defaultOrder",
     ),
   });
+}
+
+/** Names the order a series' files are named in: TVDB numbering, TMDB numbering. */
+export function fileOrderLabel(t: Translate, provider: Provider): string {
+  return t(
+    provider === "tvdb" ? "web.item.episodeOrder.files.tvdb" : "web.item.episodeOrder.files.tmdb",
+  );
 }

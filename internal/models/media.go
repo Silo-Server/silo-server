@@ -48,16 +48,8 @@ type MediaFolder struct {
 	ScanWarningAt         *time.Time
 	AllowEmptyCleanupOnce bool
 	SortOrder             int
-	// EpisodeOrderProvider is the provider whose episode order the library
-	// follows, "tvdb" or "tmdb". Empty means the first enabled remote
-	// provider in the library's Episodes chain.
+	// EpisodeOrderProvider ("tvdb", "tmdb") numbers the shows; empty: first enabled remote Episodes provider.
 	EpisodeOrderProvider string
-}
-
-// ValidEpisodeOrderProvider reports whether v is a value
-// MediaFolder.EpisodeOrderProvider accepts.
-func ValidEpisodeOrderProvider(v string) bool {
-	return v == "" || v == "tvdb" || v == "tmdb"
 }
 
 // MediaFile represents a row in the media_files table.
@@ -913,9 +905,8 @@ type Episode struct {
 	SortTitle     string
 	OriginalTitle string
 	Tagline       string
-	// ProviderSeasonNumber and ProviderEpisodeNumber place the episode in its
-	// provider's default order when the series shows another order; nil
-	// means SeasonNumber and EpisodeNumber are that order's.
+	// ProviderSeasonNumber and ProviderEpisodeNumber are the episode's numbers in its
+	// provider's default order when the series shows another; nil means the same.
 	ProviderSeasonNumber  *int
 	ProviderEpisodeNumber *int
 }
