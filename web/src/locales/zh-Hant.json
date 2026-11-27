@@ -215,6 +215,12 @@
       "value": "此項目已連結至這個帳號。"
     }
   ],
+  "error.app_code_invalid": [
+    {
+      "type": 0,
+      "value": "此代碼無法辨識、已使用或已過期。請從伺服器的網頁取得新的代碼。"
+    }
+  ],
   "error.authentication_required": [
     {
       "type": 0,
@@ -333,6 +339,12 @@
     {
       "type": 0,
       "value": "此值的類型錯誤。"
+    }
+  ],
+  "error.field.key_enrolled": [
+    {
+      "type": 0,
+      "value": "此金鑰已在這台伺服器上使用中。"
     }
   ],
   "error.field.malformed_form": [
@@ -9593,7 +9605,7 @@
   "web.admin.autoscan.connections.delete.description": [
     {
       "type": 0,
-      "value": "「"
+      "value": "將刪除「"
     },
     {
       "type": 1,
@@ -9601,7 +9613,7 @@
     },
     {
       "type": 0,
-      "value": "」將被移除。只要仍有掃描來源參照此連線，就無法刪除。請先重新設定這些來源。"
+      "value": "」。只要仍有掃描來源使用此連線，就無法刪除；請先更新這些來源。"
     }
   ],
   "web.admin.autoscan.connections.delete.title": [
@@ -9631,7 +9643,7 @@
   "web.admin.autoscan.connections.dialog.description": [
     {
       "type": 0,
-      "value": "重複使用你已在請求（Sonarr/Radarr）中設定的伺服器，或輸入你自己的憑證。"
+      "value": "重複使用請求中的 Sonarr 或 Radarr 伺服器，或手動輸入憑證。"
     }
   ],
   "web.admin.autoscan.connections.dialog.editTitle": [
@@ -9643,7 +9655,7 @@
   "web.admin.autoscan.connections.dialog.kind": [
     {
       "type": 0,
-      "value": "類型"
+      "value": "服務"
     }
   ],
   "web.admin.autoscan.connections.dialog.loadingServers": [
@@ -9655,7 +9667,7 @@
   "web.admin.autoscan.connections.dialog.noRequestServers": [
     {
       "type": 0,
-      "value": "尚無 Sonarr 或 Radarr 伺服器。請先在"
+      "value": "請求中尚無 Sonarr 或 Radarr 伺服器。請在"
     },
     {
       "type": 8,
@@ -9663,7 +9675,7 @@
       "children": [
         {
           "type": 0,
-          "value": "設定 › 請求"
+          "value": "設定 → 請求"
         }
       ]
     },
@@ -9675,7 +9687,7 @@
   "web.admin.autoscan.connections.dialog.requestServer": [
     {
       "type": 0,
-      "value": "請求伺服器"
+      "value": "請求中的伺服器"
     }
   ],
   "web.admin.autoscan.connections.dialog.requestServerOption": [
@@ -9815,7 +9827,7 @@
   "web.admin.autoscan.connections.list.columnKind": [
     {
       "type": 0,
-      "value": "類型"
+      "value": "服務"
     }
   ],
   "web.admin.autoscan.connections.list.columnName": [
@@ -9827,7 +9839,7 @@
   "web.admin.autoscan.connections.list.columnSource": [
     {
       "type": 0,
-      "value": "來源"
+      "value": "憑證"
     }
   ],
   "web.admin.autoscan.connections.list.columnURL": [
@@ -9845,7 +9857,7 @@
   "web.admin.autoscan.connections.list.description": [
     {
       "type": 0,
-      "value": "供需要連線至伺服器（例如 Sonarr 或 Radarr）的來源使用的憑證。Webhook 來源不需要憑證。"
+      "value": "已儲存的憑證，供連線至 Sonarr 或 Radarr 等伺服器的來源使用。Webhook 來源不需要憑證。"
     }
   ],
   "web.admin.autoscan.connections.list.editLabel": [
@@ -9869,13 +9881,13 @@
   "web.admin.autoscan.connections.list.own": [
     {
       "type": 0,
-      "value": "自有"
+      "value": "手動"
     }
   ],
   "web.admin.autoscan.connections.list.reused": [
     {
       "type": 0,
-      "value": "沿用自請求"
+      "value": "來自請求"
     }
   ],
   "web.admin.autoscan.connections.list.title": [
@@ -11573,13 +11585,13 @@
   "web.admin.backups.backUpNow.keyNotConfirmed": [
     {
       "type": 0,
-      "value": "已暫停，直到確認金鑰為止。"
+      "value": "已暫停，直到你確認此伺服器的 SECRET_KEY 為止。"
     }
   ],
   "web.admin.backups.backUpNow.noStorage": [
     {
       "type": 0,
-      "value": "此伺服器沒有可存放備份的儲存空間。"
+      "value": "尚未設定備份儲存空間。"
     }
   ],
   "web.admin.backups.backUpNow.unreachable": [
@@ -11609,25 +11621,25 @@
   "web.admin.backups.command.group": [
     {
       "type": 0,
-      "value": "取代整個伺服器"
+      "value": "完整伺服器還原"
     }
   ],
   "web.admin.backups.command.groupDescription": [
     {
       "type": 0,
-      "value": "完整還原會取代資料庫，因此必須先停止伺服器。"
+      "value": "這會取代整個資料庫，因此請在執行此指令前先停止 Silo。"
     }
   ],
   "web.admin.backups.command.hintBucket": [
     {
       "type": 0,
-      "value": "此指令會使用上方選取的備份（或最新的備份），並從儲存貯體讀取。請在其環境中設定 SILO_BACKUP_S3_ENDPOINT、SILO_BACKUP_S3_REGION、SILO_BACKUP_S3_ACCESS_KEY、SILO_BACKUP_S3_SECRET_KEY 和 SILO_BACKUP_S3_PATH_STYLE。"
+      "value": "此指令會使用上方選取的備份（或最新的備份），並從儲存貯體讀取。請在指令的環境中設定 SILO_BACKUP_S3_ENDPOINT、SILO_BACKUP_S3_REGION、SILO_BACKUP_S3_ACCESS_KEY、SILO_BACKUP_S3_SECRET_KEY 和 SILO_BACKUP_S3_PATH_STYLE。"
     }
   ],
   "web.admin.backups.command.hintBucketEncrypted": [
     {
       "type": 0,
-      "value": "此指令會使用上方選取的備份（或最新的備份），並從儲存貯體讀取。請在其環境中設定此伺服器的 SECRET_KEY，以及 SILO_BACKUP_S3_ENDPOINT、SILO_BACKUP_S3_REGION、SILO_BACKUP_S3_ACCESS_KEY、SILO_BACKUP_S3_SECRET_KEY 和 SILO_BACKUP_S3_PATH_STYLE。"
+      "value": "此指令會使用上方選取的備份（或最新的備份），並從儲存貯體讀取。請在指令的環境中設定此伺服器的 SECRET_KEY，以及 SILO_BACKUP_S3_ENDPOINT、SILO_BACKUP_S3_REGION、SILO_BACKUP_S3_ACCESS_KEY、SILO_BACKUP_S3_SECRET_KEY 和 SILO_BACKUP_S3_PATH_STYLE。"
     }
   ],
   "web.admin.backups.command.hintDownload": [
@@ -11669,7 +11681,7 @@
   "web.admin.backups.confirmKey.button": [
     {
       "type": 0,
-      "value": "確認金鑰"
+      "value": "確認 SECRET_KEY"
     }
   ],
   "web.admin.backups.content.group": [
@@ -12631,7 +12643,7 @@
   "web.admin.backups.location.bucketDescription": [
     {
       "type": 0,
-      "value": "存放在 Silo 也用於大頭貼和診斷套件的私人 S3 儲存貯體中，並使用你的 SECRET_KEY 加密。"
+      "value": "使用 Silo 的私人 S3 儲存貯體（與大頭貼和診斷套件共用），並以你的 SECRET_KEY 加密。"
     }
   ],
   "web.admin.backups.location.change": [
@@ -12655,7 +12667,7 @@
   "web.admin.backups.location.noneDescription": [
     {
       "type": 0,
-      "value": "此伺服器沒有可存放備份的私人儲存空間：其圖片存放在 S3，且尚未設定私人儲存貯體。請在儲存空間設定中新增私人儲存貯體以開啟備份。"
+      "value": "此伺服器將圖片存放在 S3，但尚未設定私人儲存貯體。請在儲存空間設定中新增私人儲存貯體，以便在其中存放備份。"
     }
   ],
   "web.admin.backups.location.nowhere": [
@@ -12679,13 +12691,13 @@
   "web.admin.backups.location.s3": [
     {
       "type": 0,
-      "value": "在 S3 儲存貯體中"
+      "value": "在獨立的 S3 儲存貯體中"
     }
   ],
   "web.admin.backups.location.s3Description": [
     {
       "type": 0,
-      "value": "存放在此伺服器以外，並以你的 SECRET_KEY 加密。"
+      "value": "存放在此伺服器以外的專用 S3 儲存貯體中，並以你的 SECRET_KEY 加密。"
     }
   ],
   "web.admin.backups.location.setUp": [
@@ -17857,7 +17869,7 @@
   "web.admin.backups.schedule.enabledDescription": [
     {
       "type": 0,
-      "value": "關閉此選項會停止建立新備份。已儲存的備份會保留。"
+      "value": "關閉此選項會停止排程備份。現有備份會保留。"
     }
   ],
   "web.admin.backups.schedule.first": [
@@ -17925,7 +17937,7 @@
   "web.admin.backups.schedule.groupDescription": [
     {
       "type": 0,
-      "value": "叢集中會由一台伺服器負責備份。只有在新備份成功後，才會刪除最舊的備份。"
+      "value": "在叢集中，每次備份只會由一台伺服器執行。只有在新備份成功後，才會刪除舊備份。"
     }
   ],
   "web.admin.backups.schedule.keep": [
@@ -18245,7 +18257,7 @@
   "web.admin.backups.table.otherKeyNoteWithCheck": [
     {
       "type": 0,
-      "value": "使用另一組 SECRET_KEY 加密（金鑰檢查碼 "
+      "value": "使用另一組 SECRET_KEY 加密（指紋 "
     },
     {
       "type": 1,
@@ -18259,7 +18271,7 @@
   "web.admin.backups.table.otherKeyReason": [
     {
       "type": 0,
-      "value": "只有具備建立此備份時所用 SECRET_KEY 的伺服器，才能還原此備份或解密其檔案。"
+      "value": "只有使用相同 SECRET_KEY 的伺服器，才能還原或解密此備份。"
     }
   ],
   "web.admin.backups.table.restore": [
@@ -18941,7 +18953,7 @@
   "web.admin.backups.warning.keyNotConfirmed": [
     {
       "type": 0,
-      "value": "在你確認此伺服器的 SECRET_KEY 之前，備份至此儲存貯體的作業會暫停。"
+      "value": "在你確認已保存此伺服器的 SECRET_KEY 副本之前，備份至此儲存貯體的作業會暫停。"
     }
   ],
   "web.admin.backups.warnings.copied": [
@@ -21580,6 +21592,79 @@
       }
     }
   ],
+  "web.admin.common.adminUserSignIn.unlinkConfirm.text": [
+    {
+      "type": 5,
+      "value": "last_way",
+      "options": {
+        "yes": {
+          "value": [
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " 將無法再使用此提供者帳號登入。在你設定密碼或重新連結提供者之前，"
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " 將無法登入。"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " 將無法再使用此提供者帳號登入。"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 5,
+      "value": "keys",
+      "options": {
+        "yes": {
+          "value": [
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " 與此提供者帳號綁定的 Silo App 金鑰會被移除，相關裝置也會登出。"
+            }
+          ]
+        },
+        "unknown": {
+          "value": [
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " 若有與此提供者帳號綁定的 Silo App 金鑰，都會被移除，相關裝置也會登出。"
+            }
+          ]
+        },
+        "other": {
+          "value": []
+        }
+      }
+    }
+  ],
   "web.admin.common.adminUserSignIn.unlinkConfirm.title": [
     {
       "type": 0,
@@ -22931,7 +23016,7 @@
   "web.admin.common.downloadAccess.conversionOff": [
     {
       "type": 0,
-      "value": "伺服器未準備適合裝置的副本，因此每次下載都是原始檔案。請在"
+      "value": "適合裝置的副本已關閉，因此每次下載都會使用原始檔案。請在"
     },
     {
       "type": 8,
@@ -22971,7 +23056,7 @@
   "web.admin.common.editorConflict.message": [
     {
       "type": 0,
-      "value": "其他管理員已變更此內容。你的編輯已保留。請重新載入以檢視最新版本，再重新儲存。"
+      "value": "另一位管理員已變更此內容。你的編輯仍顯示在畫面上，但重新載入會將其取代為最新版本。"
     }
   ],
   "web.admin.common.editorConflict.reload": [
@@ -23021,7 +23106,7 @@
   "web.admin.common.emailTest.saveFirst": [
     {
       "type": 0,
-      "value": "請先儲存變更；測試會使用已儲存的設定。"
+      "value": "測試會使用你已儲存的設定；如有變更，請先儲存。"
     }
   ],
   "web.admin.common.emailTest.selectProfile": [
@@ -29216,7 +29301,7 @@
     },
     {
       "type": 0,
-      "value": " 的一個登入工作階段，該使用者的其他裝置仍會保持登入。用戶端可以使用帳號密碼重新登入。"
+      "value": " 的一個登入工作階段，該使用者的其他裝置仍會保持登入。用戶端可以重新登入。"
     }
   ],
   "web.admin.dashboard.widgets.apiClients.confirmLabel": [
@@ -39189,6 +39274,12 @@
       "value": "個人檔案"
     }
   ],
+  "web.admin.history.column.progress": [
+    {
+      "type": 0,
+      "value": "進度"
+    }
+  ],
   "web.admin.history.column.status": [
     {
       "type": 0,
@@ -39223,6 +39314,12 @@
     {
       "type": 0,
       "value": "工作階段記錄"
+    }
+  ],
+  "web.admin.history.detail.backToPlay": [
+    {
+      "type": 0,
+      "value": "返回合併的播放"
     }
   ],
   "web.admin.history.detail.column.delivered": [
@@ -39333,6 +39430,12 @@
       "value": "觀看時間"
     }
   ],
+  "web.admin.history.detail.inspectSitting": [
+    {
+      "type": 0,
+      "value": "檢視"
+    }
+  ],
   "web.admin.history.detail.keyboardHint": [
     {
       "type": 0,
@@ -39417,6 +39520,12 @@
       "value": "未直接播放的原因"
     }
   ],
+  "web.admin.history.detail.section.sessions": [
+    {
+      "type": 0,
+      "value": "此次播放的工作階段"
+    }
+  ],
   "web.admin.history.detail.section.streams": [
     {
       "type": 0,
@@ -39427,6 +39536,78 @@
     {
       "type": 0,
       "value": "時間與觀看進度"
+    }
+  ],
+  "web.admin.history.detail.sessionsCapped": [
+    {
+      "type": 0,
+      "value": "顯示此次播放 "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": " 個工作階段中的前 "
+    },
+    {
+      "type": 1,
+      "value": "shown"
+    },
+    {
+      "type": 0,
+      "value": " 個。"
+    }
+  ],
+  "web.admin.history.detail.sessionsNotice": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "此次播放包含 "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " 個工作階段。下方的串流、裝置與路由詳細資料來自其主要工作階段；選擇下方任一工作階段即可個別檢視。"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.ended": [
+    {
+      "type": 0,
+      "value": "結束時間"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.method": [
+    {
+      "type": 0,
+      "value": "方式"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.started": [
+    {
+      "type": 0,
+      "value": "開始時間"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.watched": [
+    {
+      "type": 0,
+      "value": "觀看時間"
     }
   ],
   "web.admin.history.detail.subtitlesBurnIn": [
@@ -39663,6 +39844,12 @@
       "value": "所有網路"
     }
   ],
+  "web.admin.history.filter.allMediaTypes": [
+    {
+      "type": 0,
+      "value": "所有媒體"
+    }
+  ],
   "web.admin.history.filter.allMethods": [
     {
       "type": 0,
@@ -39699,6 +39886,24 @@
       "value": "已完成"
     }
   ],
+  "web.admin.history.filter.episodes": [
+    {
+      "type": 0,
+      "value": "集"
+    }
+  ],
+  "web.admin.history.filter.hideShort": [
+    {
+      "type": 0,
+      "value": "隱藏 <30 秒"
+    }
+  ],
+  "web.admin.history.filter.hideShortTitle": [
+    {
+      "type": 0,
+      "value": "隱藏未完成且短於 30 秒的工作階段"
+    }
+  ],
   "web.admin.history.filter.locationLocal": [
     {
       "type": 0,
@@ -39709,6 +39914,12 @@
     {
       "type": 0,
       "value": "遠端"
+    }
+  ],
+  "web.admin.history.filter.movies": [
+    {
+      "type": 0,
+      "value": "電影"
     }
   ],
   "web.admin.history.filter.partial": [
@@ -39886,6 +40097,12 @@
       "value": "最近播放"
     }
   ],
+  "web.admin.history.row.burnInBadgeTitle": [
+    {
+      "type": 0,
+      "value": "字幕已燒錄至影片"
+    }
+  ],
   "web.admin.history.row.completed": [
     {
       "type": 0,
@@ -39906,6 +40123,32 @@
     {
       "type": 0,
       "value": "估計值（記錄於開始追蹤確切觀看時間之前）"
+    }
+  ],
+  "web.admin.history.row.groupedSessionsTitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "由 "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " 個工作階段合併"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.history.row.meta": [
@@ -39938,6 +40181,12 @@
       "value": "部分觀看"
     }
   ],
+  "web.admin.history.row.progressLabel": [
+    {
+      "type": 0,
+      "value": "播放進度"
+    }
+  ],
   "web.admin.history.row.started": [
     {
       "type": 0,
@@ -39948,16 +40197,80 @@
       "value": "time"
     }
   ],
+  "web.admin.history.stats.accountsCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " 個帳號"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.history.stats.completed": [
     {
       "type": 0,
       "value": "已完成"
     }
   ],
+  "web.admin.history.stats.completionBreakdown": [
+    {
+      "type": 1,
+      "value": "completed"
+    },
+    {
+      "type": 0,
+      "value": " 已完成 · "
+    },
+    {
+      "type": 1,
+      "value": "partial"
+    },
+    {
+      "type": 0,
+      "value": " 部分觀看"
+    }
+  ],
   "web.admin.history.stats.partial": [
     {
       "type": 0,
       "value": "部分觀看"
+    }
+  ],
+  "web.admin.history.stats.totalPlays": [
+    {
+      "type": 0,
+      "value": "播放總數"
+    }
+  ],
+  "web.admin.history.stats.totalSessions": [
+    {
+      "type": 0,
+      "value": "工作階段總數"
+    }
+  ],
+  "web.admin.history.stats.uniqueProfiles": [
+    {
+      "type": 0,
+      "value": "不重複個人檔案"
+    }
+  ],
+  "web.admin.history.stats.uniqueTitles": [
+    {
+      "type": 0,
+      "value": "不重複作品"
     }
   ],
   "web.admin.history.stats.visibleRows": [
@@ -39976,6 +40289,24 @@
     {
       "type": 0,
       "value": "播放記錄"
+    }
+  ],
+  "web.admin.history.view.label": [
+    {
+      "type": 0,
+      "value": "記錄檢視"
+    }
+  ],
+  "web.admin.history.view.plays": [
+    {
+      "type": 0,
+      "value": "播放"
+    }
+  ],
+  "web.admin.history.view.sessions": [
+    {
+      "type": 0,
+      "value": "所有工作階段"
     }
   ],
   "web.admin.historyImport.conflict.message": [
@@ -52113,7 +52444,7 @@
   "web.admin.recommendations.jobs.cacheRefreshed": [
     {
       "type": 0,
-      "value": "最新的快取列寫入於 "
+      "value": "上次重新整理於 "
     },
     {
       "type": 1,
@@ -52123,7 +52454,7 @@
   "web.admin.recommendations.jobs.cowatch": [
     {
       "type": 0,
-      "value": "共同觀看矩陣"
+      "value": "共同觀看資料"
     }
   ],
   "web.admin.recommendations.jobs.embeddings": [
@@ -52193,7 +52524,7 @@
   "web.admin.recommendations.jobs.noRun": [
     {
       "type": 0,
-      "value": "沒有已完成的執行記錄"
+      "value": "尚無已完成的執行記錄"
     }
   ],
   "web.admin.recommendations.jobs.percent": [
@@ -52261,7 +52592,7 @@
           "value": [
             {
               "type": 0,
-              "value": "上次過期清查完成於 "
+              "value": "上次個人檔案重新整理完成於 "
             },
             {
               "type": 1,
@@ -52317,7 +52648,7 @@
           "value": [
             {
               "type": 0,
-              "value": "上次過期清查失敗於 "
+              "value": "上次個人檔案重新整理失敗於 "
             },
             {
               "type": 1,
@@ -52361,7 +52692,7 @@
   "web.admin.recommendations.jobs.tasteProfiles": [
     {
       "type": 0,
-      "value": "品味檔案"
+      "value": "品味個人檔案"
     }
   ],
   "web.admin.recommendations.jobs.title": [
@@ -52409,7 +52740,7 @@
   "web.admin.recommendations.lock.body": [
     {
       "type": 0,
-      "value": "此安裝已鎖定為第一個儲存之嵌入向量所使用的嵌入空間。"
+      "value": "Silo 會鎖定為第一個使用的嵌入模型，讓所有已儲存的嵌入向量保持相容。"
     }
   ],
   "web.admin.recommendations.lock.model": [
@@ -52439,13 +52770,13 @@
   "web.admin.recommendations.page.restartRequired": [
     {
       "type": 0,
-      "value": "一或多個設定項目已變更。必須重新啟動伺服器，變更才會生效。"
+      "value": "請重新啟動伺服器以套用你的變更。"
     }
   ],
   "web.admin.recommendations.page.subtitle": [
     {
       "type": 0,
-      "value": "設定 AI 推薦引擎。需要 pgvector，以及在 AI 服務中連接的嵌入提供者。"
+      "value": "為你的媒體庫提供個人化推薦。需要 pgvector，以及在 AI 服務中設定的嵌入提供者。"
     }
   ],
   "web.admin.recommendations.page.title": [
@@ -52457,7 +52788,7 @@
   "web.admin.recommendations.reset.body": [
     {
       "type": 0,
-      "value": "刪除嵌入鎖定、所有項目嵌入向量及個人推薦列，並清除品味檔案，讓你可以切換嵌入模型。之後請執行嵌入向量作業；品味檔案會在其影片重新嵌入時重建。"
+      "value": "清除模型鎖定、已儲存的嵌入向量、個人推薦與品味個人檔案，讓你可以切換模型。之後請執行嵌入向量作業；品味個人檔案會在作品重新嵌入時自動重建。"
     }
   ],
   "web.admin.recommendations.reset.button": [
@@ -52469,7 +52800,7 @@
   "web.admin.recommendations.reset.confirmBody": [
     {
       "type": 0,
-      "value": "所有項目嵌入向量及個人推薦列都會被刪除，品味檔案也會被清除。在嵌入向量作業重新執行之前，個人推薦和語意搜尋將無法使用。"
+      "value": "刪除所有已儲存的嵌入向量與個人推薦，並清除品味個人檔案。在嵌入向量作業再次執行之前，個人推薦與語意搜尋將無法使用。"
     }
   ],
   "web.admin.recommendations.reset.confirmButton": [
@@ -52665,7 +52996,7 @@
   "web.admin.recommendations.settings.confirmClear": [
     {
       "type": 0,
-      "value": "確認清除"
+      "value": "移除"
     }
   ],
   "web.admin.recommendations.settings.notConfigured": [
@@ -56082,13 +56413,13 @@
   "web.admin.settings.ai.chatgptConnection.browserUrl": [
     {
       "type": 0,
-      "value": "瀏覽器網址"
+      "value": "最終瀏覽器網址"
     }
   ],
   "web.admin.settings.ai.chatgptConnection.callbackInvalid": [
     {
       "type": 0,
-      "value": "ChatGPT 完成登入後，請貼上網址列中的完整網址。"
+      "value": "登入網址無效。請在 ChatGPT 完成登入後，貼上瀏覽器網址列中的完整網址。"
     }
   ],
   "web.admin.settings.ai.chatgptConnection.chooseAccount": [
@@ -56106,7 +56437,7 @@
   "web.admin.settings.ai.chatgptConnection.completeFailed": [
     {
       "type": 0,
-      "value": "無法完成登入。請檢查貼上的網址。如果這次嘗試已逾時，請關閉此對話框並重新開始。"
+      "value": "無法完成登入。請檢查貼上的網址；如果此次嘗試已過期，請取消並重新開始。"
     }
   ],
   "web.admin.settings.ai.chatgptConnection.connect": [
@@ -56170,7 +56501,7 @@
   "web.admin.settings.ai.chatgptConnection.disconnectFailed": [
     {
       "type": 0,
-      "value": "無法中斷 ChatGPT 的連結。請先重新整理連結狀態，再試一次。"
+      "value": "無法中斷 ChatGPT 的連結。請重新載入頁面並再試一次。"
     }
   ],
   "web.admin.settings.ai.chatgptConnection.disconnectNumbered": [
@@ -56192,7 +56523,7 @@
   "web.admin.settings.ai.chatgptConnection.disconnectedLocally": [
     {
       "type": 0,
-      "value": "已在本機中斷連結。請開啟 ChatGPT 用量設定，確認該 App 已中斷連結。"
+      "value": "已從 Silo 移除，但 ChatGPT 無法確認中斷連結。請檢查 ChatGPT 用量設定以撤銷存取權。"
     }
   ],
   "web.admin.settings.ai.chatgptConnection.gotIt": [
@@ -56272,13 +56603,13 @@
   "web.admin.settings.ai.chatgptConnection.signInIncomplete": [
     {
       "type": 0,
-      "value": "登入未完成。請選擇「使用 ChatGPT 繼續」再試一次。"
+      "value": "ChatGPT 登入未完成。請選擇「使用 ChatGPT 繼續」以再試一次。"
     }
   ],
   "web.admin.settings.ai.chatgptConnection.startFailed": [
     {
       "type": 0,
-      "value": "無法開始 ChatGPT 登入。請重新整理連結狀態，然後再試一次。"
+      "value": "無法開始 ChatGPT 登入。請重新載入頁面並再試一次。"
     }
   ],
   "web.admin.settings.ai.chatgptConnection.step1": [
@@ -56302,7 +56633,7 @@
   "web.admin.settings.ai.chatgptConnection.switchFailed": [
     {
       "type": 0,
-      "value": "無法切換 ChatGPT 帳號。請重新整理連結狀態。"
+      "value": "無法切換 ChatGPT 帳號。請重新載入頁面並再試一次。"
     }
   ],
   "web.admin.settings.ai.chatgptConnection.usagePaused": [
@@ -56336,7 +56667,7 @@
   "web.admin.settings.ai.chatgptRow.chatOnly": [
     {
       "type": 0,
-      "value": "方案僅提供對話功能，不含語音或嵌入。"
+      "value": "僅支援對話，不支援語音或嵌入。"
     }
   ],
   "web.admin.settings.ai.chatgptRow.signInNeeded": [
@@ -56358,7 +56689,7 @@
   "web.admin.settings.ai.chatgptRow.usedByText": [
     {
       "type": 0,
-      "value": "由文字模型使用。方案僅提供對話功能，不含語音或嵌入。"
+      "value": "由文字模型使用。僅支援對話，不支援語音或嵌入。"
     }
   ],
   "web.admin.settings.ai.embeddingProvider.connect": [
@@ -56370,7 +56701,7 @@
   "web.admin.settings.ai.embeddingProvider.description": [
     {
       "type": 0,
-      "value": "在 AI 服務中連結。ChatGPT 方案不包含嵌入模型。"
+      "value": "在 AI 服務中管理提供者。ChatGPT 方案不包含嵌入模型。"
     }
   ],
   "web.admin.settings.ai.embeddingProvider.label": [
@@ -56434,7 +56765,7 @@
   "web.admin.settings.ai.features.translateDescriptionsDescription": [
     {
       "type": 0,
-      "value": "為管理員或觀眾要求的項目翻譯簡介和標語。"
+      "value": "在加入佇列時翻譯項目簡介和標語；若下方已啟用，也會在檢視時翻譯。"
     }
   ],
   "web.admin.settings.ai.features.translateSubtitles": [
@@ -56538,7 +56869,7 @@
           "value": [
             {
               "type": 0,
-              "value": "提供者建議了 "
+              "value": "提供者建議 "
             },
             {
               "type": 1,
@@ -56546,7 +56877,7 @@
             },
             {
               "type": 0,
-              "value": " 個"
+              "value": " 個模型"
             }
           ]
         }
@@ -56558,7 +56889,7 @@
   "web.admin.settings.ai.page.batchSizeInvalid": [
     {
       "type": 0,
-      "value": "字幕批次大小必須是正整數。"
+      "value": "每次請求的字幕行數必須為整數（1 以上）。"
     }
   ],
   "web.admin.settings.ai.page.chooseReasoning": [
@@ -56576,7 +56907,7 @@
   "web.admin.settings.ai.page.chunkInvalid": [
     {
       "type": 0,
-      "value": "轉錄區段長度必須介於 60 到 600 秒之間。"
+      "value": "每次請求的音訊長度必須為介於 60 到 600 秒之間的整數。"
     }
   ],
   "web.admin.settings.ai.page.connectChatgpt": [
@@ -56588,7 +56919,7 @@
   "web.admin.settings.ai.page.contextLinesInvalid": [
     {
       "type": 0,
-      "value": "字幕上下文行數必須是零或正整數。"
+      "value": "作為上下文傳送的前後行數必須為整數（0 以上）。"
     }
   ],
   "web.admin.settings.ai.page.features": [
@@ -56600,13 +56931,13 @@
   "web.admin.settings.ai.page.featuresIntro": [
     {
       "type": 0,
-      "value": "這裡的功能都不會依排程執行：字幕作業會在觀眾或管理員請求字幕軌時開始，簡介翻譯則會在管理員將其加入佇列或觀眾開啟詳細資訊頁面時開始。"
+      "value": "這裡的功能都不會依排程執行。字幕作業僅在收到請求時啟動；簡介會在管理員加入佇列或有人開啟作品頁面時翻譯。"
     }
   ],
   "web.admin.settings.ai.page.intro": [
     {
       "type": 0,
-      "value": "每個 AI 提供者只需連結一次。文字、語音轉文字和推薦嵌入會各自從此清單中選擇提供者和模型。"
+      "value": "每個 AI 提供者只需連結一次，接著在下方為文字、語音轉文字和嵌入指派提供者與模型。"
     }
   ],
   "web.admin.settings.ai.page.loading": [
@@ -56618,7 +56949,7 @@
   "web.admin.settings.ai.page.maxConcurrentInvalid": [
     {
       "type": 0,
-      "value": "最大同時作業數必須是正整數。"
+      "value": "同時執行的作業數必須為整數（1 以上）。"
     }
   ],
   "web.admin.settings.ai.page.models": [
@@ -56636,7 +56967,7 @@
   "web.admin.settings.ai.page.quotaInvalid": [
     {
       "type": 0,
-      "value": "轉錄限制必須是零或正整數。"
+      "value": "每個帳號的轉錄次數必須為整數（0 以上）。"
     }
   ],
   "web.admin.settings.ai.page.speechCheckFailed": [
@@ -56684,7 +57015,7 @@
   "web.admin.settings.ai.providers.addDescription": [
     {
       "type": 0,
-      "value": "每個提供者只需連結一次，之後其金鑰會供所有選擇它的作業使用。"
+      "value": "每個提供者只需連結一次，之後即可在任何相容的模型中重複使用。"
     }
   ],
   "web.admin.settings.ai.providers.addSubmit": [
@@ -56708,7 +57039,7 @@
   "web.admin.settings.ai.providers.apiKeyOptional": [
     {
       "type": 0,
-      "value": "若本機端點不需要金鑰，請留空。"
+      "value": "如果你的本機端點不需要金鑰，請留空。"
     }
   ],
   "web.admin.settings.ai.providers.baseUrl": [
@@ -56720,13 +57051,13 @@
   "web.admin.settings.ai.providers.baseUrlCustom": [
     {
       "type": 0,
-      "value": "任何支援 OpenAI API 的端點。"
+      "value": "任何與 OpenAI 相容的 API 端點。"
     }
   ],
   "web.admin.settings.ai.providers.baseUrlLocal": [
     {
       "type": 0,
-      "value": "請使用 Silo 容器可連線的主機；localhost 指的是 Silo 本身。"
+      "value": "請使用 Silo 可連線的網址。在 Docker 中，localhost 指的是 Silo 容器本身。"
     }
   ],
   "web.admin.settings.ai.providers.baseUrlProxy": [
@@ -56738,7 +57069,7 @@
   "web.admin.settings.ai.providers.checkFailed": [
     {
       "type": 0,
-      "value": "無法執行檢查。"
+      "value": "連線測試失敗。"
     }
   ],
   "web.admin.settings.ai.providers.connected": [
@@ -56758,7 +57089,7 @@
     },
     {
       "type": 0,
-      "value": " 已連線。請在「模型」下為作業選擇此提供者。"
+      "value": " 已連線。請在「模型」下指派此提供者以開始使用。"
     }
   ],
   "web.admin.settings.ai.providers.continue": [
@@ -56788,7 +57119,7 @@
   "web.admin.settings.ai.providers.notUsed": [
     {
       "type": 0,
-      "value": "未被任何作業使用"
+      "value": "尚未指派給任何模型"
     }
   ],
   "web.admin.settings.ai.providers.remove": [
@@ -56799,12 +57130,16 @@
   ],
   "web.admin.settings.ai.providers.removeBlocked": [
     {
+      "type": 0,
+      "value": "由 "
+    },
+    {
       "type": 1,
       "value": "jobs"
     },
     {
       "type": 0,
-      "value": " 正在使用；請先在該處選擇其他提供者。"
+      "value": " 使用。請先指派其他提供者。"
     }
   ],
   "web.admin.settings.ai.providers.removeConfirm": [
@@ -56816,7 +57151,7 @@
   "web.admin.settings.ai.providers.removeDescription": [
     {
       "type": 0,
-      "value": "Silo 會捨棄已儲存的金鑰。若要再使用此提供者，請重新連線。"
+      "value": "這會移除此提供者及所有已儲存的 API 金鑰。你可以稍後再次新增。"
     }
   ],
   "web.admin.settings.ai.providers.removeFailed": [
@@ -56856,7 +57191,7 @@
   "web.admin.settings.ai.providers.retypeKey": [
     {
       "type": 0,
-      "value": "位址已變更，請重新輸入 API 金鑰，或將其清除。"
+      "value": "已儲存的金鑰不會傳送至新的主機。請重新輸入此網址的 API 金鑰，或將其清除。"
     }
   ],
   "web.admin.settings.ai.providers.saveFailed": [
@@ -56882,19 +57217,19 @@
   "web.admin.settings.ai.providers.selectedOnceAdded": [
     {
       "type": 0,
-      "value": "新增後會在此處選取。"
+      "value": "新增後會自動選取此提供者。"
     }
   ],
   "web.admin.settings.ai.providers.serves": [
     {
       "type": 0,
-      "value": "提供服務"
+      "value": "支援功能"
     }
   ],
   "web.admin.settings.ai.providers.servesDescription": [
     {
       "type": 0,
-      "value": "此端點可回應的內容。"
+      "value": "此端點支援的 AI 功能。"
     }
   ],
   "web.admin.settings.ai.providers.setUpChatgpt": [
@@ -56940,7 +57275,7 @@
   "web.admin.settings.ai.providers.typeAnyCapability": [
     {
       "type": 0,
-      "value": "由你選擇提供的服務"
+      "value": "由你選擇支援的功能"
     }
   ],
   "web.admin.settings.ai.providers.typeAnyEndpoint": [
@@ -56970,7 +57305,7 @@
   "web.admin.settings.ai.providers.unusedUntilSelected": [
     {
       "type": 0,
-      "value": "在作業於「模型」下選擇此提供者之前，不會有任何功能使用它。"
+      "value": "在「模型」下指派之前，不會使用此提供者。"
     }
   ],
   "web.admin.settings.ai.providers.usedBy": [
@@ -56998,7 +57333,7 @@
     },
     {
       "type": 0,
-      "value": " 使用。新金鑰儲存後會立即套用。"
+      "value": " 使用。此處的變更會在儲存後立即生效。"
     }
   ],
   "web.admin.settings.ai.speech.modelPlaceholder": [
@@ -57010,7 +57345,7 @@
   "web.admin.settings.ai.speech.noProvider": [
     {
       "type": 0,
-      "value": "請在「提供者」下新增提供語音服務的提供者。ChatGPT 方案不包含此功能。"
+      "value": "請在「提供者」下新增支援語音的提供者。ChatGPT 方案不包含語音轉文字。"
     }
   ],
   "web.admin.settings.ai.speech.providerDescription": [
@@ -57121,7 +57456,7 @@
   "web.admin.settings.ai.text.noChatProvider": [
     {
       "type": 0,
-      "value": "請在「提供者」下新增提供聊天服務的提供者，或使用 ChatGPT 方案。"
+      "value": "請在「提供者」下新增支援對話的提供者，或使用 ChatGPT 方案。"
     }
   ],
   "web.admin.settings.ai.text.reasoningDefault": [
@@ -57133,7 +57468,7 @@
   "web.admin.settings.ai.text.reasoningDescription": [
     {
       "type": 0,
-      "value": "較高的推理強度可改善複雜的翻譯，但會耗用更多時間和 Token。"
+      "value": "較高的等級可改善複雜的翻譯，但需要更長時間並消耗更多 Token。"
     }
   ],
   "web.admin.settings.ai.text.reasoningLevel": [
@@ -57233,7 +57568,7 @@
   "web.admin.settings.ai.text.serviceTierDescription": [
     {
       "type": 0,
-      "value": "「預設」會使用你 OpenAI 專案的設定。「快速」和「超快速」費用較高，且需要模型支援。"
+      "value": "「預設」會使用你 OpenAI 專案的設定。「快速/優先」和「超快速」費用較高，且需要支援的模型。"
     }
   ],
   "web.admin.settings.ai.text.serviceTierOption": [
@@ -57279,7 +57614,7 @@
   "web.admin.settings.ai.text.tagline": [
     {
       "type": 0,
-      "value": "字幕文字、描述和標語"
+      "value": "翻譯字幕、簡介與標語"
     }
   ],
   "web.admin.settings.ai.text.test": [
@@ -57351,7 +57686,7 @@
   "web.admin.settings.ai.tuning.allowanceResets": [
     {
       "type": 0,
-      "value": "額度重設週期"
+      "value": "額度時間範圍"
     }
   ],
   "web.admin.settings.ai.tuning.audioPerRequest": [
@@ -57387,7 +57722,7 @@
   "web.admin.settings.ai.tuning.jobsAtOnceDescription": [
     {
       "type": 0,
-      "value": "由同一個伺服器處理程序中的所有 AI 作業共用；每個處理程序各有自己的額度。"
+      "value": "由每個伺服器執行個體中的所有 AI 作業共用；在叢集中，每個執行個體各有自己的上限。"
     }
   ],
   "web.admin.settings.ai.tuning.perAccount": [
@@ -57399,7 +57734,7 @@
   "web.admin.settings.ai.tuning.perAccountCaption": [
     {
       "type": 0,
-      "value": "依登入帳號計算，由該帳號下的所有個人檔案共用。"
+      "value": "依帳號計算，並由該帳號下的所有個人檔案共用。"
     }
   ],
   "web.admin.settings.ai.tuning.quotaPeriodOption": [
@@ -57491,7 +57826,7 @@
   "web.admin.settings.ai.tuning.serverWideCaption": [
     {
       "type": 0,
-      "value": "整個伺服器共用一個設定，無論作業屬於誰。"
+      "value": "套用於整個伺服器，無論是誰啟動該作業。"
     }
   ],
   "web.admin.settings.ai.tuning.transcriptions": [
@@ -57503,7 +57838,7 @@
   "web.admin.settings.ai.tuning.transcriptionsHint": [
     {
       "type": 0,
-      "value": "帳號下的所有個人檔案共用這一份額度。"
+      "value": "適用於從音訊建立字幕（不適用於翻譯字幕）。"
     }
   ],
   "web.admin.settings.ai.unit.seconds": [
@@ -57515,7 +57850,7 @@
   "web.admin.settings.ai.unsavedNote": [
     {
       "type": 0,
-      "value": "尚未儲存。測試會使用此處輸入的內容。"
+      "value": "尚有未儲存的變更。測試會使用這些值；請在下方儲存以套用。"
     }
   ],
   "web.admin.settings.appearance.badgeImages.group": [
@@ -57633,7 +57968,7 @@
   "web.admin.settings.appearance.logos.storageNeeded": [
     {
       "type": 0,
-      "value": "圖片上傳需要圖片儲存空間（本機磁碟或 S3），請在"
+      "value": "請在"
     },
     {
       "type": 8,
@@ -57647,7 +57982,7 @@
     },
     {
       "type": 0,
-      "value": "設定中設定。"
+      "value": "設定中設定本機磁碟或 S3，才能上傳圖片。"
     }
   ],
   "web.admin.settings.appearance.logos.wordmark.description": [
@@ -57665,7 +58000,7 @@
   "web.admin.settings.appearance.overlays.enabled.description": [
     {
       "type": 0,
-      "value": "所有個人檔案的預設值。自行開啟或關閉標章的個人檔案會保留自己的選擇。"
+      "value": "所有個人檔案的預設值。已自行設定偏好的個人檔案會保留原本的設定。"
     }
   ],
   "web.admin.settings.appearance.overlays.enabled.label": [
@@ -57677,7 +58012,7 @@
   "web.admin.settings.appearance.overlays.group": [
     {
       "type": 0,
-      "value": "卡片疊加圖層"
+      "value": "海報徽章"
     }
   ],
   "web.admin.settings.appearance.overlays.images": [
@@ -57725,7 +58060,7 @@
   "web.admin.settings.appearance.overlays.style.description": [
     {
       "type": 0,
-      "value": "未自行選擇的使用者會套用此預設值。"
+      "value": "尚未自行選擇的個人檔案會套用此預設值。"
     }
   ],
   "web.admin.settings.appearance.overlays.style.label": [
@@ -57743,7 +58078,7 @@
   "web.admin.settings.appearance.restoreDialog.description": [
     {
       "type": 0,
-      "value": "將整個伺服器的標章預設值換成 Silo 的內建設定。標章開關不會變更，而且在你儲存之前不會寫入任何內容。"
+      "value": "將全伺服器的徽章預設值重設為 Silo 的內建設定。主要徽章開關會維持不變，且在儲存前不會套用任何變更。"
     }
   ],
   "web.admin.settings.appearance.restoreDialog.title": [
@@ -57767,7 +58102,7 @@
   "web.admin.settings.appearance.titlePages.titleArt.description": [
     {
       "type": 0,
-      "value": "未自行選擇的使用者會套用此預設值。每個人仍可自行變更。"
+      "value": "所有個人檔案的預設值。個別個人檔案仍可自行變更。"
     }
   ],
   "web.admin.settings.attention.hide": [
@@ -57825,7 +58160,7 @@
   "web.admin.settings.autoscan.polling.debounce.label": [
     {
       "type": 0,
-      "value": "防彈跳間隔"
+      "value": "防彈跳時間範圍"
     }
   ],
   "web.admin.settings.autoscan.polling.description": [
@@ -57861,13 +58196,13 @@
   "web.admin.settings.compatibilityProxies.advanced.addressStreamGrant": [
     {
       "type": 0,
-      "value": "允許同一網路位址免登入播放"
+      "value": "允許同一 IP 位址免登入播放"
     }
   ],
   "web.admin.settings.compatibilityProxies.advanced.addressStreamGrantDescription": [
     {
       "type": 0,
-      "value": "部分 Jellyfin App（例如 Findroid）會在未登入的情況下開啟直接播放和下載連結。開啟此選項後，若同一網路位址上已登入的 App 在過去兩小時內請求播放該檔案，Silo 就會處理這類請求。屆時，任何共用該位址的人（例如同一個家用網路、行動電信業者或 VPN 上的使用者）也都能播放該檔案。請僅在你使用這類 App 時開啟此選項。"
+      "value": "適用於像 Findroid 這類會在未登入時開啟直接播放與下載連結的 App。當同一 IP 位址上已登入的 App 請求播放該檔案後，會允許在 2 小時內存取。任何共用該 IP 的人（同一家用網路、行動電信業者或 VPN）也能播放該檔案；請僅在你使用這類 App 時開啟此選項。"
     }
   ],
   "web.admin.settings.compatibilityProxies.advanced.playbackTtl": [
@@ -57903,7 +58238,7 @@
   "web.admin.settings.compatibilityProxies.advanced.serverIdDescription": [
     {
       "type": 0,
-      "value": "唯讀。變更後，所有 Jellyfin App 都會將其視為新的伺服器。"
+      "value": "唯讀，因為變更後所有 Jellyfin App 都會將其視為新的伺服器。"
     }
   ],
   "web.admin.settings.compatibilityProxies.advanced.serverIdPending": [
@@ -57921,7 +58256,7 @@
   "web.admin.settings.compatibilityProxies.advanced.serverNameDescription": [
     {
       "type": 0,
-      "value": "與「一般」中的伺服器名稱分開。"
+      "value": "與一般設定中的伺服器名稱分開。"
     }
   ],
   "web.admin.settings.compatibilityProxies.advanced.sessionTtl": [
@@ -57987,7 +58322,7 @@
   "web.admin.settings.compatibilityProxies.details.chosenVersion": [
     {
       "type": 0,
-      "value": "所選版本"
+      "value": "已設定的網頁播放器版本"
     }
   ],
   "web.admin.settings.compatibilityProxies.details.currentJob": [
@@ -58011,7 +58346,7 @@
   "web.admin.settings.compatibilityProxies.details.installedAt": [
     {
       "type": 0,
-      "value": "安裝位置"
+      "value": "安裝資料夾"
     }
   ],
   "web.admin.settings.compatibilityProxies.details.licenseFile": [
@@ -58065,7 +58400,7 @@
   "web.admin.settings.compatibilityProxies.details.title": [
     {
       "type": 0,
-      "value": "下載詳細資料"
+      "value": "狀態與安裝詳細資料"
     }
   ],
   "web.admin.settings.compatibilityProxies.details.yes": [
@@ -58077,7 +58412,7 @@
   "web.admin.settings.compatibilityProxies.jellyfin.address": [
     {
       "type": 0,
-      "value": "Jellyfin App 應使用的位址"
+      "value": "供 Jellyfin App 使用的伺服器網址"
     }
   ],
   "web.admin.settings.compatibilityProxies.jellyfin.enable": [
@@ -58089,7 +58424,7 @@
   "web.admin.settings.compatibilityProxies.jellyfin.loopbackWarning": [
     {
       "type": 0,
-      "value": "只有這台伺服器能連上該位址。請使用其他裝置可連上的位址。"
+      "value": "該網址僅能在此伺服器上使用。請輸入其他裝置可以連線的網址。"
     }
   ],
   "web.admin.settings.compatibilityProxies.loading": [
@@ -58101,13 +58436,13 @@
   "web.admin.settings.compatibilityProxies.operation.installMessage": [
     {
       "type": 0,
-      "value": "正在下載並建置 Jellyfin 網頁播放器"
+      "value": "正在下載並建置 Jellyfin 網頁播放器。"
     }
   ],
   "web.admin.settings.compatibilityProxies.operation.installing": [
     {
       "type": 0,
-      "value": "正在安裝 Jellyfin Web UI"
+      "value": "正在安裝 Jellyfin 網頁播放器"
     }
   ],
   "web.admin.settings.compatibilityProxies.operation.percent": [
@@ -58123,19 +58458,19 @@
   "web.admin.settings.compatibilityProxies.operation.progressLabel": [
     {
       "type": 0,
-      "value": "Jellyfin Web 安裝進度"
+      "value": "Jellyfin 網頁播放器進度"
     }
   ],
   "web.admin.settings.compatibilityProxies.operation.removeMessage": [
     {
       "type": 0,
-      "value": "正在移除已下載的 Jellyfin 網頁播放器"
+      "value": "正在從伺服器刪除已下載的網頁播放器檔案。"
     }
   ],
   "web.admin.settings.compatibilityProxies.operation.removing": [
     {
       "type": 0,
-      "value": "正在移除 Jellyfin Web UI"
+      "value": "正在移除 Jellyfin 網頁播放器"
     }
   ],
   "web.admin.settings.compatibilityProxies.operation.started": [
@@ -58169,7 +58504,7 @@
   "web.admin.settings.compatibilityProxies.web.busy": [
     {
       "type": 0,
-      "value": "Web UI 忙碌中"
+      "value": "處理中……"
     }
   ],
   "web.admin.settings.compatibilityProxies.web.description": [
@@ -58181,13 +58516,13 @@
   "web.admin.settings.compatibilityProxies.web.disable": [
     {
       "type": 0,
-      "value": "停用 Web UI"
+      "value": "停用網頁播放器"
     }
   ],
   "web.admin.settings.compatibilityProxies.web.enable": [
     {
       "type": 0,
-      "value": "啟用 Web UI"
+      "value": "啟用網頁播放器"
     }
   ],
   "web.admin.settings.compatibilityProxies.web.heading": [
@@ -58199,13 +58534,13 @@
   "web.admin.settings.compatibilityProxies.web.install": [
     {
       "type": 0,
-      "value": "安裝 Web UI"
+      "value": "安裝網頁播放器"
     }
   ],
   "web.admin.settings.compatibilityProxies.web.installerMissingTools": [
     {
       "type": 0,
-      "value": "下載工具缺少必要的工具"
+      "value": "缺少必要的伺服器工具"
     }
   ],
   "web.admin.settings.compatibilityProxies.web.licensePresent": [
@@ -58217,7 +58552,7 @@
   "web.admin.settings.compatibilityProxies.web.missingCommands": [
     {
       "type": 0,
-      "value": "必須先在伺服器上安裝以下指令，Silo 才能下載："
+      "value": "請在伺服器上安裝這些工具以下載網頁播放器："
     },
     {
       "type": 1,
@@ -58239,7 +58574,7 @@
   "web.admin.settings.compatibilityProxies.web.remove": [
     {
       "type": 0,
-      "value": "移除 Web UI"
+      "value": "移除網頁播放器"
     }
   ],
   "web.admin.settings.compatibilityProxies.web.saveFirst": [
@@ -58257,7 +58592,7 @@
   "web.admin.settings.compatibilityProxies.web.update": [
     {
       "type": 0,
-      "value": "更新 Web UI"
+      "value": "更新網頁播放器"
     }
   ],
   "web.admin.settings.compatibilityProxies.web.versionInstalled": [
@@ -58309,7 +58644,7 @@
   "web.admin.settings.downloads.artifactDir.description": [
     {
       "type": 0,
-      "value": "留空則使用此伺服器轉碼目錄旁的 silo-download-artifacts 資料夾。除非節點有自己的目錄，否則轉碼節點會使用其轉碼目錄內的 download-artifacts。"
+      "value": "留空則使用此伺服器轉碼目錄旁的 silo-download-artifacts 資料夾。除非另有設定，否則轉碼節點會使用其轉碼目錄內的 download-artifacts。"
     }
   ],
   "web.admin.settings.downloads.artifactDir.label": [
@@ -58321,7 +58656,7 @@
   "web.admin.settings.downloads.budget.hint": [
     {
       "type": 0,
-      "value": "適用於此伺服器，以及所有未設定自己配額的節點。超出配額時，會先刪除快取檔案，從最久未使用的開始；仍有裝置在等待的檔案會保留。"
+      "value": "適用於此伺服器及未自行設定配額的節點。超出配額時，會優先刪除最久未使用的快取檔案；待處理的下載會保留。"
     }
   ],
   "web.admin.settings.downloads.budget.label": [
@@ -58333,7 +58668,7 @@
   "web.admin.settings.downloads.diskCeiling.description": [
     {
       "type": 0,
-      "value": "磁碟使用率超過此值時，無論配額為何，都會提早刪除該位置的快取檔案。範圍為 50 到 95；下載與轉碼共用磁碟時，節點會在 95% 時停止接受播放。"
+      "value": "當磁碟使用率高於此值時，即使未達配額也會提早刪除快取檔案（50–95%）。當下載與轉碼共用磁碟時，轉碼節點會在 95% 時停止接受播放。"
     }
   ],
   "web.admin.settings.downloads.diskCeiling.label": [
@@ -58345,7 +58680,7 @@
   "web.admin.settings.downloads.enabled.description": [
     {
       "type": 0,
-      "value": "整個伺服器的總開關。開啟時，由存取群組與帳號決定誰可以下載。關閉時，任何人都無法下載。"
+      "value": "整個伺服器的總開關。開啟時，由存取群組與帳號決定誰可以下載；關閉時，任何人都無法下載。"
     }
   ],
   "web.admin.settings.downloads.enabled.label": [
@@ -58363,7 +58698,7 @@
   "web.admin.settings.downloads.loadError": [
     {
       "type": 0,
-      "value": "無法載入下載設定。請先重試，再編輯限制。"
+      "value": "無法載入下載設定。請先重試再進行編輯。"
     }
   ],
   "web.admin.settings.downloads.perUser.bandwidth.label": [
@@ -58375,7 +58710,7 @@
   "web.admin.settings.downloads.perUser.concurrent.hint": [
     {
       "type": 0,
-      "value": "依每位使用者計算，並與每位使用者的頻寬上限同時適用。"
+      "value": "每位使用者允許同時進行的最大下載數。"
     }
   ],
   "web.admin.settings.downloads.perUser.concurrent.label": [
@@ -58405,7 +58740,7 @@
   "web.admin.settings.downloads.perUser.period.description": [
     {
       "type": 0,
-      "value": "計算每位使用者下載數的滾動時間範圍，例如 24h 或 168h。"
+      "value": "上述限制的滾動時間範圍，例如 24h 或 168h。"
     }
   ],
   "web.admin.settings.downloads.perUser.period.label": [
@@ -58429,7 +58764,7 @@
   "web.admin.settings.downloads.server.cacheHours.description": [
     {
       "type": 0,
-      "value": "沒有任何項目在等待的準備好檔案，在最後一次使用後保留的時數，讓其他下載或重新下載可以重複使用。範圍為 0 到 720；0 表示不再需要且閒置 10 分鐘後就刪除。"
+      "value": "已準備好的檔案在最後一次下載後保留供重複使用的時數（0–720）。設為 0 時，不再需要的檔案會在最後使用 10 分鐘後刪除。"
     }
   ],
   "web.admin.settings.downloads.server.cacheHours.label": [
@@ -58453,7 +58788,7 @@
   "web.admin.settings.downloads.server.localFallback.label": [
     {
       "type": 0,
-      "value": "工作節點無法使用時在本機準備"
+      "value": "轉碼節點無法使用時在此伺服器上準備"
     }
   ],
   "web.admin.settings.downloads.serverBandwidth.hint": [
@@ -58471,7 +58806,7 @@
   "web.admin.settings.downloads.storageLink": [
     {
       "type": 0,
-      "value": "查看伺服器與節點上的儲存空間"
+      "value": "查看下載儲存空間"
     }
   ],
   "web.admin.settings.downloads.title": [
@@ -58483,7 +58818,7 @@
   "web.admin.settings.downloads.transcode.description": [
     {
       "type": 0,
-      "value": "轉換裝置無法播放的影片，並提供較低的畫質。關閉時，所有下載都保留原始影片，即使裝置無法播放也一樣。"
+      "value": "轉換不相容的影片並提供較低畫質選項。關閉時，下載一律使用原始檔案，即使裝置無法播放也一樣。"
     }
   ],
   "web.admin.settings.downloads.transcode.label": [
@@ -58723,7 +59058,7 @@
   "web.admin.settings.general.network.lanDiscovery.description": [
     {
       "type": 0,
-      "value": "同一網路上的 Silo App 在新增伺服器時會列出此伺服器，不必手動輸入位址。網路必須能傳遞多點傳送（Docker 主機網路，而非預設的橋接網路）。"
+      "value": "讓同一網路上的 Silo App 自動找到此伺服器。需要多點傳送網路（在 Docker 中請使用 host 模式，而非預設的 bridge）。"
     }
   ],
   "web.admin.settings.general.network.lanDiscovery.label": [
@@ -58735,7 +59070,7 @@
   "web.admin.settings.general.network.localUrl.description": [
     {
       "type": 0,
-      "value": "家用網路上的裝置直接連線 Silo 的位址：主機的 IP 與 Silo 監聽的連接埠，或 Docker 下的發佈連接埠。已登入的 App 能連線時會自動切換至此位址，並使用加密連線。如果 App 已能在區域網路上找到伺服器，請留空。"
+      "value": "直接連線的區域網路位址（主機 IP 與連接埠，或 Docker 的發佈連接埠）。已登入的 App 在可連線時會透過加密連線自動切換至此位址。如果區域網路探索已正常運作，請留空。"
     }
   ],
   "web.admin.settings.general.network.localUrl.label": [
@@ -58747,19 +59082,19 @@
   "web.admin.settings.general.network.publicUrl.description": [
     {
       "type": 0,
-      "value": "使用者開啟的 HTTPS 位址。用於 WebSocket 來源與電子郵件通知中的連結。"
+      "value": "用於連線至 Silo 的 HTTPS 位址。WebSocket 連線、登入重新導向與電子郵件連結都需要此位址。"
     }
   ],
   "web.admin.settings.general.network.publicUrl.label": [
     {
       "type": 0,
-      "value": "Silo 公開網址"
+      "value": "公開網址"
     }
   ],
   "web.admin.settings.general.network.trustedProxies.description": [
     {
       "type": 0,
-      "value": "以逗號分隔的 Proxy 範圍；留空則保留私人網路預設值。"
+      "value": "以逗號分隔、受信任可轉送用戶端 IP 的 CIDR 範圍。留空則信任預設的私人網路範圍。"
     }
   ],
   "web.admin.settings.general.network.trustedProxies.label": [
@@ -58827,7 +59162,7 @@
   "web.admin.settings.health.email.notSetUp": [
     {
       "type": 0,
-      "value": "無法傳送邀請與重設郵件"
+      "value": "無法傳送邀請或密碼重設電子郵件"
     }
   ],
   "web.admin.settings.health.email.ready": [
@@ -58861,7 +59196,7 @@
   "web.admin.settings.health.publicUrl.notSet": [
     {
       "type": 0,
-      "value": "邀請與重設連結，以及登入提供者都需要此網址"
+      "value": "邀請連結、密碼重設和登入提供者都需要此網址"
     }
   ],
   "web.admin.settings.health.search.checking": [
@@ -58873,7 +59208,7 @@
   "web.admin.settings.health.search.degraded": [
     {
       "type": 0,
-      "value": "搜尋正以降級模式執行"
+      "value": "搜尋功能已降級"
     }
   ],
   "web.admin.settings.health.search.label": [
@@ -58973,7 +59308,7 @@
   "web.admin.settings.health.storage.notSetUp": [
     {
       "type": 0,
-      "value": "圖片和上傳內容沒有地方存放"
+      "value": "無法儲存圖片和上傳內容"
     }
   ],
   "web.admin.settings.health.storage.publicAndPrivate": [
@@ -59025,13 +59360,13 @@
   "web.admin.settings.hooks.invitations.authorityChanged": [
     {
       "type": 0,
-      "value": "邀請權限已變更。"
+      "value": "此請求執行期間，你登入的個人檔案已變更。"
     }
   ],
   "web.admin.settings.hooks.invitations.repeatedCursor": [
     {
       "type": 0,
-      "value": "邀請游標重複。請重新載入記錄。"
+      "value": "邀請清單不同步。請重新載入記錄。"
     }
   ],
   "web.admin.settings.hooks.inviteCodes.createFailed": [
@@ -59061,7 +59396,7 @@
   "web.admin.settings.hooks.inviteCodes.topUpFailed": [
     {
       "type": 0,
-      "value": "重新增加使用次數前，請先檢查此邀請碼目前的使用次數上限。"
+      "value": "再次嘗試前，請先檢查此邀請碼目前的使用次數上限。"
     },
     {
       "type": 1,
@@ -59071,13 +59406,13 @@
   "web.admin.settings.hooks.inviteCodes.topUpUnconfirmed": [
     {
       "type": 0,
-      "value": "無法確認結果。"
+      "value": "無法確認是否已新增使用次數。"
     }
   ],
   "web.admin.settings.hooks.inviteCodes.toppedUp": [
     {
       "type": 0,
-      "value": "已增加邀請碼的使用次數"
+      "value": "已為邀請碼新增使用次數"
     }
   ],
   "web.admin.settings.hooks.inviteCodes.updateFailed": [
@@ -59113,7 +59448,7 @@
   "web.admin.settings.hooks.serverNotificationChannels.createInProgress": [
     {
       "type": 0,
-      "value": "目的地已在建立中。"
+      "value": "已在建立管道"
     }
   ],
   "web.admin.settings.hooks.serverNotificationChannels.deleteFailed": [
@@ -59179,7 +59514,7 @@
   "web.admin.settings.hooks.settings.jellyfinWeb.installFailed": [
     {
       "type": 0,
-      "value": "無法安裝 Jellyfin Web 資源檔案"
+      "value": "無法安裝 Jellyfin 網頁播放器"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinWeb.installStarted": [
@@ -59191,7 +59526,7 @@
   "web.admin.settings.hooks.settings.jellyfinWeb.removeFailed": [
     {
       "type": 0,
-      "value": "無法移除 Jellyfin Web 資源檔案"
+      "value": "無法移除 Jellyfin 網頁播放器"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinWeb.removeStarted": [
@@ -59221,7 +59556,7 @@
   "web.admin.settings.invitations.capabilitiesFailed": [
     {
       "type": 0,
-      "value": "無法載入邀請功能。"
+      "value": "無法檢查邀請設定。"
     },
     {
       "type": 8,
@@ -59229,7 +59564,7 @@
       "children": [
         {
           "type": 0,
-          "value": "重新載入功能"
+          "value": "再試一次"
         }
       ]
     }
@@ -59283,7 +59618,7 @@
   "web.admin.settings.invitations.create.emailHint": [
     {
       "type": 0,
-      "value": "這會同時作為收件地址和對方的登入使用者名稱。"
+      "value": "用於傳送邀請，並作為對方的登入使用者名稱。"
     }
   ],
   "web.admin.settings.invitations.create.emailLabel": [
@@ -59301,7 +59636,7 @@
   "web.admin.settings.invitations.create.emailOptionBody": [
     {
       "type": 0,
-      "value": "我們會以電子郵件寄送連結，你也可以複製連結。"
+      "value": "Silo 會以電子郵件寄送連結，你也可以複製連結。"
     }
   ],
   "web.admin.settings.invitations.create.emailOptionUnavailable": [
@@ -59345,13 +59680,13 @@
   "web.admin.settings.invitations.create.finePrintEmail": [
     {
       "type": 0,
-      "value": "此連結僅能使用一次，並會在 7 天後失效。之後重新寄送會產生新的連結，並讓此連結失效。"
+      "value": "此連結僅能使用一次，並會在 7 天後失效。之後重新寄送會建立新連結，並讓此連結失效。"
     }
   ],
   "web.admin.settings.invitations.create.finePrintLink": [
     {
       "type": 0,
-      "value": "此連結僅能使用一次，並會在 7 天後失效。任何取得連結的人都能使用。如果連結落入錯誤的人手中，請從記錄中撤銷。"
+      "value": "此連結僅能使用一次，並會在 7 天後失效。任何取得連結的人都能使用；如果分享給錯誤的對象，請在記錄中撤銷。"
     }
   ],
   "web.admin.settings.invitations.create.inheritGroup": [
@@ -59363,7 +59698,7 @@
   "web.admin.settings.invitations.create.libraryHint": [
     {
       "type": 0,
-      "value": "接受邀請時建立的帳號會沿用所選群組的媒體庫範圍。"
+      "value": "使用所選存取群組允許的媒體庫。"
     }
   ],
   "web.admin.settings.invitations.create.linkOption": [
@@ -59381,7 +59716,7 @@
   "web.admin.settings.invitations.create.noDefaultProfile": [
     {
       "type": 0,
-      "value": "此伺服器無法以不可分割的方式建立預設個人檔案。請關閉個人檔案選項，以建立不含個人檔案的邀請。"
+      "value": "此伺服器無法在邀請時一併建立第一個個人檔案。必須關閉「建立對方的第一個個人檔案」才能繼續。"
     }
   ],
   "web.admin.settings.invitations.create.noteHintEmail": [
@@ -59441,7 +59776,7 @@
   "web.admin.settings.invitations.create.reloadBeforeRetry": [
     {
       "type": 0,
-      "value": "再次嘗試前，請先重新載入記錄；邀請可能已經存在。"
+      "value": "邀請可能已建立。再次嘗試前，請先重新載入記錄以確認。"
     }
   ],
   "web.admin.settings.invitations.create.reloadFailed": [
@@ -59507,7 +59842,7 @@
   "web.admin.settings.invitations.delivery.failed": [
     {
       "type": 0,
-      "value": "已建立邀請，但電子郵件傳送失敗或無法確定是否送達。此連結仍然有效，請自行傳送。"
+      "value": "已建立邀請，但電子郵件傳送失敗或無法確認是否送達。連結仍然有效，請自行分享。"
     }
   ],
   "web.admin.settings.invitations.delivery.linkCreated": [
@@ -59533,7 +59868,7 @@
   "web.admin.settings.invitations.delivery.notConfigured": [
     {
       "type": 0,
-      "value": "尚未設定電子郵件。已建立邀請，請自行傳送此連結。"
+      "value": "此伺服器尚未設定電子郵件。已建立邀請，請自行分享此連結。"
     }
   ],
   "web.admin.settings.invitations.delivery.sent": [
@@ -59547,7 +59882,7 @@
     },
     {
       "type": 0,
-      "value": "。無法保證收件者一定會收到。你可以複製下方的連結。"
+      "value": "。你也可以複製下方的連結，以防郵件未送達。"
     }
   ],
   "web.admin.settings.invitations.deliveryLabel.emailSent": [
@@ -59565,7 +59900,7 @@
   "web.admin.settings.invitations.deliveryLabel.emailUnconfirmedTitle": [
     {
       "type": 0,
-      "value": "電子郵件傳送失敗或無法確定是否送達。連結仍然有效。"
+      "value": "電子郵件傳送失敗或無法確認是否送達，但連結仍然有效。"
     }
   ],
   "web.admin.settings.invitations.deliveryLabel.link": [
@@ -59635,7 +59970,7 @@
   "web.admin.settings.invitations.loadingCapabilities": [
     {
       "type": 0,
-      "value": "正在載入邀請功能……"
+      "value": "正在檢查邀請設定……"
     }
   ],
   "web.admin.settings.invitations.notConfigured": [
@@ -59647,7 +59982,7 @@
   "web.admin.settings.invitations.publicUrlMissing": [
     {
       "type": 0,
-      "value": "請設定 Silo 公開網址以建立邀請連結。"
+      "value": "請在"
     },
     {
       "type": 8,
@@ -59658,6 +59993,10 @@
           "value": "一般設定"
         }
       ]
+    },
+    {
+      "type": 0,
+      "value": "中設定伺服器的公開網址，以建立邀請連結。"
     }
   ],
   "web.admin.settings.invitations.reloadHistory": [
@@ -59669,13 +60008,13 @@
   "web.admin.settings.invitations.resend.creating": [
     {
       "type": 0,
-      "value": "正在建立新的邀請……"
+      "value": "正在建立新連結……"
     }
   ],
   "web.admin.settings.invitations.resend.description": [
     {
       "type": 0,
-      "value": "建立替代連結後，先前的連結會失效。"
+      "value": "建立新連結會使先前的連結失效。"
     }
   ],
   "web.admin.settings.invitations.resend.finePrint": [
@@ -59693,13 +60032,13 @@
   "web.admin.settings.invitations.resend.uncertain": [
     {
       "type": 0,
-      "value": "結果可能無法確定。再次重新傳送前，請先重新載入記錄。"
+      "value": "新連結可能已建立。再次嘗試前，請先重新載入記錄以確認。"
     }
   ],
   "web.admin.settings.invitations.resendFailed": [
     {
       "type": 0,
-      "value": "無法重新傳送邀請。請先重新載入記錄再繼續。"
+      "value": "無法建立新的邀請連結。再次嘗試前，請先重新載入記錄。"
     }
   ],
   "web.admin.settings.invitations.revoke.confirm": [
@@ -59743,7 +60082,7 @@
   "web.admin.settings.invitations.row.copyNewLink": [
     {
       "type": 0,
-      "value": "複製新連結，不傳送電子郵件"
+      "value": "建立新連結但不寄送電子郵件"
     }
   ],
   "web.admin.settings.invitations.row.emailNewLink": [
@@ -59807,7 +60146,7 @@
   "web.admin.settings.invitations.row.revokeLink": [
     {
       "type": 0,
-      "value": "撤銷此連結"
+      "value": "撤銷邀請"
     }
   ],
   "web.admin.settings.invitations.status.accepted": [
@@ -60019,7 +60358,7 @@
     },
     {
       "type": 0,
-      "value": "：在你開啟公開註冊之前，這些邀請碼都無法使用。"
+      "value": "：在開啟"
     },
     {
       "type": 8,
@@ -60027,15 +60366,19 @@
       "children": [
         {
           "type": 0,
-          "value": "公開註冊設定"
+          "value": "公開註冊"
         }
       ]
+    },
+    {
+      "type": 0,
+      "value": "之前，這些邀請碼無法使用。"
     }
   ],
   "web.admin.settings.inviteCodes.signupsOn": [
     {
       "type": 0,
-      "value": "邀請碼僅在公開註冊開啟時有效。"
+      "value": "邀請碼僅在開啟"
     },
     {
       "type": 8,
@@ -60043,9 +60386,13 @@
       "children": [
         {
           "type": 0,
-          "value": "公開註冊設定"
+          "value": "公開註冊"
         }
       ]
+    },
+    {
+      "type": 0,
+      "value": "時有效。"
     }
   ],
   "web.admin.settings.inviteCodes.status.active": [
@@ -60129,7 +60476,7 @@
   "web.admin.settings.inviteCodes.topUp.title": [
     {
       "type": 0,
-      "value": "增加邀請碼使用次數"
+      "value": "為邀請碼新增使用次數"
     }
   ],
   "web.admin.settings.inviteCodes.topUpForm.adding": [
@@ -60159,7 +60506,7 @@
   "web.admin.settings.inviteCodes.topUpLabel": [
     {
       "type": 0,
-      "value": "增加邀請碼 "
+      "value": "為邀請碼 "
     },
     {
       "type": 1,
@@ -60167,7 +60514,7 @@
     },
     {
       "type": 0,
-      "value": " 的使用次數"
+      "value": " 新增使用次數"
     }
   ],
   "web.admin.settings.inviteCodes.usageCount": [
@@ -60219,7 +60566,7 @@
     },
     {
       "type": 0,
-      "value": "（無法提供此功能）"
+      "value": "（不支援）"
     }
   ],
   "web.admin.settings.lib.aiProviders.option.removed": [
@@ -60261,13 +60608,13 @@
   "web.admin.settings.lib.externalSignIn.checkStatus.unavailable": [
     {
       "type": 0,
-      "value": "無法連線至提供者；Silo 會在下次重新整理時再次確認"
+      "value": "無法連線至提供者；Silo 會在下次重新整理時重試"
     }
   ],
   "web.admin.settings.lib.externalSignIn.checkStatus.unsupported": [
     {
       "type": 0,
-      "value": "提供者無法重新檢查此帳號：工作階段會在固定時間後結束，且當使用者在這段時間內都未透過提供者登入時，其 API 金鑰和 Audiobookshelf 工作階段會被移除"
+      "value": "提供者無法重新檢查此帳號：工作階段會在固定時間後過期，除非對方在此之前再次透過提供者登入，否則將會移除 API 金鑰和 Audiobookshelf 工作階段"
     }
   ],
   "web.admin.settings.lib.externalSignIn.error.accountChanged": [
@@ -60279,7 +60626,7 @@
   "web.admin.settings.lib.externalSignIn.error.ownerOnly": [
     {
       "type": 0,
-      "value": "只有伺服器擁有者可以變更其他管理員的登入方式。"
+      "value": "只有伺服器擁有者可以變更其他管理員的登入設定。"
     }
   ],
   "web.admin.settings.lib.externalSignIn.error.selectProfile": [
@@ -60303,7 +60650,7 @@
   "web.admin.settings.lib.externalSignIn.problem.breakGlassRequired": [
     {
       "type": 0,
-      "value": "此伺服器已關閉密碼登入，此變更會導致沒有任何緊急存取管理員能以密碼登入。請先在「設定 → 登入」中重新開啟密碼登入，或將另一位管理員設為緊急存取管理員。"
+      "value": "密碼登入已關閉，因此至少必須保留一位可使用密碼登入的緊急存取管理員。請先在「設定 → 登入」中重新開啟密碼登入，或先為另一位管理員開啟「緊急存取帳號」。"
     }
   ],
   "web.admin.settings.lib.externalSignIn.problem.identityLinkedElsewhere": [
@@ -60321,25 +60668,25 @@
   "web.admin.settings.lib.externalSignIn.problem.providerAlreadyEnabled": [
     {
       "type": 0,
-      "value": "已開啟另一個登入提供者。伺服器同時只能有一個登入提供者，外加一個網路登入（例如 Tailscale）：請先關閉另一個。"
+      "value": "另一個登入提供者已啟用。請先將其關閉，一次僅能使用一個登入提供者（Tailscale 等網路登入除外）。"
     }
   ],
   "web.admin.settings.libraryMetadata.general.allVersions.description": [
     {
       "type": 0,
-      "value": "當作品位於多個媒體庫時，無論觀眾從哪裡開啟，其詳細資訊頁面都會列出觀眾可存取的所有版本。關閉時，只會列出觀眾開啟時所在媒體庫中的檔案。播放時一律可看到所有版本。"
+      "value": "當作品位於多個媒體庫時，在詳細資訊頁面列出所有可存取的版本。關閉時，僅顯示目前媒體庫中的版本。播放時一律會納入所有版本。"
     }
   ],
   "web.admin.settings.libraryMetadata.general.allVersions.label": [
     {
       "type": 0,
-      "value": "在詳細資訊頁面顯示所有媒體庫版本"
+      "value": "顯示所有媒體庫的版本"
     }
   ],
   "web.admin.settings.libraryMetadata.general.fallbackLanguage.description": [
     {
       "type": 0,
-      "value": "當媒體庫的中繼資料語言缺少標題、簡介和海報時，會先使用此語言，再使用原始語言。現有項目會在下次手動重新整理時變更。"
+      "value": "當媒體庫的語言缺少標題、簡介或海報時的備用語言，會先於原始語言使用。現有項目會在下次手動重新整理時更新。"
     }
   ],
   "web.admin.settings.libraryMetadata.general.fallbackLanguage.label": [
@@ -60363,7 +60710,7 @@
   "web.admin.settings.libraryMetadata.maturity.description": [
     {
       "type": 0,
-      "value": "適用於設有最高內容分級的個人檔案，此分級在各個人檔案中設定。"
+      "value": "適用於設有分級上限的個人檔案，並於各個人檔案中設定。"
     }
   ],
   "web.admin.settings.libraryMetadata.maturity.group": [
@@ -60381,13 +60728,13 @@
   "web.admin.settings.libraryMetadata.maturity.unrated.description": [
     {
       "type": 0,
-      "value": "適用於設有分級上限的個人檔案：決定這些個人檔案是否能看到沒有分級或標示為「未分級」的作品。伺服器無法讀取的分級一律會對這些個人檔案隱藏。沒有上限的個人檔案一律能看到這些作品。"
+      "value": "決定設有分級上限的個人檔案是否能看到沒有分級或標示為「未分級」的作品。無論如何，無法辨識的分級都會保持隱藏；沒有分級上限的個人檔案一律能看到這些作品。"
     }
   ],
   "web.admin.settings.libraryMetadata.maturity.unrated.hide": [
     {
       "type": 0,
-      "value": "對有上限的個人檔案隱藏"
+      "value": "對有分級限制的個人檔案隱藏"
     }
   ],
   "web.admin.settings.libraryMetadata.maturity.unrated.label": [
@@ -60399,13 +60746,13 @@
   "web.admin.settings.libraryMetadata.ratings.description": [
     {
       "type": 0,
-      "value": "IMDb 和 TMDB 評分沒有開關：只要支援的中繼資料外掛程式或作品的 .nfo 檔案提供這些評分，作品就會顯示。中繼資料提供者可以新增其他評分；開啟其中一項，即可在所有 App 的作品頁面上顯示其評分。作品頁面最多依此順序顯示三項評分，因此開啟的評分只會在排在它前面的評分少於三項時顯示。Rotten Tomatoes 評分也會顯示在海報標章上。開啟評分前，請先查看其條款：部分評分（例如 Rotten Tomatoes）會限制他人顯示其評分的方式。"
+      "value": "只要外掛程式或 .nfo 檔案提供 IMDb 和 TMDB 評分，系統就會一律顯示。開啟下方的其他來源，即可在所有 App 中顯示，每個作品頁面依此順序最多顯示 3 項評分。Rotten Tomatoes 也會顯示在海報標章上。請先查看各來源的條款：部分來源（例如 Rotten Tomatoes）會限制其分數的顯示方式。"
     }
   ],
   "web.admin.settings.libraryMetadata.ratings.empty": [
     {
       "type": 0,
-      "value": "沒有中繼資料外掛程式新增其他評分。"
+      "value": "沒有已啟用的中繼資料外掛程式提供其他評分。"
     }
   ],
   "web.admin.settings.libraryMetadata.ratings.fromProvider": [
@@ -60433,13 +60780,13 @@
   "web.admin.settings.libraryMetadata.ratings.undeclared.description": [
     {
       "type": 0,
-      "value": "在已啟用的外掛程式重新新增這些評分之前，它們不會顯示任何內容。請將其關閉，以免它們自行恢復顯示。"
+      "value": "在已啟用的外掛程式再次提供這些評分前會保持隱藏。將它們關閉可避免日後重新顯示。"
     }
   ],
   "web.admin.settings.libraryMetadata.ratings.undeclared.heading": [
     {
       "type": 0,
-      "value": "未由已啟用的外掛程式新增"
+      "value": "已啟用的外掛程式不再提供"
     }
   ],
   "web.admin.settings.libraryMetadata.scanning.group": [
@@ -60463,7 +60810,7 @@
   "web.admin.settings.libraryMetadata.scanning.matcherBatch.description": [
     {
       "type": 0,
-      "value": "每個比對工作程序每輪領取的項目數量。"
+      "value": "每個比對工作程序每次領取的項目數量。"
     }
   ],
   "web.admin.settings.libraryMetadata.scanning.matcherBatch.label": [
@@ -60475,7 +60822,7 @@
   "web.admin.settings.libraryMetadata.scanning.matcherWorkers.description": [
     {
       "type": 0,
-      "value": "Silo 同時查詢的項目數量。"
+      "value": "Silo 同時向中繼資料提供者比對的項目數量。"
     }
   ],
   "web.admin.settings.libraryMetadata.scanning.matcherWorkers.label": [
@@ -60487,7 +60834,7 @@
   "web.admin.settings.libraryMetadata.scanning.personRefresh.description": [
     {
       "type": 0,
-      "value": "每個伺服器每分鐘在背景查詢的演員和工作人員數量。開啟人物頁面不受此限制。"
+      "value": "每台伺服器取得演員陣容與工作人員中繼資料的背景上限。開啟人物頁面不受此限制。"
     }
   ],
   "web.admin.settings.libraryMetadata.scanning.personRefresh.label": [
@@ -60499,7 +60846,7 @@
   "web.admin.settings.libraryMetadata.scanning.realtime.description": [
     {
       "type": 0,
-      "value": "所有媒體庫皆已關閉。開啟後，由各媒體庫自己的開關決定是否監看其資料夾。"
+      "value": "關閉時，所有媒體庫都會停用資料夾監看。開啟時，則由各媒體庫自身的設定控制。"
     }
   ],
   "web.admin.settings.libraryMetadata.scanning.realtime.label": [
@@ -60529,7 +60876,7 @@
   "web.admin.settings.libraryMetadata.subtitleSync.auto.description": [
     {
       "type": 0,
-      "value": "將字幕對齊影片的音訊：下載和上傳的字幕會在新增時對齊，其他字幕則在首次播放時對齊。可修正為其他版本製作的字幕。"
+      "value": "會在新增下載與上傳的字幕時同步，其餘字幕則於首次播放時同步。可修正時間軸對應其他版本的字幕。"
     }
   ],
   "web.admin.settings.libraryMetadata.subtitleSync.auto.label": [
@@ -60559,7 +60906,7 @@
   "web.admin.settings.libraryMetadata.subtitleSync.execution.description": [
     {
       "type": 0,
-      "value": "同步時會解碼檔案中幾分鐘的音訊。"
+      "value": "字幕同步會解碼每個檔案中幾分鐘的音訊，這會消耗 CPU。"
     }
   ],
   "web.admin.settings.libraryMetadata.subtitleSync.execution.label": [
@@ -60673,7 +61020,7 @@
   "web.admin.settings.logging.server.level.description": [
     {
       "type": 0,
-      "value": "設定容器記錄的等級；Debug 會產生大量記錄，請只在追查問題時使用。無論如何，「伺服器記錄」頁面都會記錄 Info 以上等級。"
+      "value": "控制主控台與容器的記錄輸出。Debug 會輸出大量詳細內容，請僅在疑難排解時使用。「伺服器記錄」頁面一律會記錄 Info 及以上等級。"
     }
   ],
   "web.admin.settings.logging.server.level.error": [
@@ -60703,7 +61050,7 @@
   "web.admin.settings.logging.server.quiet.description": [
     {
       "type": 0,
-      "value": "捨棄以這些字詞開頭的記錄行。"
+      "value": "以逗號分隔的記錄行前綴，符合的記錄將不會輸出至主控台與容器。"
     }
   ],
   "web.admin.settings.logging.server.quiet.label": [
@@ -60727,7 +61074,7 @@
   "web.admin.settings.markers.provider.autoLocalDescription": [
     {
       "type": 0,
-      "value": "分享在此伺服器上偵測到、且符合「進階」中最低信賴度的片頭和片尾。"
+      "value": "傳送本機偵測到、且符合「進階」下自動分享最低信賴度的標記。"
     }
   ],
   "web.admin.settings.markers.provider.close": [
@@ -60745,13 +61092,13 @@
   "web.admin.settings.markers.provider.connectedOff": [
     {
       "type": 0,
-      "value": "已連線 · 關閉"
+      "value": "已設定 · 關閉"
     }
   ],
   "web.admin.settings.markers.provider.contributeEnabled": [
     {
       "type": 0,
-      "value": "允許與此提供者分享"
+      "value": "允許與此提供者分享標記"
     }
   ],
   "web.admin.settings.markers.provider.contributeMinConfidence": [
@@ -60763,7 +61110,7 @@
   "web.admin.settings.markers.provider.contributeMinConfidenceDescription": [
     {
       "type": 0,
-      "value": "選擇 0% 到 100% 之間的值。建議值：95%。"
+      "value": "只會自動分享信賴度達到或高於此值的本機偵測標記。建議值：95%。"
     }
   ],
   "web.admin.settings.markers.provider.empty": [
@@ -60801,7 +61148,7 @@
   "web.admin.settings.markers.provider.fetchMinConfidenceDescription": [
     {
       "type": 0,
-      "value": "略過此提供者評定較低的標記，讓其他提供者或本機偵測來補上。0% 表示使用所有標記。"
+      "value": "略過低於此門檻的標記，讓其他提供者或本機偵測接手。0% 表示使用所有標記。"
     }
   ],
   "web.admin.settings.markers.provider.fix": [
@@ -60947,7 +61294,7 @@
   "web.admin.settings.markers.tasks.contributeDescription": [
     {
       "type": 0,
-      "value": "將此伺服器上偵測到且符合資格的片頭和片尾，傳送給已啟用自動分享的提供者；並將儲存時未能送出的手動修正，傳送給接受修正的提供者。"
+      "value": "將符合資格的本機偵測片頭與片尾傳送至已啟用自動分享的提供者，並為接受修正的提供者重試尚未送達的手動修正。"
     }
   ],
   "web.admin.settings.markers.tasks.contributeName": [
@@ -61197,7 +61544,7 @@
   "web.admin.settings.network.direct.connected.connectedSince": [
     {
       "type": 0,
-      "value": "開始使用此路徑"
+      "value": "開始直接連線"
     }
   ],
   "web.admin.settings.network.direct.connected.device": [
@@ -61215,7 +61562,7 @@
   "web.admin.settings.network.direct.connected.peerEndpoint": [
     {
       "type": 0,
-      "value": "對等端點"
+      "value": "遠端位址"
     }
   ],
   "web.admin.settings.network.direct.connected.title": [
@@ -61247,13 +61594,13 @@
   "web.admin.settings.network.direct.description": [
     {
       "type": 0,
-      "value": "檢查此伺服器是否已準備好進行直接連線。"
+      "value": "讓裝置透過 UDP 直接連線至此伺服器，並檢查網路就緒狀態。"
     }
   ],
   "web.admin.settings.network.direct.effective": [
     {
       "type": 0,
-      "value": "生效值："
+      "value": "目前生效："
     },
     {
       "type": 1,
@@ -61293,7 +61640,7 @@
   "web.admin.settings.network.direct.feature.pmtu_fallback": [
     {
       "type": 0,
-      "value": "PMTU 備援"
+      "value": "路徑 MTU 備援"
     }
   ],
   "web.admin.settings.network.direct.feature.reachability": [
@@ -61397,7 +61744,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "向路由器請求 UPnP、NAT-PMP 或 PCP 連接埠對應。"
+      "value": "請求路由器透過 UPnP、NAT-PMP 或 PCP 自動轉送連接埠。"
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -61427,7 +61774,7 @@
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "開啟此功能會啟動直接連線引擎。引擎會開啟一個 UDP 連接埠，並在「連接埠對應」開啟時向路由器請求連接埠對應。「執行檢查」只會讀取主機的狀態。"
+      "value": "開啟此設定會為直接連線開啟 UDP 連接埠，並在「連接埠對應」開啟時請求路由器轉送該連接埠。「執行檢查」只會檢視目前狀態。"
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
@@ -61439,7 +61786,7 @@
   "web.admin.settings.network.direct.reason.clamped": [
     {
       "type": 0,
-      "value": "已限制在允許的範圍內"
+      "value": "已調整至允許範圍內"
     }
   ],
   "web.admin.settings.network.direct.reason.disabled": [
@@ -61481,7 +61828,7 @@
   "web.admin.settings.network.direct.reason.invalid": [
     {
       "type": 0,
-      "value": "值無效；改為關閉"
+      "value": "值無效；已關閉"
     }
   ],
   "web.admin.settings.network.direct.reason.invalid_default": [
@@ -61747,7 +62094,7 @@
   "web.admin.settings.network.direct.stunServers.description": [
     {
       "type": 0,
-      "value": "以逗號分隔的清單，最多 8 個 host:port 項目。留空即可使用預設值。"
+      "value": "最多 8 個以逗號分隔的 host:port 項目。留空即可使用預設值。"
     }
   ],
   "web.admin.settings.network.direct.stunServers.label": [
@@ -61765,7 +62112,7 @@
   "web.admin.settings.network.direct.udpDescription": [
     {
       "type": 0,
-      "value": "讓裝置透過直接 UDP 路徑連線至此伺服器。UDP 連接埠由 "
+      "value": "讓裝置透過 UDP 直接連線至此伺服器。UDP 連接埠由 "
     },
     {
       "type": 1,
@@ -61773,7 +62120,7 @@
     },
     {
       "type": 0,
-      "value": " 設定，在此為唯讀。"
+      "value": " 設定，無法在此變更。"
     }
   ],
   "web.admin.settings.network.host.apiServer": [
@@ -61799,7 +62146,7 @@
       "children": [
         {
           "type": 0,
-          "value": "以完成註冊此主機。"
+          "value": "以完成此主機的連線。"
         }
       ]
     }
@@ -61903,13 +62250,13 @@
   "web.admin.settings.network.page.intro": [
     {
       "type": 0,
-      "value": "網路存取提供者會讓此伺服器在 Tailscale 等覆疊網路上擁有身分，讓用戶端不需連接埠轉送或公開的反向代理即可連線。提供者是外掛程式：從「外掛程式」頁面安裝後，就會顯示在這裡。"
+      "value": "將此伺服器連線至 Tailscale 等覆疊網路，讓用戶端不需連接埠轉送或公開的反向代理伺服器即可連線。請從「外掛程式」頁面安裝提供者外掛程式。"
     }
   ],
   "web.admin.settings.network.page.noProvidersBody": [
     {
       "type": 0,
-      "value": "沒有已安裝的外掛程式提供網路存取。請從「外掛程式」頁面安裝網路存取提供者，將此伺服器連線至覆疊網路。"
+      "value": "請從「外掛程式」頁面安裝網路存取提供者，即可在此管理。"
     }
   ],
   "web.admin.settings.network.page.noProvidersTitle": [
@@ -61995,7 +62342,7 @@
   "web.admin.settings.nodeRouting.description": [
     {
       "type": 0,
-      "value": "決定由哪台機器執行 Remux 或轉碼，以及由哪台機器將串流傳送至播放器。「優先」路由會退回使用 API 伺服器；「僅限」路由則永遠不會。"
+      "value": "選擇負責處理 Remux 和轉碼的伺服器，以及負責將串流傳送至播放器的伺服器。「優先」選項會在無法使用時備援；「僅限」選項則永遠不會備援。"
     }
   ],
   "web.admin.settings.nodeRouting.egress.preferProxy": [
@@ -62025,13 +62372,13 @@
   "web.admin.settings.nodeRouting.execution.workerOnly": [
     {
       "type": 0,
-      "value": "僅限任何工作節點"
+      "value": "僅限工作節點"
     }
   ],
   "web.admin.settings.nodeRouting.fields.directPlayEgress.description": [
     {
       "type": 0,
-      "value": "原始位元組不需要執行節點。"
+      "value": "直接播放會原封不動傳送原始檔案，因此不需要轉碼或 Remux 伺服器。"
     }
   ],
   "web.admin.settings.nodeRouting.fields.directPlayEgress.label": [
@@ -62049,7 +62396,7 @@
   "web.admin.settings.nodeRouting.fields.remuxExecution.description": [
     {
       "type": 0,
-      "value": "工作節點可以是代理節點或轉碼節點。「優先使用轉碼節點」會在支援時於該節點執行 HLS 或漸進式 Remux；漸進式輸出會透過所選的代理節點轉送。"
+      "value": "工作節點包含代理節點與轉碼節點。「優先使用轉碼節點」會在支援時於轉碼節點執行 HLS 或漸進式 Remux，並透過所選代理節點轉送漸進式串流。"
     }
   ],
   "web.admin.settings.nodeRouting.fields.remuxExecution.label": [
@@ -62067,7 +62414,7 @@
   "web.admin.settings.nodeRouting.fields.videoTranscodeExecution.description": [
     {
       "type": 0,
-      "value": "影片轉碼的工作節點是轉碼節點；代理節點僅負責輸出。"
+      "value": "在工作節點中，只有轉碼節點可以執行影片轉碼；代理節點僅負責傳送串流。"
     }
   ],
   "web.admin.settings.nodeRouting.fields.videoTranscodeExecution.label": [
@@ -62097,7 +62444,7 @@
   "web.admin.settings.nodeRouting.paths.description": [
     {
       "type": 0,
-      "value": "箭頭表示軟性備援順序；「僅限」模式永遠不會跨越該界線。"
+      "value": "箭頭表示伺服器無法使用時的備援順序。「僅限」路由永遠不會備援。"
     }
   ],
   "web.admin.settings.nodeRouting.paths.directPlay": [
@@ -62139,7 +62486,7 @@
   "web.admin.settings.nodeRouting.presets.description": [
     {
       "type": 0,
-      "value": "一次設定「進階」中的全部五條路由；「自訂」不會儲存。"
+      "value": "一次套用「進階」下的全部五條路由。"
     }
   ],
   "web.admin.settings.nodeRouting.presets.gpu": [
@@ -62205,7 +62552,7 @@
   "web.admin.settings.nodeRouting.preview.remux.workerOnly": [
     {
       "type": 0,
-      "value": "僅限任何工作節點"
+      "value": "僅限工作節點"
     }
   ],
   "web.admin.settings.nodeRouting.preview.route": [
@@ -62243,13 +62590,13 @@
   "web.admin.settings.nodeRouting.warnings.proxyOnlyClients": [
     {
       "type": 0,
-      "value": "「僅限代理」輸出需要所有原生用戶端都支援授權的媒體來源；較舊的用戶端可能無法開始該工作負載。"
+      "value": "僅限代理的輸出需要支援代理串流的最新版原生用戶端。較舊的用戶端可能無法開始播放。"
     }
   ],
   "web.admin.settings.nodeRouting.warnings.stranded": [
     {
       "type": 0,
-      "value": "某條「僅限」路由目前沒有正常運作的支援節點。仍可儲存，以便節點稍後加入。"
+      "value": "某條「僅限」路由目前沒有正常運作的節點。如果節點稍後才會加入，仍可儲存設定。"
     }
   ],
   "web.admin.settings.notifications.delivery": [
@@ -62261,7 +62608,7 @@
   "web.admin.settings.notifications.deliveryDescription": [
     {
       "type": 0,
-      "value": "通知的傳送目的地。管道關閉時仍可編輯其設定，以便在開啟前先準備好。"
+      "value": "選擇 Silo 傳送通知的目的地。你可以先設定任何管道，再將其開啟。"
     }
   ],
   "web.admin.settings.notifications.digestHour": [
@@ -62279,13 +62626,13 @@
   "web.admin.settings.notifications.discord.appConnected": [
     {
       "type": 0,
-      "value": "已連結 Discord App"
+      "value": "已設定 App"
     }
   ],
   "web.admin.settings.notifications.discord.appNotConnected": [
     {
       "type": 0,
-      "value": "未連結 Discord App"
+      "value": "未設定 App"
     }
   ],
   "web.admin.settings.notifications.discord.application": [
@@ -62333,7 +62680,7 @@
   "web.admin.settings.notifications.discord.clearConfirm": [
     {
       "type": 0,
-      "value": "清除"
+      "value": "清除憑證"
     }
   ],
   "web.admin.settings.notifications.discord.clearCredentials": [
@@ -62411,7 +62758,21 @@
   "web.admin.settings.notifications.discord.guideBot": [
     {
       "type": 0,
-      "value": "Bot 頁面：重設並複製 "
+      "value": "在 "
+    },
+    {
+      "type": 8,
+      "value": "b",
+      "children": [
+        {
+          "type": 0,
+          "value": "Bot"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " 頁面上，重設並複製 "
     },
     {
       "type": 8,
@@ -62425,7 +62786,21 @@
     },
     {
       "type": 0,
-      "value": "。將所有 Privileged Gateway Intents（Presence、Server Members、Message Content）保持"
+      "value": "。請將所有 "
+    },
+    {
+      "type": 8,
+      "value": "b",
+      "children": [
+        {
+          "type": 0,
+          "value": "Privileged Gateway Intents"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "（Presence、Server Members、Message Content）保持"
     },
     {
       "type": 8,
@@ -62485,7 +62860,7 @@
   "web.admin.settings.notifications.discord.guideIntro": [
     {
       "type": 0,
-      "value": "在 "
+      "value": "在 Discord Developer Portal（"
     },
     {
       "type": 8,
@@ -62499,13 +62874,13 @@
     },
     {
       "type": 0,
-      "value": " 設定："
+      "value": "）中："
     }
   ],
   "web.admin.settings.notifications.discord.guideInvite": [
     {
       "type": 0,
-      "value": "將這三項憑證貼到下方並儲存，然後使用邀請按鈕將機器人新增至你的 Discord 伺服器。機器人"
+      "value": "將這三項憑證貼到下方並儲存，然後將機器人邀請至你的 Discord 伺服器。它"
     },
     {
       "type": 8,
@@ -62519,13 +62894,27 @@
     },
     {
       "type": 0,
-      "value": "——只要是成員就能傳送私人訊息給其他成員，而使用者必須與機器人在同一個伺服器中才能收到私人訊息。"
+      "value": "——只要待在同一個伺服器裡，就能傳送私人訊息給成員。"
     }
   ],
   "web.admin.settings.notifications.discord.guideOAuth": [
     {
       "type": 0,
-      "value": "OAuth2 頁面：複製 "
+      "value": "在 "
+    },
+    {
+      "type": 8,
+      "value": "b",
+      "children": [
+        {
+          "type": 0,
+          "value": "OAuth2"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " 頁面上，複製 "
     },
     {
       "type": 8,
@@ -62539,7 +62928,7 @@
     },
     {
       "type": 0,
-      "value": "，重設並複製 "
+      "value": "，再重設並複製 "
     },
     {
       "type": 8,
@@ -62553,7 +62942,21 @@
     },
     {
       "type": 0,
-      "value": "，然後在 Redirects 下使用此伺服器的公開網址新增"
+      "value": "。在 "
+    },
+    {
+      "type": 8,
+      "value": "b",
+      "children": [
+        {
+          "type": 0,
+          "value": "Redirects"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " 下，使用你伺服器的公開網址新增 "
     },
     {
       "type": 8,
@@ -62567,7 +62970,7 @@
     },
     {
       "type": 0,
-      "value": "——必須完全相符。"
+      "value": "（必須完全相符）。"
     }
   ],
   "web.admin.settings.notifications.discord.guidePublicUrl": [
@@ -62591,7 +62994,7 @@
   "web.admin.settings.notifications.discord.inviteCopyFailed": [
     {
       "type": 0,
-      "value": "無法複製邀請連結——請選取連結並手動複製"
+      "value": "無法複製邀請連結。請使用「邀請機器人加入伺服器」直接開啟。"
     }
   ],
   "web.admin.settings.notifications.discord.mustBeInServer": [
@@ -62603,7 +63006,7 @@
   "web.admin.settings.notifications.discord.perEpisode": [
     {
       "type": 0,
-      "value": "允許使用者選擇每集傳送私人訊息"
+      "value": "允許每集傳送私人訊息"
     }
   ],
   "web.admin.settings.notifications.discord.saveFirst": [
@@ -62739,7 +63142,7 @@
   "web.admin.settings.notifications.email.description": [
     {
       "type": 0,
-      "value": "為選擇接收的使用者傳送每日摘要或每集一則訊息。"
+      "value": "為選擇接收的使用者傳送每日摘要或每集電子郵件。"
     }
   ],
   "web.admin.settings.notifications.email.mailMissing": [
@@ -62751,7 +63154,7 @@
   "web.admin.settings.notifications.email.mailMissingStatus": [
     {
       "type": 0,
-      "value": "尚未設定郵件伺服器。設定完成前無法傳送任何電子郵件；請在"
+      "value": "尚未設定郵件伺服器。請先在"
     },
     {
       "type": 8,
@@ -62759,13 +63162,13 @@
       "children": [
         {
           "type": 0,
-          "value": "電子郵件頁面"
+          "value": "電子郵件設定"
         }
       ]
     },
     {
       "type": 0,
-      "value": "設定。"
+      "value": "中完成設定，Silo 才能傳送電子郵件。"
     }
   ],
   "web.admin.settings.notifications.email.mailReady": [
@@ -62797,7 +63200,7 @@
   "web.admin.settings.notifications.email.perEpisode": [
     {
       "type": 0,
-      "value": "允許使用者選擇每集傳送電子郵件"
+      "value": "允許每集傳送電子郵件"
     }
   ],
   "web.admin.settings.notifications.email.summaryAt": [
@@ -62841,7 +63244,7 @@
   "web.admin.settings.notifications.loadFailedDescription": [
     {
       "type": 0,
-      "value": "這裡顯示的值不會反映伺服器的實際運作狀況。請重新載入再試一次。"
+      "value": "控制項已隱藏，以免覆寫伺服器目前的設定。請重新載入並再試一次。"
     }
   ],
   "web.admin.settings.notifications.loadFailedTitle": [
@@ -62853,19 +63256,19 @@
   "web.admin.settings.notifications.perEpisodeOffDescription": [
     {
       "type": 0,
-      "value": "關閉時會改為傳送每日摘要。"
+      "value": "關閉時，使用者會改為收到每日摘要。"
     }
   ],
   "web.admin.settings.notifications.relay.applyUrl": [
     {
       "type": 0,
-      "value": "請註冊以套用新的轉送伺服器網址。"
+      "value": "請在上方註冊或輪替憑證，以套用新的轉送伺服器網址。"
     }
   ],
   "web.admin.settings.notifications.relay.chipConfigured": [
     {
       "type": 0,
-      "value": "已設定轉送伺服器"
+      "value": "已註冊"
     }
   ],
   "web.admin.settings.notifications.relay.chipFirstSend": [
@@ -62895,7 +63298,7 @@
   "web.admin.settings.notifications.relay.clearDescription": [
     {
       "type": 0,
-      "value": "在重新註冊轉送伺服器之前，將停止傳送行動裝置推播通知。"
+      "value": "行動裝置推播通知將立即停止，直到你重新註冊轉送伺服器為止。"
     }
   ],
   "web.admin.settings.notifications.relay.clearFailed": [
@@ -62947,25 +63350,25 @@
   "web.admin.settings.notifications.relay.description": [
     {
       "type": 0,
-      "value": "透過 Silo 的轉送伺服器傳送行動裝置推播，由 APNs 或 FCM 遞送。"
+      "value": "透過 Silo 的轉送伺服器（APNs 和 FCM）將推播通知傳送至 iOS 和 Android App。"
     }
   ],
   "web.admin.settings.notifications.relay.expirationUnknown": [
     {
       "type": 0,
-      "value": "到期時間不明；Silo 會在下次續約時更新憑證。"
+      "value": "憑證到期時間不明。Silo 會自動重新整理。"
     }
   ],
   "web.admin.settings.notifications.relay.expired": [
     {
       "type": 0,
-      "value": "已過期；Silo 會在下次傳送前續約。"
+      "value": "憑證已過期。Silo 會在下次推播前續約。"
     }
   ],
   "web.admin.settings.notifications.relay.expires": [
     {
       "type": 0,
-      "value": "到期時間："
+      "value": "憑證將於 "
     },
     {
       "type": 1,
@@ -62973,7 +63376,7 @@
     },
     {
       "type": 0,
-      "value": "；Silo 會自動續約。"
+      "value": " 到期。Silo 會自動續約。"
     }
   ],
   "web.admin.settings.notifications.relay.noCredential": [
@@ -62985,41 +63388,57 @@
   "web.admin.settings.notifications.relay.notRegistered": [
     {
       "type": 0,
-      "value": "尚未註冊；Silo 會在首次推播時註冊。"
+      "value": "尚未註冊。Silo 會在首次推播時自動註冊。"
     }
   ],
   "web.admin.settings.notifications.relay.ready": [
     {
+      "type": 0,
+      "value": "已註冊轉送伺服器——部署 "
+    },
+    {
       "type": 1,
       "value": "deployment"
     },
     {
       "type": 0,
-      "value": " 的憑證已就緒"
+      "value": "。"
     }
   ],
   "web.admin.settings.notifications.relay.readyKey": [
     {
+      "type": 0,
+      "value": "已註冊轉送伺服器——部署 "
+    },
+    {
       "type": 1,
       "value": "deployment"
     },
     {
       "type": 0,
-      "value": " 的憑證已就緒，金鑰 "
+      "value": "，金鑰 "
     },
     {
       "type": 1,
       "value": "key"
+    },
+    {
+      "type": 0,
+      "value": "。"
     }
   ],
   "web.admin.settings.notifications.relay.readyKeyRelay": [
     {
+      "type": 0,
+      "value": "已註冊轉送伺服器——部署 "
+    },
+    {
       "type": 1,
       "value": "deployment"
     },
     {
       "type": 0,
-      "value": " 的憑證已就緒，金鑰 "
+      "value": "，金鑰 "
     },
     {
       "type": 1,
@@ -63027,25 +63446,37 @@
     },
     {
       "type": 0,
-      "value": "，轉送請求 "
+      "value": "，請求 "
     },
     {
       "type": 1,
       "value": "request"
+    },
+    {
+      "type": 0,
+      "value": "。"
     }
   ],
   "web.admin.settings.notifications.relay.readyRelay": [
+    {
+      "type": 0,
+      "value": "已註冊轉送伺服器——部署 "
+    },
     {
       "type": 1,
       "value": "deployment"
     },
     {
       "type": 0,
-      "value": " 的憑證已就緒，轉送請求 "
+      "value": "，請求 "
     },
     {
       "type": 1,
       "value": "request"
+    },
+    {
+      "type": 0,
+      "value": "。"
     }
   ],
   "web.admin.settings.notifications.relay.register": [
@@ -63075,7 +63506,7 @@
   "web.admin.settings.notifications.relay.reregistrationNote": [
     {
       "type": 0,
-      "value": "轉送伺服器憑證已被清除，或轉送伺服器已停用此部署。請重新註冊以建立新的部署。轉送伺服器的其他拒絕狀況會自動復原。"
+      "value": "由於轉送伺服器憑證已清除，或轉送伺服器已停用此部署，推播傳送已暫停。請重新註冊以建立新的部署並繼續傳送。"
     }
   ],
   "web.admin.settings.notifications.relay.rotate": [
@@ -63093,7 +63524,7 @@
   "web.admin.settings.notifications.relay.urlDescription": [
     {
       "type": 0,
-      "value": "在下方註冊時儲存。"
+      "value": "在下方註冊或輪替憑證時套用。"
     }
   ],
   "web.admin.settings.notifications.reload": [
@@ -63143,7 +63574,7 @@
   "web.admin.settings.notifications.serverChannels.currentHost": [
     {
       "type": 0,
-      "value": "目前指向 "
+      "value": "留空以保留 "
     },
     {
       "type": 1,
@@ -63165,7 +63596,7 @@
   "web.admin.settings.notifications.serverChannels.deleteDescription": [
     {
       "type": 0,
-      "value": "伺服器事件將不再發布到此目的地。此動作無法復原。"
+      "value": "Silo 將停止發布伺服器事件到此頻道。此動作無法復原。"
     }
   ],
   "web.admin.settings.notifications.serverChannels.deleteTitle": [
@@ -63185,7 +63616,7 @@
   "web.admin.settings.notifications.serverChannels.dialogDescription": [
     {
       "type": 0,
-      "value": "伺服器頻道會廣播整個伺服器的事件——每個個人檔案都會看到相同的貼文。Discord Webhook 網址會以原生嵌入內容呈現；其他任何 HTTPS 端點則會收到已簽署的 JSON。"
+      "value": "將全伺服器事件發布到共用頻道，不依帳號或媒體庫存取權篩選。Discord Webhook 網址會以嵌入內容發布；其他 HTTPS 網址則會收到已簽署的 JSON。"
     }
   ],
   "web.admin.settings.notifications.serverChannels.disabled": [
@@ -63205,7 +63636,7 @@
     },
     {
       "type": 0,
-      "value": " 重新啟用此頻道，即可從現在起繼續發布。"
+      "value": " 重新開啟此頻道即可繼續發布新事件。"
     }
   ],
   "web.admin.settings.notifications.serverChannels.edit": [
@@ -63327,7 +63758,7 @@
     },
     {
       "type": 0,
-      "value": "。請檢查目的地網址。"
+      "value": "。請檢查 Webhook 網址。"
     }
   ],
   "web.admin.settings.notifications.serverChannels.lastFailureWhen": [
@@ -63349,7 +63780,7 @@
     },
     {
       "type": 0,
-      "value": "。請檢查目的地網址。"
+      "value": "。請檢查 Webhook 網址。"
     }
   ],
   "web.admin.settings.notifications.serverChannels.lastPost": [
@@ -63448,6 +63879,10 @@
                       "value": "status"
                     },
                     {
+                      "type": 0,
+                      "value": "，"
+                    },
+                    {
                       "type": 1,
                       "value": "duration_ms"
                     },
@@ -63492,6 +63927,10 @@
                     {
                       "type": 1,
                       "value": "status"
+                    },
+                    {
+                      "type": 0,
+                      "value": "，"
                     },
                     {
                       "type": 1,
@@ -63552,6 +63991,10 @@
                       "value": "status"
                     },
                     {
+                      "type": 0,
+                      "value": "，"
+                    },
+                    {
                       "type": 1,
                       "value": "duration_ms"
                     },
@@ -63606,6 +64049,10 @@
                       "value": "status"
                     },
                     {
+                      "type": 0,
+                      "value": "，"
+                    },
+                    {
                       "type": 1,
                       "value": "duration_ms"
                     },
@@ -63653,7 +64100,7 @@
   "web.admin.settings.notifications.serverChannelsCard.description": [
     {
       "type": 0,
-      "value": "發布到共用目的地的全伺服器公告。"
+      "value": "發布到共用 Discord 或自訂 Webhook 的全伺服器公告。"
     }
   ],
   "web.admin.settings.notifications.serverChannelsCard.destinations": [
@@ -63669,7 +64116,7 @@
             },
             {
               "type": 0,
-              "value": " 個目的地"
+              "value": " 個頻道"
             }
           ]
         }
@@ -63751,7 +64198,7 @@
   "web.admin.settings.notifications.webhooks.allowPrivateDescription": [
     {
       "type": 0,
-      "value": "允許區域網路和 localhost 目的地；僅供開發使用。"
+      "value": "允許 localhost 和區域網路位址。僅供開發使用。"
     }
   ],
   "web.admin.settings.notifications.webhooks.allowPrivateWarning": [
@@ -63769,13 +64216,13 @@
   "web.admin.settings.notifications.webhooks.deliveriesDescription": [
     {
       "type": 0,
-      "value": "由每個伺服器處理程序各自計算。超過限制的呼叫會被捨棄；收件匣通知仍會送達。"
+      "value": "依各伺服器執行個體各自限制，不會在叢集間共用。超過上限的 Webhook 傳送會被捨棄，但 App 內通知仍會送達。"
     }
   ],
   "web.admin.settings.notifications.webhooks.description": [
     {
       "type": 0,
-      "value": "使用者為自己建立的 Webhook，可為 Discord 或通用類型。"
+      "value": "使用者為自己設定的 Discord 或自訂 HTTPS Webhook。"
     }
   ],
   "web.admin.settings.notifications.webhooks.perMinute": [
@@ -63793,7 +64240,7 @@
   "web.admin.settings.notifications.webhooks.privateAllowed": [
     {
       "type": 0,
-      "value": "已允許私人目的地"
+      "value": "已允許私人位址"
     }
   ],
   "web.admin.settings.notifications.webhooks.title": [
@@ -63871,7 +64318,7 @@
   "web.admin.settings.playback.execution.localServer": [
     {
       "type": 0,
-      "value": "本機伺服器"
+      "value": "此伺服器"
     }
   ],
   "web.admin.settings.playback.execution.nodesOnly": [
@@ -63889,7 +64336,7 @@
   "web.admin.settings.playback.execution.preferNodes": [
     {
       "type": 0,
-      "value": "優先使用轉碼節點"
+      "value": "可用時使用轉碼節點"
     }
   ],
   "web.admin.settings.playback.execution.thisServer": [
@@ -63921,13 +64368,13 @@
     },
     {
       "type": 0,
-      "value": " 未通過硬體檢查（轉碼節點）"
+      "value": " 未通過轉碼節點的硬體檢查"
     }
   ],
   "web.admin.settings.playback.hwAccel.description": [
     {
       "type": 0,
-      "value": "「自動」會選擇最佳裝置。若啟動失敗，會先維持 GPU 編碼搭配 CPU 解碼，再改用軟體轉碼。"
+      "value": "「自動」會選擇最佳裝置。若 GPU 轉碼無法啟動，Silo 會先嘗試 CPU 解碼搭配 GPU 編碼，再改用軟體轉碼。"
     }
   ],
   "web.admin.settings.playback.hwAccel.detected": [
@@ -64023,7 +64470,7 @@
     },
     {
       "type": 0,
-      "value": " 需要 Silo 直接在 macOS 上執行，而非在 Docker 中（轉碼節點）"
+      "value": " 需要轉碼節點直接在 macOS 上執行，而非在 Docker 中"
     }
   ],
   "web.admin.settings.playback.hwAccel.noneFound": [
@@ -64049,7 +64496,7 @@
   "web.admin.settings.playback.hwAccel.notAccessibleNode": [
     {
       "type": 0,
-      "value": "此伺服器無法存取 "
+      "value": "轉碼節點無法存取 "
     },
     {
       "type": 1,
@@ -64057,7 +64504,7 @@
     },
     {
       "type": 0,
-      "value": " 裝置（轉碼節點）"
+      "value": " 裝置"
     }
   ],
   "web.admin.settings.playback.hwAccel.notFound": [
@@ -64073,15 +64520,11 @@
   "web.admin.settings.playback.hwAccel.notFoundNode": [
     {
       "type": 0,
-      "value": "此伺服器上找不到 "
+      "value": "轉碼節點上找不到 "
     },
     {
       "type": 1,
       "value": "backend"
-    },
-    {
-      "type": 0,
-      "value": "（轉碼節點）"
     }
   ],
   "web.admin.settings.playback.hwAccel.nvencFirstDevice": [
@@ -64143,7 +64586,7 @@
   "web.admin.settings.playback.markers.detectionWorkersDescription": [
     {
       "type": 0,
-      "value": "Silo 同時分析的季數或電影數，每個都使用各自的 ffmpeg 處理程序。預設為 1。若你的儲存空間和 CPU 仍有餘裕，可調高此值以更快完成大型媒體庫。"
+      "value": "同時分析的季數或電影數（每個都會執行一個 FFmpeg 處理程序）。預設為 1；若你的 CPU 和儲存空間允許，調高此值可加快大型媒體庫的掃描速度。"
     }
   ],
   "web.admin.settings.playback.markers.group": [
@@ -64167,7 +64610,7 @@
   "web.admin.settings.playback.markers.lazyPlaybackBoth": [
     {
       "type": 0,
-      "value": "開始播放時先在線上查詢。Silo 只會偵測線上提供者沒有的片頭或片尾，並使用此伺服器的 CPU。"
+      "value": "開始播放時先在線上查詢，再使用此伺服器的 CPU 偵測線上找不到的片頭或片尾標記。"
     }
   ],
   "web.admin.settings.playback.markers.lazyPlaybackLocal": [
@@ -64197,7 +64640,7 @@
   "web.admin.settings.playback.markers.modeDescription": [
     {
       "type": 0,
-      "value": "線上標記優先。如果你的媒體庫已儲存線上的片頭或片尾標記，Silo 就會略過該項目的本機偵測。本機偵測會使用 CPU。"
+      "value": "線上標記優先——若已儲存線上的片頭或片尾標記，Silo 會略過本機偵測。本機偵測會使用 CPU。"
     }
   ],
   "web.admin.settings.playback.markers.modeLocal": [
@@ -64269,7 +64712,7 @@
   "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
     {
       "type": 0,
-      "value": "0 到 1440。在 Silo App 中暫停達此時間的影片會結束播放，以釋放其串流及任何轉碼；再次播放時會從同一位置繼續。一起看、投放和有聲書不受影響。設為 0 即可關閉此功能。"
+      "value": "結束 Silo App 中暫停的影片工作階段，以釋放串流和轉碼資源；重新播放時會從同一位置繼續。不影響一起看、投放或有聲書。0–1440（0 表示關閉）。"
     }
   ],
   "web.admin.settings.playback.previews.chapterExecution": [
@@ -64287,7 +64730,7 @@
   "web.admin.settings.playback.previews.chapterWorkersDescription": [
     {
       "type": 0,
-      "value": "Silo 同時從多少個檔案擷取章節縮圖。另有一個額外的處理程序只處理正在播放的作品，讓它們不必在佇列後方等待。"
+      "value": "同時處理的檔案數。系統會額外保留一個處理程序專門處理正在播放的作品，讓它們不必在佇列中等待。"
     }
   ],
   "web.admin.settings.playback.previews.group": [
@@ -64299,13 +64742,13 @@
   "web.admin.settings.playback.previews.groupDescription": [
     {
       "type": 0,
-      "value": "章節縮圖和拖曳預覽需在媒體庫頁面中為每個媒體庫個別開啟。"
+      "value": "在媒體庫中為各個媒體庫開啟章節縮圖和拖曳預覽。"
     }
   ],
   "web.admin.settings.playback.previews.groupDescriptionNoTrickplay": [
     {
       "type": 0,
-      "value": "章節縮圖需在媒體庫頁面中為每個媒體庫個別開啟。"
+      "value": "在媒體庫中為各個媒體庫開啟章節縮圖。"
     }
   ],
   "web.admin.settings.playback.previews.hdrBestEffort": [
@@ -64353,7 +64796,7 @@
   "web.admin.settings.playback.previews.intervalDescription": [
     {
       "type": 0,
-      "value": "拖曳預覽之間的時間，5 到 60。變更後，所有媒體庫的預覽都會重新產生。"
+      "value": "拖曳預覽之間的間隔秒數（5–60）。變更此設定會重新產生所有媒體庫的拖曳預覽。"
     }
   ],
   "web.admin.settings.playback.previews.librariesLink": [
@@ -64401,7 +64844,7 @@
   "web.admin.settings.playback.previews.trickplayNodeCapacityDescription": [
     {
       "type": 0,
-      "value": "一個轉碼節點在所有伺服器間同時為多少個檔案產生拖曳預覽，1 到 64。每個都會計入節點的作業上限，因此請保留空間給播放使用。"
+      "value": "每個轉碼節點在所有伺服器間可同時執行的拖曳預覽作業數（1–64）。每個作業都會計入節點的作業上限，請保留空間給播放使用。"
     }
   ],
   "web.admin.settings.playback.previews.trickplayWorkers": [
@@ -64413,7 +64856,7 @@
   "web.admin.settings.playback.previews.trickplayWorkersDescription": [
     {
       "type": 0,
-      "value": "每部伺服器同時為多少個檔案產生拖曳預覽。這些作業以低優先順序執行，因此會優先處理播放。"
+      "value": "每部伺服器同時處理的檔案數。會以低優先順序執行，確保播放優先。"
     }
   ],
   "web.admin.settings.playback.previews.width": [
@@ -64425,7 +64868,7 @@
   "web.admin.settings.playback.previews.widthDescription": [
     {
       "type": 0,
-      "value": "章節縮圖和播放器拖曳時顯示的縮圖寬度，160 到 640。變更後會全部重新產生；播放器會繼續使用目前的圖片，直到逐一被取代為止。"
+      "value": "套用於章節縮圖和拖曳預覽（160–640 px）。變更此設定會重新產生現有圖片；播放器會繼續顯示目前的圖片，直到被取代為止。"
     }
   ],
   "web.admin.settings.playback.remake.intervalCount": [
@@ -64437,7 +64880,7 @@
           "value": [
             {
               "type": 0,
-              "value": "將以新的間隔重新產生 "
+              "value": "將在背景以新的間隔重新產生 "
             },
             {
               "type": 1,
@@ -64445,7 +64888,7 @@
             },
             {
               "type": 0,
-              "value": " 個檔案的拖曳預覽。此作業會在背景執行，在大型媒體庫上可能需要很長時間；播放器會繼續使用目前的圖片，直到逐一被取代為止。"
+              "value": " 個檔案的拖曳預覽。在大型媒體庫上可能需要很長時間；播放器會繼續顯示目前的圖片，直到被取代為止。"
             }
           ]
         }
@@ -64457,7 +64900,7 @@
   "web.admin.settings.playback.remake.intervalExisting": [
     {
       "type": 0,
-      "value": "將以新的間隔重新產生現有的拖曳預覽。此作業會在背景執行，在大型媒體庫上可能需要很長時間；播放器會繼續使用目前的圖片，直到逐一被取代為止。"
+      "value": "將在背景以新的間隔重新產生現有的拖曳預覽。在大型媒體庫上可能需要很長時間；播放器會繼續顯示目前的圖片，直到被取代為止。"
     }
   ],
   "web.admin.settings.playback.remake.intervalTitle": [
@@ -64475,7 +64918,7 @@
           "value": [
             {
               "type": 0,
-              "value": "將以新的寬度重新產生所有章節縮圖和 "
+              "value": "將在背景以新的寬度重新產生所有章節縮圖和 "
             },
             {
               "type": 1,
@@ -64483,7 +64926,7 @@
             },
             {
               "type": 0,
-              "value": " 個檔案的拖曳預覽。此作業會在背景執行，在大型媒體庫上可能需要很長時間；播放器會繼續使用目前的圖片，直到逐一被取代為止。"
+              "value": " 個檔案的拖曳預覽。在大型媒體庫上可能需要很長時間；播放器會繼續顯示目前的圖片，直到被取代為止。"
             }
           ]
         }
@@ -64495,13 +64938,13 @@
   "web.admin.settings.playback.remake.widthExisting": [
     {
       "type": 0,
-      "value": "將以新的寬度重新產生所有章節縮圖和現有的拖曳預覽。此作業會在背景執行，在大型媒體庫上可能需要很長時間；播放器會繼續使用目前的圖片，直到逐一被取代為止。"
+      "value": "將在背景以新的寬度重新產生所有章節縮圖和現有的拖曳預覽。在大型媒體庫上可能需要很長時間；播放器會繼續顯示目前的圖片，直到被取代為止。"
     }
   ],
   "web.admin.settings.playback.remake.widthNoPreviews": [
     {
       "type": 0,
-      "value": "將以新的寬度重新產生所有章節縮圖。此作業會在背景執行，在大型媒體庫上可能需要很長時間；播放器會繼續使用目前的圖片，直到逐一被取代為止。"
+      "value": "將在背景以新的寬度重新產生所有章節縮圖。在大型媒體庫上可能需要很長時間；播放器會繼續顯示目前的圖片，直到被取代為止。"
     }
   ],
   "web.admin.settings.playback.remake.widthTitle": [
@@ -64519,7 +64962,7 @@
   "web.admin.settings.playback.speedTests.automaticDescription": [
     {
       "type": 0,
-      "value": "只有在伺服器沒有裝置的最新測速結果時，App 才會測試該裝置的連線。關閉時，觀眾仍可在設定中執行「測試速度」。"
+      "value": "只有在沒有最新測速結果時，App 才會測試連線速度。關閉時，觀眾仍可在設定中執行「測試速度」。"
     }
   ],
   "web.admin.settings.playback.speedTests.group": [
@@ -64537,7 +64980,7 @@
   "web.admin.settings.playback.speedTests.maxAgeDescription": [
     {
       "type": 0,
-      "value": "1 到 30。測速結果超過此時間後，App 會重新測試。"
+      "value": "測速結果超過此時間後，App 會重新測試（1–30 天）。"
     }
   ],
   "web.admin.settings.playback.title": [
@@ -64579,7 +65022,7 @@
   "web.admin.settings.playback.transcoding.backBufferHint": [
     {
       "type": 0,
-      "value": "保留這麼多已下載的媒體以便立即往回跳轉，然後回收較舊的轉碼片段。設為 0 可停用清理；啟用時的值至少須為 120 秒。搭配轉碼節流使用，可同時限制用戶端播放位置前後的磁碟用量。"
+      "value": "保留指定秒數的已轉碼影片以便立即往回跳轉，並刪除較舊的片段。設為 0 可關閉清理（開啟時最低為 120）。搭配轉碼節流使用可限制總磁碟用量。"
     }
   ],
   "web.admin.settings.playback.transcoding.bufferAhead": [
@@ -64597,7 +65040,7 @@
   "web.admin.settings.playback.transcoding.copyKeyframePlaylistDescription": [
     {
       "type": 0,
-      "value": "實驗性功能。當 Silo 複製檔案的影片時，會根據檔案的關鍵影格從一開始就列出所有片段，而不是使用隨 Silo 複製進度增長的播放清單。可避免 Safari 播放到一半時凍結。跳轉到遠超過 Silo 已複製的位置時，會從該處重新開始複製。"
+      "value": "實驗性功能。事先根據關鍵影格建立完整的影片複製播放清單，而非在播放過程中逐步擴充。有助於防止 Safari 播放到一半凍結；大幅往後跳轉時會從該位置重新開始複製。"
     }
   ],
   "web.admin.settings.playback.transcoding.dir": [
@@ -64629,7 +65072,7 @@
   "web.admin.settings.playback.transcoding.enabledDescription": [
     {
       "type": 0,
-      "value": "關閉時一律不重新編碼影片。Silo 仍會為需要的裝置重新封裝檔案並轉換音訊。"
+      "value": "關閉時，Silo 絕不重新編碼影片，但仍會在裝置需要時重新封裝檔案並轉換音訊。"
     }
   ],
   "web.admin.settings.playback.transcoding.ffmpegPath": [
@@ -64661,13 +65104,13 @@
   "web.admin.settings.playback.transcoding.hardwareToneMap": [
     {
       "type": 0,
-      "value": "啟用硬體 HDR 色調對應"
+      "value": "硬體 HDR 色調對應"
     }
   ],
   "web.admin.settings.playback.transcoding.hardwareToneMapHint": [
     {
       "type": 0,
-      "value": "允許經過驗證的本機或遠端 GPU 執行器在轉碼時將 HDR 影片轉換為 SDR。"
+      "value": "轉碼時使用此伺服器或轉碼節點上支援的 GPU，將 HDR 影片轉換為 SDR。"
     }
   ],
   "web.admin.settings.playback.transcoding.preferLower": [
@@ -64685,7 +65128,7 @@
   "web.admin.settings.playback.transcoding.softwareToneMap": [
     {
       "type": 0,
-      "value": "啟用軟體 HDR 色調對應"
+      "value": "軟體 HDR 色調對應"
     }
   ],
   "web.admin.settings.playback.transcoding.softwareToneMapHint": [
@@ -64781,7 +65224,7 @@
   "web.admin.settings.providers.markerLookupDisabled": [
     {
       "type": 0,
-      "value": "線上標記查詢已停用。請在"
+      "value": "線上標記查詢已關閉，因此不會使用這些提供者。請在"
     },
     {
       "type": 8,
@@ -64839,13 +65282,13 @@
   "web.admin.settings.providers.mdblist.clearTitle": [
     {
       "type": 0,
-      "value": "要清除 MDBList 憑證嗎？"
+      "value": "要清除 MDBList API 金鑰嗎？"
     }
   ],
   "web.admin.settings.providers.mdblist.cleared": [
     {
       "type": 0,
-      "value": "已清除 MDBList 憑證"
+      "value": "已清除 MDBList API 金鑰"
     }
   ],
   "web.admin.settings.providers.mdblist.close": [
@@ -64869,7 +65312,7 @@
   "web.admin.settings.providers.mdblist.intro": [
     {
       "type": 0,
-      "value": "有了金鑰，合輯匯入就能搜尋和瀏覽 MDBList 清單；貼上的清單網址不需要金鑰即可匯入。請到 "
+      "value": "匯入合輯時需要此金鑰才能搜尋和瀏覽 MDBList。直接貼上清單網址則無需金鑰。請至 "
     },
     {
       "type": 8,
@@ -64895,13 +65338,13 @@
   "web.admin.settings.providers.mdblist.nothingToSave": [
     {
       "type": 0,
-      "value": "MDBList 沒有要儲存的內容。"
+      "value": "請輸入要儲存的 API 金鑰。"
     }
   ],
   "web.admin.settings.providers.mdblist.saved": [
     {
       "type": 0,
-      "value": "已儲存 MDBList 憑證"
+      "value": "已儲存 MDBList API 金鑰"
     }
   ],
   "web.admin.settings.providers.mdblist.saving": [
@@ -64913,7 +65356,7 @@
   "web.admin.settings.providers.mdblist.tagline": [
     {
       "type": 0,
-      "value": "清單"
+      "value": "合輯匯入"
     }
   ],
   "web.admin.settings.providers.mdblist.testConnection": [
@@ -64943,7 +65386,7 @@
   "web.admin.settings.providers.metadataNote": [
     {
       "type": 0,
-      "value": "中繼資料提供者（包括 TMDB、TheTVDB 和 MDBList 評分）請從"
+      "value": "請在"
     },
     {
       "type": 8,
@@ -64957,7 +65400,7 @@
     },
     {
       "type": 0,
-      "value": "連結。"
+      "value": "中設定中繼資料提供者（TMDB、TheTVDB 和 MDBList 評分）。"
     }
   ],
   "web.admin.settings.providers.subtitles.apiKey": [
@@ -64975,7 +65418,7 @@
   "web.admin.settings.providers.subtitles.clearDescription": [
     {
       "type": 0,
-      "value": "將 "
+      "value": "關閉 "
     },
     {
       "type": 1,
@@ -64983,7 +65426,7 @@
     },
     {
       "type": 0,
-      "value": " 儲存為停用，並清除其已儲存的憑證。此變更在這台伺服器上的套用結果會另行回報；其他伺服器可能仍在使用舊的設定。"
+      "value": " 並移除其已儲存的憑證。儲存後，Silo 會顯示此伺服器是否已套用變更；其他伺服器可能仍在使用較舊的設定。"
     }
   ],
   "web.admin.settings.providers.subtitles.clearTitle": [
@@ -65015,7 +65458,7 @@
   "web.admin.settings.providers.subtitles.connectedOff": [
     {
       "type": 0,
-      "value": "已連結 · 關閉"
+      "value": "已設定 · 關閉"
     }
   ],
   "web.admin.settings.providers.subtitles.enable": [
@@ -65061,13 +65504,13 @@
   "web.admin.settings.providers.subtitles.reload": [
     {
       "type": 0,
-      "value": "重新載入已儲存的設定（捨棄草稿）"
+      "value": "重新載入已儲存的設定（捨棄變更）"
     }
   ],
   "web.admin.settings.providers.subtitles.saveNotConfirmed": [
     {
       "type": 0,
-      "value": "未確認儲存。你的草稿已保留。請先重新載入已儲存的設定加以檢查，再進行其他變更。"
+      "value": "未確認儲存，畫面仍保留你的變更。進行其他變更前，請選擇「重新載入已儲存的設定」以查看已儲存的內容。"
     }
   ],
   "web.admin.settings.providers.subtitles.saving": [
@@ -65079,7 +65522,7 @@
   "web.admin.settings.providers.subtitles.taglineApiKey": [
     {
       "type": 0,
-      "value": "API 金鑰提供者"
+      "value": "透過 API 金鑰取得字幕"
     }
   ],
   "web.admin.settings.providers.subtitles.taglineCommunity": [
@@ -65163,25 +65606,25 @@
   "web.admin.settings.recommendations.advanced.diversity.hint": [
     {
       "type": 0,
-      "value": "0 = 最多樣化，1 = 最相關"
+      "value": "0 = 更多樣化，1 = 更相符"
     }
   ],
   "web.admin.settings.recommendations.advanced.diversity.label": [
     {
       "type": 0,
-      "value": "多樣性 Lambda"
+      "value": "相關性與多樣性（0–1）"
     }
   ],
   "web.admin.settings.recommendations.advanced.halfLife.hint": [
     {
       "type": 0,
-      "value": "舊訊號失去權重的速度"
+      "value": "較舊的活動權重減半所需的天數。"
     }
   ],
   "web.admin.settings.recommendations.advanced.halfLife.label": [
     {
       "type": 0,
-      "value": "時間衰減半衰期（天）"
+      "value": "喜好衰減半衰期（天）"
     }
   ],
   "web.admin.settings.recommendations.advanced.title": [
@@ -65205,7 +65648,7 @@
   "web.admin.settings.recommendations.embeddingLockNote": [
     {
       "type": 0,
-      "value": "改用其他模型需要重設嵌入，這會刪除所有嵌入。若改由其他提供者提供相同模型，則會在重新啟動後套用。"
+      "value": "若要切換模型，請先在下方重設嵌入（這會刪除所有已儲存的嵌入）。切換至使用相同模型的其他提供者，會在重新啟動後套用。"
     }
   ],
   "web.admin.settings.recommendations.external.addToDiscover": [
@@ -65229,37 +65672,37 @@
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
-      "value": "啟用探索推薦"
+      "value": "顯示探索推薦"
     }
   ],
   "web.admin.settings.recommendations.external.enabledHint": [
     {
       "type": 0,
-      "value": "在請求的探索頁面新增個人化列，顯示尚未加入媒體庫的作品。會使用嵌入提供者和 TMDB。"
+      "value": "在請求的探索頁面新增個人化列，顯示尚未加入媒體庫的作品。會使用你的嵌入提供者和 TMDB。"
     }
   ],
   "web.admin.settings.recommendations.external.maxTitles": [
     {
       "type": 0,
-      "value": "可供推薦的作品數量上限"
+      "value": "納入考量的作品數量上限"
     }
   ],
   "web.admin.settings.recommendations.external.maxTitlesHint": [
     {
       "type": 0,
-      "value": "伺服器保留多少部不在媒體庫中的作品以供推薦。每部作品都會在 TMDB 上查詢並建立嵌入。建立嵌入通常成本不高，但數量越多，視你的嵌入提供者而定，可能花費更多或耗時更久，也會占用更多儲存空間。"
+      "value": "不在媒體庫中、從 TMDB 擷取並建立嵌入以供推薦的作品。上限越高會占用越多儲存空間，也可能增加嵌入時間或提供者費用。"
     }
   ],
   "web.admin.settings.recommendations.external.missingFromDiscover": [
     {
       "type": 0,
-      "value": "你的探索頁面目前尚未顯示任何推薦列。"
+      "value": "你的探索頁面目前尚未包含任何推薦列。"
     }
   ],
   "web.admin.settings.recommendations.external.needsRecommendations": [
     {
       "type": 0,
-      "value": "請開啟上方的「啟用推薦」並重新啟動伺服器，探索推薦才能執行。"
+      "value": "請開啟上方的「推薦」並重新啟動伺服器，探索推薦才能執行。"
     }
   ],
   "web.admin.settings.recommendations.external.needsRequests": [
@@ -65297,7 +65740,7 @@
   "web.admin.settings.recommendations.general.enabled": [
     {
       "type": 0,
-      "value": "啟用推薦"
+      "value": "推薦"
     }
   ],
   "web.admin.settings.recommendations.general.title": [
@@ -65309,49 +65752,49 @@
   "web.admin.settings.recommendations.schedule.cowatchCron": [
     {
       "type": 0,
-      "value": "共同觀看 Cron"
+      "value": "共同觀看資料"
     }
   ],
   "web.admin.settings.recommendations.schedule.cronHint": [
     {
       "type": 0,
-      "value": "Cron 運算式"
+      "value": "Cron 運算式，例如 0 3 * * *"
     }
   ],
   "web.admin.settings.recommendations.schedule.embeddingsCron": [
     {
       "type": 0,
-      "value": "嵌入 Cron"
+      "value": "嵌入"
     }
   ],
   "web.admin.settings.recommendations.schedule.externalCron": [
     {
       "type": 0,
-      "value": "探索推薦 Cron"
+      "value": "探索推薦"
     }
   ],
   "web.admin.settings.recommendations.schedule.recommendationsCron": [
     {
       "type": 0,
-      "value": "推薦 Cron"
+      "value": "推薦"
     }
   ],
   "web.admin.settings.recommendations.schedule.tasteProfilesCron": [
     {
       "type": 0,
-      "value": "喜好輪廓 Cron"
+      "value": "喜好輪廓"
     }
   ],
   "web.admin.settings.recommendations.schedule.title": [
     {
       "type": 0,
-      "value": "排程"
+      "value": "排程（cron）"
     }
   ],
   "web.admin.settings.redis.db.description": [
     {
       "type": 0,
-      "value": "取代 URL 中的編號。共用同一個 Redis 的各個安裝都需要使用各自的編號。"
+      "value": "覆寫 URL 中的資料庫編號。共用同一個 Redis 的每台 Silo 伺服器都需要使用各自的編號。"
     }
   ],
   "web.admin.settings.redis.db.label": [
@@ -65375,7 +65818,7 @@
   "web.admin.settings.redis.unavailable.description": [
     {
       "type": 0,
-      "value": "無法載入受保護憑證的狀態。請重新載入此頁面以編輯 Redis。"
+      "value": "無法檢查已儲存的 Redis 憑證或由環境管理的設定。請重新載入此頁面以編輯 Redis 設定。"
     }
   ],
   "web.admin.settings.redis.unavailable.title": [
@@ -65491,7 +65934,7 @@
   "web.admin.settings.requests.conditions.description": [
     {
       "type": 0,
-      "value": "請求必須符合所有條件。若某個條件列出多個值，只要符合其中一個即可。"
+      "value": "請求必須符合下方所有條件（針對「符合任一」，符合列出的任一值即可）。"
     }
   ],
   "web.admin.settings.requests.conditions.heading": [
@@ -65685,7 +66128,7 @@
           "value": [
             {
               "type": 0,
-              "value": "狀態會在提出請求時讀取，因此之後才完結的影集會留在原本傳送的位置。沒有 TMDB 狀態的影集不符合條件。"
+              "value": "於提出請求時檢查，之後才完結的影集會留在原本的伺服器上。沒有 TMDB 狀態的影集不符合條件。"
             }
           ]
         },
@@ -65693,7 +66136,7 @@
           "value": [
             {
               "type": 0,
-              "value": "狀態會在提出請求時讀取，因此之後才完結的影集會留在原本傳送的位置。沒有 TMDB 狀態的影集符合條件。"
+              "value": "於提出請求時檢查，之後才完結的影集會留在原本的伺服器上。沒有 TMDB 狀態的影集仍會符合條件。"
             }
           ]
         }
@@ -65723,7 +66166,7 @@
       "children": [
         {
           "type": 0,
-          "value": "接收："
+          "value": "摘要："
         }
       ]
     },
@@ -65793,7 +66236,7 @@
   "web.admin.settings.requests.destination.fourKCaptionForceDual": [
     {
       "type": 0,
-      "value": "每個請求都會與 HD 版本一併傳送（一般）。"
+      "value": "每個請求都會與 HD 版本一併傳送（在「一般」中設定）。"
     }
   ],
   "web.admin.settings.requests.destination.hdVersion": [
@@ -65842,13 +66285,13 @@
   "web.admin.settings.requests.destination.noUhdServers": [
     {
       "type": 0,
-      "value": "沒有任何伺服器標記為 4K。請在伺服器上開啟「4K 伺服器」，以將 4K 版本傳送至該伺服器。"
+      "value": "尚未設定 4K 伺服器。請在伺服器的設定中開啟「4K 伺服器」，以分派 4K 版本。"
     }
   ],
   "web.admin.settings.requests.destination.noneChosen": [
     {
       "type": 0,
-      "value": "未選擇任何項目，因此會套用 "
+      "value": "未選取任何項目時，會使用 "
     },
     {
       "type": 1,
@@ -65856,7 +66299,7 @@
     },
     {
       "type": 0,
-      "value": " 本身的 "
+      "value": " 的預設 "
     },
     {
       "type": 1,
@@ -65960,7 +66403,7 @@
     },
     {
       "type": 0,
-      "value": "（已關閉）"
+      "value": "（已停用）"
     }
   ],
   "web.admin.settings.requests.destination.serverWrongType": [
@@ -66012,7 +66455,7 @@
           "value": [
             {
               "type": 0,
-              "value": "沒有規則符合時，影集的傳送位置。若要使用伺服器本身的設定，請將設定項目保留為伺服器預設值。"
+              "value": "未符合規則的影集請求送往的位置。若要保留伺服器本身的設定，請將任何欄位維持為伺服器預設值。"
             }
           ]
         },
@@ -66020,7 +66463,7 @@
           "value": [
             {
               "type": 0,
-              "value": "沒有規則符合時，電影的傳送位置。若要使用伺服器本身的設定，請將設定項目保留為伺服器預設值。"
+              "value": "未符合規則的電影請求送往的位置。若要保留伺服器本身的設定，請將任何欄位維持為伺服器預設值。"
             }
           ]
         }
@@ -66060,7 +66503,7 @@
   "web.admin.settings.requests.general.allowRequestsDescription": [
     {
       "type": 0,
-      "value": "使用者可以請求伺服器上沒有的電影和影集。"
+      "value": "讓使用者請求媒體庫中沒有的電影和影集。"
     }
   ],
   "web.admin.settings.requests.general.approval": [
@@ -66072,7 +66515,7 @@
   "web.admin.settings.requests.general.approvalAdmin": [
     {
       "type": 0,
-      "value": "由管理員核准"
+      "value": "需要管理員核准"
     }
   ],
   "web.admin.settings.requests.general.approvalAuto": [
@@ -66090,7 +66533,7 @@
   "web.admin.settings.requests.general.forceDualDescription": [
     {
       "type": 0,
-      "value": "一般情況下，只有在使用者的播放限制允許 4K，且有伺服器接收 4K 時，才會請求 4K 版本。開啟此選項後，每個請求都會一併請求 4K。"
+      "value": "預設情況下，只有在請求者的播放限制允許時，才會請求 4K。開啟此選項後，只要路由包含 4K 伺服器，就會為所有人請求 4K。"
     }
   ],
   "web.admin.settings.requests.general.label": [
@@ -66108,7 +66551,7 @@
   "web.admin.settings.requests.general.limitWindowInvalid": [
     {
       "type": 0,
-      "value": "請至少設定 1 天。"
+      "value": "請輸入 1 以上的整數。"
     }
   ],
   "web.admin.settings.requests.general.limitWindowUnit": [
@@ -66125,10 +66568,6 @@
   ],
   "web.admin.settings.requests.general.overridableDefault": [
     {
-      "type": 0,
-      "value": "整個伺服器的預設值。"
-    },
-    {
       "type": 8,
       "value": "link",
       "children": [
@@ -66140,7 +66579,7 @@
     },
     {
       "type": 0,
-      "value": "和帳號可以覆寫此設定。"
+      "value": "和個別帳號可以覆寫此預設值。"
     }
   ],
   "web.admin.settings.requests.general.requestLimit": [
@@ -66152,7 +66591,7 @@
   "web.admin.settings.requests.general.requestLimitDescription": [
     {
       "type": 0,
-      "value": "單一帳號在下方期間內可請求的作品數量。已拒絕和失敗的請求不計入。設為 0 時，只有擁有自己的群組或帳號限制的帳號才能請求。"
+      "value": "單一帳號在限制期間內可請求的作品數量上限。已拒絕和失敗的請求不計入。設為 0 則預設不允許請求。"
     }
   ],
   "web.admin.settings.requests.general.requestLimitInvalid": [
@@ -66176,7 +66615,7 @@
   "web.admin.settings.requests.general.watchlistDescription": [
     {
       "type": 0,
-      "value": "當有人將媒體庫中沒有的作品加入待看清單時，系統會替對方請求該作品，就像對方按下了「請求」。每個個人檔案都可以自行關閉此功能。"
+      "value": "當有人將媒體庫中沒有的作品加入待看清單時，自動提交請求。每個個人檔案都可以自行關閉此功能。"
     }
   ],
   "web.admin.settings.requests.list.addRule": [
@@ -66344,7 +66783,7 @@
           "value": [
             {
               "type": 0,
-              "value": "選擇沒有規則接收時，影集要傳送到哪裡。"
+              "value": "選擇沒有規則符合時，影集要送往哪裡。"
             }
           ]
         },
@@ -66352,7 +66791,7 @@
           "value": [
             {
               "type": 0,
-              "value": "選擇沒有規則接收時，電影要傳送到哪裡。"
+              "value": "選擇沒有規則符合時，電影要送往哪裡。"
             }
           ]
         }
@@ -66362,7 +66801,7 @@
   "web.admin.settings.requests.list.fallbackFirst": [
     {
       "type": 0,
-      "value": "請先選擇「其他全部」的傳送位置。"
+      "value": "請先為「其他全部」選擇伺服器。"
     }
   ],
   "web.admin.settings.requests.list.fallbackHd": [
@@ -66420,7 +66859,7 @@
     },
     {
       "type": 0,
-      "value": " 的更多選項"
+      "value": " 的更多動作"
     }
   ],
   "web.admin.settings.requests.list.moveDown": [
@@ -66492,7 +66931,7 @@
             },
             {
               "type": 0,
-              "value": " 伺服器，才能傳送影集請求。"
+              "value": " 伺服器，以開始分派影集請求。"
             }
           ]
         },
@@ -66508,7 +66947,7 @@
             },
             {
               "type": 0,
-              "value": " 伺服器，才能傳送電影請求。"
+              "value": " 伺服器，以開始分派電影請求。"
             }
           ]
         }
@@ -67346,7 +67785,7 @@
   "web.admin.settings.requests.model.trace.decidesHdNone": [
     {
       "type": 0,
-      "value": "決定 HD：無"
+      "value": "不傳送 HD"
     }
   ],
   "web.admin.settings.requests.model.trace.decidesUhd": [
@@ -67358,7 +67797,7 @@
   "web.admin.settings.requests.model.trace.decidesUhdNone": [
     {
       "type": 0,
-      "value": "決定 4K：無"
+      "value": "不傳送 4K"
     }
   ],
   "web.admin.settings.requests.model.trace.fails": [
@@ -67812,7 +68251,7 @@
           "value": [
             {
               "type": 0,
-              "value": "屬於動畫的影集"
+              "value": "動畫影集"
             }
           ]
         },
@@ -67820,7 +68259,7 @@
           "value": [
             {
               "type": 0,
-              "value": "屬於動畫的電影"
+              "value": "動畫電影"
             }
           ]
         }
@@ -67866,7 +68305,7 @@
   "web.admin.settings.requests.presets.changeDescription": [
     {
       "type": 0,
-      "value": "變更此規則接收的請求，再選擇它們要送往哪裡。"
+      "value": "調整此規則符合的請求，然後選擇它們要送往哪裡。"
     }
   ],
   "web.admin.settings.requests.presets.custom": [
@@ -68080,7 +68519,7 @@
   "web.admin.settings.requests.preview.caption": [
     {
       "type": 0,
-      "value": "依照已儲存的規則，查看請求會符合哪條規則，以及各版本會送往哪裡。"
+      "value": "使用你已儲存的規則，測試作品會被分派到哪裡。"
     }
   ],
   "web.admin.settings.requests.preview.checking": [
@@ -68226,7 +68665,7 @@
   "web.admin.settings.requests.preview.requesterHint": [
     {
       "type": 0,
-      "value": "僅適用特定使用者的規則只會符合這些使用者的請求。"
+      "value": "選擇帳號以測試依請求者篩選的規則。"
     }
   ],
   "web.admin.settings.requests.preview.resultYear": [
@@ -68318,7 +68757,7 @@
   "web.admin.settings.requests.routing.advancedDescription": [
     {
       "type": 0,
-      "value": "Silo 會從上往下檢查規則。第一條符合請求的規則會決定請求送往哪裡；沒有規則符合的請求會送往「其他所有請求」。變更會立即儲存。"
+      "value": "規則會由上至下執行；第一條符合的規則會處理各個版本，未符合任何規則的請求則會送往「其他全部」。變更會自動儲存。"
     }
   ],
   "web.admin.settings.requests.routing.brandsFailed": [
@@ -68348,13 +68787,13 @@
   "web.admin.settings.requests.routing.brandsNeedRequests": [
     {
       "type": 0,
-      "value": "開啟請求功能，即可依名稱選擇電視網和製片公司。"
+      "value": "在「一般」中開啟「允許請求」，即可依名稱選擇電視網和製片公司。"
     }
   ],
   "web.admin.settings.requests.routing.label": [
     {
       "type": 0,
-      "value": "請求去向"
+      "value": "路由"
     }
   ],
   "web.admin.settings.requests.routing.loadFailed": [
@@ -68402,7 +68841,7 @@
   "web.admin.settings.requests.routingMode.animeNote": [
     {
       "type": 0,
-      "value": "動畫影集會以「動畫」影集類型送往 Sonarr，讓集數編號與動畫發行方式一致。"
+      "value": "動畫影集會以「動畫」影集類型送往 Sonarr，以套用動畫集數編號。"
     }
   ],
   "web.admin.settings.requests.routingMode.label": [
@@ -68440,7 +68879,7 @@
   "web.admin.settings.requests.routingMode.onlyUhdServer": [
     {
       "type": 0,
-      "value": "— 只有 4K 伺服器，因此 HD 版本無處可送。請新增未標記為 4K 的 "
+      "value": "— 只有 4K 伺服器，因此不會傳送 HD 版本。請在上方新增非 4K 的 "
     },
     {
       "type": 1,
@@ -68492,7 +68931,7 @@
   "web.admin.settings.requests.routingMode.standardBlocked": [
     {
       "type": 0,
-      "value": "「標準」目前無法分派請求。"
+      "value": "目前無法使用「標準」路由。"
     },
     {
       "type": 1,
@@ -68500,13 +68939,13 @@
     },
     {
       "type": 0,
-      "value": "在你切換至「進階」或移除伺服器之前，將由規則決定。"
+      "value": "在你切換至「進階」或移除伺服器之前，Silo 會使用你的「進階」規則。"
     }
   ],
   "web.admin.settings.requests.routingMode.standardDescription": [
     {
       "type": 0,
-      "value": "每個請求都會送往其類型對應的伺服器，並套用該伺服器自己的設定。"
+      "value": "將電影和影集直接傳送至其對應的伺服器，並使用該伺服器的設定。"
     }
   ],
   "web.admin.settings.requests.routingMode.standardUnavailable": [
@@ -68528,7 +68967,7 @@
   "web.admin.settings.requests.routingMode.uhdNote": [
     {
       "type": 0,
-      "value": "若要將 4K 版本送往專屬伺服器，請新增該伺服器並開啟「4K 伺服器」。新增第二個同類型的伺服器會開啟「進階」。"
+      "value": "若要單獨分派 4K 版本，請新增伺服器並開啟「4K 伺服器」。新增第二台同類型的 HD 或 4K 伺服器會切換至「進階」。"
     }
   ],
   "web.admin.settings.requests.routingMode.uhdServer": [
@@ -68550,7 +68989,7 @@
   "web.admin.settings.requests.ruleEditor.deleteDescription": [
     {
       "type": 0,
-      "value": "此規則接收的請求會改由下方的規則處理，或送往「其他所有請求」。"
+      "value": "符合條件的請求會改由下方的規則處理，或送往「其他全部」。"
     }
   ],
   "web.admin.settings.requests.ruleEditor.deleteRule": [
@@ -68576,7 +69015,7 @@
   "web.admin.settings.requests.ruleEditor.description": [
     {
       "type": 0,
-      "value": "選擇此規則接收哪些請求，以及這些請求要送往哪裡。"
+      "value": "選擇此規則符合哪些請求，以及它們要送往哪裡。"
     }
   ],
   "web.admin.settings.requests.ruleEditor.editTitle": [
@@ -68602,7 +69041,7 @@
   "web.admin.settings.requests.ruleEditor.nameHint": [
     {
       "type": 0,
-      "value": "顯示在清單中。留空即可自動描述此規則。"
+      "value": "顯示在規則清單中。留空以自動產生名稱。"
     }
   ],
   "web.admin.settings.requests.ruleEditor.saveRule": [
@@ -68632,7 +69071,7 @@
   "web.admin.settings.requests.serverEditor.apiKeyHint": [
     {
       "type": 0,
-      "value": "位於該伺服器的 Settings › General。"
+      "value": "可在 Radarr、Sonarr 或你的請求 App 的「設定 → 一般」中找到。"
     }
   ],
   "web.admin.settings.requests.serverEditor.apiKeyNotNeeded": [
@@ -68662,7 +69101,7 @@
   "web.admin.settings.requests.serverEditor.deleteBlocked": [
     {
       "type": 0,
-      "value": "路由仍會將請求傳送到這裡（"
+      "value": "正由路由使用（"
     },
     {
       "type": 1,
@@ -68670,13 +69109,13 @@
     },
     {
       "type": 0,
-      "value": "），請先改為傳送到其他地方。"
+      "value": "）。刪除此伺服器前，請先重新指派這些路由。"
     }
   ],
   "web.admin.settings.requests.serverEditor.deleteDescription": [
     {
       "type": 0,
-      "value": "Silo 會停止向其傳送請求，重複使用它的 Autoscan 連線也會失去連線詳細資料。"
+      "value": "Silo 會停止向此伺服器傳送請求，任何共用此伺服器的 Autoscan 連線也會失去連線詳細資料。"
     }
   ],
   "web.admin.settings.requests.serverEditor.deleteDescriptionClearsFallback": [
@@ -68688,7 +69127,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Silo 會停止向其傳送請求，重複使用它的 Autoscan 連線也會失去連線詳細資料。影集的「其他全部」也會一併移除，因此在你新增其他伺服器之前，這些請求將無處可送。"
+              "value": "Silo 會停止向此伺服器傳送請求，共用的 Autoscan 連線也會失去連線詳細資料。這也會清除影集的「其他全部」，因此在你新增其他伺服器前，未符合規則的請求將不會被分派。"
             }
           ]
         },
@@ -68696,7 +69135,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Silo 會停止向其傳送請求，重複使用它的 Autoscan 連線也會失去連線詳細資料。電影的「其他全部」也會一併移除，因此在你新增其他伺服器之前，這些請求將無處可送。"
+              "value": "Silo 會停止向此伺服器傳送請求，共用的 Autoscan 連線也會失去連線詳細資料。這也會清除電影的「其他全部」，因此在你新增其他伺服器前，未符合規則的請求將不會被分派。"
             }
           ]
         }
@@ -68732,7 +69171,7 @@
   "web.admin.settings.requests.serverEditor.description": [
     {
       "type": 0,
-      "value": "已核准的請求會傳送到這裡。由路由決定傳送哪些請求。"
+      "value": "Silo 會根據你的路由設定，將已核准的請求傳送到這裡。"
     }
   ],
   "web.admin.settings.requests.serverEditor.detected": [
@@ -68774,7 +69213,7 @@
   "web.admin.settings.requests.serverEditor.kindMismatch": [
     {
       "type": 0,
-      "value": "此位址回應為 "
+      "value": "此網址回應為 "
     },
     {
       "type": 1,
@@ -68838,7 +69277,7 @@
           "value": [
             {
               "type": 0,
-              "value": "無法從伺服器讀取根資料夾和設定檔。請檢查網址和 API 金鑰，然後選擇「測試」。"
+              "value": "無法從此伺服器載入根資料夾和設定檔。請檢查網址和 API 金鑰，然後選擇「測試」。"
             }
           ]
         },
@@ -68846,7 +69285,7 @@
           "value": [
             {
               "type": 0,
-              "value": "無法從伺服器讀取根資料夾和設定檔。請檢查網址，然後選擇「測試」。"
+              "value": "無法從此伺服器載入根資料夾和設定檔。請檢查網址，然後選擇「測試」。"
             }
           ]
         },
@@ -68854,7 +69293,7 @@
           "value": [
             {
               "type": 0,
-              "value": "無法從伺服器讀取根資料夾和設定檔。請檢查 API 金鑰，然後選擇「測試」。"
+              "value": "無法從此伺服器載入根資料夾和設定檔。請檢查 API 金鑰，然後選擇「測試」。"
             }
           ]
         },
@@ -68862,7 +69301,7 @@
           "value": [
             {
               "type": 0,
-              "value": "無法從伺服器讀取根資料夾和設定檔。請檢查伺服器的設定，然後選擇「測試」。"
+              "value": "無法從此伺服器載入根資料夾和設定檔。請檢查伺服器設定，然後選擇「測試」。"
             }
           ]
         }
@@ -68976,7 +69415,7 @@
   "web.admin.settings.requests.serverEditor.typeLocked": [
     {
       "type": 0,
-      "value": "路由會將請求傳送到這裡（"
+      "value": "正由路由使用（"
     },
     {
       "type": 1,
@@ -68984,7 +69423,7 @@
     },
     {
       "type": 0,
-      "value": "）。請先變更路由，才能切換類型。"
+      "value": "）。變更伺服器類型前，請先更新這些路由。"
     }
   ],
   "web.admin.settings.requests.serverEditor.typePlaceholder": [
@@ -69002,7 +69441,7 @@
   "web.admin.settings.requests.serverEditor.uhdServerDescription": [
     {
       "type": 0,
-      "value": "使用「標準」路由時，4K 版本會傳送到這裡，其他內容則會傳送到此類型的另一台伺服器。"
+      "value": "將此伺服器用於 4K 版本，而非 HD 版本。使用「標準」路由時，4K 版本會自動送往這裡。"
     }
   ],
   "web.admin.settings.requests.serverEditor.url": [
@@ -69062,7 +69501,7 @@
   "web.admin.settings.requests.servers.noPlugin": [
     {
       "type": 0,
-      "value": "請求會透過外掛程式傳送到 Sonarr、Radarr 或其他請求伺服器。請先從"
+      "value": "請先在"
     },
     {
       "type": 8,
@@ -69076,7 +69515,7 @@
     },
     {
       "type": 0,
-      "value": "安裝一個。"
+      "value": "中安裝外掛程式，以連結 Sonarr、Radarr 或其他請求伺服器。"
     }
   ],
   "web.admin.settings.requests.servers.routeUsage": [
@@ -69242,7 +69681,7 @@
   "web.admin.settings.requests.warnings.animeOrder": [
     {
       "type": 0,
-      "value": "動畫作品通常是日語，因此上方的「"
+      "value": "動畫作品通常是日語，因此大部分動畫會先符合上方的「"
     },
     {
       "type": 1,
@@ -69250,13 +69689,13 @@
     },
     {
       "type": 0,
-      "value": "」會先攔截大部分動畫。"
+      "value": "」。"
     }
   ],
   "web.admin.settings.requests.warnings.animeSeriesType": [
     {
       "type": 0,
-      "value": "Sonarr 會將這些新增為標準影集。"
+      "value": "Sonarr 的影集類型未設為「動畫」，這可能會導致動畫集數編號異常。"
     }
   ],
   "web.admin.settings.requests.warnings.fixAnimeSeriesType": [
@@ -69280,7 +69719,7 @@
   "web.admin.settings.requests.warnings.forceDual": [
     {
       "type": 0,
-      "value": "「同時請求每部作品的 4K 版本」已開啟，但「其他全部」不會傳送 4K 版本。沒有規則傳送到 4K 伺服器的作品只會取得 HD 版本。"
+      "value": "「同時請求每部作品的 4K 版本」已開啟，但「其他全部」沒有 4K 伺服器。沒有規則分派到 4K 伺服器的作品只會取得 HD 版本。"
     }
   ],
   "web.admin.settings.requests.warnings.neverUsed": [
@@ -69294,13 +69733,13 @@
     },
     {
       "type": 0,
-      "value": "」會攔截此規則會處理的所有請求。"
+      "value": "」已涵蓋所有這些請求。"
     }
   ],
   "web.admin.settings.requests.warnings.serverMissing": [
     {
       "type": 0,
-      "value": "其中一台目標伺服器已不存在。"
+      "value": "此路由使用的伺服器已不存在。"
     }
   ],
   "web.admin.settings.requests.warnings.serverNeedsSetup": [
@@ -69310,7 +69749,7 @@
     },
     {
       "type": 0,
-      "value": " 需要設定。"
+      "value": " 需要先完成設定，才能接收請求。"
     }
   ],
   "web.admin.settings.requests.warnings.serverOffFallback": [
@@ -69320,7 +69759,7 @@
     },
     {
       "type": 0,
-      "value": " 已關閉。在重新開啟之前，傳送到該處的請求都無法完成。"
+      "value": " 已停用。在重新啟用前，路由至此處的請求都不會傳送。"
     }
   ],
   "web.admin.settings.requests.warnings.serverOffRule": [
@@ -69330,7 +69769,7 @@
     },
     {
       "type": 0,
-      "value": " 已關閉。在重新開啟之前，此規則傳送到該處的請求都無法完成。"
+      "value": " 已停用。在重新啟用前，符合此規則的請求都不會傳送。"
     }
   ],
   "web.admin.settings.requests.warnings.serverWrongKind": [
@@ -69388,7 +69827,7 @@
   "web.admin.settings.search.ai.description": [
     {
       "type": 0,
-      "value": "AI 提供者、各項 AI 作業使用的模型，以及使用它們的功能。"
+      "value": "AI 提供者、模型指派，以及使用它們的功能。"
     }
   ],
   "web.admin.settings.search.ai.label": [
@@ -69652,7 +70091,7 @@
   "web.admin.settings.search.autoscan.description": [
     {
       "type": 0,
-      "value": "Autoscan 檢查輪詢來源的頻率，以及其來源連線的伺服器。"
+      "value": "Autoscan 來源的預設輪詢間隔與已儲存的連線。"
     }
   ],
   "web.admin.settings.search.autoscan.label": [
@@ -69790,7 +70229,7 @@
   "web.admin.settings.search.credentialStatusError": [
     {
       "type": 0,
-      "value": "無法載入受保護憑證的狀態。請重新載入此頁面，以編輯搜尋引擎和 Meilisearch 連線。"
+      "value": "無法檢查已儲存的 Meilisearch 憑證或由環境變數管理的設定。請重新載入此頁面，以編輯搜尋引擎和 Meilisearch 連線。"
     }
   ],
   "web.admin.settings.search.degradedFallback": [
@@ -69916,7 +70355,7 @@
   "web.admin.settings.search.email.description": [
     {
       "type": 0,
-      "value": "Silo 用來寄送邀請、密碼重設和通知電子郵件的郵件伺服器。"
+      "value": "用於寄送邀請、密碼重設和通知的外寄郵件伺服器。"
     }
   ],
   "web.admin.settings.search.email.label": [
@@ -69994,7 +70433,7 @@
   "web.admin.settings.search.general.description": [
     {
       "type": 0,
-      "value": "伺服器的名稱和公開位址、其前方的代理伺服器，以及 Redis。"
+      "value": "伺服器名稱、網路位址、反向代理、資料庫和 Redis。"
     }
   ],
   "web.admin.settings.search.general.label": [
@@ -70096,13 +70535,13 @@
   "web.admin.settings.search.group": [
     {
       "type": 0,
-      "value": "搜尋"
+      "value": "目錄搜尋"
     }
   ],
   "web.admin.settings.search.library.description": [
     {
       "type": 0,
-      "value": "作品列出的版本、掃描、分級限制、評分和字幕同步。"
+      "value": "作品版本、備用語言、掃描、分級限制、評分和字幕同步。"
     }
   ],
   "web.admin.settings.search.library.label": [
@@ -70276,7 +70715,7 @@
   "web.admin.settings.search.meili.apiKey.hint": [
     {
       "type": 0,
-      "value": "主金鑰，或可讀寫索引的金鑰。"
+      "value": "主金鑰，或具備索引讀寫權限的金鑰（選填）。"
     }
   ],
   "web.admin.settings.search.meili.apiKey.label": [
@@ -70294,7 +70733,7 @@
   "web.admin.settings.search.meili.batch.label": [
     {
       "type": 0,
-      "value": "每批傳送至索引的項目數"
+      "value": "每批建立索引的項目數"
     }
   ],
   "web.admin.settings.search.meili.index.description": [
@@ -70330,19 +70769,19 @@
   "web.admin.settings.search.meili.ratio.description": [
     {
       "type": 0,
-      "value": "0 依字詞排序，1 依語意排序。"
+      "value": "數值介於 0 到 1 之間。0 僅依字詞排序；1 僅依語意排序。"
     }
   ],
   "web.admin.settings.search.meili.ratio.label": [
     {
       "type": 0,
-      "value": "依語意比對的結果比例"
+      "value": "語意排序權重"
     }
   ],
   "web.admin.settings.search.meili.semantic.description": [
     {
       "type": 0,
-      "value": "也會比對簡介語意相近的項目。"
+      "value": "即使字詞沒有完全相符，也能找出簡介相近的項目。需要在推薦頁面設定嵌入模型。"
     }
   ],
   "web.admin.settings.search.meili.semantic.enablingWarning": [
@@ -70378,7 +70817,7 @@
   "web.admin.settings.search.networkAccess.description": [
     {
       "type": 0,
-      "value": "Tailscale 等覆疊網路提供者，無需連接埠轉送即可連線至此伺服器。"
+      "value": "無需連接埠轉送，即可將此伺服器連線至 Tailscale 或其他覆疊網路。"
     }
   ],
   "web.admin.settings.search.networkAccess.label": [
@@ -70390,7 +70829,7 @@
   "web.admin.settings.search.notifications.description": [
     {
       "type": 0,
-      "value": "傳送管道和伺服器管道。"
+      "value": "推播、電子郵件、Discord、Webhook 和全伺服器公告。"
     }
   ],
   "web.admin.settings.search.notifications.label": [
@@ -70816,7 +71255,7 @@
   "web.admin.settings.search.providers.description": [
     {
       "type": 0,
-      "value": "觀看提供者外掛程式（例如 Simkl）、字幕提供者帳號、MDBList 清單金鑰，以及略過標記提供者。"
+      "value": "觀看提供者（例如 Simkl）、MDBList 合輯匯入、字幕帳號，以及略過標記提供者。"
     }
   ],
   "web.admin.settings.search.providers.label": [
@@ -70950,7 +71389,7 @@
   "web.admin.settings.search.requests.description": [
     {
       "type": 0,
-      "value": "請求限制與核准、Sonarr 和 Radarr 伺服器，以及請求的傳送目的地。"
+      "value": "核准、請求限制、Sonarr 和 Radarr 伺服器，以及請求路由。"
     }
   ],
   "web.admin.settings.search.requests.label": [
@@ -71070,7 +71509,7 @@
   "web.admin.settings.search.search.description": [
     {
       "type": 0,
-      "value": "搜尋引擎：內建 Postgres，或可容錯拼字的 Meilisearch。"
+      "value": "內建 Postgres 搜尋，或選用支援拼字容錯與語意搜尋的 Meilisearch。"
     }
   ],
   "web.admin.settings.search.search.label": [
@@ -71154,7 +71593,7 @@
   "web.admin.settings.search.security.description": [
     {
       "type": 0,
-      "value": "Silo 可以連線的本機伺服器，以及請求速率限制。"
+      "value": "本機媒體伺服器存取與請求速率限制。"
     }
   ],
   "web.admin.settings.search.security.label": [
@@ -71382,7 +71821,7 @@
   "web.admin.settings.search.status.answering": [
     {
       "type": 0,
-      "value": "處理搜尋的引擎"
+      "value": "使用中的搜尋引擎"
     }
   ],
   "web.admin.settings.search.status.automaticMaintenance": [
@@ -71394,7 +71833,7 @@
   "web.admin.settings.search.status.compressedVectors": [
     {
       "type": 0,
-      "value": "壓縮向量"
+      "value": "壓縮嵌入"
     }
   ],
   "web.admin.settings.search.status.configured": [
@@ -71424,13 +71863,13 @@
   "web.admin.settings.search.status.documents": [
     {
       "type": 0,
-      "value": "文件"
+      "value": "已索引的項目"
     }
   ],
   "web.admin.settings.search.status.droppedEvents": [
     {
       "type": 0,
-      "value": "已捨棄的事件"
+      "value": "失敗的更新"
     }
   ],
   "web.admin.settings.search.status.embeddingModel": [
@@ -71454,7 +71893,7 @@
   "web.admin.settings.search.status.health": [
     {
       "type": 0,
-      "value": "健康狀態"
+      "value": "Meilisearch 健康狀態"
     }
   ],
   "web.admin.settings.search.status.healthy": [
@@ -71472,13 +71911,13 @@
   "web.admin.settings.search.status.itemsWithVectors": [
     {
       "type": 0,
-      "value": "含向量的項目"
+      "value": "含嵌入的項目"
     }
   ],
   "web.admin.settings.search.status.lastFallback": [
     {
       "type": 0,
-      "value": "上次改用備援"
+      "value": "上次改用 Postgres 備援"
     }
   ],
   "web.admin.settings.search.status.lastSync": [
@@ -71542,7 +71981,7 @@
   "web.admin.settings.search.status.pendingEvents": [
     {
       "type": 0,
-      "value": "待處理的事件"
+      "value": "待處理的更新"
     }
   ],
   "web.admin.settings.search.status.postgresFullText": [
@@ -71596,7 +72035,7 @@
   "web.admin.settings.search.status.semanticRatio": [
     {
       "type": 0,
-      "value": "語意結果比例"
+      "value": "語意排序權重"
     }
   ],
   "web.admin.settings.search.status.semanticReadiness": [
@@ -71694,7 +72133,7 @@
   "web.admin.settings.search.status.vectorCoverage": [
     {
       "type": 0,
-      "value": "向量涵蓋率"
+      "value": "嵌入涵蓋率"
     }
   ],
   "web.admin.settings.search.storage.description": [
@@ -71844,19 +72283,19 @@
   "web.admin.settings.security.backend.description": [
     {
       "type": 0,
-      "value": "重新啟動後，Redis 會在多台伺服器之間共用計數器。"
+      "value": "使用 Redis 在多台伺服器之間共用速率限制計數器。變更會在重新啟動後套用。"
     }
   ],
   "web.admin.settings.security.backend.descriptionNoRedis": [
     {
       "type": 0,
-      "value": "重新啟動後，Redis 會在多台伺服器之間共用計數器。請先在「一般」頁面設定 Redis。"
+      "value": "在一般設定中設定 Redis，即可在多台伺服器之間共用速率限制計數器。變更會在重新啟動後套用。"
     }
   ],
   "web.admin.settings.security.backend.drift": [
     {
       "type": 0,
-      "value": "執行中的限制器正在使用"
+      "value": "速率限制目前正在使用"
     },
     {
       "type": 5,
@@ -71908,7 +72347,7 @@
     },
     {
       "type": 0,
-      "value": "後端。如果重新啟動後仍未修正，請確認已儲存的後端可以連線。"
+      "value": "計數器儲存位置。如果重新啟動後仍未修正，請確認已儲存的計數器儲存位置可正常連線。"
     }
   ],
   "web.admin.settings.security.backend.label": [
@@ -71998,7 +72437,7 @@
   "web.admin.settings.security.global.description": [
     {
       "type": 0,
-      "value": "所有受速率限制路由的總上限。"
+      "value": "所有受速率限制端點的總上限。"
     }
   ],
   "web.admin.settings.security.global.label": [
@@ -72022,7 +72461,7 @@
   "web.admin.settings.security.localNetwork.description": [
     {
       "type": 0,
-      "value": "讓每個帳號都能從位於本機網路位址（例如 192.168.x.x 或 localhost）的 Plex、Emby 和 Jellyfin 伺服器匯入觀看記錄並同步。管理員一律可以這麼做。"
+      "value": "允許所有帳號匯入觀看記錄，並與本機的 Plex、Emby 或 Jellyfin 伺服器（例如 192.168.x.x 或 localhost）同步。管理員一律具有此存取權。"
     }
   ],
   "web.admin.settings.security.localNetwork.group": [
@@ -72034,25 +72473,25 @@
   "web.admin.settings.security.localNetwork.label": [
     {
       "type": 0,
-      "value": "所有帳號皆可使用本機伺服器"
+      "value": "允許所有帳號使用本機媒體伺服器"
     }
   ],
   "web.admin.settings.security.localNetwork.warning": [
     {
       "type": 0,
-      "value": "任何能登入的人都可以讓此伺服器向其本機網路上的裝置傳送請求。請只在你信任此伺服器上的每個帳號時開啟此選項。"
+      "value": "任何已登入的帳號都能讓此伺服器連線至其本機網路上的裝置。請僅在你信任每個帳號時才啟用。"
     }
   ],
   "web.admin.settings.security.perAddress.description": [
     {
       "type": 0,
-      "value": "每個 IP 都有一個額度。已登入的請求還會共用一個大四倍的帳號額度，涵蓋所有個人檔案、工作階段、裝置和 API 金鑰。"
+      "value": "套用於每個 IP 位址。已登入的帳號也會在所有個人檔案、工作階段、裝置和 API 金鑰之間共用一項上限（4 倍大）。"
     }
   ],
   "web.admin.settings.security.perAddress.label": [
     {
       "type": 0,
-      "value": "每個位址和帳號"
+      "value": "每個 IP 位址與帳號"
     }
   ],
   "web.admin.settings.security.quotaMode.enforce": [
@@ -72112,7 +72551,7 @@
   "web.admin.settings.security.rateLimit.notRunning": [
     {
       "type": 0,
-      "value": "已啟用，但此處理程序中沒有執行中的限制器，可能是啟動失敗。請檢查伺服器記錄。"
+      "value": "速率限制已啟用，但未在此伺服器上執行，可能是啟動失敗。請檢查伺服器記錄。"
     }
   ],
   "web.admin.settings.security.session.heading": [
@@ -72124,7 +72563,7 @@
   "web.admin.settings.security.session.quotaDescription": [
     {
       "type": 0,
-      "value": "每個登入工作階段都有一個請求額度桶，會在一小時內逐漸補滿，可阻擋整天都維持在上述限制以下的用戶端。播放、下載、管理員和 API 金鑰不計入。「僅記錄」只會記錄用盡額度的工作階段；「強制執行」則會拒絕這些工作階段，直到額度桶補滿為止。儀表板上的「最忙碌的 API 用戶端」卡片會顯示哪些工作階段發出最多請求。"
+      "value": "限制每個登入工作階段的持續 API 請求數量（播放、下載、管理員和 API 金鑰不在此限）。「僅記錄」會記錄達到上限的工作階段；「強制執行」會封鎖請求，直到額度重新補充。請在儀表板的「最忙碌的 API 用戶端」卡片中查看請求量最高的工作階段。"
     }
   ],
   "web.admin.settings.security.session.quotaLabel": [
@@ -72136,7 +72575,7 @@
   "web.admin.settings.security.session.sizeDescription": [
     {
       "type": 0,
-      "value": "額度桶每小時補充的請求數，以及補滿時可容納的數量。已滿的額度桶必須能在一週內補滿。"
+      "value": "每小時補充速率與最大突發額度。突發額度不得超過一週的每小時請求總量。"
     }
   ],
   "web.admin.settings.security.session.sizeLabel": [
@@ -72228,7 +72667,7 @@
   "web.admin.settings.signIn.network.autoProvisionDescription": [
     {
       "type": 0,
-      "value": "關閉：只有已連結 "
+      "value": "關閉時，只有已連結 "
     },
     {
       "type": 1,
@@ -72290,13 +72729,13 @@
   "web.admin.settings.signIn.network.description": [
     {
       "type": 0,
-      "value": "裝置透過網路連上此伺服器的人，會以該裝置擁有者的身分登入，不需要密碼。此功能可與上方的提供者同時開啟。"
+      "value": "透過網路提供者連上此伺服器的使用者，無需密碼即會以該裝置擁有者的身分登入。可與上方的單一登入提供者同時使用。"
     }
   ],
   "web.admin.settings.signIn.network.enableDescription": [
     {
       "type": 0,
-      "value": "向裝置透過 "
+      "value": "向透過 "
     },
     {
       "type": 1,
@@ -72304,7 +72743,7 @@
     },
     {
       "type": 0,
-      "value": " 連上此伺服器的人顯示「繼續身分」按鈕。"
+      "value": " 連線的使用者顯示「以……身分繼續」按鈕。"
     }
   ],
   "web.admin.settings.signIn.network.enableLabel": [
@@ -72330,21 +72769,7 @@
   "web.admin.settings.signIn.network.howRoles": [
     {
       "type": 0,
-      "value": "角色來自你的 tailnet 政策中的授權：含有 "
-    },
-    {
-      "type": 8,
-      "value": "code",
-      "children": [
-        {
-          "type": 1,
-          "value": "admin_role"
-        }
-      ]
-    },
-    {
-      "type": 0,
-      "value": " 的 "
+      "value": "在你的 tailnet 政策中透過 "
     },
     {
       "type": 8,
@@ -72358,7 +72783,21 @@
     },
     {
       "type": 0,
-      "value": " 授權會讓對方成為 Silo 管理員，含有 "
+      "value": " 授權指派角色："
+    },
+    {
+      "type": 8,
+      "value": "code",
+      "children": [
+        {
+          "type": 1,
+          "value": "admin_role"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " 為 Silo 管理員，"
     },
     {
       "type": 8,
@@ -72372,7 +72811,7 @@
     },
     {
       "type": 0,
-      "value": " 則為一般使用者。任何能編輯 tailnet 政策的人都能讓自己成為 Silo 管理員。沒有授權時，對方的角色維持不變，因此移除某人的管理員授權並不會將其降級：請改為授予 "
+      "value": " 為一般使用者。任何能編輯該政策的使用者都能將自己設為 Silo 管理員。移除授權不會變更既有角色；若要降級管理員，請授予 "
     },
     {
       "type": 8,
@@ -72386,13 +72825,13 @@
     },
     {
       "type": 0,
-      "value": "。政策變更會在下次登入或重新檢查存取權時套用。同時透過你的主要登入提供者登入的帳號，會採用該提供者的角色。"
+      "value": "。變更會在下次登入或重新檢查存取權時套用。同時使用主要登入提供者的帳號，會沿用該提供者指派的角色。"
     }
   ],
   "web.admin.settings.signIn.network.howSharedTv": [
     {
       "type": 0,
-      "value": "使用共用電視的每個人，都會以將該電視登入 "
+      "value": "共用電視會使用電視本身的 "
     },
     {
       "type": 1,
@@ -72400,7 +72839,7 @@
     },
     {
       "type": 0,
-      "value": " 的人的身分及角色登入，因此請以沒有管理員授權的人登入共用電視；個人檔案會將各自的觀看紀錄分開。請為任何將他人流量轉送到此伺服器的裝置（例如反向代理）加上標籤，否則其後方的所有人都會以其擁有者的身分登入。"
+      "value": " 帳號和角色讓所有人登入，因此請使用非管理員帳號，並以個人檔案區隔不同觀眾。請為反向代理等中繼裝置加上標籤，否則其後方的所有人都會以該裝置擁有者的身分登入。"
     },
     {
       "type": 8,
@@ -72426,7 +72865,7 @@
   "web.admin.settings.signIn.network.howWho": [
     {
       "type": 0,
-      "value": "任何裝置能透過 "
+      "value": "任何透過 "
     },
     {
       "type": 1,
@@ -72434,7 +72873,7 @@
     },
     {
       "type": 0,
-      "value": " 連上此伺服器的人都能登入，包括與你共用伺服器的人；已加標籤的裝置則無法登入。若要加以限制，請將外掛程式的「誰可以登入」設為已獲授予 "
+      "value": " 連上此伺服器的人都能登入，包括與你共用此伺服器的人（已加標籤的裝置除外）。若要限制存取，請在外掛程式設定中將「誰可以登入」設為需要 "
     },
     {
       "type": 8,
@@ -72448,7 +72887,7 @@
     },
     {
       "type": 0,
-      "value": " 的人。"
+      "value": "。"
     },
     {
       "type": 1,
@@ -72456,7 +72895,7 @@
     },
     {
       "type": 0,
-      "value": " 登入絕不會依 Email 比對現有帳號：帳號擁有者須在自己的登入設定中連結 "
+      "value": " 絕不會依電子郵件比對現有帳號。已有帳號的使用者可在自己的登入設定中連結 "
     },
     {
       "type": 1,
@@ -72506,7 +72945,7 @@
   "web.admin.settings.signIn.page.allowPasswordDescription": [
     {
       "type": 0,
-      "value": "關閉：除了緊急存取管理員外，所有人都透過提供者登入。至少需要一位緊急存取管理員；伺服器擁有者預設就是其中之一。"
+      "value": "關閉時，除了緊急存取管理員外，所有人都必須使用你的登入提供者登入。至少需要一位緊急存取管理員（伺服器擁有者預設即為其中之一）。"
     }
   ],
   "web.admin.settings.signIn.page.allowPasswordLabel": [
@@ -72543,10 +72982,42 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.settings.signIn.page.demoAccountDescription": [
+    {
+      "type": 0,
+      "value": "公開示範的所有訪客都會登入此帳號。示範模式開啟時，使用此帳號的名稱及其 Silo 密碼登入失敗的次數不會計入每個名稱的限制，否則所有訪客都會共用這個限制。依位址計算的請求限制維持不變。留空表示不指定任何帳號。"
+    }
+  ],
+  "web.admin.settings.signIn.page.demoAccountLabel": [
+    {
+      "type": 0,
+      "value": "示範帳號 ID"
+    }
+  ],
+  "web.admin.settings.signIn.page.demoAccountNames": [
+    {
+      "type": 0,
+      "value": "指定的帳號為 "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "。"
+    }
+  ],
+  "web.admin.settings.signIn.page.demoGroup": [
+    {
+      "type": 0,
+      "value": "示範模式"
+    }
+  ],
   "web.admin.settings.signIn.page.emailMatchDescription": [
     {
       "type": 0,
-      "value": "當提供者表示 Email 已驗證時，首次登入會連結到 Email 相同的一般 Silo 帳號。管理員、擁有者和緊急存取帳號絕不會被比對。"
+      "value": "首次登入時，若提供者將該電子郵件標記為已驗證，便會連結至具有相同電子郵件的現有 Silo 帳號。管理員、擁有者和緊急存取帳號絕不會被比對。"
     }
   ],
   "web.admin.settings.signIn.page.emailMatchLabel": [
@@ -72558,13 +73029,13 @@
   "web.admin.settings.signIn.page.emailMatchWarning": [
     {
       "type": 0,
-      "value": "在提供者端掌控該 Email 的人會接管該 Silo 帳號。Silo 不會驗證帳號 Email，因此比對到的帳號是最先註冊或設定該位址的帳號；比對後會將其在所有地方登出並刪除其 API 金鑰。只有在提供者會驗證每個 Email，且使用者無法自行變更時，才開啟此選項。"
+      "value": "任何在你的提供者端掌控某個電子郵件的人，都能接管最先註冊或設定該電子郵件的 Silo 帳號（Silo 不會驗證電子郵件）。比對成功後，該帳號會在所有地方登出，並刪除其 API 金鑰。只有在你的提供者會驗證每個電子郵件，且使用者無法自行變更時，才開啟此選項。"
     }
   ],
   "web.admin.settings.signIn.page.externalUnavailable": [
     {
       "type": 0,
-      "value": "此伺服器不提供外部登入，因此只能使用 Silo 密碼登入。"
+      "value": "此伺服器無法使用外部登入。使用者只能使用 Silo 密碼登入。"
     }
   ],
   "web.admin.settings.signIn.page.loading": [
@@ -72574,6 +73045,10 @@
     }
   ],
   "web.admin.settings.signIn.page.lockedOutNote": [
+    {
+      "type": 0,
+      "value": "緊急存取管理員可以在 "
+    },
     {
       "type": 8,
       "value": "code",
@@ -72586,7 +73061,7 @@
     },
     {
       "type": 0,
-      "value": " 會為緊急存取管理員顯示密碼表單，在伺服器上執行 "
+      "value": " 使用密碼登入。若要在伺服器上重新開啟密碼登入，請執行 "
     },
     {
       "type": 8,
@@ -72600,7 +73075,7 @@
     },
     {
       "type": 0,
-      "value": " 則可重新開啟密碼登入。"
+      "value": "。"
     }
   ],
   "web.admin.settings.signIn.page.lockedOutTitle": [
@@ -72618,13 +73093,13 @@
   "web.admin.settings.signIn.page.noBreakGlassError": [
     {
       "type": 0,
-      "value": "目前還無法關閉密碼登入：沒有任何管理員是緊急存取帳號。請先在使用者頁面開啟一位管理員，並開啟「緊急存取帳號」，這樣即使提供者停止服務，仍有人可以登入。"
+      "value": "目前還無法關閉密碼登入。請先在使用者頁面為至少一位管理員開啟「緊急存取帳號」，這樣即使你的提供者發生中斷，管理員仍可登入。"
     }
   ],
   "web.admin.settings.signIn.page.noBreakGlassStatus": [
     {
       "type": 0,
-      "value": "尚無緊急存取管理員。請在管理員的"
+      "value": "尚無緊急存取管理員。請在"
     },
     {
       "type": 8,
@@ -72638,7 +73113,7 @@
     },
     {
       "type": 0,
-      "value": "開啟「緊急存取帳號」。"
+      "value": "為一位管理員開啟「緊急存取帳號」。"
     }
   ],
   "web.admin.settings.signIn.page.noProviderError": [
@@ -72694,7 +73169,7 @@
   "web.admin.settings.signIn.page.passwordResetDescription": [
     {
       "type": 0,
-      "value": "在登入頁面加入「忘記密碼？」，讓使用者能透過 Email 取得重設連結。需要設定 Email 和公開網址。"
+      "value": "在登入頁面新增「忘記密碼？」，讓使用者可以透過電子郵件寄送重設連結給自己。需要設定電子郵件寄送功能與公開網址。"
     }
   ],
   "web.admin.settings.signIn.page.passwordResetLabel": [
@@ -72742,7 +73217,7 @@
   "web.admin.settings.signIn.page.userApiKeysDescription": [
     {
       "type": 0,
-      "value": "任何帳號都可以在「設定 → API 金鑰」中為自己的個人檔案建立金鑰。這些金鑰可以讀取和變更觀看記錄、清單和請求，但無法播放或下載媒體。關閉此選項後將無法建立新金鑰；現有金鑰在撤銷前仍可使用。"
+      "value": "帳號可以在「設定 → API 金鑰」中為自己的個人檔案建立金鑰，用來檢視與編輯觀看記錄、清單和請求（無法播放或下載）。關閉此選項會阻止建立新金鑰；現有金鑰在撤銷前仍可使用。"
     }
   ],
   "web.admin.settings.signIn.page.userApiKeysLabel": [
@@ -72971,7 +73446,7 @@
   "web.admin.settings.signIn.provider.autoProvision.description": [
     {
       "type": 0,
-      "value": "提供者允許進入的人，會在首次登入時取得 Silo 帳號。關閉：只有 Silo 帳號已連結的人才能登入。"
+      "value": "使用者首次透過你的提供者登入時，自動建立 Silo 帳號。關閉時，只有已連結的 Silo 帳號才能登入。"
     }
   ],
   "web.admin.settings.signIn.provider.autoProvision.label": [
@@ -73033,7 +73508,7 @@
     },
     {
       "type": 0,
-      "value": " 登入的人在重新開啟前都無法登入。他們的 Silo 帳號及與 "
+      "value": " 的使用者在重新開啟前都無法登入。其 Silo 帳號和 "
     },
     {
       "type": 1,
@@ -73041,7 +73516,7 @@
     },
     {
       "type": 0,
-      "value": " 的連結會保留。"
+      "value": " 連結都會保留。"
     }
   ],
   "web.admin.settings.signIn.provider.binding.turnOffDescriptionBreakGlass": [
@@ -73055,7 +73530,7 @@
     },
     {
       "type": 0,
-      "value": " 重新開啟前，只有緊急存取管理員能登入。Silo 帳號及其與 "
+      "value": " 重新開啟前，只有緊急存取管理員能登入。Silo 帳號及其 "
     },
     {
       "type": 1,
@@ -73063,7 +73538,7 @@
     },
     {
       "type": 0,
-      "value": " 的連結會保留。"
+      "value": " 連結都會保留。"
     }
   ],
   "web.admin.settings.signIn.provider.binding.turnOffTitle": [
@@ -73087,7 +73562,7 @@
     },
     {
       "type": 0,
-      "value": " 已關閉。現在只能使用 Silo 密碼登入。"
+      "value": " 已關閉。使用者只能使用 Silo 密碼登入。"
     }
   ],
   "web.admin.settings.signIn.provider.binding.turnedOffBreakGlass": [
@@ -73117,7 +73592,7 @@
     },
     {
       "type": 0,
-      "value": " 目前是登入提供者。一台伺服器一次只能使用一個：請先將其關閉，才能改用 "
+      "value": " 目前正在使用中。一次只能開啟一個提供者。請先將其關閉，才能改用 "
     },
     {
       "type": 1,
@@ -73169,7 +73644,7 @@
   "web.admin.settings.signIn.provider.copy.failed": [
     {
       "type": 0,
-      "value": "無法複製。請選取該位址並手動複製。"
+      "value": "無法複製。請選取該 URI 並手動複製。"
     }
   ],
   "web.admin.settings.signIn.provider.header.oauthShown": [
@@ -73221,7 +73696,7 @@
   "web.admin.settings.signIn.provider.loginName.description": [
     {
       "type": 0,
-      "value": "顯示在登入頁面及 App 中供使用者選擇登入方式的位置。"
+      "value": "顯示在登入頁面和 App 中，供使用者選擇登入方式。"
     }
   ],
   "web.admin.settings.signIn.provider.loginName.directoryName": [
@@ -73279,7 +73754,7 @@
   "web.admin.settings.signIn.provider.loginName.title": [
     {
       "type": 0,
-      "value": "登入按鈕"
+      "value": "登入顯示名稱"
     }
   ],
   "web.admin.settings.signIn.provider.missing.disabled": [
@@ -73357,13 +73832,13 @@
   "web.admin.settings.signIn.provider.register.postLogoutUriDescription": [
     {
       "type": 0,
-      "value": "只有在你開啟「在提供者端登出」（位於「進階」中）時才需要。"
+      "value": "只有在「進階」中開啟提供者登出時才需要。"
     }
   ],
   "web.admin.settings.signIn.provider.register.publicUrlMissing": [
     {
       "type": 0,
-      "value": "重新導向 URI 需要伺服器的公開網址。請在"
+      "value": "請在"
     },
     {
       "type": 8,
@@ -73377,7 +73852,7 @@
     },
     {
       "type": 0,
-      "value": "中設定。"
+      "value": "中設定伺服器的公開網址，以產生重新導向 URI。"
     }
   ],
   "web.admin.settings.signIn.provider.register.redirectUri": [
@@ -73473,7 +73948,7 @@
   "web.admin.settings.signIn.provider.slot.oneAtATime": [
     {
       "type": 0,
-      "value": "伺服器一次只能使用一個提供者。若要切換，請先關閉 "
+      "value": "若要切換提供者，請先關閉 "
     },
     {
       "type": 1,
@@ -73553,19 +74028,19 @@
   "web.admin.settings.signIn.provider.test.descriptionSaved": [
     {
       "type": 0,
-      "value": "測試已儲存的設定，不會儲存任何內容。"
+      "value": "測試你已儲存的組態，不會變更任何設定。"
     }
   ],
   "web.admin.settings.signIn.provider.test.descriptionUnsaved": [
     {
       "type": 0,
-      "value": "以你未儲存的變更覆蓋已儲存的設定進行測試，不會儲存任何內容。"
+      "value": "測試你目前的設定（包含未儲存的變更），且不會儲存這些變更。"
     }
   ],
   "web.admin.settings.signIn.provider.test.didNotPass": [
     {
       "type": 0,
-      "value": "測試未通過。"
+      "value": "連線測試失敗。"
     }
   ],
   "web.admin.settings.signIn.provider.test.errorFallback": [
@@ -73583,7 +74058,7 @@
   "web.admin.settings.signIn.provider.test.lookUpNote": [
     {
       "type": 0,
-      "value": "輸入使用者名稱後，測試也會找出該使用者，並顯示其所屬群組及將獲得的角色。不會使用密碼。"
+      "value": "輸入使用者名稱即可預覽該使用者的群組與 Silo 角色。不需要密碼。"
     }
   ],
   "web.admin.settings.signIn.provider.test.run": [
@@ -73700,19 +74175,19 @@
   "web.admin.settings.storage.active.cancel": [
     {
       "type": 0,
-      "value": "取消轉移"
+      "value": "取消遷移"
     }
   ],
   "web.admin.settings.storage.active.cancelFailed": [
     {
       "type": 0,
-      "value": "無法取消儲存空間轉移。請再試一次。"
+      "value": "無法取消儲存空間遷移。請再試一次。"
     }
   ],
   "web.admin.settings.storage.active.cancelRequested": [
     {
       "type": 0,
-      "value": "已要求取消儲存空間轉移。"
+      "value": "已請求取消儲存空間遷移。"
     }
   ],
   "web.admin.settings.storage.active.cancelling": [
@@ -73724,7 +74199,7 @@
   "web.admin.settings.storage.active.queued": [
     {
       "type": 0,
-      "value": "儲存空間轉移：已加入佇列"
+      "value": "儲存空間遷移：已加入佇列"
     }
   ],
   "web.admin.settings.storage.active.refresh": [
@@ -73736,19 +74211,19 @@
   "web.admin.settings.storage.active.running": [
     {
       "type": 0,
-      "value": "儲存空間轉移：執行中"
+      "value": "儲存空間遷移：執行中"
     }
   ],
   "web.admin.settings.storage.active.verifiedLabel": [
     {
       "type": 0,
-      "value": "已驗證的儲存物件"
+      "value": "已驗證的檔案"
     }
   ],
   "web.admin.settings.storage.backend": [
     {
       "type": 0,
-      "value": "後端"
+      "value": "儲存空間後端"
     }
   ],
   "web.admin.settings.storage.backendAuto": [
@@ -73760,7 +74235,7 @@
   "web.admin.settings.storage.backendDescription": [
     {
       "type": 0,
-      "value": "Silo 存放圖片、字幕及其他媒體庫素材的位置。"
+      "value": "Silo 存放圖片、字幕及其他媒體庫檔案的位置。"
     }
   ],
   "web.admin.settings.storage.backendLocal": [
@@ -73772,13 +74247,13 @@
   "web.admin.settings.storage.backendLockedLocal": [
     {
       "type": 0,
-      "value": "編輯本機路徑，或選擇 S3 並填寫「公開儲存空間」。儲存後會開啟受管理的轉移審查。"
+      "value": "編輯本機路徑，或選擇 S3 並設定「公開儲存空間」。儲存後會開啟遷移審查。"
     }
   ],
   "web.admin.settings.storage.backendLockedS3": [
     {
       "type": 0,
-      "value": "選擇「自動」或「本機磁碟」，以審查從 S3 進行的受管理轉移。"
+      "value": "選擇「自動」或「本機磁碟」，以審查從 S3 進行的儲存空間遷移。"
     }
   ],
   "web.admin.settings.storage.cacheImages": [
@@ -73790,13 +74265,13 @@
   "web.admin.settings.storage.cacheImagesDescription": [
     {
       "type": 0,
-      "value": "關閉時，用戶端會直接從提供者載入圖片，且不會使用存放在媒體旁的圖片。先前儲存的圖片會改回使用提供者圖片，但你在「編輯中繼資料」中選擇圖片的作品除外。"
+      "value": "關閉時，App 會從提供者載入圖片，並忽略媒體旁的圖片。已快取的圖片會改回使用提供者圖片，但在「編輯中繼資料」中設定的自訂圖片除外。"
     }
   ],
   "web.admin.settings.storage.credentialStatusUnavailable": [
     {
       "type": 0,
-      "value": "無法取得受保護憑證的狀態"
+      "value": "無法檢查已儲存的憑證"
     }
   ],
   "web.admin.settings.storage.dialog.checking": [
@@ -73814,19 +74289,19 @@
   "web.admin.settings.storage.dialog.copyOptionsAvailable": [
     {
       "type": 0,
-      "value": "可使用以複製為基礎的轉移選項。"
+      "value": "你可以將現有檔案複製到新位置。"
     }
   ],
   "web.admin.settings.storage.dialog.description": [
     {
       "type": 0,
-      "value": "Silo 會先驗證並複製所選資料，再進行切換。公開位置變更時，公開目錄參照會在重新啟動後於背景進行比對更新。舊的儲存空間絕不會自動刪除。"
+      "value": "Silo 會在切換前先驗證並複製你選取的檔案。若公開儲存空間變更，媒體庫圖片連結會在重新啟動後於背景更新。你的舊儲存空間絕不會自動刪除。"
     }
   ],
   "web.admin.settings.storage.dialog.localPath": [
     {
       "type": 0,
-      "value": "本機圖片路徑"
+      "value": "本機儲存路徑"
     }
   ],
   "web.admin.settings.storage.dialog.privateEndpointMissing": [
@@ -73838,13 +74313,13 @@
   "web.admin.settings.storage.dialog.queue": [
     {
       "type": 0,
-      "value": "將轉移加入佇列"
+      "value": "開始遷移"
     }
   ],
   "web.admin.settings.storage.dialog.queuing": [
     {
       "type": 0,
-      "value": "正在加入佇列……"
+      "value": "正在開始……"
     }
   ],
   "web.admin.settings.storage.dialog.retryCheck": [
@@ -73880,19 +74355,19 @@
   "web.admin.settings.storage.dialog.target": [
     {
       "type": 0,
-      "value": "目標"
+      "value": "目的地"
     }
   ],
   "web.admin.settings.storage.dialog.targetLocal": [
     {
       "type": 0,
-      "value": "本機磁碟（Silo 預設行為）"
+      "value": "本機磁碟"
     }
   ],
   "web.admin.settings.storage.dialog.targetLocalSource": [
     {
       "type": 0,
-      "value": "依「後端」設定選取。"
+      "value": "依「儲存空間後端」設定選取。"
     }
   ],
   "web.admin.settings.storage.dialog.targetPrivate": [
@@ -73932,25 +74407,25 @@
     },
     {
       "type": 0,
-      "value": "請查看管理員診斷以瞭解詳細資訊。"
+      "value": "請查看伺服器診斷以瞭解詳細資訊。"
     }
   ],
   "web.admin.settings.storage.failed.canceledReason": [
     {
       "type": 0,
-      "value": "儲存空間轉移已取消。"
+      "value": "儲存空間遷移已取消。"
     }
   ],
   "web.admin.settings.storage.failed.titleCancelled": [
     {
       "type": 0,
-      "value": "儲存空間轉移已取消"
+      "value": "儲存空間遷移已取消"
     }
   ],
   "web.admin.settings.storage.failed.titleFailed": [
     {
       "type": 0,
-      "value": "儲存空間轉移失敗"
+      "value": "儲存空間遷移失敗"
     }
   ],
   "web.admin.settings.storage.failure.commit": [
@@ -73962,13 +74437,13 @@
   "web.admin.settings.storage.failure.copy": [
     {
       "type": 0,
-      "value": "複製儲存物件失敗。"
+      "value": "無法將檔案複製到新的儲存空間。"
     }
   ],
   "web.admin.settings.storage.failure.preparation": [
     {
       "type": 0,
-      "value": "準備儲存空間轉移失敗。"
+      "value": "無法準備儲存空間遷移。"
     }
   ],
   "web.admin.settings.storage.failure.targetCheck": [
@@ -73980,19 +74455,19 @@
   "web.admin.settings.storage.failure.unknown": [
     {
       "type": 0,
-      "value": "儲存空間轉移未完成。"
+      "value": "儲存空間遷移未完成。"
     }
   ],
   "web.admin.settings.storage.failure.verification": [
     {
       "type": 0,
-      "value": "儲存空間驗證失敗。"
+      "value": "已複製的檔案驗證失敗。"
     }
   ],
   "web.admin.settings.storage.group": [
     {
       "type": 0,
-      "value": "儲存空間"
+      "value": "一般"
     }
   ],
   "web.admin.settings.storage.loading": [
@@ -74016,7 +74491,7 @@
   "web.admin.settings.storage.localPathLockedLocal": [
     {
       "type": 0,
-      "value": "變更此路徑會開啟受管理的轉移。請在 Docker 中將新路徑掛載為磁碟區。"
+      "value": "變更此路徑會在儲存時開啟儲存空間遷移審查。請在 Docker 中將新路徑掛載為磁碟區。"
     }
   ],
   "web.admin.settings.storage.localPathLockedS3": [
@@ -74034,25 +74509,25 @@
   "web.admin.settings.storage.lockStatusUnavailable": [
     {
       "type": 0,
-      "value": "無法取得儲存空間鎖定狀態"
+      "value": "無法取得儲存空間狀態"
     }
   ],
   "web.admin.settings.storage.lockUnknownMove": [
     {
       "type": 0,
-      "value": "無法取得儲存空間鎖定狀態。移動儲存空間前，請重新檢查狀態。"
+      "value": "無法取得儲存空間狀態。開始遷移前，請先重試狀態檢查。"
     }
   ],
   "web.admin.settings.storage.lockUnknownSave": [
     {
       "type": 0,
-      "value": "無法取得儲存空間鎖定狀態。儲存此位置前，請重新檢查狀態。"
+      "value": "無法取得儲存空間狀態。儲存此位置前，請先重試狀態檢查。"
     }
   ],
   "web.admin.settings.storage.manualRestart.body": [
     {
       "type": 0,
-      "value": "儲存空間切換已確認，但此主機無法自動重新啟動 Silo。請重新啟動伺服器，以安全地啟用新的儲存空間。"
+      "value": "你的新儲存空間設定已儲存，但 Silo 無法自動重新啟動。請重新啟動伺服器以使用新的儲存空間。"
     }
   ],
   "web.admin.settings.storage.manualRestart.title": [
@@ -74064,37 +74539,37 @@
   "web.admin.settings.storage.notes.backfill": [
     {
       "type": 0,
-      "value": "「補齊中繼資料圖片」會從已儲存的提供者網址下載，而非舊的 S3。"
+      "value": "「補齊中繼資料圖片」任務會從已儲存的提供者網址下載，而非你舊的 S3 儲存貯體。"
     }
   ],
   "web.admin.settings.storage.notes.metadataRetained": [
     {
       "type": 0,
-      "value": "PostgreSQL 中的核心中繼資料會保留。"
+      "value": "Postgres 中的媒體庫中繼資料會完整保留。"
     }
   ],
   "web.admin.settings.storage.notes.privateChanging": [
     {
       "type": 0,
-      "value": "「遷移所有內容」會將診斷套件和目錄作業產出檔案複製到新位置；「保留個人上傳內容」和「重新開始」則會將其留在舊位置。"
+      "value": "只有「遷移所有內容」會複製診斷套件和目錄作業檔案；其他選項會將其留在舊位置。"
     }
   ],
   "web.admin.settings.storage.notes.privateOnly": [
     {
       "type": 0,
-      "value": "「遷移所有私人資料」會將診斷套件和目錄作業產出檔案複製到新位置；「保留個人檔案頭像」和「重新開始」則會將其留在舊位置。"
+      "value": "只有「遷移所有私人資料」會複製診斷套件和目錄作業檔案；其他選項會將其留在舊位置。"
     }
   ],
   "web.admin.settings.storage.notes.privateUnchanged": [
     {
       "type": 0,
-      "value": "個人檔案頭像、診斷套件和目錄作業產出檔案會留在目前的儲存空間。"
+      "value": "個人檔案頭像、診斷套件和目錄作業檔案會留在目前的位置。"
     }
   ],
   "web.admin.settings.storage.notes.restartRequired": [
     {
       "type": 0,
-      "value": "轉移完成後需要重新啟動。"
+      "value": "遷移完成後，請重新啟動伺服器。"
     }
   ],
   "web.admin.settings.storage.notes.sidecar": [
@@ -74112,25 +74587,25 @@
   "web.admin.settings.storage.notes.toLocalMigrateAll": [
     {
       "type": 0,
-      "value": "所有內容（包括診斷套件和目錄作業產物）都會複製到本機磁碟。"
+      "value": "所有內容（包括診斷套件和目錄作業檔案）都會複製到本機磁碟。"
     }
   ],
   "web.admin.settings.storage.notes.toLocalPreserve": [
     {
       "type": 0,
-      "value": "診斷套件和目錄作業產物會留在舊的私人儲存貯體中，切換後將無法使用。"
+      "value": "診斷套件和目錄作業檔案會留在舊的私人儲存貯體中，切換後將無法存取。"
     }
   ],
   "web.admin.settings.storage.notes.toLocalStartFresh": [
     {
       "type": 0,
-      "value": "「全新開始」不會複製任何內容：上傳的檔案、已下載的字幕、個人檔案頭像、診斷套件和目錄作業產物都會留在 S3 中，切換後將無法使用。"
+      "value": "「全新開始」不會複製任何內容：上傳的檔案、已下載的字幕、個人檔案頭像、診斷套件和目錄作業檔案都會留在 S3 中，切換後將無法存取。"
     }
   ],
   "web.admin.settings.storage.phase.canceled": [
     {
       "type": 0,
-      "value": "已取消儲存空間轉移"
+      "value": "儲存空間遷移已取消"
     }
   ],
   "web.admin.settings.storage.phase.checkingTarget": [
@@ -74148,25 +74623,25 @@
   "web.admin.settings.storage.phase.completed": [
     {
       "type": 0,
-      "value": "已完成儲存空間轉移"
+      "value": "儲存空間遷移已完成"
     }
   ],
   "web.admin.settings.storage.phase.copying": [
     {
       "type": 0,
-      "value": "正在複製儲存物件"
+      "value": "正在複製檔案"
     }
   ],
   "web.admin.settings.storage.phase.failed": [
     {
       "type": 0,
-      "value": "儲存空間轉移失敗"
+      "value": "儲存空間遷移失敗"
     }
   ],
   "web.admin.settings.storage.phase.preparing": [
     {
       "type": 0,
-      "value": "正在準備儲存空間轉移"
+      "value": "正在準備儲存空間遷移"
     }
   ],
   "web.admin.settings.storage.phase.queued": [
@@ -74178,13 +74653,13 @@
   "web.admin.settings.storage.phase.restartPending": [
     {
       "type": 0,
-      "value": "需要重新啟動才能啟用儲存空間"
+      "value": "重新啟動伺服器以使用新的儲存空間"
     }
   ],
   "web.admin.settings.storage.phase.verifying": [
     {
       "type": 0,
-      "value": "正在驗證已複製的物件"
+      "value": "正在驗證已複製的檔案"
     }
   ],
   "web.admin.settings.storage.policy.legend": [
@@ -74202,7 +74677,7 @@
   "web.admin.settings.storage.policy.migrateAllDescription": [
     {
       "type": 0,
-      "value": "複製完整的圖片目錄樹，包括已下載的字幕。私人資料變更位置時，也會一併複製頭像、診斷套件和目錄作業產物。快取非常大時，可能需要很長時間。"
+      "value": "複製所有已儲存的圖片和已下載的字幕；若同時移動私人儲存空間，也會一併複製個人檔案頭像、診斷套件和目錄作業檔案。大型媒體庫可能需要較長時間。"
     }
   ],
   "web.admin.settings.storage.policy.preserve": [
@@ -74232,7 +74707,7 @@
   "web.admin.settings.storage.policy.privateMigrateAllDescription": [
     {
       "type": 0,
-      "value": "將個人檔案頭像、診斷套件和目錄作業產物複製到新位置。"
+      "value": "將個人檔案頭像、診斷套件和目錄作業檔案複製到新位置。"
     }
   ],
   "web.admin.settings.storage.policy.privatePreserve": [
@@ -74244,13 +74719,13 @@
   "web.admin.settings.storage.policy.privatePreserveDescription": [
     {
       "type": 0,
-      "value": "將個人檔案頭像複製到新位置。診斷套件和目錄產物會留在舊位置，切換後將無法使用。"
+      "value": "複製個人檔案頭像。診斷套件和目錄作業檔案會留在舊位置，切換後將無法存取。"
     }
   ],
   "web.admin.settings.storage.policy.privateStartFreshDescription": [
     {
       "type": 0,
-      "value": "不會讀取舊位置。切換後，現有的個人檔案頭像會顯示為遺失；其檔案、診斷套件和目錄產物會留在舊位置。"
+      "value": "略過舊位置。現有的個人檔案頭像將顯示為遺失，舊的頭像、診斷套件和目錄作業檔案會留在原處。"
     }
   ],
   "web.admin.settings.storage.policy.startFresh": [
@@ -74262,13 +74737,13 @@
   "web.admin.settings.storage.policy.startFreshDescription": [
     {
       "type": 0,
-      "value": "不會讀取舊的圖片儲存區。提供者路徑會改回 TMDB/TVDB 網址；自訂圖片必須重新上傳。已下載的字幕會留在舊的儲存區中，切換後將無法使用。"
+      "value": "略過舊的儲存空間。提供者圖片會改回使用 TMDB/TVDB 網址，自訂圖片必須重新上傳。已下載的字幕會留在舊位置，切換後將無法存取。"
     }
   ],
   "web.admin.settings.storage.policy.startFreshWithAvatarsDescription": [
     {
       "type": 0,
-      "value": "不會讀取舊的圖片儲存區。提供者路徑會改回 TMDB/TVDB 網址；自訂圖片必須重新上傳。已下載的字幕會留在舊的儲存區中，切換後將無法使用。個人檔案頭像也會留在舊的儲存空間中，切換後將無法使用。"
+      "value": "略過舊的儲存空間。提供者圖片會改回使用 TMDB/TVDB 網址，自訂圖片必須重新上傳。已下載的字幕和個人檔案頭像會留在舊位置，切換後將無法存取。"
     }
   ],
   "web.admin.settings.storage.policy.unavailableNoPrivateBucket": [
@@ -74292,7 +74767,7 @@
   "web.admin.settings.storage.privateGroupDescription": [
     {
       "type": 0,
-      "value": "只有伺服器會讀取的檔案：個人檔案頭像、診斷套件和目錄種子產物。使用 S3 儲存空間時，需要在此設定儲存貯體來存放這些檔案；使用本機磁碟時，除非設定了儲存貯體，否則這些檔案會留在本機儲存路徑中。"
+      "value": "僅供伺服器使用的檔案：個人檔案頭像、診斷套件和目錄作業檔案。使用 S3 時必須設定才能存放這些檔案；使用本機磁碟時，除非設定了儲存貯體，否則這些檔案會留在本機儲存路徑中。"
     }
   ],
   "web.admin.settings.storage.publicGroup": [
@@ -74304,37 +74779,37 @@
   "web.admin.settings.storage.publicGroupDescription": [
     {
       "type": 0,
-      "value": "用戶端直接下載的檔案：快取的圖片、上傳的海報和品牌圖片。當「後端」設為 S3，或設為「自動」並在此設定儲存貯體時使用。"
+      "value": "用戶端直接下載的檔案：已快取的圖片、上傳的海報和品牌圖片。當「儲存空間後端」設為 S3，或設為「自動」並設定儲存貯體時使用。"
     }
   ],
   "web.admin.settings.storage.recovery.messageBlocked": [
     {
       "type": 0,
-      "value": "復原作業受阻。請查看管理員診斷資訊以瞭解詳情。"
+      "value": "儲存空間復原受阻。請查看伺服器診斷資訊以瞭解詳情。"
     }
   ],
   "web.admin.settings.storage.recovery.messagePending": [
     {
       "type": 0,
-      "value": "重新啟動後將進行圖片核對。"
+      "value": "媒體庫圖片參照會在伺服器重新啟動後更新。"
     }
   ],
   "web.admin.settings.storage.recovery.messageRunning": [
     {
       "type": 0,
-      "value": "正在核對已提交的圖片儲存空間。"
+      "value": "正在為新的儲存位置更新媒體庫圖片參照。"
     }
   ],
   "web.admin.settings.storage.recovery.messageWaitingRetry": [
     {
       "type": 0,
-      "value": "核對已暫停，正在等待重試。"
+      "value": "圖片參照更新已暫停，正在等待重試。"
     }
   ],
   "web.admin.settings.storage.recovery.needsAttention": [
     {
       "type": 0,
-      "value": "復原作業需要處理。請查看管理員診斷資訊以瞭解詳情。"
+      "value": "儲存空間復原需要處理。請查看伺服器診斷資訊以瞭解詳情。"
     }
   ],
   "web.admin.settings.storage.recovery.titleBlocked": [
@@ -74370,7 +74845,7 @@
   "web.admin.settings.storage.retryStatus": [
     {
       "type": 0,
-      "value": "重新檢查狀態"
+      "value": "重新檢查"
     }
   ],
   "web.admin.settings.storage.reviewTransition": [
@@ -74424,31 +74899,31 @@
   "web.admin.settings.storage.s3.locationChangeFromLocal": [
     {
       "type": 0,
-      "value": "儲存此儲存貯體後，會開啟從本機儲存空間進行的受管理轉移。切換前請選擇要複製的內容。"
+      "value": "儲存後會開啟從本機磁碟進行的儲存空間轉移。在切換前，你可以選擇要複製的內容。"
     }
   ],
   "web.admin.settings.storage.s3.locationChangePrivate": [
     {
       "type": 0,
-      "value": "儲存此位置後，會開啟受管理轉移。你可以全新開始，或從目前存放位置複製頭像、診斷資訊和目錄產物；Silo 會在切換前驗證新舊位置。"
+      "value": "儲存後會開啟儲存空間轉移。你可以全新開始，或複製個人檔案頭像、診斷套件和目錄作業檔案；Silo 會在切換前驗證這兩個位置。"
     }
   ],
   "web.admin.settings.storage.s3.locationChangeS3": [
     {
       "type": 0,
-      "value": "儲存此位置後，會開啟受管理轉移。你可以全新開始，或從目前的 S3 儲存空間複製資料；Silo 會在切換前驗證新舊位置。"
+      "value": "儲存後會開啟儲存空間轉移。你可以全新開始，或從目前的 S3 位置複製檔案；Silo 會在切換前驗證這兩個位置。"
     }
   ],
   "web.admin.settings.storage.s3.locationUnlockedPrivate": [
     {
       "type": 0,
-      "value": "Silo 會在啟動時記錄已設定的私人儲存貯體。請在儲存頭像、診斷資訊或目錄產物前選好儲存貯體；之後若要變更，需要進行受管理轉移。"
+      "value": "Silo 會在啟動時鎖定已設定的私人儲存貯體。請在儲存個人檔案頭像、診斷套件或目錄作業檔案前選好儲存貯體；之後若要變更，需要進行儲存空間轉移。"
     }
   ],
   "web.admin.settings.storage.s3.locationUnlockedPublic": [
     {
       "type": 0,
-      "value": "首次寫入圖片時會記錄此位置。上傳的海報、合輯圖片和品牌圖片無法重新下載，因此請在掃描前選好儲存貯體。"
+      "value": "Silo 儲存第一張圖片後，就會鎖定此位置。上傳的海報、合輯圖片和品牌圖片無法重新下載，因此請在掃描前選好儲存貯體。"
     }
   ],
   "web.admin.settings.storage.s3.pathStyle": [
@@ -74520,7 +74995,7 @@
   "web.admin.settings.storage.s3.urlAuth": [
     {
       "type": 0,
-      "value": "資源連結的授權方式"
+      "value": "下載連結的授權方式"
     }
   ],
   "web.admin.settings.storage.s3.urlAuthCloudflare": [
@@ -74550,13 +75025,13 @@
   "web.admin.settings.storage.target.noPrivateBucketLocal": [
     {
       "type": 0,
-      "value": "無私人儲存貯體：頭像、診斷資訊和目錄產物會存放在本機磁碟。"
+      "value": "無私人儲存貯體：個人檔案頭像、診斷套件和目錄作業檔案會保留在本機磁碟。"
     }
   ],
   "web.admin.settings.storage.target.noPrivateBucketS3": [
     {
       "type": 0,
-      "value": "無私人儲存貯體：頭像、診斷資訊和目錄產物將無法使用。"
+      "value": "無私人儲存貯體：個人檔案頭像、診斷套件和目錄作業檔案將無法使用。"
     }
   ],
   "web.admin.settings.storage.target.privateBucket": [
@@ -74648,7 +75123,7 @@
   "web.admin.settings.storage.transitionQueueFailed": [
     {
       "type": 0,
-      "value": "無法將儲存空間轉移加入佇列。請檢查儲存空間設定，然後再試一次。"
+      "value": "無法開始儲存空間轉移。請檢查你的儲存空間設定，然後再試一次。"
     }
   ],
   "web.admin.settings.storage.transitionQueued": [
@@ -74682,7 +75157,7 @@
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
-      "value": "此伺服器不提供受管理的儲存空間轉移。"
+      "value": "此伺服器不提供儲存空間轉移。"
     }
   ],
   "web.admin.settings.storage.unitSeconds": [
@@ -74708,7 +75183,7 @@
             },
             {
               "type": 0,
-              "value": " 個物件"
+              "value": " 個檔案"
             }
           ]
         }
@@ -74744,7 +75219,7 @@
   "web.admin.settings.watchProviders.footnote": [
     {
       "type": 0,
-      "value": "Simkl、MDBList 和其他觀看提供者可從"
+      "value": "從"
     },
     {
       "type": 8,
@@ -74758,7 +75233,7 @@
     },
     {
       "type": 0,
-      "value": "安裝。提供者的 App 憑證位於其外掛程式頁面，觀眾則可從個人檔案設定連結自己的帳號。"
+      "value": "安裝 Simkl、MDBList 和其他觀看提供者。在各提供者的外掛程式頁面設定其 App 憑證；觀眾可在個人檔案設定中連結自己的帳號。"
     }
   ],
   "web.admin.settings.watchProviders.loadError": [
@@ -74782,7 +75257,7 @@
   "web.admin.settings.watchProviders.tagline": [
     {
       "type": 0,
-      "value": "觀看提供者外掛程式"
+      "value": "觀看紀錄同步"
     }
   ],
   "web.admin.shell.drawer.close": [
@@ -79430,6 +79905,222 @@
       "value": " 筆"
     }
   ],
+  "web.admin.users.detail.appKeys.confirm.denyDescription": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " 將無法登入 "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " 的帳號。如果這是對方的裝置，對方可以在 Silo App 中重新新增。"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKey": [
+    {
+      "type": 0,
+      "value": "移除金鑰"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKeyDescription": [
+    {
+      "type": 0,
+      "value": "已登入的裝置會繼續運作，直到你將其移除。此金鑰將無法再新增任何裝置，由它新增且仍在等待中的裝置也會被拒絕。"
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " 下次在登入狀態下新增裝置時，其 Silo App 會設定新的金鑰。"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKeyTitle": [
+    {
+      "type": 0,
+      "value": "要移除 "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " 的帳號金鑰嗎？"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.removeDescription": [
+    {
+      "type": 0,
+      "value": "移除 "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " 會立即將其從 "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " 的帳號登出，並停用其金鑰：該裝置將無法再用此金鑰登入。若要再次使用，"
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " 需要在 Silo App 中重新新增。"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.withdrawDescription": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " 將無法使用此核准登入 "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " 的帳號。"
+    }
+  ],
+  "web.admin.users.detail.appKeys.description": [
+    {
+      "type": 0,
+      "value": "透過 Silo App 登入 "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " 的帳號、無須密碼的裝置與 App。"
+    }
+  ],
+  "web.admin.users.detail.appKeys.empty": [
+    {
+      "type": 0,
+      "value": "此帳號沒有任何裝置使用 Silo App。"
+    }
+  ],
+  "web.admin.users.detail.appKeys.loadFailed": [
+    {
+      "type": 0,
+      "value": "無法載入裝置。"
+    }
+  ],
+  "web.admin.users.detail.appKeys.off": [
+    {
+      "type": 0,
+      "value": "此伺服器已關閉 Silo App 登入，因此這些裝置無法登入。你仍可以移除它們。"
+    }
+  ],
+  "web.admin.users.detail.appKeys.ownerOnly": [
+    {
+      "type": 0,
+      "value": "只有伺服器擁有者可以變更其他管理員或擁有者的裝置。"
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.description": [
+    {
+      "type": 0,
+      "value": "Silo App 會使用此金鑰新增 "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " 的新裝置。設定於 "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "。"
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.none": [
+    {
+      "type": 0,
+      "value": "沒有帳號金鑰。"
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " 下次在登入狀態下新增裝置時，其 Silo App 會設定一組金鑰。"
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.remove": [
+    {
+      "type": 0,
+      "value": "移除帳號金鑰"
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKeyRemoved": [
+    {
+      "type": 0,
+      "value": "已移除帳號金鑰"
+    }
+  ],
+  "web.admin.users.detail.appKeys.preapprovals.description": [
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " 為尚未連線的裝置預先核准的登入。"
+    }
+  ],
+  "web.admin.users.detail.appKeys.waiting.description": [
+    {
+      "type": 0,
+      "value": "管理員帳號上的新裝置需等待 "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " 從已登入的裝置核准。你可以在此拒絕。"
+    }
+  ],
+  "web.admin.users.detail.appKeys.waiting.title": [
+    {
+      "type": 0,
+      "value": "等待核准"
+    }
+  ],
   "web.admin.users.detail.common.allProfiles": [
     {
       "type": 0,
@@ -82694,6 +83385,12 @@
       "value": "此帳號的個人檔案數已達上限"
     }
   ],
+  "web.admin.users.detail.profiles.badge.changedHere": [
+    {
+      "type": 0,
+      "value": "已在此變更"
+    }
+  ],
   "web.admin.users.detail.profiles.badge.kids": [
     {
       "type": 0,
@@ -82895,6 +83592,648 @@
     {
       "type": 0,
       "value": "儲存 PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowAgain": [
+    {
+      "type": 0,
+      "value": "重新允許"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowAgainAria": [
+    {
+      "type": 0,
+      "value": "讓 "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " 回到這台伺服器"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowDescription": [
+    {
+      "type": 0,
+      "value": "如果對方 App 的個人檔案仍包含 "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "，且此帳號還有空間新增個人檔案，對方的 App 下次同步時可以重新加入 "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "，作為新的個人檔案，不含其在此伺服器上的記錄。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowTitle": [
+    {
+      "type": 0,
+      "value": "要重新允許 "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " 嗎？"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.alreadyCleared": [
+    {
+      "type": 0,
+      "value": "此變更已被清除，或 "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 已再次變更。清單已是最新狀態。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedBy": [
+    {
+      "type": 0,
+      "value": "由 "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 於 "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": " 變更"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedSinceOpened": [
+    {
+      "type": 0,
+      "value": "此變更在你開啟後已更新，因此未清除任何內容。請在清單中重新查看，如果仍要清除，再進行清除。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedWhileRunning": [
+    {
+      "type": 0,
+      "value": "執行期間個人檔案已變更，因此未做任何變更。清單已是最新狀態；如果仍要執行，請再試一次。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clear": [
+    {
+      "type": 0,
+      "value": "清除"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearAndRemovePin": [
+    {
+      "type": 0,
+      "value": "清除並移除 PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearAria": [
+    {
+      "type": 0,
+      "value": "清除 "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " 上 "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " 的變更"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearFailed": [
+    {
+      "type": 0,
+      "value": "無法清除變更。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearInherit": [
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " 的 "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " 會依對方 App 的要求，改回 "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " 目前繼承的值。來自對方 App 的變更會再次套用。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearLater": [
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " 會維持現狀，直到對方的 App 下次傳送此值。之後，來自對方 App 的變更會再次套用。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearNow": [
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " 會立即改回來自對方 App 的值，且來自對方 App 的變更會再次套用。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearNowValue": [
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " 的 "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " 會立即改回 "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": "，即來自對方 App 的值。來自對方 App 的變更會再次套用。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearPin": [
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " 會保留你設定的 PIN，直到對方的 App 下次傳送 PIN。之後，來自對方 App 的變更會再次套用。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearPinRemoves": [
+    {
+      "type": 0,
+      "value": "對方的 App 傳送的 "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " 沒有 PIN，因此清除會立即移除你設定的 PIN。之後，任何使用此帳號的人都能不需 PIN 開啟 "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearTitle": [
+    {
+      "type": 0,
+      "value": "要清除 "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " 上 "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " 的變更嗎？"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.deletedAccount": [
+    {
+      "type": 0,
+      "value": "已刪除的帳號"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.description": [
+    {
+      "type": 0,
+      "value": "這些個人檔案來自 "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 的 App。你在此所做的變更會保留在這台伺服器上，直到你清除為止。這並非鎖定："
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 也可以在此變更相同的項目。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismiss": [
+    {
+      "type": 0,
+      "value": "忽略"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismissAria": [
+    {
+      "type": 0,
+      "value": "忽略 "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " 上 "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " 的備註"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismissFailed": [
+    {
+      "type": 0,
+      "value": "無法忽略備註。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.isChild": [
+    {
+      "type": 0,
+      "value": "兒童個人檔案"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.maxAdvisoryAge": [
+    {
+      "type": 0,
+      "value": "年齡限制"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.maxContentRating": [
+    {
+      "type": 0,
+      "value": "內容分級限制"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.name": [
+    {
+      "type": 0,
+      "value": "名稱"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.picture": [
+    {
+      "type": 0,
+      "value": "圖片"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.pin": [
+    {
+      "type": 0,
+      "value": "PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.requests": [
+    {
+      "type": 0,
+      "value": "請求"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.requireAdvisoryAge": [
+    {
+      "type": 0,
+      "value": "要求年齡分級"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.fieldValue": [
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": "："
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.hidden": [
+    {
+      "type": 0,
+      "value": "已由 "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 於 "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": " 在此伺服器上移除。在你允許之前，對方的 App 不會重新加入。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.loadFailed": [
+    {
+      "type": 0,
+      "value": "無法載入在此伺服器上所做的變更。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.nameTaken": [
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " 無法改回對方 App 中的名稱 "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "，因為此處另一個個人檔案已使用該名稱。請先重新命名該個人檔案，再重新清除。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeHiddenNextSync": [
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " 可在 "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 的 App 下次同步時回來，前提是該 App 的個人檔案仍包含它。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeHiddenWoken": [
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " 可在對方的 App 下次同步時回來，前提是該 App 的個人檔案仍包含它。已要求 "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 的手機進行同步。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeNextSync": [
+    {
+      "type": 0,
+      "value": "已清除。"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 的 App 下次同步時會收到此變更。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeWoken": [
+    {
+      "type": 0,
+      "value": "已清除。已要求 "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 的手機進行同步。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.removedBy": [
+    {
+      "type": 0,
+      "value": "由 "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 於 "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": " 移除"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.replacedOwner": [
+    {
+      "type": 0,
+      "value": "這取代了你設定的值。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.setBy": [
+    {
+      "type": 0,
+      "value": "由 "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 於 "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": " 設定"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.settled": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 已於 "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": " 變更此項目；你設定的值已不再適用。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.title": [
+    {
+      "type": 0,
+      "value": "已在此伺服器上變更"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.inherited": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": "（繼承）"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.noPicture": [
+    {
+      "type": 0,
+      "value": "無圖片"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.none": [
+    {
+      "type": 0,
+      "value": "無"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.off": [
+    {
+      "type": 0,
+      "value": "關閉"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.on": [
+    {
+      "type": 0,
+      "value": "開啟"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.picture": [
+    {
+      "type": 0,
+      "value": "自訂圖片"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.pinNone": [
+    {
+      "type": 0,
+      "value": "無 PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.pinSet": [
+    {
+      "type": 0,
+      "value": "已設定 PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.requestsAllowed": [
+    {
+      "type": 0,
+      "value": "已允許"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.requestsBlocked": [
+    {
+      "type": 0,
+      "value": "已封鎖"
     }
   ],
   "web.admin.users.detail.profiles.setPin": [
@@ -84120,6 +85459,144 @@
     {
       "type": 0,
       "value": "設定密碼"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.action": [
+    {
+      "type": 0,
+      "value": "建立登入連結"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.actionHint": [
+    {
+      "type": 0,
+      "value": "遺失所有裝置"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.description": [
+    {
+      "type": 0,
+      "value": "供 "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " 在遺失所有裝置時使用的單次連結。它會開啟一個頁面，提供 Silo App 用的代碼，或讓對方選擇密碼。連結有效 24 小時，建立新連結會取代上一個。"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailAction": [
+    {
+      "type": 0,
+      "value": "以電子郵件傳送"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHint": [
+    {
+      "type": 0,
+      "value": "建立連結後自行複製並傳送，或以電子郵件傳送至 "
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": "。"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHintNoAddress": [
+    {
+      "type": 0,
+      "value": "建立連結後，請自行複製並傳送。此帳號沒有可傳送的電子郵件地址。"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHintNoMail": [
+    {
+      "type": 0,
+      "value": "建立連結後，請自行複製並傳送。在設定中設定電子郵件，即可從這裡傳送。"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailSent": [
+    {
+      "type": 0,
+      "value": "已將連結傳送至 "
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": "。連結將於 "
+    },
+    {
+      "type": 1,
+      "value": "expires"
+    },
+    {
+      "type": 0,
+      "value": " 過期。"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailUnconfirmed": [
+    {
+      "type": 0,
+      "value": "郵件伺服器未確認是否已送達。下方的連結仍可使用：請複製後透過其他方式傳送。"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.failed": [
+    {
+      "type": 0,
+      "value": "無法建立登入連結。"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.linkShare": [
+    {
+      "type": 0,
+      "value": "請只將此連結傳送給 "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "。在連結被使用或於 "
+    },
+    {
+      "type": 1,
+      "value": "expires"
+    },
+    {
+      "type": 0,
+      "value": " 過期之前，任何持有連結的人都能登入此帳號。"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.providerRequired": [
+    {
+      "type": 0,
+      "value": "此伺服器已關閉本機密碼登入，因此登入連結會略過其登入提供者。請要求 "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " 在此伺服器的網站上透過提供者登入，然後使用其帳號設定中的「在 Silo 中開啟」。"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.title": [
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " 的登入連結"
     }
   ],
   "web.audiobooks.chapter.fallbackTitle": [
@@ -85713,6 +87190,120 @@
       "value": "核准登入"
     }
   ],
+  "web.auth.appCode.code": [
+    {
+      "type": 0,
+      "value": "代碼"
+    }
+  ],
+  "web.auth.appCode.codeCopied": [
+    {
+      "type": 0,
+      "value": "已複製代碼"
+    }
+  ],
+  "web.auth.appCode.copyCode": [
+    {
+      "type": 0,
+      "value": "複製代碼"
+    }
+  ],
+  "web.auth.appCode.copyFailed": [
+    {
+      "type": 0,
+      "value": "無法複製代碼。請選取代碼並手動複製。"
+    }
+  ],
+  "web.auth.appCode.expired": [
+    {
+      "type": 0,
+      "value": "此代碼已過期。"
+    }
+  ],
+  "web.auth.appCode.failed": [
+    {
+      "type": 0,
+      "value": "Silo 無法產生代碼。請再試一次。"
+    }
+  ],
+  "web.auth.appCode.instructions": [
+    {
+      "type": 0,
+      "value": "按下「開啟 Silo」，即可在這部裝置上的 Silo App 中繼續。如果尚未安裝 App，請先安裝，再回到此分頁並再次按下「開啟 Silo」。"
+    }
+  ],
+  "web.auth.appCode.noScanCode": [
+    {
+      "type": 0,
+      "value": "此伺服器的位址太長，無法產生 QR 碼。請在 Silo App 中輸入伺服器位址和代碼，或複製代碼後貼到 App 中。"
+    }
+  ],
+  "web.auth.appCode.open": [
+    {
+      "type": 0,
+      "value": "開啟 Silo"
+    }
+  ],
+  "web.auth.appCode.renew": [
+    {
+      "type": 0,
+      "value": "取得新代碼"
+    }
+  ],
+  "web.auth.appCode.scanCodeLabel": [
+    {
+      "type": 0,
+      "value": "供 Silo App 掃描的 QR 碼"
+    }
+  ],
+  "web.auth.appCode.scanCodeUnavailable": [
+    {
+      "type": 0,
+      "value": "無法為此伺服器顯示 QR 碼。請在 Silo App 中輸入伺服器位址和代碼，或複製代碼後貼到 App 中。"
+    }
+  ],
+  "web.auth.appCode.scanHint": [
+    {
+      "type": 0,
+      "value": "請使用 Silo App 中的掃描器掃描此 QR 碼，或輸入、複製下方的伺服器位址和代碼。"
+    }
+  ],
+  "web.auth.appCode.serverAddress": [
+    {
+      "type": 0,
+      "value": "伺服器位址"
+    }
+  ],
+  "web.auth.appCode.singleUse": [
+    {
+      "type": 0,
+      "value": "此代碼僅能使用一次，並會在幾分鐘後過期。"
+    }
+  ],
+  "web.auth.appCode.title": [
+    {
+      "type": 0,
+      "value": "開啟 Silo"
+    }
+  ],
+  "web.auth.appCode.typeInstructions": [
+    {
+      "type": 0,
+      "value": "在你手機或平板電腦上的 Silo App 中，以位址新增此伺服器，並輸入此代碼來建立你的帳號。任何取得此代碼的人都能代替你加入，因此請勿分享。"
+    }
+  ],
+  "web.auth.appCode.typeTitle": [
+    {
+      "type": 0,
+      "value": "使用此代碼加入"
+    }
+  ],
+  "web.auth.appCode.webLink": [
+    {
+      "type": 0,
+      "value": "改用 siloserver.org 連結開啟"
+    }
+  ],
   "web.auth.card.rememberedIt": [
     {
       "type": 0,
@@ -85915,10 +87506,46 @@
       ]
     }
   ],
+  "web.auth.invite.appAccountEmail": [
+    {
+      "type": 0,
+      "value": "你的帳號將使用 "
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": "。"
+    }
+  ],
+  "web.auth.invite.appContinue": [
+    {
+      "type": 0,
+      "value": "繼續"
+    }
+  ],
+  "web.auth.invite.appEmailHint": [
+    {
+      "type": 0,
+      "value": "如果你提供電子郵件地址，當你遺失裝置時，此伺服器可以傳送登入連結給你。"
+    }
+  ],
   "web.auth.invite.appMissing": [
     {
       "type": 0,
       "value": "沒有反應嗎？表示尚未安裝 App，請直接在下方繼續。"
+    }
+  ],
+  "web.auth.invite.appProviderOnly": [
+    {
+      "type": 1,
+      "value": "server"
+    },
+    {
+      "type": 0,
+      "value": " 透過其登入提供者新增使用者。請在此網站上使用該提供者登入，然後從你的帳號設定開啟 Silo。"
     }
   ],
   "web.auth.invite.created": [
@@ -85947,6 +87574,18 @@
       "value": "輸入你的電子郵件地址並選擇密碼。你將使用電子郵件地址登入。"
     }
   ],
+  "web.auth.invite.descriptionWithApp": [
+    {
+      "type": 0,
+      "value": "使用手機或平板電腦上的 Silo App 加入，或選擇密碼來登入。"
+    }
+  ],
+  "web.auth.invite.emailOptional": [
+    {
+      "type": 0,
+      "value": "電子郵件（選填）"
+    }
+  ],
   "web.auth.invite.emailPlaceholder": [
     {
       "type": 0,
@@ -85967,6 +87606,18 @@
     {
       "type": 0,
       "value": " 邀請你"
+    }
+  ],
+  "web.auth.invite.joinWithApp": [
+    {
+      "type": 0,
+      "value": "使用 Silo App 加入"
+    }
+  ],
+  "web.auth.invite.joinWithAppInstead": [
+    {
+      "type": 0,
+      "value": "改用 Silo App 加入"
     }
   ],
   "web.auth.invite.loadFailed": [
@@ -86067,6 +87718,30 @@
     {
       "type": 0,
       "value": "無法使用邀請"
+    }
+  ],
+  "web.auth.invite.usePassword": [
+    {
+      "type": 0,
+      "value": "改用密碼"
+    }
+  ],
+  "web.auth.invite.usernameIsAddress": [
+    {
+      "type": 0,
+      "value": "含有 @ 的使用者名稱必須是你在下方輸入的電子郵件地址。"
+    }
+  ],
+  "web.auth.invite.usernameRequired": [
+    {
+      "type": 0,
+      "value": "請選擇使用者名稱。"
+    }
+  ],
+  "web.auth.invite.usernameTaken": [
+    {
+      "type": 0,
+      "value": "此使用者名稱已有人使用。請選擇其他名稱。"
     }
   ],
   "web.auth.languagePicker.label": [
@@ -86953,6 +88628,126 @@
     {
       "type": 0,
       "value": "登入"
+    }
+  ],
+  "web.auth.signInLink.backToCode": [
+    {
+      "type": 0,
+      "value": "返回代碼"
+    }
+  ],
+  "web.auth.signInLink.codeExpired": [
+    {
+      "type": 0,
+      "value": "請向此伺服器的管理員索取新連結，以取得另一組代碼。"
+    }
+  ],
+  "web.auth.signInLink.documentTitle": [
+    {
+      "type": 0,
+      "value": "登入連結"
+    }
+  ],
+  "web.auth.signInLink.failed": [
+    {
+      "type": 0,
+      "value": "Silo 無法開啟此連結。請再試一次。"
+    }
+  ],
+  "web.auth.signInLink.installFirst": [
+    {
+      "type": 0,
+      "value": "此連結只能使用一次，代碼的有效時間為幾分鐘。請先在手機或平板電腦上安裝 Silo App，再按下「繼續」。"
+    }
+  ],
+  "web.auth.signInLink.intro": [
+    {
+      "type": 0,
+      "value": "管理員傳送此連結給你，讓你可以重新登入。請繼續以取得 Silo App 的代碼，或選擇密碼。"
+    }
+  ],
+  "web.auth.signInLink.keepOpen": [
+    {
+      "type": 0,
+      "value": "完成之前請保持此頁面開啟。此連結已使用過，重新載入或離開頁面會遺失它提供的內容。"
+    }
+  ],
+  "web.auth.signInLink.leaveAction": [
+    {
+      "type": 0,
+      "value": "離開"
+    }
+  ],
+  "web.auth.signInLink.leaveDescription": [
+    {
+      "type": 0,
+      "value": "此連結已使用過。如果你離開，Silo App 的代碼和設定密碼的機會都會消失，你將需要新的連結。"
+    }
+  ],
+  "web.auth.signInLink.leaveTitle": [
+    {
+      "type": 0,
+      "value": "要離開此頁面嗎？"
+    }
+  ],
+  "web.auth.signInLink.noCodeAdministrator": [
+    {
+      "type": 0,
+      "value": "這是管理員帳號，因此此連結只能設定密碼。請設定密碼、在此伺服器的網站上登入，然後從該處的帳號設定開啟 Silo App。"
+    }
+  ],
+  "web.auth.signInLink.noCodeAppKeysOff": [
+    {
+      "type": 0,
+      "value": "Silo App 目前無法在此伺服器上登入，因此此連結只能設定密碼。"
+    }
+  ],
+  "web.auth.signInLink.passwordDescription": [
+    {
+      "type": 0,
+      "value": "儲存後，此帳號會在所有裝置上登出。使用 Silo App 登入的裝置會自動重新登入。"
+    }
+  ],
+  "web.auth.signInLink.passwordSet": [
+    {
+      "type": 0,
+      "value": "你的密碼已儲存。請使用新密碼登入。"
+    }
+  ],
+  "web.auth.signInLink.passwordSetLostDevices": [
+    {
+      "type": 0,
+      "value": "使用 Silo App 的遺失裝置在你移除之前仍可登入。登入後，請在帳號設定的裝置中移除這些裝置。"
+    }
+  ],
+  "web.auth.signInLink.passwordTitle": [
+    {
+      "type": 0,
+      "value": "選擇密碼"
+    }
+  ],
+  "web.auth.signInLink.providerRequired": [
+    {
+      "type": 0,
+      "value": "此伺服器透過其登入提供者讓使用者登入，因此此連結無效。請改用該提供者登入。"
+    }
+  ],
+  "web.auth.signInLink.setPasswordInstead": [
+    {
+      "type": 0,
+      "value": "改為設定密碼"
+    }
+  ],
+  "web.auth.signInLink.title": [
+    {
+      "type": 0,
+      "value": "重新存取你的帳號"
+    }
+  ],
+  "web.auth.signInLink.unavailable": [
+    {
+      "type": 0,
+      "value": "此連結已被使用、已被較新的連結取代，或已過期。請向此伺服器的管理員索取新連結。"
     }
   ],
   "web.auth.signup.closed": [
@@ -99383,7 +101178,7 @@
   "web.common.signingSecret.description": [
     {
       "type": 0,
-      "value": "Silo 會用這組密鑰簽署每次傳送的內容，讓你的接收端可以驗證。密鑰只會顯示一次，請立即將它儲存在接收服務上。如果遺失，之後可以輪替密鑰。"
+      "value": "Silo 會使用這組密鑰簽署 Webhook，讓你的服務可以驗證。請立即儲存，這組密鑰只會顯示一次，但如果遺失仍可輪替。"
     }
   ],
   "web.common.signingSecret.saved": [
@@ -115300,19 +117095,19 @@
   "web.notifications.pushPrivacy.generic": [
     {
       "type": 0,
-      "value": "推播通知內容皆為通用訊息；App 收到推播後，會直接從你的 Silo 伺服器擷取私人內容。"
+      "value": "每次推播都不含私密資訊；App 收到後會直接從你的伺服器擷取通知內容。"
     }
   ],
   "web.notifications.pushPrivacy.metadata": [
     {
       "type": 0,
-      "value": "中繼服務不會收到通知標題、訊息內文、媒體名稱、使用者名稱、個人檔案名稱或你的伺服器 URL。但它會處理傳送通知及營運服務所需的技術中繼資料，包括不透明的部署識別碼、推播傳送時間、請求狀態、App 主題、你自行架設的 Silo 伺服器用來連線至中繼服務的 IP 位址，以及經雜湊處理的裝置推播權杖。Apple 或 Google 也可能為其平台處理標準的推播傳送中繼資料。"
+      "value": "中繼服務不會收到通知標題、訊息內文、媒體名稱、使用者名稱、個人檔案名稱或你的伺服器 URL。為了傳送通知及營運服務，它會處理技術中繼資料，包括不透明的部署識別碼、推播傳送時間、請求狀態、App 主題、你的伺服器用來連線至中繼服務的 IP 位址，以及經雜湊處理的裝置推播權杖。Apple 或 Google 也可能為其平台處理標準的推播傳送中繼資料。"
     }
   ],
   "web.notifications.pushPrivacy.relay": [
     {
       "type": 0,
-      "value": "啟用推播通知後，你的 Silo 伺服器會向 Silo 的推播中繼服務傳送不含內容的請求，讓 Silo 能透過 Apple Push Notification service 或 Firebase Cloud Messaging 傳送通知。此中繼服務"
+      "value": "啟用推播通知後，你的伺服器會向 Silo 的推播中繼服務傳送不含內容的請求，以透過 Apple Push Notification service 或 Firebase Cloud Messaging 傳送通知。此中繼服務"
     },
     {
       "type": 8,
@@ -120488,7 +122283,7 @@
   "web.profiles.userPolicy.audioTranscodingHint": [
     {
       "type": 0,
-      "value": "轉換音訊，不重新編碼影片。"
+      "value": "轉換音訊軌，不重新編碼影片。"
     }
   ],
   "web.profiles.userPolicy.downloadTranscodes": [
@@ -123358,7 +125153,7 @@
   "web.settings.account.password.signOutOthersDescription": [
     {
       "type": 0,
-      "value": "其他瀏覽器和 App 必須使用新密碼重新登入。這個瀏覽器會保持登入，API 金鑰也會繼續有效。"
+      "value": "其他瀏覽器和 App 會被登出。這個瀏覽器會保持登入，API 金鑰也會繼續有效。"
     }
   ],
   "web.settings.account.password.title": [
@@ -124203,6 +125998,500 @@
     {
       "type": 0,
       "value": "如何使用此金鑰"
+    }
+  ],
+  "web.settings.appKeys.actionFailed": [
+    {
+      "type": 0,
+      "value": "無法完成這項變更。請再試一次。"
+    }
+  ],
+  "web.settings.appKeys.approveMainOnly": [
+    {
+      "type": 0,
+      "value": "只有家庭的主要個人檔案可以核准裝置。請切換至主要個人檔案後再核准。"
+    }
+  ],
+  "web.settings.appKeys.approved": [
+    {
+      "type": 0,
+      "value": "已核准 "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.confirm.approve": [
+    {
+      "type": 0,
+      "value": "核准裝置"
+    }
+  ],
+  "web.settings.appKeys.confirm.approveDescription": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " 將可以使用 Silo App 登入你的帳號，直到你將其移除為止。請只在你剛設定好這部裝置時才核准。"
+    }
+  ],
+  "web.settings.appKeys.confirm.approveTitle": [
+    {
+      "type": 0,
+      "value": "要核准 "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " 嗎？"
+    }
+  ],
+  "web.settings.appKeys.confirm.deny": [
+    {
+      "type": 0,
+      "value": "拒絕裝置"
+    }
+  ],
+  "web.settings.appKeys.confirm.denyDescription": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " 將無法登入你的帳號。如果這是你的裝置，請在 Silo App 中重新新增。"
+    }
+  ],
+  "web.settings.appKeys.confirm.denyTitle": [
+    {
+      "type": 0,
+      "value": "要拒絕 "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " 嗎？"
+    }
+  ],
+  "web.settings.appKeys.confirm.remove": [
+    {
+      "type": 0,
+      "value": "移除裝置"
+    }
+  ],
+  "web.settings.appKeys.confirm.removeDescription": [
+    {
+      "type": 0,
+      "value": "移除 "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " 會立即將其登出並停用其金鑰：這部裝置將無法再用該金鑰登入。若要再次使用，請在 Silo App 中重新新增。"
+    }
+  ],
+  "web.settings.appKeys.confirm.removeTitle": [
+    {
+      "type": 0,
+      "value": "要移除 "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " 嗎？"
+    }
+  ],
+  "web.settings.appKeys.confirm.withdraw": [
+    {
+      "type": 0,
+      "value": "撤回核准"
+    }
+  ],
+  "web.settings.appKeys.confirm.withdrawDescription": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " 將無法使用這項核准登入你的帳號。"
+    }
+  ],
+  "web.settings.appKeys.confirm.withdrawTitle": [
+    {
+      "type": 0,
+      "value": "要撤回 "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " 的核准嗎？"
+    }
+  ],
+  "web.settings.appKeys.confirm.working": [
+    {
+      "type": 0,
+      "value": "正在儲存……"
+    }
+  ],
+  "web.settings.appKeys.denied": [
+    {
+      "type": 0,
+      "value": "已拒絕 "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.description": [
+    {
+      "type": 0,
+      "value": "使用 Silo App 登入你帳號（無需密碼）的裝置和 App。"
+    }
+  ],
+  "web.settings.appKeys.devices.title": [
+    {
+      "type": 0,
+      "value": "裝置"
+    }
+  ],
+  "web.settings.appKeys.empty": [
+    {
+      "type": 0,
+      "value": "你的帳號沒有任何裝置使用 Silo App。"
+    }
+  ],
+  "web.settings.appKeys.footnote": [
+    {
+      "type": 0,
+      "value": "移除裝置會將其登出並讓其金鑰失效。登出工作階段不會移除裝置：裝置會使用其金鑰重新登入。"
+    }
+  ],
+  "web.settings.appKeys.loadFailed": [
+    {
+      "type": 0,
+      "value": "無法載入你的裝置。"
+    }
+  ],
+  "web.settings.appKeys.loading": [
+    {
+      "type": 0,
+      "value": "正在載入裝置……"
+    }
+  ],
+  "web.settings.appKeys.off": [
+    {
+      "type": 0,
+      "value": "這台伺服器已關閉 Silo App 登入，因此這些裝置無法登入，等待中的裝置也無法核准。你仍然可以移除這些裝置。"
+    }
+  ],
+  "web.settings.appKeys.personKey.description": [
+    {
+      "type": 0,
+      "value": "你的 Silo App 會使用這個金鑰新增你的新裝置。設定時間："
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "。"
+    }
+  ],
+  "web.settings.appKeys.personKey.none": [
+    {
+      "type": 0,
+      "value": "沒有帳號金鑰。下次你在登入狀態下新增裝置時，Silo App 會設定一個。"
+    }
+  ],
+  "web.settings.appKeys.personKey.title": [
+    {
+      "type": 0,
+      "value": "帳號金鑰"
+    }
+  ],
+  "web.settings.appKeys.pinDescription": [
+    {
+      "type": 0,
+      "value": "輸入主要個人檔案的 PIN 以核准這部裝置。"
+    }
+  ],
+  "web.settings.appKeys.preapprovals.description": [
+    {
+      "type": 0,
+      "value": "你為尚未連線的裝置核准的登入。"
+    }
+  ],
+  "web.settings.appKeys.preapprovals.loadFailed": [
+    {
+      "type": 0,
+      "value": "無法載入預先核准的登入。"
+    }
+  ],
+  "web.settings.appKeys.preapprovals.title": [
+    {
+      "type": 0,
+      "value": "預先核准"
+    }
+  ],
+  "web.settings.appKeys.refreshLabel": [
+    {
+      "type": 0,
+      "value": "重新整理 Silo App 裝置"
+    }
+  ],
+  "web.settings.appKeys.removed": [
+    {
+      "type": 0,
+      "value": "已移除 "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.row.allowedBy": [
+    {
+      "type": 0,
+      "value": "由 "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 允許"
+    }
+  ],
+  "web.settings.appKeys.row.approve": [
+    {
+      "type": 0,
+      "value": "核准"
+    }
+  ],
+  "web.settings.appKeys.row.approveLabel": [
+    {
+      "type": 0,
+      "value": "核准 "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.row.deny": [
+    {
+      "type": 0,
+      "value": "拒絕"
+    }
+  ],
+  "web.settings.appKeys.row.denyLabel": [
+    {
+      "type": 0,
+      "value": "拒絕 "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.row.enrolledFrom": [
+    {
+      "type": 0,
+      "value": "來自 "
+    },
+    {
+      "type": 1,
+      "value": "address"
+    }
+  ],
+  "web.settings.appKeys.row.identityGone": [
+    {
+      "type": 0,
+      "value": "無法登入：其登入提供者帳號已不再連結"
+    }
+  ],
+  "web.settings.appKeys.row.kindApp": [
+    {
+      "type": 0,
+      "value": "其他 App"
+    }
+  ],
+  "web.settings.appKeys.row.kindDevice": [
+    {
+      "type": 0,
+      "value": "Silo App"
+    }
+  ],
+  "web.settings.appKeys.row.lastUsed": [
+    {
+      "type": 0,
+      "value": "上次登入："
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.settings.appKeys.row.notUsed": [
+    {
+      "type": 0,
+      "value": "尚未使用其金鑰登入"
+    }
+  ],
+  "web.settings.appKeys.row.preapproval": [
+    {
+      "type": 0,
+      "value": "預先核准 · "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": " 到期"
+    }
+  ],
+  "web.settings.appKeys.row.provider": [
+    {
+      "type": 0,
+      "value": "已透過登入提供者驗證"
+    }
+  ],
+  "web.settings.appKeys.row.remove": [
+    {
+      "type": 0,
+      "value": "移除"
+    }
+  ],
+  "web.settings.appKeys.row.removeLabel": [
+    {
+      "type": 0,
+      "value": "移除 "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.row.viaAppCode": [
+    {
+      "type": 0,
+      "value": "使用伺服器網頁上的一次性代碼新增"
+    }
+  ],
+  "web.settings.appKeys.row.viaPersonKey": [
+    {
+      "type": 0,
+      "value": "由另一部裝置上的 Silo App 新增"
+    }
+  ],
+  "web.settings.appKeys.row.viaSession": [
+    {
+      "type": 0,
+      "value": "在登入狀態下新增"
+    }
+  ],
+  "web.settings.appKeys.row.waitingUntil": [
+    {
+      "type": 0,
+      "value": "等待核准，直到 "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.settings.appKeys.row.withdraw": [
+    {
+      "type": 0,
+      "value": "撤回"
+    }
+  ],
+  "web.settings.appKeys.row.withdrawLabel": [
+    {
+      "type": 0,
+      "value": "撤回 "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " 的核准"
+    }
+  ],
+  "web.settings.appKeys.signsBackIn": [
+    {
+      "type": 0,
+      "value": "使用 Silo App 登入的裝置會自動重新登入。"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "移除裝置"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "即可停止。"
+    }
+  ],
+  "web.settings.appKeys.title": [
+    {
+      "type": 0,
+      "value": "Silo App 裝置"
+    }
+  ],
+  "web.settings.appKeys.unavailable": [
+    {
+      "type": 0,
+      "value": "這台伺服器無法使用 Silo App 登入，因此這些裝置無法登入。你仍然可以移除這些裝置。"
+    }
+  ],
+  "web.settings.appKeys.waiting.description": [
+    {
+      "type": 0,
+      "value": "有新裝置要求使用 Silo App 登入你的帳號。請只在你剛設定好這部裝置時才核准。"
+    }
+  ],
+  "web.settings.appKeys.waiting.title": [
+    {
+      "type": 0,
+      "value": "等待你核准"
+    }
+  ],
+  "web.settings.appKeys.withdrawn": [
+    {
+      "type": 0,
+      "value": "已撤回核准"
     }
   ],
   "web.settings.cardOverlay.adjust": [
@@ -125955,6 +128244,12 @@
       "value": "電子郵件或使用者名稱"
     }
   ],
+  "web.settings.historyImport.embyDirectHelp": [
+    {
+      "type": 0,
+      "value": "輸入要從中匯入的 Emby 伺服器基本 URL。"
+    }
+  ],
   "web.settings.historyImport.embyPassword": [
     {
       "type": 0,
@@ -125965,6 +128260,12 @@
     {
       "type": 0,
       "value": "如果帳號沒有密碼，請留空"
+    }
+  ],
+  "web.settings.historyImport.embyServerUrl": [
+    {
+      "type": 0,
+      "value": "Emby 伺服器 URL"
     }
   ],
   "web.settings.historyImport.embyUsername": [
@@ -126115,6 +128416,12 @@
     {
       "type": 0,
       "value": "Plex 帳號"
+    }
+  ],
+  "web.settings.historyImport.mode.serverUrl": [
+    {
+      "type": 0,
+      "value": "伺服器 URL"
     }
   ],
   "web.settings.historyImport.newImport.description": [
@@ -126412,7 +128719,7 @@
   "web.settings.historyImport.source.emby": [
     {
       "type": 0,
-      "value": "Emby Connect 或已儲存的伺服器"
+      "value": "Emby Connect、伺服器 URL 或已儲存的伺服器"
     }
   ],
   "web.settings.historyImport.source.jellyfin": [
@@ -129005,6 +131312,54 @@
       "value": "你目前處於離線狀態，因此這項變更未儲存"
     }
   ],
+  "web.settings.openInSilo.action": [
+    {
+      "type": 0,
+      "value": "取得 Silo App 代碼"
+    }
+  ],
+  "web.settings.openInSilo.codeInstructions": [
+    {
+      "type": 0,
+      "value": "在你手機或平板電腦上的 Silo App 中，以位址新增這台伺服器並輸入這組代碼。任何擁有這組代碼的人都能登入這個帳號，所以請勿分享。"
+    }
+  ],
+  "web.settings.openInSilo.codeTitle": [
+    {
+      "type": 0,
+      "value": "Silo App 代碼"
+    }
+  ],
+  "web.settings.openInSilo.description": [
+    {
+      "type": 0,
+      "value": "讓你手機或平板電腦上的 Silo App 登入這個帳號，無需密碼。"
+    }
+  ],
+  "web.settings.openInSilo.loadFailed": [
+    {
+      "type": 0,
+      "value": "無法確認這個瀏覽器是否可以取得 Silo App 代碼。"
+    }
+  ],
+  "web.settings.openInSilo.mainProfileOnly": [
+    {
+      "type": 0,
+      "value": "只有家庭的主要個人檔案可以取得 Silo App 代碼。請切換至主要個人檔案後再試一次。"
+    }
+  ],
+  "web.settings.openInSilo.pinDescription": [
+    {
+      "type": 0,
+      "value": "輸入主要個人檔案的 PIN 以取得 Silo App 代碼。"
+    }
+  ],
+  "web.settings.openInSilo.title": [
+    {
+      "type": 0,
+      "value": "Silo App"
+    }
+  ],
   "web.settings.overlays.accent.amber": [
     {
       "type": 0,
@@ -129660,7 +132015,7 @@
   "web.settings.overlays.library.help": [
     {
       "type": 0,
-      "value": "PNG、JPEG 或 WebP，最大 4 MB。透明 PNG 效果最佳。接著在徽章的「調整」選單中選取它，作為圖示，或用於單一值（例如 2160p）。"
+      "value": "PNG、JPEG 或 WebP，最大 4 MB（建議使用透明 PNG）。在徽章的圖片選單中將它設為圖示，或用於特定值（例如 2160p）。"
     }
   ],
   "web.settings.overlays.library.name": [
@@ -129672,7 +132027,7 @@
   "web.settings.overlays.library.needsStorage": [
     {
       "type": 0,
-      "value": "上傳圖片需要資產儲存空間。請設定儲存空間以上傳徽章圖片。圖庫中已有的圖片仍會列在下方，且可以刪除。"
+      "value": "請在儲存空間設定中配置儲存空間，才能上傳徽章圖片。現有圖片會繼續列在下方，且仍可刪除。"
     }
   ],
   "web.settings.overlays.library.pickAnother": [
@@ -129774,7 +132129,7 @@
   "web.settings.overlays.look.reset": [
     {
       "type": 0,
-      "value": "使用原始設計樣式"
+      "value": "重設為預設樣式"
     }
   ],
   "web.settings.overlays.look.shadow": [
@@ -131790,6 +134145,12 @@
       "value": "登入時間"
     }
   ],
+  "web.settings.sessions.row.signsBackIn": [
+    {
+      "type": 0,
+      "value": "這部裝置會自動重新登入"
+    }
+  ],
   "web.settings.sessions.row.summary": [
     {
       "type": 8,
@@ -131872,6 +134233,24 @@
     {
       "type": 0,
       "value": "設定"
+    }
+  ],
+  "web.settings.signInAgain.action": [
+    {
+      "type": 0,
+      "value": "重新登入"
+    }
+  ],
+  "web.settings.signInAgain.manageDevices": [
+    {
+      "type": 0,
+      "value": "重新登入以管理你的裝置"
+    }
+  ],
+  "web.settings.signInAgain.useApp": [
+    {
+      "type": 0,
+      "value": "請在 Silo App 中管理你的裝置。"
     }
   ],
   "web.settings.signedInSessions.loadFailed": [

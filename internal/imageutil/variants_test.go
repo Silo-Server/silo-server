@@ -8,7 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/h2non/bimg"
@@ -164,4 +166,43 @@ func TestDecodeBudgetBoundsSourcesInFlight(t *testing.T) {
 	if _, err := GenerateVariants(data, []int{300}); err != nil {
 		t.Fatalf("after release: %v", err)
 	}
+}
+
+// TestDecodeBudgetReturnsFreedMemoryOnceIdle pins when malloc's free pages go
+// back to the operating system: only once the budget has stayed empty for a
+// whole idleReleaseDelay. A reservation taken during the delay, whether still
+// held or already released, cancels that release.
+func TestDecodeBudgetReturnsFreedMemoryOnceIdle(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		budget := newDecodeBudget(int64(1) << 30)
+		var frees atomic.Int32
+		budget.freeMemory = func() { frees.Add(1) }
+		reserve := func() func() {
+			t.Helper()
+			release, err := budget.reserve(bimg.ImageSize{Width: 10, Height: 10})
+			if err != nil {
+				t.Fatal(err)
+			}
+			return release
+		}
+		wait := func(d time.Duration, wantFrees int32, when string) {
+			t.Helper()
+			time.Sleep(d) //nolint:forbidigo // synctest fake clock: sleeping advances time; nothing waits on the real clock.
+			synctest.Wait()
+			if got := frees.Load(); got != wantFrees {
+				t.Fatalf("%s: %d frees, want %d", when, got, wantFrees)
+			}
+		}
+
+		reserve()()
+		wait(time.Second, 0, "before the delay ended")
+		held := reserve()
+		wait(idleReleaseDelay, 0, "a decode held the budget when the delay ended")
+
+		held()
+		wait(idleReleaseDelay/2, 0, "halfway through the delay")
+		reserve()()
+		wait(idleReleaseDelay/2+time.Second, 0, "a decode ran during the delay")
+		wait(idleReleaseDelay/2, 1, "the budget stayed empty for the whole delay")
+	})
 }

@@ -543,13 +543,19 @@ func (s *RuntimeConfigStore) UpsertAuthBinding(ctx context.Context, binding Auth
 			}
 		}
 
+		guard, err := beginSignInGuard(ctx, tx)
+		if err != nil {
+			return err
+		}
 		if err := upsertAuthBindingInTx(ctx, tx, binding); err != nil {
 			return err
 		}
 		if binding.Enabled {
-			return validateInstallationAuthBindings(ctx, tx, binding.InstallationID)
+			if err := validateInstallationAuthBindings(ctx, tx, binding.InstallationID); err != nil {
+				return err
+			}
 		}
-		return nil
+		return guard.finish(ctx, tx)
 
 	})
 }

@@ -327,6 +327,10 @@ const (
 	PasswordMinLengthCeiling = 72
 )
 
+// ServerPublicURLSettingKey is the server's public URL. OAuth sign-in needs
+// it, so turning local password sign-in off reads it too.
+const ServerPublicURLSettingKey = "server.public_url"
+
 // External sign-in settings (docs/architecture/external-sign-in.md).
 const (
 	// AuthLocalPasswordLoginSettingKey turns local password sign-in on or off

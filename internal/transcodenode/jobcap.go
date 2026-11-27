@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -76,11 +77,13 @@ func (s *Server) admitJob() (*jobSlot, bool) {
 	return &jobSlot{s: s}, true
 }
 
-// countJob counts a job in activeJobs: its admitted slot when it was new
-// work, or none for work the node already held, which the cap never refuses.
-func (s *Server) countJob(slot *jobSlot) {
+// countJob counts a job of kind in activeJobs: its admitted slot when it was
+// new work, or none for work the node already held, which the cap never
+// refuses. The job ends with endJob of the same kind.
+func (s *Server) countJob(slot *jobSlot, kind nodepool.JobKind) {
 	if slot == nil {
 		s.activeJobs.Add(1)
+		s.jobKinds.add(kind, 1)
 		return
 	}
 	s.admission.Lock()
@@ -91,6 +94,50 @@ func (s *Server) countJob(slot *jobSlot) {
 	slot.done = true
 	s.admitted--
 	s.activeJobs.Add(1)
+	s.jobKinds.add(kind, 1)
+}
+
+// endJob uncounts a job countJob counted.
+func (s *Server) endJob(kind nodepool.JobKind) {
+	s.activeJobs.Add(-1)
+	s.jobKinds.add(kind, -1)
+}
+
+// jobKindCounts breaks activeJobs down by nodepool.JobKind for the health
+// report, which the core's planner balances each kind on. It moves with
+// activeJobs in countJob and endJob. The zero value is ready to use.
+type jobKindCounts struct {
+	mu   sync.Mutex
+	jobs map[nodepool.JobKind]int
+}
+
+func (c *jobKindCounts) add(kind nodepool.JobKind, delta int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.jobs == nil {
+		c.jobs = make(map[nodepool.JobKind]int, len(nodepool.JobKinds))
+	}
+	c.jobs[kind] += delta
+}
+
+// snapshot names every kind, idle ones as zero, so the core can tell a node
+// with no jobs of a kind from a node that cannot say.
+func (c *jobKindCounts) snapshot() map[nodepool.JobKind]int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make(map[nodepool.JobKind]int, len(nodepool.JobKinds))
+	for _, kind := range nodepool.JobKinds {
+		out[kind] = max(c.jobs[kind], 0)
+	}
+	return out
+}
+
+// sessionJobKind classifies an HLS transcode session from what its recipe
+// re-encodes. A session's target codecs never change after it starts, so its
+// start and its retirement name the same kind.
+func sessionJobKind(session *playback.TranscodeSession) nodepool.JobKind {
+	opts := session.Opts()
+	return nodepool.CodecJobKind(opts.TargetCodecVideo, opts.TargetCodecAudio)
 }
 
 // release gives back a slot that was never counted.

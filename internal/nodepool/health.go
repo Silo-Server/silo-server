@@ -23,7 +23,12 @@ import (
 type healthResponse struct {
 	Status     string `json:"status"`
 	ActiveJobs int    `json:"active_jobs"`
-	EgressKbps int    `json:"egress_kbps"`
+	// ActiveJobsByKind breaks ActiveJobs down by JobKind. It is stored with
+	// the resource sample (see marshalLastStats), so every API server's
+	// planner reads it from the node row without a column of its own. A node
+	// that predates job kinds omits it.
+	ActiveJobsByKind json.RawMessage `json:"active_jobs_by_kind"`
+	EgressKbps       int             `json:"egress_kbps"`
 	// CapabilitiesHash identifies the node's current hardware capability
 	// snapshot. A node that predates capability snapshots reports none, which
 	// is how the sweep tells "nothing changed" from "cannot say".
@@ -94,8 +99,9 @@ const maxHealthResponseBytes = 256 << 10
 
 // maxLastStatsBytes bounds the resource blob that is persisted and served.
 //
-// Past this, the stats are dropped and the health verdict is kept: whether a
-// node is alive routes streams, while its dashboard numbers do not, and an
+// Past this, the stats are dropped and the health verdict and the job
+// breakdown are kept: whether a node is alive and how many jobs of each kind it
+// runs route streams, while its dashboard numbers do not, and an
 // oversized blob would otherwise be rewritten into a jsonb column every sweep
 // and echoed to every admin listing nodes.
 const maxLastStatsBytes = 32 << 10
@@ -225,7 +231,8 @@ func marshalLastStats(ctx context.Context, n *Node, hr healthResponse) []byte {
 	sampledAt := trimJSONNull(hr.SampledAt)
 	build := trimJSONNull(hr.Build)
 	artifacts := trimJSONNull(hr.Artifacts)
-	if system == nil && gpu == nil && attribution == nil && build == nil && artifacts == nil {
+	jobsByKind := trimJSONNull(hr.ActiveJobsByKind)
+	if system == nil && gpu == nil && attribution == nil && build == nil && artifacts == nil && jobsByKind == nil {
 		return nil
 	}
 	payload := struct {
@@ -235,7 +242,10 @@ func marshalLastStats(ctx context.Context, n *Node, hr healthResponse) []byte {
 		SampledAt   json.RawMessage `json:"sampled_at,omitempty"`
 		Build       json.RawMessage `json:"build,omitempty"`
 		Artifacts   json.RawMessage `json:"artifacts,omitempty"`
-	}{System: system, GPU: gpu, Attribution: attribution, SampledAt: sampledAt, Build: build, Artifacts: artifacts}
+		// ActiveJobsByKind is read back by reportedJobsByKind: unlike the
+		// rest of the sample, transcode selection routes on it.
+		ActiveJobsByKind json.RawMessage `json:"active_jobs_by_kind,omitempty"`
+	}{System: system, GPU: gpu, Attribution: attribution, SampledAt: sampledAt, Build: build, Artifacts: artifacts, ActiveJobsByKind: jobsByKind}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
 		return nil
@@ -244,6 +254,23 @@ func marshalLastStats(ctx context.Context, n *Node, hr healthResponse) []byte {
 		slog.WarnContext(ctx, "node resource sample too large to store", "component", "nodepool",
 			"id", n.ID, "name", n.Name, "url", n.URL,
 			"bytes", len(encoded), "limit_bytes", maxLastStatsBytes)
+		return routingStatsOnly(jobsByKind)
+	}
+	return encoded
+}
+
+// routingStatsOnly keeps the part of an oversized sample that routes work: the
+// job breakdown is a few dozen bytes, and dropping it with the dashboard
+// numbers would return every placement this node is eligible for to total
+// jobs. nil when there is none, or when it is itself too large.
+func routingStatsOnly(jobsByKind json.RawMessage) []byte {
+	if jobsByKind == nil {
+		return nil
+	}
+	encoded, err := json.Marshal(struct {
+		ActiveJobsByKind json.RawMessage `json:"active_jobs_by_kind"`
+	}{jobsByKind})
+	if err != nil || len(encoded) > maxLastStatsBytes {
 		return nil
 	}
 	return encoded

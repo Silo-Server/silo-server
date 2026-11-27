@@ -692,6 +692,51 @@ most every five minutes, so this can be older than `last_health_check`. Omitted 
 node predating storage reporting. `GET /api/v2/admin/downloads/storage` presents it
 with the server's own measurement.
 
+`last_stats.active_jobs_by_kind` breaks the transcode node's `active_jobs` down
+by kind, as an object naming every kind with its count, idle kinds as `0`:
+
+| Kind | Job |
+|---|---|
+| `video_transcode` | Re-encodes the video stream (tone mapping and subtitle burn-in included), whatever happens to the audio. |
+| `audio_transcode` | Copies the video stream, or has none, and re-encodes the audio: a remux with audio conversion, or a theme conversion. |
+| `remux` | Copies every stream into a new container. |
+| `trickplay` | Extracts trickplay thumbnails. |
+
+A prepared download is classed by the same work: one that re-encodes video is a
+`video_transcode`, because it competes with playback encodes for the same GPU.
+
+It comes from the same health response as `active_jobs`, though the node reads
+the two separately, so their sums can differ briefly while a job starts or
+stops. Node selection reads it: see "Job kind balancing" below. Omitted on a
+node predating job kinds.
+
+### Job kind balancing
+
+The kinds cost very different amounts: a video encode holds a GPU encoder for
+the length of a stream, while a remux that copies every stream costs a little
+disk and network. Balancing the job total alone can leave one node's GPU
+saturated with encodes while another runs only remuxes, so transcode selection
+balances each kind on its own. Playback, trickplay and prepared-download
+placements name the kind of job they start, and among eligible transcode nodes
+the one with the fewest effective jobs **of that kind** wins. Effective means
+the node's last reported count plus jobs this API server placed there since that
+report. Nodes level on the kind are separated by their effective job total.
+Playback placements then apply the shared-GPU tie-breaker; trickplay and
+prepared-download reservations have none. The soft affinity that keeps a
+playback session on its current node compares the kind's count: a session moves
+only to a node with at least two fewer jobs of its kind.
+
+The job total still decides `max_jobs`. Kind balancing changes which node
+takes work, never how much work a node may take.
+
+When any eligible candidate has no stored `active_jobs_by_kind`, that placement
+uses the job total for every candidate. A node that cannot say must not look
+idle next to nodes that can. That happens during a rolling upgrade from a build
+that predates the field. A sample over the 32 KiB limit (the "node resource
+sample too large to store" warning) is dropped except for
+`active_jobs_by_kind`, so `last_stats` holds only that field until the sample
+fits again, and balancing continues.
+
 ### Scratch admission
 
 A transcode writes HLS segments to its node's scratch volume for the whole life
@@ -704,7 +749,7 @@ jobs.
 The exclusion is soft in two directions:
 
 - If it would leave no eligible candidate at all, it is ignored and the ordinary
-  least-jobs selection stands. Degraded service beats no service, and 95% was
+  selection stands. Degraded service beats no service, and 95% was
   not chosen to be a kill switch for a whole cluster.
 - A node whose fill cannot be read is never excluded: no sample, no `scratch`
   entry (a node predating the flag), an unmeasurable path, or numbers the node
@@ -714,7 +759,8 @@ The exclusion is soft in two directions:
 Each transition into pressure is logged once per node (`component=nodepool`,
 "scratch volume nearly full"), not once per session start.
 
-Nothing else routes on `last_stats`, and the guard applies to playback and
+Apart from `active_jobs_by_kind` (see "Job kind balancing" above), nothing else
+routes on `last_stats`, and the guard applies to playback and
 local-egress transcode selection only — not to proxy selection, and not to the
 non-streaming transcode reservations used by prepared downloads.
 
@@ -863,7 +909,8 @@ Caveats on what a key can prove:
   the server, and stays a matter for how the host is partitioned.
 
 Node selection uses the same keys as a tie-breaker: among transcode nodes that
-are otherwise level on effective job count, the one whose physical GPU group —
+are otherwise level on effective job counts (see "Job kind balancing" above),
+the one whose physical GPU group —
 itself plus every pooled transcode node sharing a key with it — carries the
 fewest jobs wins. It never overrides the job count itself or the soft affinity
 that keeps a session on its current node, and it does not apply to proxy
@@ -2532,7 +2579,7 @@ summary. Run credentials and private dispatch metadata never appear in these res
 
 A server address the user supplied must be on the public internet unless the
 account is an admin or an admin turned on `media_servers.allow_private_destinations`.
-That covers a typed Jellyfin or Plex URL and the server addresses Emby Connect or
+That covers a typed Emby, Jellyfin, or Plex URL and the server addresses Emby Connect or
 plex.tv list for the account; servers an admin configured as import sources are
 exempt. A refused address returns `422 validation_failed` whose detail says the
 address is on the server's local network. Cloud metadata, link-local, and other blocked addresses are refused
@@ -2549,9 +2596,16 @@ because each probe carries the Plex token. Addresses the account may not reach u
 the policy above are skipped, and the run is refused only when none remain; the eight
 raced are the first that remain. The Plex token is removed from any redirect that
 leaves the host it was sent to or downgrades from HTTPS to HTTP.
-`GET /api/v2/history-imports/capability` reports `plex_connection_fallback` and
-`max_plex_connections`. A server without it rejects `plex_base_urls` as an unknown
-member, so check the capability before sending the field.
+`GET /api/v2/history-imports/capability` reports `plex_connection_fallback`,
+`max_plex_connections`, and `emby_custom_server`. A server without those capabilities
+rejects `plex_base_urls` or `emby_base_url` as unknown members, so check the capability
+before sending them.
+
+Direct Emby imports accept `emby_base_url` with `username` and an optional `password`
+on `POST /api/v2/history-imports/runs`, mutually exclusive with `connect_session_id`
+and `source_id`, and run with `connection_mode` set to `"custom"`. Non-JSON or
+incomplete `2xx` sign-in responses from an Emby or Jellyfin server return
+`503 dependency_unavailable` with `Retry-After: 30` rather than an internal error.
 
 New queued personal imports survive server restart. Source changes invalidate captured
 configuration without retargeting the import; stale running executions fail without replay.

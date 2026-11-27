@@ -17,6 +17,7 @@ export function LoginSessionRow({
   session,
   onSignOut,
   keyMark = "hidden",
+  reduced = false,
 }: {
   session: LoginSession;
   /**
@@ -26,6 +27,8 @@ export function LoginSessionRow({
    */
   keyMark?: "link" | "text" | "hidden";
   onSignOut?: (session: LoginSession) => void;
+  /** The server sent only this session's id; its times are the caller's own. */
+  reduced?: boolean;
 }) {
   const t = useT();
   const [expanded, setExpanded] = useState(false);
@@ -54,23 +57,25 @@ export function LoginSessionRow({
               <Badge variant="outline">{t("web.settings.sessions.row.thisBrowser")}</Badge>
             )}
           </div>
-          <p className="text-muted-foreground mt-1 text-xs">
-            {t("web.settings.sessions.row.summary", {
-              last_seen: lastSeen,
-              signed_in: formatDateTime(session.created_at, { seconds: false }),
-              status: (chunks) => (
-                <span
-                  className={
-                    sessionActive(session.last_seen_at)
-                      ? "text-emerald-600 dark:text-emerald-400"
-                      : undefined
-                  }
-                >
-                  {chunks}
-                </span>
-              ),
-            })}
-          </p>
+          {!reduced && (
+            <p className="text-muted-foreground mt-1 text-xs">
+              {t("web.settings.sessions.row.summary", {
+                last_seen: lastSeen,
+                signed_in: formatDateTime(session.created_at, { seconds: false }),
+                status: (chunks) => (
+                  <span
+                    className={
+                      sessionActive(session.last_seen_at)
+                        ? "text-emerald-600 dark:text-emerald-400"
+                        : undefined
+                    }
+                  >
+                    {chunks}
+                  </span>
+                ),
+              })}
+            </p>
+          )}
           {session.device_key_id && keyMark !== "hidden" && (
             // Signing this session out doesn't stop it: the link goes to the
             // device in the Silo app devices list on the same page.
@@ -112,25 +117,27 @@ export function LoginSessionRow({
                 : t("common.signOut")}
             </Button>
           )}
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            className={cn(WRAPPING_BUTTON, "text-muted-foreground hover:text-foreground")}
-            aria-label={t("web.settings.sessions.row.detailsFor", { device: device.name })}
-            aria-expanded={expanded}
-            aria-controls={detailsId}
-            onClick={() => setExpanded(!expanded)}
-          >
-            {t("web.settings.sessions.row.details")}
-            <ChevronDown
-              className={cn("transition-transform", expanded && "rotate-180")}
-              aria-hidden="true"
-            />
-          </Button>
+          {!reduced && (
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className={cn(WRAPPING_BUTTON, "text-muted-foreground hover:text-foreground")}
+              aria-label={t("web.settings.sessions.row.detailsFor", { device: device.name })}
+              aria-expanded={expanded}
+              aria-controls={detailsId}
+              onClick={() => setExpanded(!expanded)}
+            >
+              {t("web.settings.sessions.row.details")}
+              <ChevronDown
+                className={cn("transition-transform", expanded && "rotate-180")}
+                aria-hidden="true"
+              />
+            </Button>
+          )}
         </div>
       </div>
-      {expanded && (
+      {expanded && !reduced && (
         <dl
           id={detailsId}
           className="border-border mt-3 grid grid-cols-1 gap-3 border-t pt-3 text-xs sm:grid-cols-2 sm:ps-12"

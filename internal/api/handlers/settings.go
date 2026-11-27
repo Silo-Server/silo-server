@@ -466,10 +466,11 @@ func (h *SettingsHandler) EffectiveSubtitleAppearance(ctx context.Context, userI
 	}
 	h.registerRequestDevice(ctx, store, profileID, device)
 
+	// device_id names the device an override belongs to, so it is set only
+	// when one is found below, as the v2 schema documents.
 	view := EffectiveSubtitleAppearanceView{
 		Key:            SubtitleAppearanceSettingKey,
 		ProfileID:      profileID,
-		DeviceID:       device.DeviceID,
 		DeviceName:     device.DeviceName,
 		DevicePlatform: device.DevicePlatform,
 	}
@@ -497,6 +498,7 @@ func (h *SettingsHandler) EffectiveSubtitleAppearance(ctx context.Context, userI
 		view.DeviceValue = compactSettingJSON(deviceRow.Value)
 		view.EffectiveValue = view.DeviceValue
 		view.HasDeviceOverride = true
+		view.DeviceID = device.DeviceID
 		view.UpdatedAt = deviceRow.UpdatedAt
 		// The device name and platform live on the row the companion PUT
 		// wrote, so a GET that declares only the device id still reports them.

@@ -532,7 +532,7 @@ func buildPrepareFileArgs(opts TranscodeOpts, outputPath string) []string {
 	isVideoCopy := opts.TargetCodecVideo == "copy"
 	isAudioCopy := opts.TargetCodecAudio == "copy"
 	if opts.PreparedTracks != nil {
-		isAudioCopy = opts.PreparedTracks.allAudioCopied()
+		isAudioCopy = opts.PreparedTracks.AllAudioCopied()
 	}
 
 	args := []string{"-nostdin", "-hide_banner", "-loglevel", "error"}

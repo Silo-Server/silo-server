@@ -81,7 +81,7 @@ func TestJobCapAdmissionIsRaceFree(t *testing.T) {
 	if len(admitted) != 1 {
 		t.Fatalf("%d starts admitted at the cap less one, want 1", len(admitted))
 	}
-	s.countJob(admitted[0])
+	s.countJob(admitted[0], nodepool.JobKindRemux)
 	admitted[0].release()
 	if s.activeJobs.Load() != 3 || s.admitted != 0 {
 		t.Fatalf("after counting the slot: active %d, admitted %d", s.activeJobs.Load(), s.admitted)

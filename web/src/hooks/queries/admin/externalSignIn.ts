@@ -1,7 +1,7 @@
 // Admin side of external sign-in (OIDC and LDAP): the Sign-in settings page
 // and the Sign-in tab of an account. The rules are in
 // docs/architecture/external-sign-in.md; the operations in docs/auth-api.md.
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
   captureProfileRequestContext,
@@ -35,8 +35,15 @@ export type AdminUserIdentityInput = V2Body<"POST /api/v2/admin/users/{id}/ident
 export type SignInBindingWrite =
   V2Body<"PUT /api/v2/admin/plugins/installations/{id}/auth-binding">;
 
+export type LocalPasswordOffGroup = "email_match" | "admin_link";
+export type LocalPasswordOffAccounts =
+  V2Result<"GET /api/v2/admin/sign-in/local-password-off/accounts">;
+
 export const externalSignInKeys = {
   capabilities: () => ["admin", "external-sign-in", "capabilities"] as const,
+  // Under the admin users prefix, so an account write refreshes it.
+  localPasswordOff: (group: LocalPasswordOffGroup, emailMatch: boolean, limit: number) =>
+    [...adminKeys.users(), "local-password-off", group, emailMatch, limit] as const,
   // Under the admin users prefix, so every account write (a password turns
   // local sign-in back on) refreshes the identities beside it.
   identities: (scope: string, userId: number) =>
@@ -49,6 +56,37 @@ export function useExternalSignInCapabilities() {
     queryKey: externalSignInKeys.capabilities(),
     queryFn: () => v2("GET /api/v2/auth/external-sign-in/capabilities"),
     staleTime: ADMIN_STALE_TIME,
+    retry: false,
+  });
+}
+
+/**
+ * The accounts of one group that lose their way in when password sign-in is
+ * turned off, a page at a time, with both group totals on every page.
+ * emailMatch is the page's email matching value, saved or staged, so the
+ * answer fits the edit; it is part of the key.
+ */
+export function useLocalPasswordOffAccounts(
+  group: LocalPasswordOffGroup,
+  emailMatch: boolean,
+  limit: number,
+  enabled: boolean,
+) {
+  return useInfiniteQuery({
+    queryKey: externalSignInKeys.localPasswordOff(group, emailMatch, limit),
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam }) =>
+      v2("GET /api/v2/admin/sign-in/local-password-off/accounts", {
+        query: {
+          group,
+          email_auto_match: emailMatch ? "true" : "false",
+          limit,
+          ...(pageParam ? { cursor: pageParam } : {}),
+        },
+      }),
+    getNextPageParam: (page) => (page.page?.has_more ? page.page.next_cursor : undefined),
+    enabled,
+    staleTime: 0,
     retry: false,
   });
 }

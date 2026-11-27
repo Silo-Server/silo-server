@@ -227,7 +227,7 @@ describe("routing warnings", () => {
     );
     expect(warnings.get("a")).toBeUndefined();
     expect(warnings.get("b")?.map((w) => w.text)).toEqual([
-      "Never used: “Anime” above catches every request this rule would.",
+      "Never used: “Anime” above already matches all of these requests.",
       "Radarr is a Radarr server; series need Sonarr.",
     ]);
     expect(warnings.get("b")?.[0]?.fix).toEqual({ kind: "move-above", targetId: "a" });
@@ -236,7 +236,7 @@ describe("routing warnings", () => {
   it("says Everything else makes no 4K copies while every request asks for one", () => {
     const warnings = routingWarnings(input({ forceDual: true }));
     expect(warnings.get("fallback-series")?.[0]).toMatchObject({
-      text: "“Also request a 4K version of every title” is on, but Everything else doesn't send 4K versions. Titles no rule sends to a 4K server get HD only.",
+      text: "“Also request a 4K version of every title” is on, but “Everything else” has no 4K server. Titles that no rule routes to a 4K server will get HD only.",
       fix: { kind: "edit-fallback" },
     });
     expect(
@@ -314,7 +314,7 @@ describe("request servers", () => {
           language: "en",
           forceDual: false,
         }).get(fallback("k1").id) ?? []
-      ).some((warning) => warning.text === "Local needs setup.");
+      ).some((warning) => warning.text === "Local needs setup before it can receive requests.");
     expect(warns([routerInstallation()])).toBe(true);
     expect(warns([routerInstallation({ api_key_optional: true, base_url_optional: false })])).toBe(
       false,
