@@ -255,4 +255,4 @@ replace github.com/quic-go/quic-go => github.com/darthShadow/quic-go v0.64.1-shu
 
 replace tailscale.com => github.com/darthShadow/tailscale v1.104.2-shunpike.2
 
-replace github.com/Silo-Server/silo-plugin-sdk => github.com/Rhainland/silo-plugin-sdk v0.10.1-0.20261126225425-4b90b42eaf6e
+replace github.com/Silo-Server/silo-plugin-sdk => github.com/Rhainland/silo-plugin-sdk v0.10.1-0.20261127135000-6835c0926dd6
