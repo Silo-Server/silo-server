@@ -1,5 +1,5 @@
 {
-  "revision": "864a7643be76d3fb69eabd0c2cc2df6b50a2fba50ddfc4e5e34acf5539d66b83",
+  "revision": "ac14e8f809bd20e1630a475ca1f894d129553e44c87dbf92610d8dd101504ef1",
   "state": "available",
   "available": true,
   "identities": true,
@@ -11,5 +11,6 @@
   "credentials_linking": true,
   "network_sign_in": true,
   "local_password_off_accounts": true,
+  "local_password_off_blocking": true,
   "network_link_keeps_password": true
 }

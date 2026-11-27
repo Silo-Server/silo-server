@@ -30,6 +30,8 @@ const REASON_TEXT: Partial<Record<Account["reason"], MessageKey>> = {
   administrator: "web.admin.settings.signIn.passwordsOff.reason.administrator",
   no_email: "web.admin.settings.signIn.passwordsOff.reason.noEmail",
   email_match_off: "web.admin.settings.signIn.passwordsOff.reason.emailMatchOff",
+  keys_only: "web.admin.settings.signIn.passwordsOff.reason.keysOnly",
+  no_way_in: "web.admin.settings.signIn.passwordsOff.reason.noWayIn",
 };
 
 const usersLinkClass =
@@ -75,7 +77,12 @@ function groupState(query: GroupQuery) {
  * Asks before password sign-in is turned off, naming who loses their way in:
  * the accounts email matching connects at their first provider sign-in, and
  * the ones nothing connects until an administrator links them
- * (listAdminLocalPasswordOffAccounts).
+ * (listAdminLocalPasswordOffAccounts). Accounts the change would leave with
+ * only their Silo app keys, or no way in, come first: the server refuses the
+ * change while there are any (the blocking group, from the same query), so
+ * the confirm button waits until there are none. Their count rides on every
+ * page of the other two groups, so their list is fetched only when it is
+ * not zero.
  */
 export function LocalPasswordOffDialog({
   open,
@@ -101,13 +108,24 @@ export function LocalPasswordOffDialog({
   );
   const matched = groupState(matchedQuery);
   const unmatched = groupState(unmatchedQuery);
-  const loading = matched.loading || unmatched.loading;
-  const failed = matched.failed || unmatched.failed;
-  // Each group's count comes from its own response: the two are answered at
-  // different moments, so one's totals can be older than the other's list.
+  // The blocking count from the newest of the other two responses.
+  const announcedBlocking = (unmatched.totals ?? matched.totals)?.blocking ?? 0;
+  const blockingQuery = useLocalPasswordOffAccounts(
+    "blocking",
+    emailMatch,
+    LOCAL_PASSWORD_OFF_PAGE,
+    open && announcedBlocking > 0,
+  );
+  const blocking = groupState(blockingQuery);
+  const blockingWanted = announcedBlocking > 0;
+  const loading = matched.loading || unmatched.loading || (blockingWanted && blocking.loading);
+  const failed = matched.failed || unmatched.failed || (blockingWanted && blocking.failed);
+  // Each group's count comes from its own response: the groups are answered at
+  // different moments, so one's totals can be older than another's list.
   const matchedTotal = matched.totals?.email_match;
   const unmatchedTotal = unmatched.totals?.admin_link;
-  const nobody = matchedTotal === 0 && unmatchedTotal === 0;
+  const blockingTotal = blockingWanted ? (blocking.totals?.blocking ?? announcedBlocking) : 0;
+  const nobody = matchedTotal === 0 && unmatchedTotal === 0 && blockingTotal === 0;
 
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
@@ -137,6 +155,18 @@ export function LocalPasswordOffDialog({
             <p>{t("web.admin.settings.signIn.passwordsOff.nobodyAffected")}</p>
           ) : (
             <>
+              {blockingTotal ? (
+                <AccountGroup
+                  heading={t("web.admin.settings.signIn.passwordsOff.blockedHeading", {
+                    count: blockingTotal,
+                  })}
+                  notes={[t("web.admin.settings.signIn.passwordsOff.blockedExplain", { provider })]}
+                  accounts={blocking.accounts}
+                  latestTotal={blockingTotal}
+                  query={blockingQuery}
+                  showReason
+                />
+              ) : null}
               {matchedTotal ? (
                 <AccountGroup
                   heading={t("web.admin.settings.signIn.passwordsOff.matchHeading", {
@@ -183,7 +213,11 @@ export function LocalPasswordOffDialog({
         </p>
         <AlertDialogFooter>
           <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
-          <AlertDialogAction variant="destructive" onClick={onConfirm} disabled={loading}>
+          <AlertDialogAction
+            variant="destructive"
+            onClick={onConfirm}
+            disabled={loading || blockingTotal > 0}
+          >
             {t("web.admin.settings.signIn.passwordsOff.confirm")}
           </AlertDialogAction>
         </AlertDialogFooter>

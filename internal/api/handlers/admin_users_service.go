@@ -283,6 +283,9 @@ func (h *AdminHandler) UpdateAdminAccount(ctx context.Context, id int, revision,
 		if err := auth.EnsureBreakGlassAfterAdminChange(ctx, tx, current, &input); err != nil {
 			return false, breakGlassError(err)
 		}
+		if err := auth.EnsureKeysNotOnlyWayInAfterAdminChange(ctx, tx, current, &input); err != nil {
+			return false, breakGlassError(err)
+		}
 		if input.AccessGroupID.Set {
 			if err := h.validateAdminGroup(ctx, tx, input.AccessGroupID.Value, role); err != nil {
 				return false, err
@@ -354,10 +357,18 @@ func enableLocalLoginWithPassword(input *models.UpdateUserInput) {
 	}
 }
 
-// breakGlassError renders the break-glass requirement as the conflict it is.
+// breakGlassError renders the break-glass requirement, and a change that
+// would leave accounts with keys as their only way in or with none
+// (auth.AccountsAtRiskError, which names them), as the conflicts they are.
 func breakGlassError(err error) error {
 	if errors.Is(err, auth.ErrBreakGlassRequired) {
 		return apiError(http.StatusConflict, "break_glass_required", "Local password sign-in is off, and this is the last break-glass admin that can still sign in with a password")
+	}
+	if risk, ok := errors.AsType[*auth.AccountsAtRiskError](err); ok {
+		return apiError(http.StatusConflict, "last_sign_in_method", risk.Detail())
+	}
+	if errors.Is(err, auth.ErrKeysOnlyWayIn) {
+		return apiError(http.StatusConflict, "last_sign_in_method", "Local password sign-in is off, and this change would leave the account with Silo app keys as its only way to sign in. Give it a password or link a sign-in provider account for it first.")
 	}
 	return err
 }

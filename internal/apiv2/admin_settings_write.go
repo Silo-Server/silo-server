@@ -104,7 +104,11 @@ func registerAdminSettingsWrite(reg *Registry) {
 		o.MaxBodyBytes = 1 << 20
 		// Turning auth.local_password_login off without a usable
 		// break-glass admin, or without a sign-in provider, is refused.
-		o.Description = "Turning auth.local_password_login off while no enabled break-glass admin can sign in with a password is 409 break_glass_required, and while no OIDC or LDAP provider people can sign in with is on it is 409 sign_in_provider_required (an OpenID Connect provider counts only with server.public_url set, so clearing server.public_url while auth.local_password_login is off and it is the only provider is refused the same way). Otherwise the change applies at once; listAdminLocalPasswordOffAccounts tells beforehand which accounts lose their way in."
+		o.Description = "Turning auth.local_password_login off while no enabled break-glass admin can sign in with a password is 409 break_glass_required, and while no OIDC or LDAP provider people can sign in with is on it is 409 sign_in_provider_required (an OpenID Connect provider counts only with server.public_url set, so clearing server.public_url while auth.local_password_login is off and it is the only provider is refused the same way). Otherwise the change applies at once; listAdminLocalPasswordOffAccounts tells beforehand which accounts lose their way in. " +
+			"Turning it off while it would leave an account with Silo app keys as its only way in, or with none, is 409 last_sign_in_method, whose detail names the accounts (the blocking group of listAdminLocalPasswordOffAccounts lists them, from the same query). " +
+			"Turning app keys off (auth.app_key_sign_in off, or demo.enabled on) while any account signs in only with its keys is 409 last_sign_in_method, naming them (listSignInAccountsAtRisk with app_keys_off); otherwise every login session a key opened ends in the same transaction as the write. " +
+			"Changing server.public_url while an account would lose the only sign-in provider it can use (an OAuth provider needs the address) and has no password that signs in is 409 last_sign_in_method, naming the accounts. " +
+			"While the Owner holds a live session a key opened, turning app keys off or demo mode on by anyone but the Owner is 403 permission_denied, the Owner refusal."
 		o.Errors = append(o.Errors, http.StatusConflict)
 		return o
 	}

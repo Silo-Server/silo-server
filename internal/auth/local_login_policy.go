@@ -246,7 +246,14 @@ func CheckLocalLoginSettingChange(ctx context.Context, db dbQuerier, before, aft
 			return ErrBreakGlassRequired
 		}
 	}
-	return requireSignInProvider(ctx, db, after.PublicURL)
+	if err := requireSignInProvider(ctx, db, after.PublicURL); err != nil || !turningOff {
+		return err
+	}
+	// Turning it off is also refused while it would leave an account with
+	// app keys as its only way in, or take away a last way in that is its
+	// keys (*AccountsAtRiskError, naming them), judged on the public URL the
+	// same write leaves.
+	return refuseAccountsAtRisk(ctx, db, ChangeLocalPasswordsOff, SignInSettings{localOn: false, publicURL: after.PublicURL})
 }
 
 // requireSignInProvider answers ErrSignInProviderRequired unless a provider
@@ -347,6 +354,10 @@ const (
 	// LocalPasswordOffAdminLink: nothing links the account until an
 	// administrator does.
 	LocalPasswordOffAdminLink = "admin_link"
+	// LocalPasswordOffBlocking: the account would be left with app keys as
+	// its only way in, or with no way in, so turning local passwords off is
+	// refused while it is listed (localPasswordsOffBlocksSQL).
+	LocalPasswordOffBlocking = "blocking"
 )
 
 // What decides an affected account's outcome (LocalPasswordOffAccount.Reason).
@@ -396,54 +407,52 @@ type LocalPasswordOffPage struct {
 	EmailAutoMatch  bool
 	EmailMatchTotal int
 	AdminLinkTotal  int
+	// BlockingTotal counts the blocking group: zero on a server whose
+	// accounts hold no app keys.
+	BlockingTotal int
 }
 
-// localPasswordOffSQL answers LocalPasswordOffAccounts in one query: $1 is
-// whether email matching is on, $2 whether the email_match group is asked
-// for, $3 and $4 the last row of the previous page, $5 the row limit, $6
-// the installations that can sign people in (signInProviders).
+// localPasswordOffSQL answers LocalPasswordOffAccounts in one query over
+// localPasswordOffAffectedSQL: $1 is whether email matching is on, $2 the
+// group asked for, $3 and $4 the last row of the previous page, $5 the row
+// limit, $6 the installations that can sign people in (signInProviders).
 func localPasswordOffSQL() string {
-	return `WITH affected AS (
-			SELECT u.id, COALESCE(u.username::text, '') AS username, COALESCE(u.email, '')::text AS email,
-				COALESCE(u.role, '') AS role, COALESCE(u.is_owner, false) AS is_owner,
-				CASE
-					WHEN ` + emailMatchCandidateSQL("u") + ` AND btrim(COALESCE(u.email, '')) <> '' THEN
-						CASE WHEN $1 THEN 'email_match' ELSE 'email_match_off' END
-					WHEN ` + emailMatchCandidateSQL("u") + ` THEN 'no_email'
-					ELSE 'administrator'
-				END AS reason
-			FROM users u
-			WHERE u.enabled AND ` + passwordSignsInSQL("u") + ` AND NOT u.break_glass
-				AND NOT EXISTS (SELECT 1 FROM plugin_auth_identities i WHERE i.user_id = u.id AND i.plugin_installation_id = ANY($6))),
+	return `WITH affected AS (` + localPasswordOffAffectedSQL("$1", "$6") + `),
+		grouped AS (
+			SELECT *, CASE
+				WHEN reason = 'email_match' THEN 'email_match'
+				WHEN reason IN ('keys_only', 'no_way_in') THEN 'blocking'
+				ELSE 'admin_link'
+			END AS grp
+			FROM affected),
 		totals AS (
-			SELECT COUNT(*) FILTER (WHERE reason = 'email_match') AS matched,
-				COUNT(*) FILTER (WHERE reason <> 'email_match') AS unmatched
-			FROM affected)
-		SELECT t.matched, t.unmatched, a.id, a.username, a.email, a.role, a.is_owner, a.reason
+			SELECT COUNT(*) FILTER (WHERE grp = 'email_match') AS matched,
+				COUNT(*) FILTER (WHERE grp = 'admin_link') AS unmatched,
+				COUNT(*) FILTER (WHERE grp = 'blocking') AS blocking
+			FROM grouped)
+		SELECT t.matched, t.unmatched, t.blocking, a.id, a.username, a.email, a.role, a.is_owner, a.reason
 		FROM totals t
 		LEFT JOIN LATERAL (
-			SELECT * FROM affected
-			WHERE (reason = 'email_match') = $2 AND (username, id) > ($3::text, $4::int)
+			SELECT * FROM grouped
+			WHERE grp = $2 AND (username, id) > ($3::text, $4::int)
 			ORDER BY username, id
 			LIMIT $5) a ON true
 		ORDER BY a.username, a.id`
 }
 
-// LocalPasswordOffAccounts answers who loses their way in when local
-// password sign-in is turned off: enabled accounts that can sign in with a
-// password today (passwordSignsInSQL), are not break-glass
-// (localPasswordPolicy exempts those), and have no linked identity at an
-// provider that can sign people in (signInProviders, the guard's rule: no
-// network provider, and an OpenID Connect one only with a public URL).
-// Each is grouped by whether email auto-match can link it at its first
-// provider sign-in,
-// with the rule account resolution applies (emailMatchCandidateSQL); a link
-// to a network provider elsewhere does not stop that match. Both group
-// totals and the page come from one query, ordered by username (empty for
-// an account without one), then ID.
+// LocalPasswordOffAccounts answers who turning local password sign-in off
+// affects, from localPasswordOffAffectedSQL: the accounts that lose password
+// sign-in (enabled, a password that signs in today, not break-glass, and no
+// linked identity at a provider that can sign people in, by the guard's
+// rule), grouped by whether email auto-match can link them at their first
+// provider sign-in (emailMatchCandidateSQL; a link to a network provider
+// elsewhere does not stop that match); and the accounts that block the
+// write, group blocking, because they would be left with app keys as their
+// only way in, or none. All three totals and the page come from one query,
+// ordered by username (empty for an account without one), then ID.
 func (s *IdentityService) LocalPasswordOffAccounts(ctx context.Context, q LocalPasswordOffQuery) (LocalPasswordOffPage, error) {
 	var page LocalPasswordOffPage
-	if q.Group != LocalPasswordOffEmailMatch && q.Group != LocalPasswordOffAdminLink {
+	if q.Group != LocalPasswordOffEmailMatch && q.Group != LocalPasswordOffAdminLink && q.Group != LocalPasswordOffBlocking {
 		return page, fmt.Errorf("unknown group %q", q.Group)
 	}
 	if q.Limit <= 0 {
@@ -469,7 +478,7 @@ func (s *IdentityService) LocalPasswordOffAccounts(ctx context.Context, q LocalP
 		return page, err
 	}
 	rows, err := s.pool.Query(ctx, localPasswordOffSQL(),
-		matching, q.Group == LocalPasswordOffEmailMatch, q.AfterUsername, q.AfterID, q.Limit+1, providers)
+		matching, q.Group, q.AfterUsername, q.AfterID, q.Limit+1, providers)
 	if err != nil {
 		return page, fmt.Errorf("listing accounts that lose password sign-in: %w", err)
 	}
@@ -480,7 +489,7 @@ func (s *IdentityService) LocalPasswordOffAccounts(ctx context.Context, q LocalP
 			username, email, role, reason *string
 			owner                         *bool
 		)
-		if err := rows.Scan(&page.EmailMatchTotal, &page.AdminLinkTotal, &id, &username, &email, &role, &owner, &reason); err != nil {
+		if err := rows.Scan(&page.EmailMatchTotal, &page.AdminLinkTotal, &page.BlockingTotal, &id, &username, &email, &role, &owner, &reason); err != nil {
 			return page, fmt.Errorf("listing accounts that lose password sign-in: %w", err)
 		}
 		if id == nil {

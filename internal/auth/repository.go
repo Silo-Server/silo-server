@@ -642,6 +642,10 @@ func updateCurrentRole(ctx context.Context, db interface {
 func endImpersonationsInvolving(ctx context.Context, db interface {
 	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
 }, id int) error {
+	if err := lockSessionsInOrder(ctx, db, `(s.impersonator_user_id = $1 OR (s.user_id = $1 AND s.impersonator_user_id IS NOT NULL))
+		AND s.revoked_at IS NULL`, id); err != nil {
+		return err
+	}
 	if _, err := db.Exec(ctx, `
 		UPDATE auth_sessions SET revoked_at = NOW()
 		WHERE (impersonator_user_id = $1 OR (user_id = $1 AND impersonator_user_id IS NOT NULL))
@@ -649,26 +653,6 @@ func endImpersonationsInvolving(ctx context.Context, db interface {
 		return fmt.Errorf("ending impersonation sessions after a role change: %w", err)
 	}
 	return nil
-}
-
-// revokeCredentialsIssuedToNonAdmin deletes the API keys, reset and sign-in
-// links of an account being made an admin or the Owner; revokes its app keys.
-// Other admins may have minted them and kept them; afterwards they would
-// carry authority that only the Owner grants. An admin's app keys also need
-// the admin's own approval, which keys enrolled before were never given.
-func revokeCredentialsIssuedToNonAdmin(ctx context.Context, db interface {
-	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
-}, id int) error {
-	if _, err := db.Exec(ctx, `DELETE FROM api_keys WHERE user_id = $1`, id); err != nil {
-		return fmt.Errorf("revoking the promoted account's API keys: %w", err)
-	}
-	if _, err := db.Exec(ctx, `DELETE FROM password_reset_tokens WHERE user_id = $1`, id); err != nil {
-		return fmt.Errorf("deleting the promoted account's reset links: %w", err)
-	}
-	if err := EndSignInLinksTx(ctx, db, id); err != nil {
-		return err
-	}
-	return revokeAccountKeysTx(ctx, db, id)
 }
 
 // CompareAndSwapPassword replaces the bcrypt hash only if it is still the one
@@ -687,6 +671,9 @@ func (r *UserRepository) CompareAndSwapPassword(ctx context.Context, id int, exp
 func (r *UserRepository) ReplaceTemporaryPassword(ctx context.Context, id int, expectedHash, newPassword, keepSessionID string) error {
 	return r.compareAndSwapPassword(ctx, id, expectedHash, newPassword, func(tx pgx.Tx) error {
 		if err := lockIdentitiesBeforeSessions(ctx, tx, id, false); err != nil {
+			return err
+		}
+		if err := lockSessionsInOrder(ctx, tx, `s.user_id = $1 AND s.id <> $2 AND s.revoked_at IS NULL`, id, keepSessionID); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `

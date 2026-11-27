@@ -92,12 +92,22 @@ type DevicePreapproval struct {
 }
 
 // A pre-approved request records the login session that approved it
-// (preapproved_session_id). The database withdraws it when that session is
-// revoked: the trigger auth_sessions_withdraw_preapprovals fires on every
-// write that revokes a login session, whichever code path or release made
-// it, so no revocation here has to remember to. Preapprove holds the
-// session's row lock while it inserts, and a revocation takes that lock
-// first, so neither can miss the other.
+// (preapproved_session_id), and stands only while that session is live: not
+// revoked and not expired (preapprovalLiveSQL). Collecting it reads the
+// approver's state (approverLive) and refuses it once the session has ended;
+// the lists and the cap leave it out. Ending a session therefore writes no
+// request row: every path that ends sessions touches session rows only, and
+// a request whose approver has ended stays approved in its row until
+// collection refuses it or the expired-request cleanup removes it.
+// Preapprove holds the session's row lock while it inserts, so a request is
+// never stored for a session already revoked.
+
+// preapprovalLiveSQL is the condition on a device_login_requests row r that
+// the session which approved it in advance is live. It reads the statement's
+// clock, not the transaction's start: a collect may wait on the account lock,
+// and an approver that expires meanwhile must read as ended.
+const preapprovalLiveSQL = `EXISTS (SELECT 1 FROM auth_sessions s WHERE s.id = r.preapproved_session_id
+	AND s.revoked_at IS NULL AND s.expires_at > clock_timestamp())`
 
 // Preapprove approves a sign-in in advance for the device holding the secret
 // behind input.Binding, as approverUserID's account. The request claims in
@@ -155,8 +165,9 @@ func (s *DeviceLoginService) Preapprove(ctx context.Context, input DevicePreappr
 		}
 		// The account lock taken above serializes this count with the insert.
 		var waiting int
-		if err := tx.QueryRow(ctx, `SELECT count(*) FROM device_login_requests
-			WHERE approved_by_user_id = $1 AND preapproved_at IS NOT NULL AND status = $2 AND expires_at > $3`,
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM device_login_requests r
+			WHERE approved_by_user_id = $1 AND preapproved_at IS NOT NULL AND status = $2 AND expires_at > $3
+				AND `+preapprovalLiveSQL,
 			approverUserID, DeviceLoginStatusApproved, now).Scan(&waiting); err != nil {
 			return fmt.Errorf("count device pre-approvals: %w", err)
 		}
@@ -231,8 +242,9 @@ func (s *DeviceLoginService) ListPreapprovals(ctx context.Context, userID int) (
 // first, with no check on the caller.
 func (s *DeviceLoginService) listPreapprovals(ctx context.Context, userID int) ([]DevicePreapproval, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, device_name, device_platform, created_at, expires_at FROM device_login_requests
+		SELECT id, device_name, device_platform, created_at, expires_at FROM device_login_requests r
 		WHERE approved_by_user_id = $1 AND preapproved_at IS NOT NULL AND status = $2 AND expires_at > $3
+			AND `+preapprovalLiveSQL+`
 		ORDER BY created_at DESC, id`, userID, DeviceLoginStatusApproved, s.now().UTC())
 	if err != nil {
 		return nil, fmt.Errorf("list device pre-approvals: %w", err)
@@ -370,19 +382,37 @@ func lockPreapprovalIdentity(ctx context.Context, tx pgx.Tx, preview *deviceLogi
 	return err
 }
 
+// approverLive reports whether the session that approved the request in
+// advance is live, with a plain read: collection already holds the account
+// row and the request row, and takes no lock on the approver's session.
+// A collect that read the approver live a moment before it ended still
+// succeeds, as an approval given a moment before a logout does.
+func approverLive(ctx context.Context, tx pgx.Tx, requestID string) (bool, error) {
+	var live bool
+	if err := tx.QueryRow(ctx, `SELECT `+preapprovalLiveSQL+` FROM device_login_requests r WHERE r.id = $1`, requestID).Scan(&live); err != nil {
+		return false, fmt.Errorf("reading the approving session: %w", err)
+	}
+	return live, nil
+}
+
 // preapprovedSession adjusts the session collecting a pre-approved request:
 // it records the polling device's address. The session keeps the approving
 // session's provider time, as every device sign-in does: redeeming is not a
 // provider sign-in, so it must not restart the limit that ends a chain the
 // provider can no longer vouch for. It reports denied, after withdrawing the
-// request in tx, when the request was approved through a provider identity
-// that is gone or refused since; identityErr is lockPreapprovalIdentity's
+// request in tx, when the session that approved it is no longer live, or the
+// request was approved through a provider identity that is gone or refused
+// since; identityErr is lockPreapprovalIdentity's
 // answer. It answers that denial once the withdrawal is committed, any other
 // identity failure (a disabled provider) as its error, and nil to go on
 // collecting.
 func preapprovedSession(ctx context.Context, tx pgx.Tx, record *deviceLoginRecord, identityErr error, session *models.AuthSession) (*DeviceLoginPollResult, error) {
+	live, err := approverLive(ctx, tx, record.ID)
+	if err != nil {
+		return nil, err
+	}
 	gone := record.ApprovedIdentityID == nil && record.ApprovedProviderSince != nil
-	if errors.Is(identityErr, ErrNotPermitted) || gone {
+	if !live || errors.Is(identityErr, ErrNotPermitted) || gone {
 		if _, err := tx.Exec(ctx, `UPDATE device_login_requests SET status = $2, denied_at = NOW(), updated_at = NOW() WHERE id = $1`,
 			record.ID, DeviceLoginStatusDenied); err != nil {
 			return nil, fmt.Errorf("withdraw device pre-approval: %w", err)

@@ -207,6 +207,9 @@ function localOffPage(query: LocalOffQuery) {
     totals: staleTotals[query.group] ?? {
       email_match: localOff.email_match!.total,
       admin_link: localOff.admin_link!.total,
+      // Only a test that sets the group answers it: a server whose accounts
+      // hold no app keys answers 0, as main's own cases stand for.
+      ...(localOff.blocking ? { blocking: localOff.blocking.total } : {}),
     },
   };
 }
@@ -1087,6 +1090,36 @@ describe("SignInSettings password sign-in", () => {
     expect(state.setValue).not.toHaveBeenCalled();
     await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
     expect(state.setValue).not.toHaveBeenCalled();
+  });
+
+  it("lists the accounts that block turning password sign-in off and won't confirm", async () => {
+    const user = userEvent.setup();
+    localOff = {
+      email_match: { items: [], total: 0 },
+      admin_link: { items: [], total: 0 },
+      blocking: { items: [account(5, "keys_only"), account(6, "no_way_in")], total: 2 },
+    };
+    mount();
+    await user.click(screen.getByRole("switch", { name: "Allow password sign-in" }));
+    const dialog = await screen.findByRole("alertdialog");
+    expect(
+      await within(dialog).findByText(
+        "2 accounts would be left with only Silo app keys, or no way in",
+      ),
+    ).toBeInTheDocument();
+    expect(within(dialog).getByText("Only app keys would sign it in")).toBeInTheDocument();
+    expect(within(dialog).getByText("Couldn't sign in at all")).toBeInTheDocument();
+    expect(
+      within(dialog).queryByText("Every account can still sign in after this."),
+    ).not.toBeInTheDocument();
+    expect(
+      within(dialog).getByRole("button", { name: "Turn off password sign-in" }),
+    ).toBeDisabled();
+    expect(
+      opCalls("GET /api/v2/admin/sign-in/local-password-off/accounts").map(
+        (call) => (call.options as { query: LocalOffQuery }).query.group,
+      ),
+    ).toContain("blocking");
   });
 
   it("turns password sign-in back on without asking", async () => {

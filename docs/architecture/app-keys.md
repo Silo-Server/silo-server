@@ -93,10 +93,35 @@ fails like any other revoked session's. Revoking every key of an account does
 the same for each of its device keys.
 
 **Lock order.** Key rows are written only by application transactions, and
-always in one order: the account row (`lockUser`), the plugin installation
-(share) and the provider identity a key is bound to (`keySignInPolicy`), the
-person key, the device keys, then the login sessions those keys opened. No
-database trigger or cascade writes to a key row. A sign-in reads the key's
+always in one order: the account row (`lockUser`); for a key bound to a
+provider identity, its plugin installation (share) and identity
+(`lockKeyIdentity`); the settings lock (shared; `lockChain`, see
+[The switch](#the-switch)); the person key, the device keys, then the login
+sessions those keys opened. The installation comes before the settings lock
+because a plugin write that guards sign-in takes its installation row and
+then the settings lock; nothing holds the settings lock while it waits for an
+installation row. No database
+trigger or cascade writes to a key row. Ending a session writes only its
+row. A path that ends or deletes several sessions locks them in id order
+first, with a separate locking read (`lockSessionsInOrder`), and writes any
+device sign-in request after the sessions, the order a session's deletion
+writes them in through its foreign key. An ender that also ends sign-in
+links (`EndSignInLinksTx`) deletes the link and link-code rows last, after
+the session and request rows; every path takes them after the account's
+row. Turning the switch off takes the
+ownership lock (shared), every plugin installation row (share, in id order;
+`auth.LockSwitchWrite`), the settings lock (exclusive), then the key sessions
+(in id order), and no account, identity or key row. A refresh that ends a key
+session the sweep missed takes the installation rows before the settings lock
+too. The ownership lock comes first wherever
+it is taken: ownership then account rows (a transfer or the recovery command,
+exclusive), ownership then settings (a settings write that could turn app
+keys off or demo mode on, shared, before the settings lock), and account row
+then settings (key and password sign-in), so no path holds an account row or
+the settings lock while it waits for the ownership lock. The Owner check under
+the settings write only tries that lock: a write that brings its own
+transaction (a restore) is refused, to be made again, while a transfer holds
+it. A sign-in reads the key's
 binding without a lock, locks the installation and identity, then locks the
 key row and, when its binding changed meanwhile (a link committed in between),
 answers 429 with a one-second `Retry-After`: the key is still good, and the
@@ -993,6 +1018,129 @@ the provider on the server's site and using "Open in Silo"
 (`POST /auth/app-codes`), so the keys enroll against that identity. Creating
 and resending invitations stays refused while local passwords are off.
 
+### Keys are never the only way in
+
+An account can have app keys as its only credential (an app-code join makes
+one), so this is a rule for the settings changes below, not a fact about every
+account. It protects an account from being left with keys as its only way in,
+and from losing its last way in when that way in is its keys: app keys going
+off, or local passwords going off for an account with no usable password whose
+keys need them. Turning local passwords off still ends password sign-in for
+every account that is not break-glass, as it always has, and with it every
+such account's local keys. Both switches refuse a change the
+rule forbids, with `last_sign_in_method` and a detail naming the
+accounts (`auth.AccountsAtRiskError`). One query decides who is at risk
+(`auth.AccountsAtRisk`), and `GET /admin/sign-in/accounts-at-risk` serves the
+same list to the settings page:
+
+- **App keys going off**: an enabled account whose keys sign in now and that
+  has no password that signs in and no provider identity it can sign in with.
+  With the switch off it would have no way in, so the write is refused until
+  it gets a password or a provider account. The list doesn't depend on the
+  switch, so while app keys are already off it names the accounts that still
+  have no way in.
+- **Local passwords going off**: an enabled account that afterwards has no
+  password that signs in (only a break-glass administrator's does) and no
+  provider identity it can sign in with, and either holds a working key and no
+  usable password, or keeps a key that still works then (a provider-bound key,
+  or a break-glass administrator's), which would be its only way in. So an
+  account with a password and a provider-bound key is listed too. Linking a
+  provider account takes any account off the list; giving a password takes
+  only a break-glass administrator off. An account with a password and only
+  local keys is left with no way in, as an account with only a password always
+  has been, and is not listed.
+
+For local passwords going off one query (`localPasswordOffAffectedSQL`)
+answers both outcomes: the accounts above, which block the write and are
+named in its refusal, and the accounts that only lose password sign-in (a
+password that signs in today, not break-glass, no identity at a provider that
+can sign people in), which the write is allowed to leave without it and
+`listAdminLocalPasswordOffAccounts` warns about. That list's `blocking` group
+is the first kind, read from the same query, so the confirmation page and the
+refusal never disagree. On a server whose accounts hold no app keys nobody
+blocks, and the warned accounts are the ones listed before app keys existed.
+
+What each write does to each kind of account, while a break-glass
+administrator and a provider people can use exist (otherwise turning local
+passwords off is refused for that reason first). Refused means the write is
+refused naming the account (`last_sign_in_method`); warned means it is
+allowed and the confirmation lists the account as losing password sign-in;
+blank means unaffected. `TestAccountsAtRiskDB` runs every row.
+
+| Account | App keys off | Local passwords off | Public URL removed |
+|---|---|---|---|
+| A password only | | warned | |
+| A password and a local key | | warned | |
+| A password and a key bound to a provider that signs people in | | | |
+| A password and a key bound to a provider that does not (network, or OAuth with no public URL) | | refused | |
+| Keys only, local | refused | refused | |
+| Keys only, bound to a provider that signs people in | | | |
+| Keys only, bound to a provider that does not | refused | refused | |
+| A provider account only (directory) | | | |
+| An OAuth provider account only, with a public URL | | | refused |
+| An OAuth identity and a local key, with a public URL | | | refused |
+| An administrator with a password and a key | | warned | |
+| Break-glass, with a password | | | |
+| Break-glass, no password, a local key, local passwords already off | refused | refused | |
+| Disabled | | | |
+
+The facts are SQL fragments in `internal/auth` (`sign_in_risk.go`), each tied
+to the Go check it mirrors: a usable password is `HasLocalPassword`; a usable
+provider identity is an identity at an installation whose provider can sign
+people in from an ordinary device (`signInProviders`: an enabled
+installation with an enabled sign-in binding that is not a network identity
+binding, and for an OAuth provider a public
+URL, without which its browser and native starts refuse); a working key follows
+`keySignInPolicy` (a local key under the local password rule, a person key
+only on an account that isn't an administrator's, a provider-bound key while
+its identity's installation is enabled; a waiting key is no way in). A
+settings write that changes `server.public_url` is refused, with the same
+problem and remedy, while an account would lose the only provider it can
+sign in with and has no password that signs in (`auth.CheckPublicURLChange`),
+and the switch checks judge the address the same write leaves. The rule
+counts a binding whose capability row is missing, while sign-in's registry
+keeps its last good provider set. Provider and binding writes do not take the
+settings lock, so a provider disabled between the check and the sweep is not
+seen. An address
+the environment supplies refuses admin writes, and a change to that value at
+a restart is not checked. A full
+restore lists the accounts it brings back with no way in with the same SQL
+(`auth.AccountHasNoWayInSQL`), over every enabled account. Each refusal, and
+the restore, names a remedy true for the settings (`auth.WayInRemedy`), and
+offers linking a provider account only while some provider can sign people
+in, otherwise setting one up:
+while local passwords are on, a password or a provider account; while they
+are off, a provider account, or a password for a break-glass administrator
+it names.
+
+Two changes to an account, rather than to these settings, can leave it with
+no way in. Both are long-standing behavior that predates the switch checks
+above, and those checks do not refuse them.
+
+- **Making an account an administrator** revokes its app keys, so an account
+  whose keys were its only way in has none. Another administrator's account
+  is the Owner's alone to change, so the Owner fixes it. While local password
+  sign-in is on, the Owner sets a password for it or makes it a sign-in link
+  (an administrator's link gives the password route only). While it is off, a
+  password signs in only a break-glass account, so the Owner does one of
+  three things: links the account to a provider account by its exact subject
+  (`createAdminUserIdentity`; email match never attaches an identity to an
+  administrator, and the person's own linking needs them signed in); makes
+  the account break-glass and sets its password, or makes it a sign-in link
+  once it is break-glass; or turns local password sign-in back on and sets
+  its password.
+- **Clearing break-glass while local password sign-in is off** ends the
+  account's password sign-in and, with it, its local keys. An account with
+  no provider account it can use then has no way in until the Owner links it
+  to one, sets break-glass again, or local password sign-in is turned back
+  on. The last usable break-glass account can't be cleared (409
+  `break_glass_required`).
+
+With shell access to a node, `silo auth local-login enable` turns local
+password sign-in back on, and with `-user <name> -temporary-password` it turns
+one account's local password sign-in on and gives it a temporary password,
+which signs in while the setting is on or the account is break-glass.
+
 ### Sign-in links
 
 A sign-in link is how a person who lost every device gets back in. An
@@ -1150,6 +1298,37 @@ whose password sign-in it refuses anyway. A break-glass administrator, who
 still signs in with a password while the switch is off, gets a link with the
 password route only, as any administrator does. The account view reads the
 rule with one read of the switch and one query for the page's accounts.
+
+### Promotion
+
+Nothing an account set going while it was ordinary may produce a session or
+a key once it is an administrator's. Promotion to administrator or the
+Owner, and a move of ownership to the account, end all of it in the
+promotion's transaction (`revokeCredentialsIssuedToNonAdmin`), because other
+administrators may have minted some of it and kept it, and an administrator's
+app keys need the administrator's own approval:
+
+- API keys;
+- password reset links;
+- sign-in links, with their app codes and set-password tokens;
+- app keys (the person key, device keys, devices still waiting for
+  approval) and the sessions they opened;
+- device sign-in approvals, made in advance or at the moment, that no device
+  has collected;
+- unredeemed app codes of every kind.
+
+Order: the key sessions, then the request rows, then the link and code rows.
+When adding a new kind of pending credential (something an account can set
+going that later signs someone in or enrolls a key), add it to this list and
+to that function.
+
+Promotion keeps the account's own password, provider and device sign-in
+sessions, which refresh into the new role, a sign-in at a provider already
+in progress, which completes, and its Jellyfin-compatible and
+Audiobookshelf-compatible sessions. The person opened each of these by
+signing in, so no other administrator minted them, and an administrator
+viewing as the account cannot approve a device sign-in for it. Someone who
+knew or set the account's password before the promotion still knows it.
 
 ### Sessions that can't manage keys
 
@@ -1395,8 +1574,9 @@ person changes the password from their own device.
 ## The account's creation time
 
 Every answer that carries a token pair for one of the person's own sessions
-carries `account_created_at` beside `user`, set where the pair is built, so no
-such path leaves it out; the current-user read and the administrator's views
+carries `account_created_at` (beside `user` where the answer has one; a refresh
+answer has no `user`), set where the pair is built, so no such path leaves it
+out; the current-user read and the administrator's views
 do not carry it. It is the account's `users.created_at`, RFC 3339 in UTC at the stored
 microsecond precision. Nothing rewrites that column after the account is made,
 and a full restore brings it back exactly. Its JSON form drops trailing zeros
@@ -1470,12 +1650,10 @@ TLS connection covers all of it.
   that is still waiting for approval is refused with it (`denied`): replacing
   the key is how a person cuts off a copy of it, and a waiting device may be
   the copy's work. That device is introduced again with the new key.
-- **A provider refusing the person** (`applyAnswer`), **an email match taking
-  over the account** (`account_resolution.go`), **a promotion to admin or a
-  move of ownership** (`revokeCredentialsIssuedToNonAdmin`) revoke every key of
-  the account and end their sessions, in the same transaction, as they delete
-  the account's API keys. A promoted account's keys never had an admin's
-  approval.
+- **A provider refusing the person** (`applyAnswer`) and **an email match
+  taking over the account** (`account_resolution.go`) revoke every key of the
+  account and end their sessions, in the same transaction, as they delete the
+  account's API keys.
 - **A password reset, "sign out everywhere" and a password change** end
   sessions as before and keep keys: the device signs in again with its key. The
   devices list is where a key is revoked. The web app says so, in one sentence
@@ -2044,12 +2222,129 @@ redemption, both app code issues and app code redemption,
 `PUT /auth/keys/person`, `pending/{id}/approve` and the signed
 form of `PUT /profiles/set` answer
 `capability_disabled`; the invitation lookup reports `app_join: false`. A person's own key list and its deletes, the pending
-list and `deny` stay open, so keys can be reviewed, revoked and refused; sessions keys
-opened before are not ended by the switch. A session another app's key
-opened is answered 403 `permission_denied` by the origin gate on
-`createAppCode`, `enrollAppKeys`, `approvePendingAppKey` and
-`replacePersonKey` before those operations' `capability_disabled`. Backups classify it as an access setting: a restore keeps the
-stricter of the live and the backed-up value.
+list and `deny` stay open, so keys can be reviewed, revoked and refused.
+
+**Turning the switch off ends every session a key opened.** "The switch" is
+one fact everywhere it is read: the setting on and demo mode off
+(`auth.AppKeySwitchOn`). A settings write that turns it off, through
+`PUT /admin/settings` or `PUT /admin/settings/{key}` (the setting going off,
+or `demo.enabled` going on), ends every live session with a
+`device_key_id` (`auth.EndAppKeySessionsTx`): the person's own device keys'
+and those of apps enrolled with a grant. Sessions opened by a password, a
+provider or device sign-in are untouched, and so are the keys. The sweep runs
+in the settings write's own transaction, which holds the settings lock in
+exclusive mode, so the write and the sweep commit together or not at all.
+Turning the switch back on needs nothing: each device signs in again with the
+key it holds. The sweep leaves a sign-in link's unredeemed app code in place:
+its redeem reads the switch under the settings lock, as every key path does,
+so the code is refused while the switch is off and works again if the switch
+comes back on before the code expires.
+
+**What the switch does not end.** A device that a key session approved has a
+session of its own, opened by device sign-in rather than by the key, and stays
+signed in when the switch goes off: a TV signed in by device sign-in, a
+Jellyfin app paired by Quick Connect, and a remote-playback handoff. The TV and
+the Jellyfin app renew like any session; a handoff ends by itself within 24
+hours. To end them, the person ends those sessions from their list of
+sessions (`deleteSession`), or an administrator ends one of the account's
+sessions (`deleteAdminUserLoginSession`) or all of them
+(`deleteAdminUserLoginSessions`, which also deletes the account's
+Jellyfin-compatible and Audiobookshelf sessions). An uncollected device
+sign-in a key session approved in advance is no longer honored once that
+session has ended, by the switch or any other way: collection refuses it
+([device-login.md](device-login.md), "The approving session").
+
+What else a key session obtained stops working with it:
+
+| Obtained through a key session | After the switch ends the session | What checks it |
+|---|---|---|
+| Profile token (`X-Profile-Token`) | at once | it travels only with an access token, whose session row is checked on each request |
+| Events socket | within 15 seconds | the session row at connect and every 15 seconds |
+| Playback control socket | within 15 seconds | the same check, every 15 seconds |
+| Watch Together socket | within 15 seconds | the same check, every 15 seconds |
+| Stream reference | at once | the session row on each media request |
+| Plugin token or launch cookie | at once | the session row on each request |
+| Direct download link | refused for new requests at once | the session row when a request starts |
+| Audiobookshelf session | none to end | a key session can't open one: Audiobookshelf sign-in takes a password |
+
+A direct download link's check runs when a request starts, so a transfer
+already running is not cut off by this check. A download the server hands to a
+streaming node redirects to the node with a token the node checks by its
+signature alone, which lasts 15 minutes from the redirect.
+
+Every key path that opens a session, enrolls a key or verifies a signed
+profile set reads the switch again inside its transaction, under the settings
+lock (`lockChain`, which calls `lockAppKeySwitch` right after the account row
+lock), and refuses with `capability_disabled` when it is off. So a key
+sign-in and a switch-off serialize: either the switch-off commits first and
+the sign-in is refused without a session, or the sign-in commits first and
+the switch-off, waiting on the lock, ends its session. The key paths take the
+lock in shared mode: they only read the settings under it, and none asks for
+it in exclusive mode later in the same transaction (an app code's join takes
+it exclusive before `lockChain`, and a transaction's shared request on a lock
+it already holds exclusive is granted at once). Two key paths that take it
+shared therefore don't wait for each other on it (a join holding it exclusive
+is waited for, as any writer is), and none can hold it shared while waiting to
+take it exclusive, the pattern that would deadlock two of them.
+
+The sweep ends key sessions in one order (`endKeySessionsTx`): every plugin
+installation row (share), then the sessions in id order. Ending a session
+writes only its row: a device sign-in the session approved in advance stops
+being honored because collection reads the session's state, not because a
+trigger rewrites the request (a migration dropped the trigger that did; no
+row was rewritten). A schema check (`TestNoUnlistedSideWritesDB`) fails on
+any trigger, rule or foreign-key action that writes another table on a write
+to sessions, device sign-ins, keys or sign-in links, or writes one of those on
+a write to another table, unless it is listed with its reason. It cannot see
+SQL a function builds at run time (`EXECUTE` of a string).
+Staged tests run, each in both orders and without a deadlock: logout against
+the sweep; deleting an account against a logout and against the sweep; the
+sweep against ending all of an account's sessions (as a password reset and
+an administrator do) with two key sessions stored against their id order;
+the sweep against revoking one device key, an account's keys, and unlinking
+an identity, each with two key sessions; two revokes of one session with a
+pre-approval committed between them; and a collect against the revoke of the
+session that approved it, which never yields a session once the revoke has
+committed before the collect reads it.
+
+A key session can survive the sweep only in a database written or put back
+by hand (`auth.app_key_sign_in` or `demo.enabled` stored without the
+settings write), or when an API server still on the previous build opens it
+during a rolling deploy. Such a session is ended at its next renewal
+(`checkSessionStanding`, which `Service.Refresh` and plugin access renewal
+share): the renewal reads the switch without a lock and, only when that
+says off, takes the settings lock (shared), reads it again, ends the session
+in the sweep's order and answers as for a revoked session. While the switch
+is on a key session's renewal costs one extra read and takes no lock: a
+switch-off that commits just after that read ends the session in its own
+sweep, so the tokens that renewal mints name a revoked session and fail on
+first use. Its access token is refused from then on, and the session does not
+come back when the switch does. Only a session with a `device_key_id` reads
+the switch there; requests with an access token don't. So a key session the
+sweep missed that never refreshes keeps its access token until it expires
+(8 hours by default). During a rolling deploy, an API server still on the
+previous build opens key sessions without reading the switch inside its
+transaction, and its refresh does not end them; those end at the next refresh
+an updated server handles. A server on an earlier build of this change
+also honors a device sign-in approved in advance whose approving session
+ended while it ran, takes request rows before session rows when it ends
+sessions (so it can deadlock with this build's paths that end sessions), and
+transfers ownership without the ownership lock
+([device-login.md](device-login.md)).
+
+**The Owner.** While the Owner holds a live key session, only the Owner may
+turn app keys off or demo mode on through the settings write; anyone else is
+refused `owner_protected`, as for any other change to the Owner's account
+(`auth.CheckSwitchOffActor`, decided in the write's transaction before the
+sweep, where every key path waits on the settings lock; it reads ownership
+under the ownership lock, which the write takes before the settings lock and
+a transfer and the recovery command take before any row; see "Lock order").
+
+A session another app's key opened, if one still existed, would be answered
+403 `permission_denied` by the origin gate on `createAppCode`,
+`enrollAppKeys`, `approvePendingAppKey` and `replacePersonKey` before those
+operations' `capability_disabled`. Backups classify it as an access setting:
+a restore keeps the stricter of the live and the backed-up value.
 
 **Demo mode.** On a demo server (`demo.enabled`) every visitor signs in to
 one shared account. A key a visitor enrolled would be a lasting credential of

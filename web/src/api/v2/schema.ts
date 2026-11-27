@@ -5483,7 +5483,7 @@ export interface paths {
     get: operations["getAdminStoredSettings"];
     /**
      * Validate and merge captured settings under the existing transaction guard; prerequisite probes and runtime notifications are not replayable receipts.
-     * @description Turning auth.local_password_login off while no enabled break-glass admin can sign in with a password is 409 break_glass_required, and while no OIDC or LDAP provider people can sign in with is on it is 409 sign_in_provider_required (an OpenID Connect provider counts only with server.public_url set, so clearing server.public_url while auth.local_password_login is off and it is the only provider is refused the same way). Otherwise the change applies at once; listAdminLocalPasswordOffAccounts tells beforehand which accounts lose their way in.
+     * @description Turning auth.local_password_login off while no enabled break-glass admin can sign in with a password is 409 break_glass_required, and while no OIDC or LDAP provider people can sign in with is on it is 409 sign_in_provider_required (an OpenID Connect provider counts only with server.public_url set, so clearing server.public_url while auth.local_password_login is off and it is the only provider is refused the same way). Otherwise the change applies at once; listAdminLocalPasswordOffAccounts tells beforehand which accounts lose their way in. Turning it off while it would leave an account with Silo app keys as its only way in, or with none, is 409 last_sign_in_method, whose detail names the accounts (the blocking group of listAdminLocalPasswordOffAccounts lists them, from the same query). Turning app keys off (auth.app_key_sign_in off, or demo.enabled on) while any account signs in only with its keys is 409 last_sign_in_method, naming them (listSignInAccountsAtRisk with app_keys_off); otherwise every login session a key opened ends in the same transaction as the write. Changing server.public_url while an account would lose the only sign-in provider it can use (an OAuth provider needs the address) and has no password that signs in is 409 last_sign_in_method, naming the accounts. While the Owner holds a live session a key opened, turning app keys off or demo mode on by anyone but the Owner is 403 permission_denied, the Owner refusal.
      */
     put: operations["updateAdminSettings"];
     post?: never;
@@ -5504,7 +5504,7 @@ export interface paths {
     get: operations["getAdminSetting"];
     /**
      * Validate and replace one setting with the established single-key validation rules and transaction guard.
-     * @description Turning auth.local_password_login off while no enabled break-glass admin can sign in with a password is 409 break_glass_required, and while no OIDC or LDAP provider people can sign in with is on it is 409 sign_in_provider_required (an OpenID Connect provider counts only with server.public_url set, so clearing server.public_url while auth.local_password_login is off and it is the only provider is refused the same way). Otherwise the change applies at once; listAdminLocalPasswordOffAccounts tells beforehand which accounts lose their way in.
+     * @description Turning auth.local_password_login off while no enabled break-glass admin can sign in with a password is 409 break_glass_required, and while no OIDC or LDAP provider people can sign in with is on it is 409 sign_in_provider_required (an OpenID Connect provider counts only with server.public_url set, so clearing server.public_url while auth.local_password_login is off and it is the only provider is refused the same way). Otherwise the change applies at once; listAdminLocalPasswordOffAccounts tells beforehand which accounts lose their way in. Turning it off while it would leave an account with Silo app keys as its only way in, or with none, is 409 last_sign_in_method, whose detail names the accounts (the blocking group of listAdminLocalPasswordOffAccounts lists them, from the same query). Turning app keys off (auth.app_key_sign_in off, or demo.enabled on) while any account signs in only with its keys is 409 last_sign_in_method, naming them (listSignInAccountsAtRisk with app_keys_off); otherwise every login session a key opened ends in the same transaction as the write. Changing server.public_url while an account would lose the only sign-in provider it can use (an OAuth provider needs the address) and has no password that signs in is 409 last_sign_in_method, naming the accounts. While the Owner holds a live session a key opened, turning app keys off or demo mode on by anyone but the Owner is 403 permission_denied, the Owner refusal.
      */
     put: operations["updateAdminSetting"];
     post?: never;
@@ -5582,6 +5582,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/admin/sign-in/accounts-at-risk": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List the accounts a sign-in switch change would leave with no way in.
+     * @description app_keys_off lists the enabled accounts whose Silo app keys sign in now and that have no password that signs in and no sign-in provider account: with app keys off they have no way in. updateAdminSettings refuses turning app keys off while it lists any account. The list is the same while app keys are already off, where it names the accounts that still have no way in. local_passwords_off lists the enabled accounts the change would leave with Silo app keys as their only way in (a key bound to a sign-in provider account, or a break-glass account's, keeps working), or with none (no password that signs in, and keys that need local passwords): the same accounts, from the same query, as the blocking group of listAdminLocalPasswordOffAccounts, which also lists the accounts that only lose password sign-in. Linking a provider account takes one off the list; a password takes off only a break-glass administrator, the one kind a password signs in once local passwords are off. updateAdminSettings refuses turning local passwords off while it lists any account.
+     */
+    get: operations["listSignInAccountsAtRisk"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/admin/sign-in/local-password-off/accounts": {
     parameters: {
       query?: never;
@@ -5591,7 +5611,7 @@ export interface paths {
     };
     /**
      * List the accounts that lose their way in when local password sign-in is turned off.
-     * @description Answers for turning auth.local_password_login off: enabled accounts whose local password signs in today, that are not break-glass admins and have no linked identity at an enabled provider. Break-glass admins keep their password and are not listed; neither are disabled accounts. Each account is in one group: email_match when email auto-match can link it at its first provider sign-in (the provider must assert that email as verified), otherwise admin_link. totals counts both groups whichever is asked for. Ordered by username; pages are live, not a snapshot.
+     * @description Answers for turning auth.local_password_login off: enabled accounts whose local password signs in today, that are not break-glass admins and have no linked identity at an enabled provider. Break-glass admins keep their password and are not listed; neither are disabled accounts. Each account is in one group: email_match when email auto-match can link it at its first provider sign-in (the provider must assert that email as verified), otherwise admin_link. A third group, blocking, holds the accounts the change would leave with Silo app keys as their only way in, or with none (an account with no password whose keys need local passwords); turning auth.local_password_login off is refused naming them (409 last_sign_in_method) from the same query, and an account in it is in neither of the other groups. totals counts every group whichever is asked for. Ordered by username; pages are live, not a snapshot.
      */
     get: operations["listAdminLocalPasswordOffAccounts"];
     put?: never;
@@ -14745,6 +14765,26 @@ export interface components {
        */
       username: string;
     };
+    AccountAtRisk: {
+      break_glass: boolean;
+      /** @description Whether the account has a usable local password, whatever the server's local password setting */
+      has_password: boolean;
+      /**
+       * @description The account's ID
+       * @example 1
+       */
+      id: string;
+      is_owner: boolean;
+      /** @enum {string} */
+      role: "admin" | "user";
+      /**
+       * Format: date-time
+       * @description When the account's live, unused sign-in link expires; null for none. The list does not fill it, so it is always null
+       */
+      sign_in_link_expires_at: string | null;
+      /** @description The account's username, or its email when it has none */
+      username: string;
+    };
     AccountIdentity: {
       /**
        * @description Name at the provider; may be empty
@@ -15209,7 +15249,7 @@ export interface components {
        */
       access_group_id?: string | null;
       audio_transcode_allowed?: boolean | null;
-      /** @description Make the admin account a break-glass account, which keeps local password sign-in while the server turns it off, or clear it. Only admins may hold it, and only the server Owner may set or clear it (403 permission_denied otherwise); clearing the last usable one while local password sign-in is off is 409 break_glass_required */
+      /** @description Make the admin account a break-glass account, which keeps local password sign-in while the server turns it off, or clear it. Only admins may hold it, and only the server Owner may set or clear it (403 permission_denied otherwise); clearing the last usable one while local password sign-in is off is 409 break_glass_required; setting it, while local password sign-in is off, on an account whose Silo app keys would then be its only way in (no usable password, no usable sign-in provider account) is 409 last_sign_in_method */
       break_glass?: boolean;
       download_allowed?: boolean | null;
       download_transcode_allowed?: boolean | null;
@@ -21258,11 +21298,17 @@ export interface components {
        */
       is_owner: boolean;
       /**
-       * @description What decides the account's outcome. email_match: an ordinary account with an email, and email auto-match is on, so the provider's first sign-in for that verified email links it. email_match_off: the same, with email auto-match off. administrator: an admin or the Owner, which email auto-match never links. no_email: an ordinary account without an email
+       * @description What decides the account's outcome. email_match: an ordinary account with an email, and email auto-match is on, so the provider's first sign-in for that verified email links it. email_match_off: the same, with email auto-match off. administrator: an admin or the Owner, which email auto-match never links. no_email: an ordinary account without an email. In the blocking group, keys_only: a Silo app key keeps signing it in (one bound to a sign-in provider account, or a break-glass account's) and would be its only way in; no_way_in: it has no password that signs in and its keys need local passwords, so it would have no way in
        * @example email_match
        * @enum {string}
        */
-      reason: "email_match" | "email_match_off" | "administrator" | "no_email";
+      reason:
+        | "email_match"
+        | "email_match_off"
+        | "administrator"
+        | "no_email"
+        | "keys_only"
+        | "no_way_in";
       /**
        * @example user
        * @enum {string}
@@ -21290,6 +21336,12 @@ export interface components {
        * @example 1
        */
       admin_link: number;
+      /**
+       * Format: int64
+       * @description Accounts in the blocking group: while it is not zero, turning auth.local_password_login off is refused. Zero on a server whose accounts hold no Silo app keys
+       * @example 0
+       */
+      blocking: number;
       /**
        * Format: int64
        * @description Accounts in the email_match group
@@ -30952,6 +31004,8 @@ export interface components {
       live_provider_changes: boolean;
       /** @description Whether listAdminLocalPasswordOffAccounts lists the accounts that lose their way in when auth.local_password_login is turned off, and whether updateAdminSettings refuses turning it off without an enabled OIDC or LDAP provider (sign_in_provider_required) */
       local_password_off_accounts: boolean;
+      /** @description Whether listAdminLocalPasswordOffAccounts answers group blocking and totals.blocking: the accounts turning auth.local_password_login off would leave with Silo app keys as their only way in, or with none, which updateAdminSettings refuses (409 last_sign_in_method) from the same query */
+      local_password_off_blocking: boolean;
       /** @description Whether linking a network identity (linkAccountIdentityWithNetwork, or createAdminUserIdentity at a network provider) keeps the account's local password sign-in. While the provider's latest answer refuses the person, that password is refused with not_permitted (break-glass accounts excepted); an unavailable or unsupported answer keeps the refusal, and it ends when the provider vouches again or the network provider is turned off. Servers without the field turn local password sign-in off on such a link. network_sign_in says whether the link operations are served */
       network_link_keeps_password: boolean;
       /** @description Whether signInWithNetworkIdentity and linkAccountIdentityWithNetwork are served. Whether a given request may use them is answered by listAuthProviders, which lists a network provider only to a request that arrived through that provider's network */
@@ -39037,6 +39091,10 @@ export interface components {
       new_password: string;
       /** @description set_password_token from redeemSignInLink */
       token: string;
+    };
+    SignInRiskOutputBody: {
+      /** @description Every account the change leaves at risk, in username order. Not paged: it holds only accounts whose way in would be their keys alone, or would be gone */
+      items: components["schemas"]["AccountAtRisk"][];
     };
     SignupInputBody: {
       /**
@@ -92453,14 +92511,123 @@ export interface operations {
       };
     };
   };
+  listSignInAccountsAtRisk: {
+    parameters: {
+      query: {
+        /** @description The switch going off: app_keys_off for auth.app_key_sign_in, local_passwords_off for auth.local_password_login */
+        change: "app_keys_off" | "local_passwords_off";
+      };
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SignInRiskOutputBody"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
   listAdminLocalPasswordOffAccounts: {
     parameters: {
       query: {
         cursor?: string;
         /** @description Answer as if auth.email_auto_match had this value, for an edit that changes both settings; omitted uses the saved value */
         email_auto_match?: "true" | "false";
-        /** @description email_match: accounts email auto-match can link at their first provider sign-in. admin_link: accounts nothing links until an administrator does */
-        group: "email_match" | "admin_link";
+        /** @description email_match: accounts email auto-match can link at their first provider sign-in. admin_link: accounts nothing links until an administrator does. blocking: accounts that would be left with Silo app keys as their only way in, or with none; turning auth.local_password_login off is refused (409 last_sign_in_method) while any is listed */
+        group: "email_match" | "admin_link" | "blocking";
         /** @description Page size; default 50, maximum 200 */
         limit?: number;
       };

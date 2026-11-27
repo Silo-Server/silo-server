@@ -52,9 +52,10 @@ const (
 
 // AppKeyRepository stores app keys: an account's person key and its device
 // keys. Every key path takes its locks in one order: the account row
-// (lockUser), the plugin installation and provider identity of a
-// provider-bound key (keySignInPolicy), the person key, the device key rows,
-// then the login sessions those keys opened. Key rows are written only here,
+// (lockUser), the settings lock in shared mode (lockChain, which reads the
+// app key switch under it), the plugin installation and provider identity of
+// a provider-bound key (keySignInPolicy), the person key, the device key
+// rows, then the login sessions those keys opened. Key rows are written only here,
 // in application transactions that hold the account lock: a key's
 // identity_id has no foreign key, so deleting an identity (the cascade from
 // uninstalling a plugin, which takes no account lock) never writes one.
@@ -432,6 +433,10 @@ func revokeIdentityKeysTx(ctx context.Context, tx sessionExecQuerier, userID int
 		WHERE user_id = $1 AND identity_id = $2 AND revoked_at IS NULL`, userID, identityID); err != nil {
 		return fmt.Errorf("revoking the identity's person key: %w", err)
 	}
+	if err := lockSessionsInOrder(ctx, tx, `s.user_id = $1 AND s.revoked_at IS NULL AND s.device_key_id IN (SELECT id FROM auth_device_keys
+		WHERE user_id = $1 AND identity_id = $2 AND revoked_at IS NULL)`, userID, identityID); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(ctx, `WITH revoked AS (
 			UPDATE auth_device_keys SET revoked_at = NOW()
 			WHERE user_id = $1 AND identity_id = $2 AND revoked_at IS NULL RETURNING id
@@ -481,6 +486,9 @@ func revokeAccountKeysTx(ctx context.Context, tx sessionExecQuerier, userID int)
 	if _, err := tx.Exec(ctx, `UPDATE auth_person_keys SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL`, userID); err != nil {
 		return fmt.Errorf("revoking person keys: %w", err)
 	}
+	if err := lockSessionsInOrder(ctx, tx, `s.user_id = $1 AND s.device_key_id IS NOT NULL AND s.revoked_at IS NULL`, userID); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(ctx, `WITH revoked AS (
 			UPDATE auth_device_keys SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL RETURNING id
 		)
@@ -503,6 +511,9 @@ func revokeAccountKeysTx(ctx context.Context, tx sessionExecQuerier, userID int)
 // rows (a key's identity_id has no foreign key to the identity).
 func endDeviceKeySessions(ctx context.Context, tx pgx.Tx, userID int, ids []string) error {
 	if err := lockIdentitiesBeforeSessions(ctx, tx, userID, false); err != nil {
+		return err
+	}
+	if err := lockSessionsInOrder(ctx, tx, `s.device_key_id = ANY($1::uuid[]) AND s.revoked_at IS NULL`, ids); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `UPDATE auth_sessions SET revoked_at = COALESCE(revoked_at, NOW())
@@ -534,6 +545,11 @@ func bindAccountKeysToIdentity(ctx context.Context, tx sessionExecQuerier, userI
 // sessions they opened by cascade (key rows before sessions, as everywhere),
 // then the person keys, before the account's other sessions are revoked.
 func deleteAccountKeysTx(ctx context.Context, tx sessionExecQuerier, userID int) error {
+	// The cascade deletes every session the keys opened, live or not; they
+	// are locked in id order first (lockSessionsInOrder).
+	if err := lockSessionsInOrder(ctx, tx, `s.user_id = $1 AND s.device_key_id IS NOT NULL`, userID); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(ctx, `DELETE FROM auth_device_keys WHERE user_id = $1`, userID); err != nil {
 		return fmt.Errorf("deleting device keys: %w", err)
 	}

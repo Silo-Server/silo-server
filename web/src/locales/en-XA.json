@@ -86756,6 +86756,60 @@
       "value": "⟦Ļéţ ûšéŕš çŕéåţé ÅÞÎ ķéýš~~~~~~~~~~⟧"
     }
   ],
+  "web.admin.settings.signIn.passwordsOff.blockedExplain": [
+    {
+      "type": 0,
+      "value": "⟦Þåššŵöŕđ šîĝñ-îñ çåñ'ţ ƀé ţûŕñéđ öƒƒ ŵĥîļé ţĥéšé åççöûñţš åŕé ļîšţéđ. Ļîñķ éåçĥ öñé ţö å "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " åççöûñţ ƒŕöɱ îţš þåĝé îñ Ûšéŕš, öŕ ĝîṽé å ƀŕéåķ-ĝļåšš åđɱîñ å þåššŵöŕđ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.blockedHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " åççöûñţ ŵöûļđ ƀé ļéƒţ ŵîţĥ öñļý Šîļö åþþ ķéýš, öŕ ñö ŵåý îñ~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " åççöûñţš ŵöûļđ ƀé ļéƒţ ŵîţĥ öñļý Šîļö åþþ ķéýš, öŕ ñö ŵåý îñ~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.settings.signIn.passwordsOff.confirm": [
     {
       "type": 0,
@@ -86974,10 +87028,22 @@
       "value": "⟦Éɱåîļ ɱåţçĥîñĝ îš öƒƒ~~~~~~~~~⟧"
     }
   ],
+  "web.admin.settings.signIn.passwordsOff.reason.keysOnly": [
+    {
+      "type": 0,
+      "value": "⟦Öñļý åþþ ķéýš ŵöûļđ šîĝñ îţ îñ~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.admin.settings.signIn.passwordsOff.reason.noEmail": [
     {
       "type": 0,
       "value": "⟦Ñö éɱåîļ~~~~⟧"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.noWayIn": [
+    {
+      "type": 0,
+      "value": "⟦Çöûļđñ'ţ šîĝñ îñ åţ åļļ~~~~~~~~~~⟧"
     }
   ],
   "web.admin.settings.signIn.passwordsOff.sessions": [

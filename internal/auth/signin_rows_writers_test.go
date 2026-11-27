@@ -35,6 +35,12 @@ const (
 	newAccount = "account with no sign-in rows yet"
 	// No caller.
 	unused = "no caller"
+	// Works across accounts: every installation row (share, in id order),
+	// the settings lock, then the sessions in id order. An uninstall waits at
+	// its installation or the writer waits there holding no session row, and
+	// a plugin write (installation, then settings lock) meets it at the
+	// installation, not the settings lock.
+	installationsFirst = "every installation (share), settings lock, then sessions in id order"
 )
 
 // signInRowWriters is every statement outside tests that writes
@@ -74,6 +80,10 @@ var signInRowWriters = map[string]string{
 	"internal/auth/app_key_repository.go:endDeviceKeySessions": identitiesFirst,
 	"internal/auth/app_key_repository.go:revokeAccountKeysTx":  identitiesFirst,
 	"internal/auth/app_key_repository.go:revokeIdentityKeysTx": identitiesFirst,
+	// Promotion: under the account lock, after revokeAccountKeysTx has taken
+	// the account's identities and ended its key sessions.
+	// Turning the app key switch off ends every key session on the server.
+	"internal/auth/app_key_switch.go:endKeySessionsTx": installationsFirst,
 
 	"internal/auth/session.go:createWithQuerier":                 oneRow,
 	"internal/auth/device_login.go:markOpened":                   oneRow,

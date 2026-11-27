@@ -16,7 +16,6 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/appkeys"
 	"github.com/Silo-Server/silo-server/internal/auditmutation"
-	"github.com/Silo-Server/silo-server/internal/demomode"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -83,19 +82,6 @@ func EndSignInLinksTx(ctx context.Context, db interface {
 		return fmt.Errorf("ending sign-in link codes: %w", err)
 	}
 	return nil
-}
-
-// appKeysOnTx reads whether app key sign-in is on, from the two settings
-// every key route reads: auth.app_key_sign_in, and demo mode (demo.enabled),
-// in which app keys are always off. The caller holds the settings lock, which
-// every settings write takes, so the answer cannot change under it.
-func appKeysOnTx(ctx context.Context, tx pgx.Tx) (bool, error) {
-	on, err := appKeySignInAllowed(ctx, tx)
-	if err != nil || !on {
-		return false, err
-	}
-	demo, err := readBoolSetting(ctx, tx, demomode.SettingKey, false)
-	return !demo, err
 }
 
 // signInLinkPolicy refuses a sign-in link for an account that may not sign in
@@ -323,8 +309,9 @@ func lockSignInLinkAccounts(ctx context.Context, tx pgx.Tx, userID, issuerID int
 }
 
 // RedeemSignInLink spends a sign-in link: in one transaction the link is
-// marked redeemed and, while app key sign-in is on (appKeysOnTx, read under
-// the settings lock in that transaction), an app code of kind sign_in_link is
+// marked redeemed and, while app key sign-in is on (appKeySwitchOn, the one
+// reading of the switch every key path makes, under the settings lock in
+// that transaction), an app code of kind sign_in_link is
 // stored for its account, so of two concurrent redemptions exactly one
 // succeeds. canDeliverCode says the caller can hand a code out (it knows the
 // server address); while app keys are on and it can't, the redeem is
@@ -379,7 +366,7 @@ func (a *AppKeySignIn) RedeemSignInLink(ctx context.Context, token string, canDe
 		// The switch is read here, under the settings lock this transaction
 		// holds (lockSignInLinkAccount), so a change of it is wholly before
 		// or after the answer.
-		keysOn, err := appKeysOnTx(ctx, tx)
+		keysOn, err := appKeySwitchOn(ctx, tx)
 		if err != nil {
 			return err
 		}
@@ -532,9 +519,9 @@ func (a *AppKeySignIn) SetPasswordWithSignInLink(ctx context.Context, token, new
 // the account's own person key sent again keeps its provider binding, and
 // the device enrolled under it takes that binding, as a device it introduces
 // does. An administrator's account is refused, and so is the code while app
-// key sign-in is off, read under the settings lock. Lock order: the account,
-// the code, the settings lock, the provider locks, the person key, the device
-// keys and sessions.
+// key sign-in is off, read under the settings lock (lockChain). Lock order:
+// the account, the code, the settings lock (shared), the provider locks, the
+// person key, the device keys and sessions.
 func (a *AppKeySignIn) redeemSignInLinkCode(ctx context.Context, req KeyRedeemRequest, payload *appkeys.Payload, hash []byte, code appCodeRow, out *KeySignInResult) (*auditmutation.Entry, error) {
 	binding, err := ownPersonKeyBinding(ctx, a.pool, *code.userID, req.PersonKey)
 	if err != nil {
@@ -558,21 +545,16 @@ func (a *AppKeySignIn) redeemSignInLinkCode(ctx context.Context, req KeyRedeemRe
 		if err := spendAppCode(ctx, tx, hash); err != nil {
 			return err
 		}
-		// The route read the switch before this transaction; a change
-		// committed since is read here, under the settings lock every settings
-		// write takes, before any key or session is written. The refusal rolls
-		// the spend back. The session and join codes still rely on the route's
-		// read; when every key path re-reads the switch under this lock, this
-		// becomes that one function.
-		if err := lockServerSettings(ctx, tx); err != nil {
-			return err
-		}
-		if on, err := appKeysOnTx(ctx, tx); err != nil {
-			return err
-		} else if !on {
+		// lockChain takes the settings lock, shared, and re-reads the switch
+		// under it, as every key path does: a switch-off committed since the
+		// route's read refuses here, before any key or session is written, and
+		// the refusal rolls the spend back. A switch-off's sweep holds the lock
+		// exclusive, so it runs wholly before this read or after this commit,
+		// when it ends the session this opened.
+		chain, err := lockChain(ctx, tx, user, binding)
+		if errors.Is(err, ErrAppKeySignInDisabled) {
 			return ErrAppKeysOff
 		}
-		chain, err := lockChain(ctx, tx, user, binding)
 		if err != nil {
 			return sessionIdentityGone(err)
 		}

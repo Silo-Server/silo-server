@@ -291,6 +291,9 @@ func (r *UserRepository) TransferOwnership(ctx context.Context, fromID, toID int
 	if fromID == toID {
 		return ErrOwnershipTarget
 	}
+	if err := lockOwnership(ctx, tx, false); err != nil {
+		return err
+	}
 	// Lock both accounts in id order so a transfer cannot interleave with
 	// another change to either.
 	rows, err := tx.Query(ctx, `SELECT id, role, enabled, is_owner FROM users WHERE id = ANY($1) ORDER BY id FOR UPDATE`, []int{fromID, toID})
@@ -366,6 +369,11 @@ func moveOwnership(ctx context.Context, tx pgx.Tx, fromID, toID int) error {
 	if err := revokeCredentialsIssuedToNonAdmin(ctx, tx, toID); err != nil {
 		return err
 	}
+	// Both sets of sessions below, locked in id order first.
+	if err := lockSessionsInOrder(ctx, tx, `s.revoked_at IS NULL AND ((s.user_id = $1 AND s.impersonator_user_id IS NOT NULL)
+		OR (s.impersonator_user_id = $2 AND EXISTS (SELECT 1 FROM users t WHERE t.id = s.user_id AND t.role = 'admin')))`, toID, fromID); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE auth_sessions SET revoked_at = NOW()
 		WHERE user_id = $1 AND impersonator_user_id IS NOT NULL AND revoked_at IS NULL`, toID); err != nil {
@@ -399,6 +407,9 @@ func (r *UserRepository) SetOwner(ctx context.Context, username string) (*models
 		return nil, 0, err
 	}
 	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	if err := lockOwnership(ctx, tx, false); err != nil {
+		return nil, 0, err
+	}
 	// Lock the named account and the current Owner in one statement, in id
 	// order, so concurrent recoveries serialize instead of deadlocking.
 	rows, err := tx.Query(ctx, `
@@ -453,4 +464,32 @@ func (r *UserRepository) SetOwner(ctx context.Context, username string) (*models
 		return nil, 0, err
 	}
 	return user, previous, nil
+}
+
+// ownershipLock names the advisory lock around moving ownership. The two
+// writers of ownership (TransferOwnership and SetOwner) take it exclusively
+// before any row. A settings write that could turn the app key switch off
+// takes it shared before the settings lock (LockOwnershipShared), and the
+// Owner check under that write only tries it (CheckSwitchOffActor). So every
+// path takes it first: ownership then account rows (a transfer), ownership
+// then settings (the write), and no path holds an account row or the
+// settings lock while it waits for this lock.
+const ownershipLock = "silo:auth:ownership"
+
+// LockOwnershipShared takes the ownership lock in shared mode for the rest of
+// tx. A settings write that could turn the app key switch off takes it first,
+// before the settings lock.
+func LockOwnershipShared(ctx context.Context, tx pgx.Tx) error {
+	return lockOwnership(ctx, tx, true)
+}
+
+func lockOwnership(ctx context.Context, tx pgx.Tx, shared bool) error {
+	fn := "pg_advisory_xact_lock"
+	if shared {
+		fn = "pg_advisory_xact_lock_shared"
+	}
+	if _, err := tx.Exec(ctx, `SELECT `+fn+`(hashtextextended($1, 0))`, ownershipLock); err != nil {
+		return fmt.Errorf("locking ownership: %w", err)
+	}
+	return nil
 }

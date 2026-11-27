@@ -226,7 +226,7 @@ func openPool(t *testing.T, dbURL string) *pgxpool.Pool {
 // carried), and the passwordless account too when its keys are revoked or a
 // sign-in switch is off on the live server, which the restore keeps off. A
 // backup that predates app keys takes the backup's identity without saying
-// that devices sign in by key.
+// that devices sign in by key, and lists its account with no password.
 func TestFullRestoreOntoAnotherServerDB(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
@@ -248,7 +248,10 @@ func TestFullRestoreOntoAnotherServerDB(t *testing.T) {
 				dbExec(t, source, `ALTER TABLE auth_sessions DROP COLUMN device_key_id`)
 				dbExec(t, source, `DROP TABLE auth_device_keys, auth_person_keys`)
 				dbExec(t, source, `DELETE FROM goose_db_version WHERE version_id IN (20261125041456, 20261125074454)`)
-				dbExec(t, source, `INSERT INTO users (role, username) VALUES ('user', 'passwordless')`)
+				var passwordless int64
+				if err := source.QueryRow(t.Context(), `INSERT INTO users (role, username) VALUES ('user', 'passwordless') RETURNING id`).Scan(&passwordless); err != nil {
+					t.Fatal(err)
+				}
 				r := backupKeys(t, source, sourceURL)
 				live, liveURL := backuptest.Database(t)
 				serverIDOf(t, live)
@@ -259,9 +262,11 @@ func TestFullRestoreOntoAnotherServerDB(t *testing.T) {
 				if got := serverIDOf(t, openPool(t, liveURL)); got != keyBackupServerID {
 					t.Fatalf("server id = %q, want the backup's %q", got, keyBackupServerID)
 				}
-				wantOutput(t, out, identityTakenNoKeys, keepOriginalOff)
-				if strings.Contains(out, identityTaken) || strings.Contains(out, strandedSentence) {
-					t.Fatalf("a restore that kept no app keys says devices sign in by key, or lists accounts:\n%s", out)
+				// Its passwordless account has no key to sign in with.
+				wantOutput(t, out, identityTakenNoKeys, keepOriginalOff,
+					fmt.Sprintf("%s passwordless (account %d).", strandedSentence, passwordless))
+				if strings.Contains(out, identityTaken) {
+					t.Fatalf("a restore that kept no app keys says devices sign in by key:\n%s", out)
 				}
 				return
 			}

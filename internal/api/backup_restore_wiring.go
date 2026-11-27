@@ -14,6 +14,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/adminjob"
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/backup"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -121,6 +122,12 @@ func applyRestoredSettings(ctx context.Context, tx pgx.Tx, admin *handlers.Admin
 			guard = func(s handlers.AdminSettingsSnapshot) error { return check(s.Stored) }
 		}
 		result, publish, err := admin.ApplyAdminSettingsInTx(ctx, tx, rest, guard)
+		if errors.Is(err, auth.ErrOwnershipChanging) {
+			// The settings page's "Save again" is not what someone restoring
+			// does.
+			return nil, nil, fmt.Errorf("the server's ownership was being moved while these settings were restored; "+
+				"restore them again once the move has finished: %w", auth.ErrOwnershipChanging)
+		}
 		if err != nil {
 			return nil, nil, err
 		}

@@ -107,6 +107,57 @@ LDAP provider people can sign in with is on it is
 `server.public_url` set, so clearing `server.public_url` while password
 sign-in is off and that provider is the only one is refused the same way.
 
+Three more refusals keep every account a way in, all `409 last_sign_in_method`
+with a detail that names the accounts (the first ten, then how many more):
+
+- Turning `auth.local_password_login` off while an enabled account would
+  afterwards have no password that signs in (only a break-glass
+  administrator's does) and no usable sign-in provider account, and holds Silo
+  app keys and no usable password, or keeps a key that still works then (one
+  bound to a sign-in provider, or a break-glass administrator's). An account
+  with a password and a provider-bound key is refused this way too: its
+  password stops working and its key would be its only way in. The detail
+  names linking a provider account for each, and giving a password only to a
+  break-glass administrator it names, the one kind a password signs in then.
+  These are the accounts in the `blocking` group of
+  `listAdminLocalPasswordOffAccounts`, read from the same query; the accounts
+  that only lose password sign-in, in its other two groups, do not stop the
+  write.
+- Turning app keys off (`auth.app_key_sign_in` off, or `demo.enabled` on) while
+  any enabled account signs in only with its keys. Otherwise the write ends
+  every login session a key opened, in the same transaction.
+- Changing `server.public_url` while an account would lose the only sign-in
+  provider it can use (an OAuth provider needs the address) and has no
+  password that signs in. Both switch checks judge the address the same write
+  leaves. An address the environment supplies refuses admin writes, and a
+  change to that value at a restart is not checked.
+
+While the Owner holds a live session a key opened, turning app keys off or
+demo mode on by anyone but the Owner is `403 owner_protected` (on v2,
+`permission_denied` with the same detail as other Owner refusals), and
+nothing is written. A write that brings its own transaction (a restore) is
+refused while ownership is being moved at that moment: on its own it is
+`409 conflict`, to be saved again, and a restore's settings item fails with a
+message to restore them again once the move has finished.
+
+Turning app keys off ends every session a key opened. A device such a session
+approved has a session of its own and stays signed in: a TV signed in by
+device sign-in, a Jellyfin app paired by Quick Connect, or a remote-playback
+handoff. The TV and the Jellyfin app renew like any session; a handoff ends by
+itself within 24 hours. To end them, the person ends those sessions from their
+list of sessions (`deleteSession`), or an administrator ends one of the
+account's sessions (`deleteAdminUserLoginSession`) or all of them
+(`deleteAdminUserLoginSessions`, which also deletes the account's
+Jellyfin-compatible and Audiobookshelf sessions). An uncollected device
+sign-in approved in advance is refused once the approving session has ended.
+
+`GET /admin/sign-in/accounts-at-risk?change=app_keys_off|local_passwords_off`
+(`listSignInAccountsAtRisk`, acting admin) lists those accounts with their id,
+username, role, `is_owner`, `break_glass`, `has_password` and
+`sign_in_link_expires_at` (always null: the list does not fill it). The app keys
+list is the same while app keys are already off, where it names the accounts
+that still have no way in. It is not paged.
+
 Both writes are non-retryable. Enabling diagnostics can probe storage before the
 transaction, a change to the Redis connection connects to Redis before it (see
 [saving the Redis connection](#saving-the-redis-connection)), and runtime

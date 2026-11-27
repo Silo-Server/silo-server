@@ -29,8 +29,11 @@ SDK's `docs/auth-provider.md`.
   sessions locks the account row, then the account's identities
   (`lockIdentitiesBeforeSessions`, or the identity `FOR UPDATE` where a path
   works on one identity), and only then those rows: the uninstall waits at the
-  identities, or the transaction waits for it. Revocation also withdraws device
-  sign-in approvals before it revokes sessions. Revoking app keys follows the
+  identities, or the transaction waits for it. A transaction that ends several
+  sessions locks them in id order first (`lockSessionsInOrder`), and
+  revocation withdraws device sign-in approvals after it revokes sessions:
+  session rows before request rows, the order a session's deletion writes
+  them in (its foreign key nulls the requests that name it). Revoking app keys follows the
   same rule for the sessions, since a session a key opened carries the identity
   the key was bound to: the identities are locked before those sessions. Where
   the key rows fall varies. Revoking every key of the account
@@ -47,7 +50,17 @@ SDK's `docs/auth-provider.md`.
   clears requests before sessions; that follows from the names Postgres gave
   the two foreign keys' triggers, and nothing relies on it. These paths take
   one account at a time: an uninstall deletes an installation's identities in
-  an order of its own, and an account holds at most one of them.
+  an order of its own, and an account holds at most one of them. Turning the
+  app key switch off ends key sessions across every account
+  (`EndAppKeySessionsTx`), so it locks every installation row (share, in id
+  order) before the sessions (in id order) instead: an uninstall locks its
+  installation before it deletes identities, so one of the two waits at the
+  installation holding no session row. It takes those installation rows
+  before the settings lock (`auth.LockSwitchWrite`), as a provider-bound key's
+  sign-in takes its installation and identity before the settings lock
+  (`lockChain`): a plugin write takes its installation row and then the
+  settings lock, so nothing holds the settings lock while it waits for an
+  installation row.
 - The uninstall also holds the server-settings lock (the sign-in provider
   guard) while it deletes. Its order is: the bindings lock, the installation
   row, the settings lock, then the installation's identities taken
@@ -246,8 +259,14 @@ ordered against each other.
   a provider is usable. The warning
   (`SignInProviderWarning`) names the ways back: the declaration, a break-glass
   admin turning password sign-in back on, and `silo auth local-login enable`.
-- `listAdminLocalPasswordOffAccounts` answers who the switch would lock out.
-  It shares with sign-in the email-match rule (`emailMatchCandidateSQL`, also
+- `listAdminLocalPasswordOffAccounts` answers who the switch would lock out,
+  and the refusal below answers from the same query
+  (`localPasswordOffAffectedSQL`): every enabled account it affects is either
+  warned (it loses password sign-in; grouped `email_match` or `admin_link`)
+  or blocking (it would be left with Silo app keys as its only way in, or with
+  none; group `blocking`). On a server whose accounts hold no app keys nobody
+  blocks, and the warned accounts are the same as before app keys. It shares
+  with sign-in the email-match rule (`emailMatchCandidateSQL`, also
   used by account resolution), and with the guard the rule for which
   providers can sign people in (`signInProviders`): a link counts as a way in
   only to one of those, so not to a network provider (it signs the account in
@@ -267,6 +286,20 @@ ordered against each other.
   sliding and ends `auth.refresh_token_expiry` after the provider last
   vouched for it. Personal API keys keep working, and a session can still
   approve a new device.
+- Turning the switch off is also refused, with `last_sign_in_method`, while
+  any account is in the list's `blocking` group (app-keys.md, "Keys are never
+  the only way in"); the detail names those accounts. Afterwards a key that is
+  not provider-bound works only for a break-glass account, and a password
+  signs in only a break-glass administrator, so the refusal names linking a
+  provider account for each, and a password only where a break-glass
+  administrator is named. The break-glass check runs first, then the check
+  for a provider people can use, then this one. While the switch is off, an
+  administrator change that would leave a break-glass admin with keys as its
+  only way in (setting the flag on an account with keys and no usable password
+  or provider identity, or turning such an account's password sign-in off) is
+  refused the same way. A person's own unlink of their last usable provider
+  account is refused with `last_sign_in_method` whatever keys they hold; an
+  administrator's unlink stays allowed.
 - Recovery from a shell with the server's `DATABASE_URL`:
   `silo auth local-login enable` turns the switch back on;
   `silo auth local-login enable -user <name or email>` turns one account's

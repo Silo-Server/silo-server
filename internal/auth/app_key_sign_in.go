@@ -207,11 +207,28 @@ type lockedChain struct {
 	providerSince *time.Time
 }
 
-// lockChain takes the provider and settings locks for binding (keySignInPolicy)
-// after the account row lock and before any key or session row.
+// lockChain takes, after the account row lock and before any key or session
+// row, the provider locks for binding and the settings lock, reading the
+// switch under it (lockAppKeySwitch). A provider-bound key's installation and
+// identity come first (lockKeyIdentity), then the settings lock: a plugin
+// write takes its installation row and then the settings lock, so this never
+// holds the settings lock while it waits for an installation row. A key that
+// is not provider-bound takes no provider lock; the settings lock comes first
+// and the local password rule is read under it. A switch that is off refuses
+// with ErrAppKeySignInDisabled, ahead of any provider refusal.
 func lockChain(ctx context.Context, tx pgx.Tx, user *models.User, binding KeyBinding) (lockedChain, error) {
-	identityID, providerSince, err := keySignInPolicy(ctx, tx, user, binding)
-	return lockedChain{identityID: identityID, providerSince: providerSince}, err
+	if !binding.ProviderBound {
+		if err := lockAppKeySwitch(ctx, tx); err != nil {
+			return lockedChain{}, err
+		}
+		identityID, providerSince, err := keySignInPolicy(ctx, tx, user, binding)
+		return lockedChain{identityID: identityID, providerSince: providerSince}, err
+	}
+	identityID, providerSince, policyErr := keySignInPolicy(ctx, tx, user, binding)
+	if err := lockAppKeySwitch(ctx, tx); err != nil {
+		return lockedChain{}, err
+	}
+	return lockedChain{identityID: identityID, providerSince: providerSince}, policyErr
 }
 
 func (c lockedChain) session(ip string, expiry time.Time) KeySession {

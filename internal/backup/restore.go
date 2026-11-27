@@ -618,10 +618,9 @@ type DatabaseLoader interface {
 	// HasAccounts reports whether dbURL holds an account: a users row. A
 	// database without the table holds none.
 	HasAccounts(ctx context.Context, dbURL string) (bool, error)
-	// StrandedAccounts lists the enabled accounts among holders (accounts
-	// that held an app key when the restore read them) that dbURL leaves
-	// with no way to sign in.
-	StrandedAccounts(ctx context.Context, dbURL string, holders []int64) ([]string, error)
+	// StrandedAccounts lists the enabled accounts dbURL leaves with no way
+	// to sign in, and the remedy true for its sign-in switches.
+	StrandedAccounts(ctx context.Context, dbURL string) ([]string, string, error)
 	// CarryPolicies gives dbURL liveURL's custom access policies ("" for
 	// none), returning the backup's it turned off.
 	CarryPolicies(ctx context.Context, dbURL, liveURL string) ([]string, error)

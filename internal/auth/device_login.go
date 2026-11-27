@@ -100,7 +100,15 @@ var deviceCodeAlphabet = []byte("0123456789")
 // the approving accounts first, as approval and collection do, and commit this
 // update together with session revocation. Already-issued playback grants and
 // requests approved by other accounts are unchanged.
-func withdrawDeviceSignInApprovalsInTransaction(ctx context.Context, tx pgx.Tx, userIDs []int) (int64, error) {
+func withdrawDeviceSignInApprovalsInTransaction(ctx context.Context, tx sessionExecQuerier, userIDs []int) (int64, error) {
+	// In id order, so two withdrawals over shared rows never hold each
+	// other's. Callers end the account's sessions first: session rows
+	// before request rows.
+	if _, err := tx.Exec(ctx, `SELECT id FROM device_login_requests
+		WHERE approved_by_user_id = ANY($1::int[]) AND status = $2 ORDER BY id FOR UPDATE`,
+		userIDs, DeviceLoginStatusApproved); err != nil {
+		return 0, fmt.Errorf("locking device sign-in approvals: %w", err)
+	}
 	tag, err := tx.Exec(ctx, `
 		UPDATE device_login_requests SET status = $2, updated_at = NOW()
 		WHERE approved_by_user_id = ANY($1::int[]) AND status = $3`,

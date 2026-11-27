@@ -485,6 +485,11 @@ func appKeyProblem(err error) error {
 // appKeyProblemAt is appKeyProblem with the location of the route's signed
 // payload, for a payload field it refuses.
 func appKeyProblemAt(err error, payloadLocation string) error {
+	if errors.Is(err, auth.ErrAppKeySignInDisabled) {
+		// The switch went off between the route's read and the service's
+		// read under the settings lock: the answer the route gives then.
+		return CapabilityProblem(StateDisabled, appKeyDomain)
+	}
 	if errors.Is(err, auth.ErrSessionCheckUnavailable) {
 		// As at refresh: the store couldn't be asked, and the key is not
 		// judged.

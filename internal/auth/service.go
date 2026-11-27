@@ -1382,7 +1382,8 @@ type sessionStanding struct {
 
 // checkSessionStanding applies the checks a login session must pass before
 // tokens are issued from it: the session and account are live, an
-// impersonating administrator still holds the role, and a session opened
+// impersonating administrator still holds the role, a session a key opened
+// finds the app key switch on (AppKeySwitchOn), and a session opened
 // through an external provider passes the provider re-check under its outage
 // policy. Errors follow Refresh's contract.
 func (s *Service) checkSessionStanding(ctx context.Context, sessionID string) (*sessionStanding, error) {
@@ -1417,6 +1418,19 @@ func (s *Service) checkSessionStanding(ctx context.Context, sessionID string) (*
 			return nil, err
 		}
 		return nil, sessionCheckUnavailable("checking impersonator", err)
+	}
+	if session.DeviceKeyID != nil {
+		// A session a key opened lives only while the switch is on. Turning
+		// it off ends these sessions in the same transaction; one a
+		// database written by hand left live is ended here, at its next
+		// renewal, so it neither refreshes on nor returns with the switch.
+		ended, err := endKeySessionIfSwitchOff(ctx, s.sessions.pool, session.ID)
+		if err != nil {
+			return nil, sessionCheckUnavailable("ending a key session with the switch off", err)
+		}
+		if ended {
+			return nil, ErrSessionRevoked
+		}
 	}
 
 	newExpiry, rechecked, err := s.providerExpiry(ctx, session, time.Now())

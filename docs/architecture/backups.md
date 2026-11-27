@@ -2132,18 +2132,24 @@ that holds a bearer secret or a public capability, each one way:
   can't be carried, keep none (`AppKeysLeftOut`), and an account a restore
   set creates has none. A backup taken before the key tables existed
   restores with no keys. Once the keys and the access settings are settled,
-  every full restore lists by name and id each enabled account that held an
-  unrevoked app key when the restore read the backup and the live server
-  (keys the restore then revoked or left out included) and now has no way
-  to sign in under the restored `auth.app_key_sign_in` and
-  `auth.local_password_login`: no sign-in link whose plugin installation is
-  enabled, no password that signs in, and no key that does
-  (`StrandedAccounts`, which mirrors `keySignInPolicy` and
-  `localPasswordPolicy`). It says to give each a password or link a sign-in
-  provider account for it. Accounts that had no key are left to the other
-  deployment notice, which already says their links are not carried. It
-  changes nothing and never fails the restore. What a person sees for what
-  is left out:
+  every full restore lists each enabled account the restored database leaves
+  with no way to sign in under its app key switch (`auth.app_key_sign_in`, off
+  in demo mode) and `auth.local_password_login`: no provider identity it can
+  sign in with (a provider that can sign people in from an ordinary device:
+  an enabled installation with an enabled binding that is not a network
+  identity binding, and a public URL for an OAuth one), no
+  password that signs in, and no key that does (`StrandedAccounts`, built on
+  `auth.AccountHasNoWayInSQL`, the rule the sign-in switch checks use; see
+  app-keys.md, "Keys are never the only way in"). Every account is
+  considered, not only key holders, so a password-only account a restored
+  "local passwords off" strands is listed too, and so is an account from a
+  backup that predates the key tables. Keys the restore revoked or left out
+  are revoked or absent in the restored rows, so they count as gone. It
+  prints how many accounts and the first 20 by name and id, then how many
+  more, and the remedy true for the restored switches: a password or a
+  provider account while local passwords are on; a provider account, or a
+  password for a break-glass administrator it names, while they are off. It changes nothing and never fails the restore. What a person sees
+  for what is left out:
   - Login sessions: every app signs in again; one with a working key does
     so by itself.
   - Waiting keys: the device asks to enroll again and waits for an admin's

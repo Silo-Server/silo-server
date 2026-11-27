@@ -476,6 +476,7 @@ GET /api/v2/admin/settings/restart-keys	non-media
 GET /api/v2/admin/settings/sensitive-status	non-media
 GET /api/v2/admin/settings/{key}	non-media
 PUT /api/v2/admin/settings/{key}	non-media
+GET /api/v2/admin/sign-in/accounts-at-risk	non-media
 GET /api/v2/admin/sign-in/local-password-off/accounts	non-media
 GET /api/v2/admin/stats	non-media
 GET /api/v2/admin/stats/api-clients	non-media
@@ -1598,6 +1599,7 @@ GET /api/v2/admin/settings/restart-keys	non-media
 GET /api/v2/admin/settings/sensitive-status	non-media
 GET /api/v2/admin/settings/{key}	non-media
 PUT /api/v2/admin/settings/{key}	non-media
+GET /api/v2/admin/sign-in/accounts-at-risk	non-media
 GET /api/v2/admin/sign-in/local-password-off/accounts	non-media
 GET /api/v2/admin/stats	non-media
 GET /api/v2/admin/stats/api-clients	non-media

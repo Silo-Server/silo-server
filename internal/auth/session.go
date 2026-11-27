@@ -237,6 +237,22 @@ func (r *SessionRepository) ListByUserPage(ctx context.Context, userID int, afte
 	return scanSessions(rows)
 }
 
+// lockSessionsInOrder locks the sessions sessionWhere selects (a condition
+// on auth_sessions s, with args) in id order. Every path that ends or deletes
+// several sessions calls it, with the condition of its own write, before
+// that write: one statement updating many rows locks them in whatever order
+// it scans them, and two such statements over shared rows can each hold one
+// the other needs. A separate locking read with ORDER BY locks in id order
+// (the lock step runs above the sort), so every multi-session ender takes
+// shared rows in one order. Ending a session writes only its row, so the
+// session rows come before any request row a path writes afterwards.
+func lockSessionsInOrder(ctx context.Context, db sessionExecQuerier, sessionWhere string, args ...any) error {
+	if _, err := db.Exec(ctx, `SELECT s.id FROM auth_sessions s WHERE `+sessionWhere+` ORDER BY s.id FOR UPDATE`, args...); err != nil {
+		return fmt.Errorf("locking login sessions: %w", err)
+	}
+	return nil
+}
+
 // Revoke sets revoked_at to NOW() for the given session.
 func (r *SessionRepository) Revoke(ctx context.Context, id string) error {
 	query := `UPDATE auth_sessions SET revoked_at = NOW() WHERE id = $1`
@@ -457,29 +473,29 @@ func (r *SessionRepository) RevokeAsAdmin(ctx context.Context, actorID, userID i
 	if err := lockAdminActorAndTarget(ctx, tx, actorID, userID); err != nil {
 		return 0, err
 	}
-	// Sign out everywhere takes the account's identities, then its device
-	// sign-in approvals, then its sessions, as revokeSignInsInTransaction
-	// does (see lockIdentitiesBeforeSessions).
-	var withdrawn int64
-	if sessionID == nil {
-		if err := lockIdentitiesBeforeSessions(ctx, tx, userID, false); err != nil {
-			return 0, err
-		}
-		if withdrawn, err = withdrawDeviceSignInApprovalsInTransaction(ctx, tx, []int{userID}); err != nil {
-			return 0, err
-		}
-		if err := EndSignInLinksTx(ctx, tx, userID); err != nil {
-			return 0, err
-		}
-	}
-	query := `UPDATE auth_sessions SET revoked_at = NOW()
-		WHERE (user_id = $1 OR impersonator_user_id = $1)
-		AND revoked_at IS NULL AND expires_at > NOW()`
+	// Sign out everywhere takes the account's identities, then its sessions
+	// in id order (lockSessionsInOrder), then withdraws its device sign-in
+	// approvals and ends its sign-in links, as revokeSignInsInTransaction does.
+	var (
+		withdrawn int64
+		query     string
+	)
 	args := []any{userID}
 	// A single session reports whether this call ended it: revoking a
 	// session that was already over succeeds and records nothing.
 	var wasLive bool
-	if sessionID != nil {
+	if sessionID == nil {
+		if err := lockIdentitiesBeforeSessions(ctx, tx, userID, false); err != nil {
+			return 0, err
+		}
+		if err := lockSessionsInOrder(ctx, tx, `(s.user_id = $1 OR s.impersonator_user_id = $1)
+			AND s.revoked_at IS NULL AND s.expires_at > NOW()`, userID); err != nil {
+			return 0, err
+		}
+		query = `UPDATE auth_sessions SET revoked_at = NOW()
+			WHERE (user_id = $1 OR impersonator_user_id = $1)
+			AND revoked_at IS NULL AND expires_at > NOW()`
+	} else {
 		err := tx.QueryRow(ctx, `SELECT revoked_at IS NULL AND expires_at > NOW() FROM auth_sessions
 			WHERE user_id = $1 AND id = $2 FOR UPDATE`, userID, *sessionID).Scan(&wasLive)
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -497,6 +513,14 @@ func (r *SessionRepository) RevokeAsAdmin(ctx context.Context, actorID, userID i
 	}
 	if sessionID != nil && tag.RowsAffected() == 0 {
 		return 0, ErrSessionNotFound
+	}
+	if sessionID == nil {
+		if withdrawn, err = withdrawDeviceSignInApprovalsInTransaction(ctx, tx, []int{userID}); err != nil {
+			return 0, err
+		}
+		if err := EndSignInLinksTx(ctx, tx, userID); err != nil {
+			return 0, err
+		}
 	}
 	// Sign out everywhere also ends the account's other sign-ins; ending any
 	// of them is worth a domain row, even with no login session left.
@@ -555,23 +579,26 @@ func (r *SessionRepository) ExtendExpiresAt(ctx context.Context, id string, newE
 // DeleteExpired removes all sessions whose expires_at is in the past,
 // regardless of their revocation status. Returns the number of deleted rows.
 //
-// Deleting a session clears device_login_requests.auth_session_id, so the
+// Deleting a session clears the device_login_requests rows that name it
+// (auth_session_id, the session a request produced, and
+// preapproved_session_id, the session that approved it in advance), so the
 // delete takes sessions before requests, the reverse of a plugin uninstall
 // (see lockIdentitiesBeforeSessions). It therefore never waits: it skips a
-// session or request row another transaction holds, and leaves that session
-// for the next run.
+// session another transaction holds, and a session naming a request row
+// another transaction holds, and leaves that session for the next run.
 func (r *SessionRepository) DeleteExpired(ctx context.Context) (int, error) {
 	query := `
 		WITH expired AS (
 			SELECT id FROM auth_sessions WHERE expires_at < NOW() FOR UPDATE SKIP LOCKED
 		), requests AS (
 			SELECT id FROM device_login_requests
-			WHERE auth_session_id IN (SELECT id FROM expired) FOR UPDATE SKIP LOCKED
+			WHERE auth_session_id IN (SELECT id FROM expired) OR preapproved_session_id IN (SELECT id FROM expired)
+			FOR UPDATE SKIP LOCKED
 		)
 		DELETE FROM auth_sessions s USING expired e
 		WHERE s.id = e.id AND NOT EXISTS (
 			SELECT 1 FROM device_login_requests d
-			WHERE d.auth_session_id = s.id AND d.id NOT IN (SELECT id FROM requests))`
+			WHERE (d.auth_session_id = s.id OR d.preapproved_session_id = s.id) AND d.id NOT IN (SELECT id FROM requests))`
 	tag, err := r.pool.Exec(ctx, query)
 	if err != nil {
 		return 0, fmt.Errorf("deleting expired sessions: %w", err)

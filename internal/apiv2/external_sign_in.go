@@ -64,6 +64,8 @@ type ExternalSignInCapabilities struct {
 	// served (NetworkSignIn).
 	// LocalPasswordOffAccounts: listAdminLocalPasswordOffAccounts is served.
 	LocalPasswordOffAccounts bool `json:"local_password_off_accounts" doc:"Whether listAdminLocalPasswordOffAccounts lists the accounts that lose their way in when auth.local_password_login is turned off, and whether updateAdminSettings refuses turning it off without an enabled OIDC or LDAP provider (sign_in_provider_required)"`
+	// LocalPasswordOffBlocking: the list's blocking group is served.
+	LocalPasswordOffBlocking bool `json:"local_password_off_blocking" doc:"Whether listAdminLocalPasswordOffAccounts answers group blocking and totals.blocking: the accounts turning auth.local_password_login off would leave with Silo app keys as their only way in, or with none, which updateAdminSettings refuses (409 last_sign_in_method) from the same query"`
 	NetworkLinkKeepsPassword bool `json:"network_link_keeps_password" doc:"Whether linking a network identity (linkAccountIdentityWithNetwork, or createAdminUserIdentity at a network provider) keeps the account's local password sign-in. While the provider's latest answer refuses the person, that password is refused with not_permitted (break-glass accounts excepted); an unavailable or unsupported answer keeps the refusal, and it ends when the provider vouches again or the network provider is turned off. Servers without the field turn local password sign-in off on such a link. network_sign_in says whether the link operations are served"`
 }
 
@@ -355,6 +357,7 @@ func registerExternalSignIn(reg *Registry) {
 				out.Body.NetworkSignIn = svc.NetworkLinkingAvailable() && reg.deps.Sessions != nil
 				out.Body.NetworkLinkKeepsPassword = true
 				out.Body.LocalPasswordOffAccounts = true
+				out.Body.LocalPasswordOffBlocking = true
 			}
 			return out, nil
 		})

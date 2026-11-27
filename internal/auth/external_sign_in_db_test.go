@@ -40,7 +40,18 @@ func newExternalSignInEnv(t *testing.T) *externalSignInEnv {
 		t.Skip("SILO_TEST_DATABASE_URL is not set")
 	}
 	ctx := t.Context()
-	pool, err := pgxpool.New(ctx, dsn)
+	poolConfig, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		t.Fatalf("parse test database URL: %v", err)
+	}
+	// Staged race tests hold a blocker, several parties and a poll at once;
+	// the default size (the larger of 4 and the CPU count) would park a party
+	// in the pool on a 4-CPU runner, where Postgres never sees it wait.
+	poolConfig.MaxConns = 16
+	// A name of this test's own, so a staged wait counts only this test's
+	// backends, never another test's waiting on a shared advisory lock.
+	poolConfig.ConnConfig.RuntimeParams["application_name"] = fmt.Sprintf("silo-test-%d", time.Now().UnixNano())
+	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
 	if err != nil {
 		t.Fatalf("connect test database: %v", err)
 	}
@@ -1007,5 +1018,23 @@ func TestPluginAuthBindingCallbackModeDB(t *testing.T) {
 	err := store.UpsertAuthBinding(ctx, binding)
 	if _, ok := errors.AsType[*plugins.ConfigValidationError](err); !ok {
 		t.Fatalf("explicit LDAP callback mode: %v, want validation error", err)
+	}
+}
+
+// addUsableProvider installs a sign-in provider people can use (an enabled
+// installation with an enabled binding that reads as a credentials
+// provider, so it needs no public URL) with no identities: turning local
+// passwords off needs one (ErrSignInProviderRequired), and it changes no
+// account's way in.
+func (e *externalSignInEnv) addUsableProvider(t *testing.T) {
+	t.Helper()
+	var id int
+	if err := e.pool.QueryRow(t.Context(), `INSERT INTO plugin_installations (plugin_id, version, install_path, enabled, update_policy, kind)
+		VALUES ($1, '0', '/nonexistent/'||$1, true, 'manual', 'plugin') RETURNING id`, "usable-provider-"+e.suffix).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = e.pool.Exec(context.Background(), `DELETE FROM plugin_installations WHERE id = $1`, id) })
+	if _, err := e.pool.Exec(t.Context(), `INSERT INTO plugin_auth_bindings (plugin_installation_id, capability_id, enabled) VALUES ($1, 'directory', true)`, id); err != nil {
+		t.Fatal(err)
 	}
 }

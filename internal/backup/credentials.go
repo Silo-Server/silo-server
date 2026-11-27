@@ -603,9 +603,7 @@ func (l PGLoader) CarryCredentials(ctx context.Context, dbURL, liveURL string, k
 			return err
 		}
 		settle := newAppKeySettle(tables, live, keys)
-		if err := settle.holders(ctx, tx, &result); err != nil {
-			return err
-		}
+		result.AppKeys.Kept = settle.on
 		for i, table := range tables {
 			if table.name == "stream_nodes" {
 				if err := reconcileRestoredStreamNodeReferences(ctx, tx, live[i]); err != nil {

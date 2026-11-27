@@ -403,11 +403,13 @@ administrator issued; while one exists, requests send nothing.
 ## The account's creation time
 
 Every answer that carries a token pair for one of the person's own sessions
-also carries `account_created_at` beside `user`: password and network
+also carries `account_created_at`, beside `user` where the answer has one: password and network
 sign-in, `completeOAuthLogin`, device sign-in polling, `refreshSession`,
 signup and setup, an accepted invitation, a completed password reset, an
 administrator's impersonation, and every sealed `signed_in` answer to one of
-the person's own device keys. It is the account's `users.created_at`: RFC 3339
+the person's own device keys. A `refreshSession` answer carries the tokens,
+`expires_in` and this member and no `user`, so the account's name and role
+reach a device only on the answers that carry `user`. It is the account's `users.created_at`: RFC 3339
 in UTC at the stored microsecond precision, with trailing zeros of the
 fraction left out (so it is not the millisecond instant other fields use).
 Nothing rewrites it after the account is made, and a full restore brings it
@@ -1720,7 +1722,15 @@ code redemption, `PUT /auth/keys/person`, `pending/{id}/approve` and the signed
 form of `PUT /api/v2/profiles/set` answer 409 `capability_disabled`, and the
 invitation lookup reports `app_join: false`. The capability,
 `GET /auth/keys` and its deletes, `GET /auth/keys/pending` and
-`pending/{id}/deny` stay open. A server in demo
+`pending/{id}/deny` stay open. Turning the switch off ends every login session
+a key opened, a granted app's included, in the same transaction as the
+settings write; sessions opened by a password, a provider or device sign-in
+stay. A key session a hand-written database left live is ended at its next
+refresh while the switch is off (401 `session_expired`, as a revoked
+session), and stays ended when the switch comes back; until it refreshes,
+its access token keeps working until it expires (8 hours by default).
+Turning it back on needs nothing:
+each device signs in again with its key. A server in demo
 mode (`demo.enabled`) behaves as if the switch were off, for administrators
 too, and its capability reports `disabled`: every visitor shares one account
 there, so no key is enrolled on it and none signs in. There
@@ -1766,8 +1776,8 @@ linking rule whether or not `network_sign_in` is served.
 | `POST /auth/refresh` (`refreshSession`) | the refresh token | A session opened through the provider is re-checked with it when due (see below). A refused account ends the session (401 `session_expired`). Under the `fail_closed` outage policy, an unreachable provider answers 503 `provider_unavailable`; the session stays valid and the client retries later. A database that cannot be read answers 503 `dependency_unavailable` with `Retry-After` (see [When the server cannot check a session](#when-the-server-cannot-check-a-session)). A provider answer the server received but could not apply, where a retry would not help, is 401 `invalid_token`: a refusal that could not be applied, a role sync that rolled back, or a replacement refresh token that could not be stored (the provider may accept only that token now). A refusal whose revocation rolled back stays on record and ends the session at the next check, and an unapplied active answer stays due. Any other database failure after an active answer is the retryable 503 above. |
 | `POST /admin/users/{id}/identities` (`createAdminUserIdentity`) | acting admin | Links by `installation_id` and the exact `external_subject`. Turns local password sign-in off unless the account is break-glass or the installation is a network identity provider. |
 | `DELETE /admin/users/{id}/identities/{identity_id}` (`deleteAdminUserIdentity`) | acting admin | May leave the account without a sign-in method; setting a password with `updateAdminUser` turns its local password sign-in back on. |
-| `PUT /admin/users/{id}` (`updateAdminUser`) | acting admin | `break_glass` sets or clears the flag: admin accounts only, and only the server Owner may change it (403 `permission_denied`). The Owner has it by default (set at first-run setup and on every ownership move) and may clear it on its own account. A `password` also turns the account's local password sign-in back on, so an admin other than the Owner may not set its own while its local sign-in is off (403 `permission_denied`). Demoting, disabling or clearing the last usable break-glass admin while local sign-in is off is 409 `break_glass_required`; so is deleting it (`deleteAdminUser`) or turning `auth.local_password_login` off without one (`updateAdminSettings`, `updateAdminSetting`). |
-| `GET /admin/sign-in/local-password-off/accounts` (`listAdminLocalPasswordOffAccounts`) | acting admin | Who loses their way in if `auth.local_password_login` is turned off: enabled accounts whose local password signs in today (password sign-in on and a password set), that are not break-glass and have no linked identity at an enabled OIDC or LDAP provider. A link counts only to a provider that can sign people in, as the switch-off check judges it: not to a network provider (once passwords are off it signs the account in only from that network), and not to an OpenID Connect provider while `server.public_url` is unset. Disabled and break-glass accounts are not listed. `group` (required) picks one group: `email_match`, the ordinary accounts with an email that email auto-match can link at their first provider sign-in (the provider must assert that email as verified), or `admin_link`, everyone else, whom nothing links until an administrator does. Each account carries `reason`: `email_match`, `email_match_off` (it would match, but `auth.email_auto_match` is off), `administrator` (an admin or the Owner, which auto-match never links) or `no_email`. `email_auto_match` (`true` or `false`, optional) answers as if the setting had that value, for an edit that changes both; the response's `email_auto_match` is the value used. `totals` counts both groups on every page. Ordered by username (an account without one sorts first), then ID, and paginated with `limit` and `cursor`; pages are live, not a snapshot. Advertised by `local_password_off_accounts` in `getExternalSignInCapabilities`. |
+| `PUT /admin/users/{id}` (`updateAdminUser`) | acting admin | `break_glass` sets or clears the flag: admin accounts only, and only the server Owner may change it (403 `permission_denied`). The Owner has it by default (set at first-run setup and on every ownership move) and may clear it on its own account. A `password` also turns the account's local password sign-in back on, so an admin other than the Owner may not set its own while its local sign-in is off (403 `permission_denied`). Demoting, disabling or clearing the last usable break-glass admin while local sign-in is off is 409 `break_glass_required`; so is deleting it (`deleteAdminUser`) or turning `auth.local_password_login` off without one (`updateAdminSettings`, `updateAdminSetting`). While local sign-in is off, a change that leaves a break-glass admin with Silo app keys as its only way in (setting `break_glass` on an account with keys and no usable password or provider account, or turning such an account's local password sign-in off) is 409 `last_sign_in_method`. |
+| `GET /admin/sign-in/local-password-off/accounts` (`listAdminLocalPasswordOffAccounts`) | acting admin | Who loses their way in if `auth.local_password_login` is turned off: enabled accounts whose local password signs in today (password sign-in on and a password set), that are not break-glass and have no linked identity at an enabled OIDC or LDAP provider. A link counts only to a provider that can sign people in, as the switch-off check judges it: not to a network provider (once passwords are off it signs the account in only from that network), and not to an OpenID Connect provider while `server.public_url` is unset. Disabled and break-glass accounts are not listed. `group` (required) picks one group: `email_match`, the ordinary accounts with an email that email auto-match can link at their first provider sign-in (the provider must assert that email as verified), or `admin_link`, everyone else, whom nothing links until an administrator does. Each account carries `reason`: `email_match`, `email_match_off` (it would match, but `auth.email_auto_match` is off), `administrator` (an admin or the Owner, which auto-match never links) or `no_email`. A third group, `blocking`, holds the accounts the change would leave with Silo app keys as their only way in (`reason` `keys_only`: a key bound to a sign-in provider account, or a break-glass account's, keeps working) or with none (`no_way_in`: no password that signs in, and keys that need local passwords); an account in it is in neither other group, and turning `auth.local_password_login` off is refused naming exactly these accounts (409 `last_sign_in_method`), from the same query. On a server whose accounts hold no app keys it is always empty. `email_auto_match` (`true` or `false`, optional) answers as if the setting had that value, for an edit that changes both; the response's `email_auto_match` is the value used. `totals` counts every group on every page (`email_match`, `admin_link`, `blocking`); `local_password_off_blocking` in `getExternalSignInCapabilities` says the server answers the third group. Ordered by username (an account without one sorts first), then ID, and paginated with `limit` and `cursor`; pages are live, not a snapshot. Advertised by `local_password_off_accounts` in `getExternalSignInCapabilities`. |
 | `POST /admin/plugins/installations/{id}/auth-binding/test` (`testAdminPluginAuthBinding`) | acting admin | Sends staged `config` entries (blank secrets keep the stored value only while the rest of that entry is unchanged and no secret in it is typed) to the plugin's `TestConnection`; answers `ok`, the plugin's `steps` and `callback_url`, the redirect URI to register at an OAuth provider. If the public URL is unset or the binding mode cannot be read, the response keeps the test results and leaves the URL empty. A plugin without a connection test, or a disabled installation, is 409. Not retried automatically. |
 | `PUT /admin/plugins/installations/{id}/auth-binding` (`updateAdminPluginAuthBinding`) | acting admin | Applies without a restart (`X-Silo-Restart-Required: false`). `auto_provision` defaults to true. Enabling a second binding of the same kind is 409 `provider_already_enabled`; one network identity binding may be enabled beside the one OIDC or LDAP binding. |
 | `GET /admin/plugins/installations` (`listAdminPluginInstallations`) | acting admin | Each OAuth auth binding carries `callback_url` (the callback to register at the provider) and `post_logout_redirect_url` (`/login`, to register for provider logout), both on `server.public_url`; empty without a public URL and for a password provider. The other operations that answer an installation carry them too. |
@@ -1922,10 +1932,27 @@ and logs out of Silo without the provider when it does not answer in time.
 
 Server settings: `auth.local_password_login` (default `true`; turning it off
 needs a break-glass admin and an OIDC or LDAP provider people can sign in
-with, and is otherwise applied at once: the settings write takes no
-acknowledgement, so a client that wants to show who is affected reads
-`listAdminLocalPasswordOffAccounts` first. Turning it off signs nobody out:
-nothing but password sign-in, signup and invitations reads the switch, so
+with, and is refused with 409 `last_sign_in_method` while it would leave an
+account with Silo app keys as its only way in, or with none: the `blocking`
+group of `listAdminLocalPasswordOffAccounts` lists those accounts from the
+same query the refusal reads. Otherwise it applies at once: the settings
+write takes no acknowledgement, so a client that wants to show who is
+affected reads `listAdminLocalPasswordOffAccounts` first. While it is off,
+these read it, and nothing else does:
+password sign-in (`login`) signs in only break-glass admins;
+`signup` and `acceptInvitation` are refused with 403 `local_login_disabled`,
+sending an invitation is refused, `getSignupStatus` reports signup off and
+`listAuthProviders` leaves `local` out;
+an invitation's app code (`redeemAppCode` with a join code) is refused with
+`provider_sign_in_required`;
+a Silo app key that is not bound to a sign-in provider account does not sign
+in, enroll or redeem (`local_login_disabled`), except a break-glass
+account's, while a key bound to one is judged by its provider instead;
+a sign-in link is not made, redeemed or used to set a password
+(`provider_sign_in_required`), except for a break-glass account;
+and a person's unlink of their own provider account, and `sign_in_again` in
+`getAppKeySessionAccess`, count a password only where it would sign in.
+Turning it off signs nobody out: no session reads the switch at refresh, so
 every session ends as it would anyway. A session opened with a password
 slides forward at each refresh, so it lasts until the person signs out, an
 administrator ends it, or it goes unrefreshed past `auth.refresh_token_expiry`.

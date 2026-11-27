@@ -428,6 +428,41 @@
 ./internal/auth TestUnlinkRevokesItsKeysDB
 ./internal/auth TestKeyChallengeSpentOnKidMismatchDB
 ./internal/auth TestKeySessionRefusedPastItsLimitDB
+# Turning the app key switch off: key sessions end with the write, key paths
+# re-read the switch under the settings lock, and renewal reads it.
+./internal/auth TestAppKeySwitchOffEndsKeySessionsDB
+./internal/auth TestKeySignInRacesSwitchOffDB
+./internal/api/handlers TestAppKeySwitchWriteEndsKeySessionsDB
+./internal/apiv2 TestKeySessionSweepMissedEndsAtRefreshDB
+./internal/auth TestSwitchOffSweepAndAccountRevokeDoNotDeadlockDB
+./internal/api/handlers TestAppKeysOffJudgedOnTheBatchLocalSettingDB
+./internal/auth TestSessionEndersStagedDB
+./internal/auth TestTwoRevokesAroundAPreapprovalDB
+./internal/auth TestCollectRacingTheApproversRevokeDB
+./internal/auth TestNoUnlistedSideWritesDB
+./internal/auth TestOwnershipTransferSignInAndSwitchOffDB
+./internal/auth TestPromotionWithdrawsApprovalsDB
+./internal/auth TestCollectReadsApproverAtStatementClockDB
+./internal/auth TestPromotionEndsSessionAppCodesDB
+./internal/api/handlers TestStaleSettingsWriteAnswersPreconditionFirstDB
+./internal/api/handlers TestGuardedSwitchWriteOnOneConnectionDB
+./internal/auth TestSessionEndersLockInIDOrderDB
+./internal/auth TestSignInLinkCodeRedeemAgainstSweepDB
+./internal/auth TestPluginWriteAgainstKeyPathsDB
+./internal/auth TestLocalPasswordOffMatchesMainWithoutKeysDB
+./internal/auth TestLocalPasswordOffPageAndRefusalAgreeDB
+./internal/auth TestSwitchOffAfterRenewalReadDB
+./internal/api/handlers TestPublicURLWritesKeepAWayInDB
+./internal/api/handlers TestSwitchOffKeepsOwnerProtectionDB
+./internal/api/handlers TestLocalPasswordsOffJudgesTheStateLeftDB
+./internal/api/handlers TestOwnershipMoveAgainstSwitchOffDB
+./migrations TestDropSessionPreapprovalTriggerUpAndDownPostgres
+# Keys are never the only way in: who each switch change leaves at risk, the
+# refusals that name them, and the restore's list of accounts with no way in.
+./internal/auth TestAccountsAtRiskDB
+./internal/auth TestLocalLoginOffRefusesKeysOnlyDB
+./internal/auth TestUnlinkOnlyProviderWithKeysRefusedDB
+./internal/backup TestStrandedAccountsCoverEveryAccountDB
 ./internal/auth TestGrantRedeemDB
 ./internal/auth TestSignedInRepliesReportPersonKeyDB
 ./internal/auth TestRepliesThatLeaveOutThePersonKeyDB
