@@ -99,6 +99,33 @@ func listsAccount(accounts []AccountAtRisk, id int) bool {
 // the write is refused). The local-passwords answer is read from
 // listAdminLocalPasswordOffAccounts' groups, and the refusal's list must name
 // exactly the accounts in its blocking group.
+// The outcomes a truth-table row expects of each write.
+const (
+	truthAlone  = "unaffected"
+	truthWarned = "warned"
+	truthBlocks = "blocks"
+)
+
+// truthOutcome is what the three writes do to one account.
+type truthOutcome struct {
+	appKeysOff bool
+	localOff   string
+	urlRemoved bool
+}
+
+// truthRow is one kind of account in TestAccountsAtRiskDB.
+type truthRow struct {
+	name    string
+	localOn bool
+	seed    func(t *testing.T, id int)
+	role    string
+	pw, bg  bool
+	// publicURL is server.public_url; OAuth sign-in needs one.
+	publicURL string
+	disabled  bool
+	want      truthOutcome
+}
+
 func TestAccountsAtRiskDB(t *testing.T) {
 	env := newExternalSignInEnv(t)
 	ctx := t.Context()
@@ -109,28 +136,76 @@ func TestAccountsAtRiskDB(t *testing.T) {
 	oidc := env.riskProvider(t, "oidc", `["oauth2"]`)
 	network := env.riskProvider(t, "network", `["network"]`)
 	identities := NewIdentityService(env.pool)
+	for i, tc := range truthRows(env, directory, oidc, network) {
 
-	const (
-		alone  = "unaffected"
-		warned = "warned"
-		blocks = "blocks"
-	)
-	type outcome struct {
-		appKeysOff bool
-		localOff   string
-		urlRemoved bool
+		t.Run(tc.name, func(t *testing.T) {
+			label := fmt.Sprintf("risk-%d", i)
+			local := map[bool]string{true: "true", false: "false"}[tc.localOn]
+			env.setSetting(t, config.AuthLocalPasswordLoginSettingKey, local)
+			env.setSetting(t, config.ServerPublicURLSettingKey, tc.publicURL)
+			role := tc.role
+			if role == "" {
+				role = models.RoleUser
+			}
+			id := env.riskAccount(t, label, role, tc.pw, tc.bg)
+			tc.seed(t, id)
+			if tc.disabled {
+				if _, err := env.pool.Exec(ctx, `UPDATE users SET enabled = false WHERE id = $1`, id); err != nil {
+					t.Fatal(err)
+				}
+			}
+			got := observeTruth(t, env, identities, id, local, tc.publicURL)
+			if got != tc.want {
+				t.Fatalf("outcome = %+v, want %+v", got, tc.want)
+			}
+			if _, err := env.pool.Exec(ctx, `UPDATE users SET enabled = false WHERE id = $1`, id); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
-	for i, tc := range []struct {
-		name    string
-		localOn bool
-		seed    func(t *testing.T, id int)
-		role    string
-		pw, bg  bool
-		// publicURL is server.public_url; OAuth sign-in needs one.
-		publicURL string
-		disabled  bool
-		want      outcome
-	}{
+}
+
+// observeTruth reads what the three writes would do to account id: the app
+// keys refusal's list, the local-passwords list's groups (checked against
+// the refusal's own list), and a public URL removal's refusal when one is
+// set.
+func observeTruth(t *testing.T, env *externalSignInEnv, identities *IdentityService, id int, local, publicURL string) truthOutcome {
+	t.Helper()
+	ctx := t.Context()
+	appKeys, err := AccountsAtRisk(ctx, env.pool, ChangeAppKeysOff)
+	if err != nil {
+		t.Fatal(err)
+	}
+	refused, err := AccountsAtRisk(ctx, env.pool, ChangeLocalPasswordsOff)
+	if err != nil {
+		t.Fatal(err)
+	}
+	group := localPasswordOffGroupOf(t, identities, id)
+	if blocking := group == LocalPasswordOffBlocking; listsAccount(refused, id) != blocking {
+		t.Fatalf("the refusal names it = %v, but its group is %q: the page and the refusal disagree", !blocking, group)
+	}
+	got := truthOutcome{appKeysOff: listsAccount(appKeys, id), localOff: map[string]string{
+		"": truthAlone, LocalPasswordOffEmailMatch: truthWarned, LocalPasswordOffAdminLink: truthWarned, LocalPasswordOffBlocking: truthBlocks,
+	}[group]}
+	if publicURL != "" {
+		err := pgx.BeginFunc(ctx, env.pool, func(tx pgx.Tx) error {
+			return CheckPublicURLChange(ctx, tx, SignInSettingsOf(local, publicURL), SignInSettingsOf(local, ""))
+		})
+		got.urlRemoved = listsAccountErr(err, id)
+	}
+	return got
+}
+
+// truthRows are the kinds of account TestAccountsAtRiskDB seeds, with what
+// each write does to them.
+func truthRows(env *externalSignInEnv, directory, oidc, network int) []truthRow {
+	const (
+		alone  = truthAlone
+		warned = truthWarned
+		blocks = truthBlocks
+	)
+	type outcome = truthOutcome
+	return []truthRow{
 		{name: "passwordless with a device key", localOn: true, want: outcome{true, blocks, false},
 			seed: func(t *testing.T, id int) { env.riskKey(t, id, models.DeviceKeyStatusActive, nil) }},
 		{name: "passwordless with only a person key", localOn: true, want: outcome{true, blocks, false},
@@ -198,51 +273,6 @@ func TestAccountsAtRiskDB(t *testing.T) {
 			seed: func(t *testing.T, id int) { env.riskKey(t, id, models.DeviceKeyStatusActive, nil) }},
 		{name: "disabled, with no way in but a key", localOn: true, disabled: true, want: outcome{false, alone, false},
 			seed: func(t *testing.T, id int) { env.riskKey(t, id, models.DeviceKeyStatusActive, nil) }},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			label := fmt.Sprintf("risk-%d", i)
-			local := map[bool]string{true: "true", false: "false"}[tc.localOn]
-			env.setSetting(t, config.AuthLocalPasswordLoginSettingKey, local)
-			env.setSetting(t, config.ServerPublicURLSettingKey, tc.publicURL)
-			role := tc.role
-			if role == "" {
-				role = models.RoleUser
-			}
-			id := env.riskAccount(t, label, role, tc.pw, tc.bg)
-			tc.seed(t, id)
-			if tc.disabled {
-				if _, err := env.pool.Exec(ctx, `UPDATE users SET enabled = false WHERE id = $1`, id); err != nil {
-					t.Fatal(err)
-				}
-			}
-			appKeys, err := AccountsAtRisk(ctx, env.pool, ChangeAppKeysOff)
-			if err != nil {
-				t.Fatal(err)
-			}
-			refused, err := AccountsAtRisk(ctx, env.pool, ChangeLocalPasswordsOff)
-			if err != nil {
-				t.Fatal(err)
-			}
-			group := localPasswordOffGroupOf(t, identities, id)
-			if blocking := group == LocalPasswordOffBlocking; listsAccount(refused, id) != blocking {
-				t.Fatalf("the refusal names it = %v, but its group is %q: the page and the refusal disagree", !blocking, group)
-			}
-			got := outcome{appKeysOff: listsAccount(appKeys, id), localOff: map[string]string{
-				"": alone, LocalPasswordOffEmailMatch: warned, LocalPasswordOffAdminLink: warned, LocalPasswordOffBlocking: blocks,
-			}[group]}
-			if tc.publicURL != "" {
-				err := pgx.BeginFunc(ctx, env.pool, func(tx pgx.Tx) error {
-					return CheckPublicURLChange(ctx, tx, SignInSettingsOf(local, tc.publicURL), SignInSettingsOf(local, ""))
-				})
-				got.urlRemoved = listsAccountErr(err, id)
-			}
-			if got != tc.want {
-				t.Fatalf("outcome = %+v, want %+v", got, tc.want)
-			}
-			if _, err := env.pool.Exec(ctx, `UPDATE users SET enabled = false WHERE id = $1`, id); err != nil {
-				t.Fatal(err)
-			}
-		})
 	}
 }
 

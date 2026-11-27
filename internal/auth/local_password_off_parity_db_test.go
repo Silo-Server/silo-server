@@ -81,47 +81,6 @@ func TestLocalPasswordOffMatchesMainWithoutKeysDB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	type row struct {
-		ID                    int
-		Username, Email, Role string
-		IsOwner               bool
-		Reason                string
-		EmailMatch, AdminLink int
-		BlockingIfAnswered    int
-	}
-	read := func(t *testing.T, tx pgx.Tx, query string, group any, matching bool, withBlocking bool) []row {
-		t.Helper()
-		rows, err := tx.Query(ctx, query, matching, group, "", 0, 100000, providers)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer rows.Close()
-		var out []row
-		for rows.Next() {
-			var (
-				r                             row
-				id                            *int
-				username, email, role, reason *string
-				owner                         *bool
-			)
-			dest := []any{&r.EmailMatch, &r.AdminLink}
-			if withBlocking {
-				dest = append(dest, &r.BlockingIfAnswered)
-			}
-			dest = append(dest, &id, &username, &email, &role, &owner, &reason)
-			if err := rows.Scan(dest...); err != nil {
-				t.Fatal(err)
-			}
-			if id != nil {
-				r.ID, r.Username, r.Email, r.Role, r.IsOwner, r.Reason = *id, *username, *email, *role, *owner, *reason
-			}
-			out = append(out, r)
-		}
-		if err := rows.Err(); err != nil {
-			t.Fatal(err)
-		}
-		return out
-	}
 	for _, matching := range []bool{true, false} {
 		t.Run(fmt.Sprintf("email matching %v", matching), func(t *testing.T) {
 			tx, err := env.pool.Begin(ctx)
@@ -136,8 +95,8 @@ func TestLocalPasswordOffMatchesMainWithoutKeysDB(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, group := range []string{LocalPasswordOffEmailMatch, LocalPasswordOffAdminLink} {
-				before := read(t, tx, mainLocalPasswordOffSQL(), group == LocalPasswordOffEmailMatch, matching, false)
-				after := read(t, tx, localPasswordOffSQL(), group, matching, true)
+				before := readLocalPasswordOff(t, tx, mainLocalPasswordOffSQL(), group == LocalPasswordOffEmailMatch, matching, false, providers)
+				after := readLocalPasswordOff(t, tx, localPasswordOffSQL(), group, matching, true, providers)
 				for i := range after {
 					if after[i].BlockingIfAnswered != 0 {
 						t.Fatalf("%s: %d accounts block with no key rows", group, after[i].BlockingIfAnswered)
@@ -150,4 +109,51 @@ func TestLocalPasswordOffMatchesMainWithoutKeysDB(t *testing.T) {
 			}
 		})
 	}
+}
+
+// localPasswordOffRow is one row of a local-password-off query: the totals
+// it carries and the account, if any.
+type localPasswordOffRow struct {
+	ID                    int
+	Username, Email, Role string
+	IsOwner               bool
+	Reason                string
+	EmailMatch, AdminLink int
+	BlockingIfAnswered    int
+}
+
+// readLocalPasswordOff runs query (main's, or localPasswordOffSQL when
+// withBlocking says it answers the blocking total too) for group, in tx.
+func readLocalPasswordOff(t *testing.T, tx pgx.Tx, query string, group any, matching, withBlocking bool, providers []int) []localPasswordOffRow {
+	t.Helper()
+	rows, err := tx.Query(t.Context(), query, matching, group, "", 0, 100000, providers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var out []localPasswordOffRow
+	for rows.Next() {
+		var (
+			r                             localPasswordOffRow
+			id                            *int
+			username, email, role, reason *string
+			owner                         *bool
+		)
+		dest := []any{&r.EmailMatch, &r.AdminLink}
+		if withBlocking {
+			dest = append(dest, &r.BlockingIfAnswered)
+		}
+		dest = append(dest, &id, &username, &email, &role, &owner, &reason)
+		if err := rows.Scan(dest...); err != nil {
+			t.Fatal(err)
+		}
+		if id != nil {
+			r.ID, r.Username, r.Email, r.Role, r.IsOwner, r.Reason = *id, *username, *email, *role, *owner, *reason
+		}
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return out
 }
