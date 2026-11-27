@@ -847,42 +847,48 @@ function WatchProviderCard({
                 </div>
               )}
               <div className="grid grid-cols-1 gap-x-6 gap-y-1 sm:grid-cols-2">
-                <ToggleRow
-                  id={`watch-provider-${providerKey}-import-watched`}
-                  label={t("web.settings.watchProviders.toggle.importWatched.label")}
-                  description={t(
-                    "web.settings.watchProviders.toggle.importWatched.description",
-                    name,
-                  )}
-                  checked={connection.import_watched_enabled}
-                  disabled={isBusy}
-                  onChange={(checked) =>
-                    updateConnection.mutate({ import_watched_enabled: checked })
-                  }
-                />
-                <ToggleRow
-                  id={`watch-provider-${providerKey}-import-progress`}
-                  label={t("web.settings.watchProviders.toggle.importProgress.label")}
-                  description={t(
-                    "web.settings.watchProviders.toggle.importProgress.description",
-                    name,
-                  )}
-                  checked={connection.import_progress_enabled}
-                  disabled={isBusy}
-                  onChange={(checked) =>
-                    updateConnection.mutate({ import_progress_enabled: checked })
-                  }
-                />
-                <ToggleRow
-                  id={`watch-provider-${providerKey}-export-watched`}
-                  label={t("web.settings.watchProviders.toggle.exportWatched.label")}
-                  description={t("web.settings.watchProviders.toggle.exportWatched.description")}
-                  checked={connection.export_watched_enabled}
-                  disabled={isBusy}
-                  onChange={(checked) =>
-                    updateConnection.mutate({ export_watched_enabled: checked })
-                  }
-                />
+                {connection.capabilities.import_watched ? (
+                  <ToggleRow
+                    id={`watch-provider-${providerKey}-import-watched`}
+                    label={t("web.settings.watchProviders.toggle.importWatched.label")}
+                    description={t(
+                      "web.settings.watchProviders.toggle.importWatched.description",
+                      name,
+                    )}
+                    checked={connection.import_watched_enabled}
+                    disabled={isBusy}
+                    onChange={(checked) =>
+                      updateConnection.mutate({ import_watched_enabled: checked })
+                    }
+                  />
+                ) : null}
+                {connection.capabilities.import_progress ? (
+                  <ToggleRow
+                    id={`watch-provider-${providerKey}-import-progress`}
+                    label={t("web.settings.watchProviders.toggle.importProgress.label")}
+                    description={t(
+                      "web.settings.watchProviders.toggle.importProgress.description",
+                      name,
+                    )}
+                    checked={connection.import_progress_enabled}
+                    disabled={isBusy}
+                    onChange={(checked) =>
+                      updateConnection.mutate({ import_progress_enabled: checked })
+                    }
+                  />
+                ) : null}
+                {connection.capabilities.export_watched ? (
+                  <ToggleRow
+                    id={`watch-provider-${providerKey}-export-watched`}
+                    label={t("web.settings.watchProviders.toggle.exportWatched.label")}
+                    description={t("web.settings.watchProviders.toggle.exportWatched.description")}
+                    checked={connection.export_watched_enabled}
+                    disabled={isBusy}
+                    onChange={(checked) =>
+                      updateConnection.mutate({ export_watched_enabled: checked })
+                    }
+                  />
+                ) : null}
                 {connection.capabilities.import_favorites ||
                 connection.capabilities.export_favorites ? (
                   <ToggleRow
@@ -1015,14 +1021,16 @@ function WatchProviderCard({
                     }
                   />
                 ) : null}
-                <ToggleRow
-                  id={`watch-provider-${providerKey}-scrobble`}
-                  label={t("web.settings.watchProviders.toggle.scrobble.label")}
-                  description={t("web.settings.watchProviders.toggle.scrobble.description")}
-                  checked={connection.scrobble_enabled}
-                  disabled={isBusy}
-                  onChange={(checked) => updateConnection.mutate({ scrobble_enabled: checked })}
-                />
+                {connection.capabilities.scrobble_playback ? (
+                  <ToggleRow
+                    id={`watch-provider-${providerKey}-scrobble`}
+                    label={t("web.settings.watchProviders.toggle.scrobble.label")}
+                    description={t("web.settings.watchProviders.toggle.scrobble.description")}
+                    checked={connection.scrobble_enabled}
+                    disabled={isBusy}
+                    onChange={(checked) => updateConnection.mutate({ scrobble_enabled: checked })}
+                  />
+                ) : null}
                 {connectionSettings
                   .filter((setting) => setting.type === "boolean")
                   .map((setting) => (
