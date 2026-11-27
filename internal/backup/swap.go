@@ -80,7 +80,7 @@ type SwapOptions struct {
 	// WorkDir holds the local journal.
 	WorkDir string
 	// Journaled runs once the journal exists, just before the live database
-	// closes, with the time --recover takes from here on.
+	// closes, with the identifier --recover takes from here on.
 	Journaled func(stamp string)
 	Now       func() time.Time
 	Out       io.Writer
@@ -140,7 +140,16 @@ func RestoreSwap(ctx context.Context, src *Source, loader DatabaseLoader, ctl Co
 	if err != nil {
 		return err
 	}
-	stamp := opts.now().UTC().Format("20060102t150405z")
+	liveOID, found, err := ctl.OID(ctx, live)
+	if err != nil {
+		return fmt.Errorf("reading the live database OID: %w", err)
+	}
+	if !found {
+		return fmt.Errorf("database %s does not exist", live)
+	}
+	// PostgreSQL database names are cluster wide. Include the live database's
+	// OID so restores of different databases can start in the same second.
+	stamp := fmt.Sprintf("%s_%d", opts.now().UTC().Format("20060102t150405z"), liveOID)
 	restored, before := "silo_restore_"+stamp, "silo_before_restore_"+stamp
 	opened, sealedStores, err := openSwapStores(ctx, src, opts, stamp)
 	if err != nil {
@@ -148,10 +157,9 @@ func RestoreSwap(ctx context.Context, src *Source, loader DatabaseLoader, ctl Co
 	}
 	stores := storesOf(opened)
 	// Step 2: preflight. Nothing changes here.
-	liveOID, err := swapPreflight(ctx, ctl, stores, live, restored, before, func() ([]string, error) {
+	if err := swapPreflight(ctx, ctl, stores, live, restored, before, func() ([]string, error) {
 		return loader.Extensions(ctx, src.path(DumpName))
-	})
-	if err != nil {
+	}); err != nil {
 		return err
 	}
 	// Step 3.
@@ -390,45 +398,38 @@ func checkLiveIdle(ctx context.Context, ctl ControlDB, live string) error {
 
 // swapPreflight is §10.2 step 2: no other client on the live database, the
 // privileges a swap needs, free names for the two databases it creates, and
-// writable stores. It changes nothing and returns the live database's oid.
-func swapPreflight(ctx context.Context, ctl ControlDB, stores blobStores, live, restored, before string, extensions func() ([]string, error)) (uint32, error) {
+// writable stores.
+func swapPreflight(ctx context.Context, ctl ControlDB, stores blobStores, live, restored, before string, extensions func() ([]string, error)) error {
 	if others, err := ctl.OtherConnections(ctx, live); err != nil {
-		return 0, fmt.Errorf("checking for other connections: %w", err)
+		return fmt.Errorf("checking for other connections: %w", err)
 	} else if others > 0 {
-		return 0, fmt.Errorf("%d other clients are connected to %s; stop Silo on every server and turn off automatic restarts, or use separate mode (--into)", others, live)
+		return fmt.Errorf("%d other clients are connected to %s; stop Silo on every server and turn off automatic restarts, or use separate mode (--into)", others, live)
 	}
 	if err := ctl.CheckPrivileges(ctx, live); err != nil {
-		return 0, fmt.Errorf("%w; stop here and use separate mode (--into) instead", err)
+		return fmt.Errorf("%w; stop here and use separate mode (--into) instead", err)
 	}
 	// The restored database is new, from template0: pg_restore creates the
 	// backup's extensions in it as this role.
 	needed, err := extensions()
 	if err != nil {
-		return 0, fmt.Errorf("reading the extensions the backup needs: %w", err)
+		return fmt.Errorf("reading the extensions the backup needs: %w", err)
 	}
 	if err := ctl.CheckExtensions(ctx, needed); err != nil {
-		return 0, err
+		return err
 	}
 	for _, name := range []string{restored, before} {
 		if _, taken, err := ctl.OID(ctx, name); err != nil {
-			return 0, err
+			return err
 		} else if taken {
-			return 0, fmt.Errorf("a database named %s already exists; wait a second and run the restore again", name)
+			return fmt.Errorf("a database named %s already exists; wait a second and run the restore again", name)
 		}
-	}
-	liveOID, found, err := ctl.OID(ctx, live)
-	if err != nil {
-		return 0, err
-	}
-	if !found {
-		return 0, fmt.Errorf("database %s does not exist", live)
 	}
 	for name, store := range stores {
 		if err := store.Probe(ctx); err != nil {
-			return 0, fmt.Errorf("the %s blob store is not writable: %w", name, err)
+			return fmt.Errorf("the %s blob store is not writable: %w", name, err)
 		}
 	}
-	return liveOID, nil
+	return nil
 }
 
 func errIf(cond bool, msg string) error {

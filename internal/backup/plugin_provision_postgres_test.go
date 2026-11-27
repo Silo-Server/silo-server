@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -45,6 +46,11 @@ func TestRestorePluginProvisioningDB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The databases share a PostgreSQL server. Restore them at the same
+	// instant and retain each previous database until all cases finish.
+	restoreTime := time.Now()
+	workDir := t.TempDir()
+	suite := t
 	for _, scenario := range []pluginProvisionRestoreCase{
 		{name: "same deployment"},
 		{name: "authority restriction on older schema", older: true, samePluginIDs: true},
@@ -87,8 +93,9 @@ func TestRestorePluginProvisioningDB(t *testing.T) {
 					t.Fatal(err)
 				}
 			} else {
-				restoredURL = swapPluginProvisionRestore(t, src, loader, SwapOptions{
-					DatabaseOnly: true, Validate: validate, WorkDir: t.TempDir(), JournalKey: manifestKey, Out: &out,
+				restoredURL = swapPluginProvisionRestore(t, suite, src, loader, SwapOptions{
+					DatabaseOnly: true, Validate: validate, WorkDir: workDir, JournalKey: manifestKey, Out: &out,
+					Now: func() time.Time { return restoreTime },
 				}, scenario)
 			}
 			restored, err := pgxpool.New(ctx, restoredURL)
@@ -147,7 +154,7 @@ func backupPluginProvisionRestore(t *testing.T, pool *pgxpool.Pool, dbURL string
 	return src
 }
 
-func swapPluginProvisionRestore(t *testing.T, src *Source, loader PGLoader, opts SwapOptions, scenario pluginProvisionRestoreCase) string {
+func swapPluginProvisionRestore(t, suite *testing.T, src *Source, loader PGLoader, opts SwapOptions, scenario pluginProvisionRestoreCase) string {
 	t.Helper()
 	ctx := t.Context()
 	destination, dstURL := backuptest.Database(t)
@@ -165,16 +172,21 @@ func swapPluginProvisionRestore(t *testing.T, src *Source, loader PGLoader, opts
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = ctl.Close(ctx) }()
 	opts.LiveURL = dstURL
 	var previous string
 	opts.Journaled = func(stamp string) { previous = "silo_before_restore_" + stamp }
+	suite.Cleanup(func() {
+		cleanup, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		defer func() { _ = ctl.Close(cleanup) }()
+		if previous == "" {
+			return
+		}
+		if err := ctl.Drop(cleanup, previous); err != nil {
+			suite.Errorf("dropping the previous database %s: %v", previous, err)
+		}
+	})
 	if err := RestoreSwap(ctx, src, loader, ctl, opts); err != nil {
-		t.Fatal(err)
-	}
-	// The swap retains the old database under a name shared across tests
-	// within the same second. This fixture is finished with it.
-	if err := ctl.Drop(ctx, previous); err != nil {
 		t.Fatal(err)
 	}
 	return dstURL

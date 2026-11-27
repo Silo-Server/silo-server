@@ -2301,6 +2301,11 @@ held until the command returns or its connection drops. A second restore or
 naming the holder's process: each control connection is on the maintenance
 database, so neither preflight would see the other.
 
+The `<time>` identifier in the names and recovery command below combines the
+UTC timestamp with the live database's OID. Restores of different databases
+on the same PostgreSQL server get distinct names even when they start in the
+same second.
+
 1. Validate (above).
 2. Preflight on a control connection to the maintenance database
    (`postgres`): no other client on the live database, `CREATEDB` and

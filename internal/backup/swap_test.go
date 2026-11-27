@@ -27,7 +27,7 @@ import (
 )
 
 const (
-	swapStamp    = "20261031t040000z"
+	swapStamp    = "20261031t040000z_100"
 	liveDB       = "silo"
 	restoredDB   = "silo_restore_" + swapStamp
 	beforeDB     = "silo_before_restore_" + swapStamp
