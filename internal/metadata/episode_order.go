@@ -273,28 +273,36 @@ func writeEpisodeFileNumbers(ctx context.Context, tx pgx.Tx, seriesID, structure
 }
 
 // markListedEpisodes records inside tx which rows the series' order lists
-// (episodesOfCurrentNumbering). In each season targets has episodes in, the
-// rows at the targets' numbers are listed and the rest, which the order
-// lacks (a renumber parks them after the season's last episode), are not.
-// A season targets has none of keeps its marks: a refresh that could not
-// load a season says nothing about its episodes. It returns how many rows
-// changed.
+// (episodesOfCurrentNumbering). In each provider season targets has
+// episodes in, the rows at the targets' numbers are listed and the rest,
+// which the order lacks, are not. A provider season targets has none of
+// keeps its marks: a refresh that could not load a season says nothing about
+// its episodes. Seasons are the provider's default ones (provider numbers,
+// else the shown ones), since the absolute layout shows every season as one.
+// It returns how many rows changed.
 func markListedEpisodes(ctx context.Context, tx pgx.Tx, seriesID string, targets []EpisodeResult) (int64, error) {
-	seasons, numbers := make([]int32, 0, len(targets)), make([]int32, 0, len(targets))
+	n := len(targets)
+	seasons, numbers, providerSeasons := make([]int32, 0, n), make([]int32, 0, n), make([]int32, 0, n)
 	for _, target := range targets {
-		if catalog.FitsPostgresInteger(target.SeasonNumber) && catalog.FitsPostgresInteger(target.EpisodeNumber) {
-			seasons = append(seasons, int32(target.SeasonNumber))  //nolint:gosec // FitsPostgresInteger checked the range
-			numbers = append(numbers, int32(target.EpisodeNumber)) //nolint:gosec // FitsPostgresInteger checked the range
+		providerSeason := target.SeasonNumber
+		if target.ProviderSeasonNumber > 0 || target.ProviderEpisodeNumber > 0 {
+			providerSeason = target.ProviderSeasonNumber
+		}
+		if catalog.FitsPostgresInteger(target.SeasonNumber) && catalog.FitsPostgresInteger(target.EpisodeNumber) &&
+			catalog.FitsPostgresInteger(providerSeason) {
+			seasons = append(seasons, int32(target.SeasonNumber))            //nolint:gosec // FitsPostgresInteger checked the range
+			numbers = append(numbers, int32(target.EpisodeNumber))           //nolint:gosec // FitsPostgresInteger checked the range
+			providerSeasons = append(providerSeasons, int32(providerSeason)) //nolint:gosec // FitsPostgresInteger checked the range
 		}
 	}
 	tag, err := tx.Exec(ctx, `
-		WITH listed AS (SELECT s, n FROM unnest($2::int[], $3::int[]) AS v(s, n))
+		WITH listed AS (SELECT s, n, ps FROM unnest($2::int[], $3::int[], $4::int[]) AS v(s, n, ps))
 		UPDATE episodes e
 		SET unlisted = NOT EXISTS (SELECT 1 FROM listed WHERE s = e.season_number AND n = e.episode_number)
 		WHERE e.series_id = $1
-		  AND e.season_number IN (SELECT s FROM listed)
+		  AND COALESCE(e.provider_season_number, e.season_number) IN (SELECT ps FROM listed)
 		  AND e.unlisted IS DISTINCT FROM NOT EXISTS (SELECT 1 FROM listed WHERE s = e.season_number AND n = e.episode_number)`,
-		seriesID, seasons, numbers)
+		seriesID, seasons, numbers, providerSeasons)
 	if err != nil {
 		return 0, fmt.Errorf("marking the listed episodes of %s: %w", seriesID, err)
 	}
@@ -302,9 +310,8 @@ func markListedEpisodes(ctx context.Context, tx pgx.Tx, seriesID string, targets
 }
 
 // episodesOfCurrentNumbering drops the episodes the series' order does not
-// list (episodes.unlisted, markListedEpisodes): rows a renumber parked
-// because the chosen order lacks them, which would otherwise shift every
-// later bare episode number.
+// list (episodes.unlisted, markListedEpisodes), which would otherwise shift
+// every later bare episode number.
 func (s *MetadataService) episodesOfCurrentNumbering(ctx context.Context, seriesID string, episodes []*models.Episode) ([]*models.Episode, error) {
 	rows, err := s.dbPool.Query(ctx, `SELECT content_id FROM episodes WHERE series_id = $1 AND unlisted`, seriesID)
 	if err != nil {

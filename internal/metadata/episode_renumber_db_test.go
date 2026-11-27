@@ -484,6 +484,25 @@ func TestEpisodesOfCurrentNumberingDB(t *testing.T) {
 	if got := current(); got != "1.2 1.3 1.4 2.1" {
 		t.Fatalf("after a partial refresh = %q", got)
 	}
+
+	// In the absolute layout every episode shows in season 1; a provider
+	// season that did not load still keeps its marks.
+	if _, err := pool.Exec(ctx, `UPDATE episodes SET provider_season_number = 2, provider_episode_number = 1
+		WHERE series_id = $1 AND season_number = 1 AND episode_number = 4`, series); err != nil {
+		t.Fatal(err)
+	}
+	if err := pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
+		_, err := markListedEpisodes(ctx, tx, series, []EpisodeResult{
+			{SeasonNumber: 1, EpisodeNumber: 2, ProviderSeasonNumber: 1, ProviderEpisodeNumber: 2},
+			{SeasonNumber: 1, EpisodeNumber: 3, ProviderSeasonNumber: 1, ProviderEpisodeNumber: 3},
+		})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := current(); got != "1.2 1.3 1.4 2.1" {
+		t.Fatalf("after an absolute refresh without provider season 2 = %q", got)
+	}
 }
 
 // insertRenumberTestSeries stores a matched series titled title under a TVDB
