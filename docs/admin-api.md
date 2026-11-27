@@ -310,7 +310,8 @@ usable client address: the resolved address is then the forwarder's own. The web
 Activity panel shows this separately from the access-network badge.
 `GET /api/v2/admin/sessions/capabilities` advertises `stream_location` for client
 feature detection. The displayed location is fixed at playback negotiation,
-even if a later media request arrives over another network path.
+even if a later media request arrives over another network path. A session's
+[egress](#session-egress) counts under this location.
 
 The web activity views show that network alongside the named execution and egress
 nodes. API egress is labeled "API server"; its reporting identity remains in the
@@ -2750,6 +2751,73 @@ These projections do not grant playback-control authority. In particular,
 administrator stop capability. The administrator commands below authorize the
 administrator separately and bind the exact target session; the caller-bound
 user stop cannot be reused by forging the target account/profile context.
+
+### Session egress
+
+With `egress: true` in the capabilities, the detailed list accepts
+`include_egress=true`, and each row it returns may then carry `egress`, the bytes
+Silo has sent to the viewer for that playback session so far. Send
+`include_egress` only after the capabilities report `egress`: v2 rejects query
+parameters a server does not declare. During a rolling upgrade an older server
+answers `include_egress` with a 422 validation failure. Behind a load balancer
+the capabilities can come from an upgraded server and the list from one that is
+not, so after a 422 leave the parameter off for a few minutes before trying it
+again rather than following the capabilities straight back into the same
+failure. `egress: true` means stream telemetry is enabled on the server; the web
+Activity views do not request it.
+
+- `bytes` sums what every API server and proxy node reporting stream telemetry
+  sent the viewer. A hop between Silo's own nodes, such as a transcode node
+  feeding the API server, is not counted, so a transcoded session counts once. A
+  proxy node with stream telemetry turned off contributes nothing, so its
+  sessions count only what an API server sent them, such as playlists.
+- `measured_at` is when the newest of the servers counting the session took its
+  count, on that server's clock. Every API server answers the same instant for
+  the same reports. Servers report about once a second and their clocks can
+  differ slightly, so rates over short intervals can jitter.
+- `series` is an opaque token naming the set of servers behind `bytes`. It changes
+  when one of them starts or stops counting the session, stops reporting, or
+  restarts.
+
+A row omits `egress` when the count is unknown: stream telemetry is off, its
+merged view is not built yet, the last refresh of that view failed, the session
+used more routes than telemetry tracks per session, a server counting it reports
+a capture time further ahead of the answering API server's clock than telemetry
+tolerates, or telemetry has no record of the session. Omission is not zero. A server that stops reporting leaves the count
+of each session it served, which changes that session's `series`; other sessions
+keep theirs. When a server records more observations than its telemetry cap
+allows, the excess is not attributed to a session, and `bytes` undercounts without
+being omitted. The `session` row in `session.*` events never carries `egress`.
+
+When stream telemetry is not shared between servers (no Redis, or
+`SILO_STREAM_TELEMETRY_DISTRIBUTED` off), `egress` counts only what the API server
+answering the list sent itself, and rows whose media a proxy node delivered
+(`routing_egress_node_id` present) omit it.
+
+To chart bandwidth, poll the list and keep, per session, the last observation you
+accepted as its baseline:
+
+1. Ignore an observation whose `measured_at` is not newer than the baseline's. A
+   load balancer can send a poll to an API server whose view is older, even one
+   from before the last `series` change; that observation is neither counted nor
+   a new baseline.
+2. When `series` differs from the baseline's, or `bytes` fell, make the
+   observation the new baseline and count nothing for that interval. `bytes` can
+   restart within a series after the session is idle long enough for telemetry
+   to forget it (five minutes by default). A client that polls less often than
+   that can miss the restart and undercount the interval.
+3. Otherwise the session sent `Δbytes` over `Δmeasured_at`; the observation
+   becomes the baseline.
+
+Sum the rates by `stream_location` for local and remote, by `user_id` for accounts
+(or `profile_id` for profiles), and by `user_id` with `device_id` for devices,
+taking device names from `GET /api/v2/admin/devices` by both fields, not
+`device_id` alone. Each session counts under its row's `stream_location`, as
+[playback node routing](#playback-node-routing) describes it. The figure is best
+effort: a play shorter than two observations, and the part after the last
+observation, are not counted. Only playback sessions are counted. Offline
+download transfers remain in the `download_egress_kbps` series of
+`GET /api/v2/admin/stats/timeseries`.
 
 ## Sequenced administrator playback commands
 

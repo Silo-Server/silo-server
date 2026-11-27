@@ -137,6 +137,9 @@ type Dependencies struct {
 	ScanControls                    ScanControlService
 	AuthProviderIconPublic          AuthProviderIconPublic
 	AdminPlaybackSessions           AdminPlaybackSessionService
+	// AdminSessionEgress serves per-session viewer egress for the admin
+	// sessions list. Wired only when stream telemetry is enabled.
+	AdminSessionEgress AdminSessionEgressService
 	// PlaybackLifecycleEvents reports that this server announces session.*
 	// lifecycle events on the admin sessions channel.
 	PlaybackLifecycleEvents          bool

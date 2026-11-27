@@ -19017,6 +19017,10 @@
             "description": "Whole-session method: direct, remux, direct_stream (copied video, converted audio) or transcode; absent when unknown",
             "type": "string"
           },
+          "egress": {
+            "$ref": "#/components/schemas/AdminPlaybackSessionEgress",
+            "description": "Viewer egress of the session, only when the list was read with include_egress=true. Absent when it is unknown: stream telemetry is off, its merged view is not built, its last refresh failed, the session's routes exceeded the telemetry route cap, a counting server's clock runs ahead of this server's beyond the telemetry tolerance, telemetry has no record of the session, or a proxy node served the session while telemetry is not shared between servers. Never present in session.* events."
+          },
           "episode_number": {
             "description": "Episode number; absent when not an episode",
             "format": "int64",
@@ -19421,6 +19425,10 @@
             },
             "type": "array"
           },
+          "egress": {
+            "description": "Stream telemetry is enabled: the list accepts include_egress and rows may then carry egress",
+            "type": "boolean"
+          },
           "is_jellyfin_client": {
             "type": "boolean"
           },
@@ -19511,10 +19519,39 @@
           "lifecycle_events",
           "adaptation_reasons",
           "subtitle",
+          "egress",
           "adaptation_reason_values",
           "revision",
           "state",
           "allowed"
+        ],
+        "type": "object"
+      },
+      "AdminPlaybackSessionEgress": {
+        "additionalProperties": false,
+        "properties": {
+          "bytes": {
+            "description": "Bytes Silo has sent to the viewer for this playback session so far, summed across every API server and proxy node; hops between Silo's own nodes are not counted",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "measured_at": {
+            "description": "When the newest of the counting servers took its count, on that server's clock; the same on every API server for the same reports. Servers report about once a second and their clocks can differ slightly, so rates over short intervals jitter. Divide a change in bytes by the change in this, not by the time between polls",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "series": {
+            "description": "Opaque token naming the set of servers that make up bytes. Ignore an observation whose measured_at is not newer than the baseline's, whatever its series. Otherwise start a new baseline when series differs from the baseline's or bytes fell, and compare bytes only within one series",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bytes",
+          "measured_at",
+          "series"
         ],
         "type": "object"
       },
@@ -134949,6 +134986,16 @@
               ],
               "minLength": 1,
               "type": "string"
+            }
+          },
+          {
+            "description": "Add egress to the rows. Send it only when the capabilities report egress true.",
+            "explode": false,
+            "in": "query",
+            "name": "include_egress",
+            "schema": {
+              "description": "Add egress to the rows. Send it only when the capabilities report egress true.",
+              "type": "boolean"
             }
           }
         ],

@@ -2863,6 +2863,25 @@
       "body_file": "admin_playback_sessions.json"
     },
     {
+      "name": "admin_playback_sessions_egress",
+      "operation_id": "listAdminPlaybackSessions",
+      "scenario": "With include_egress, a row carries the viewer bytes the merged stream telemetry counted for it, without the relay hop between Silo's own nodes; a session telemetry has no record of omits egress.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/sessions?include_egress=true",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/CollectionAdminPlaybackSession",
+      "body_file": "admin_playback_sessions_egress.json"
+    },
+    {
       "name": "admin_playback_summary",
       "operation_id": "getAdminPlaybackSummary",
       "scenario": "A bounded account activity sample omits diagnostic identifiers and network metadata.",
