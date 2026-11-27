@@ -1020,8 +1020,8 @@ account. It protects an account from being left with keys as its only way in,
 and from losing its last way in when that way in is its keys: app keys going
 off, or local passwords going off for an account with no usable password whose
 keys need them. Turning local passwords off still ends password sign-in for
-every account that is not break-glass, as it always has, and with it the local
-keys of an account that also had a password. Both switches refuse a change the
+every account that is not break-glass, as it always has, and with it every
+such account's local keys. Both switches refuse a change the
 rule forbids, with `last_sign_in_method` and a detail naming the
 accounts (`auth.AccountsAtRiskError`). One query decides who is at risk
 (`auth.AccountsAtRisk`), and `GET /admin/sign-in/accounts-at-risk` serves the
@@ -1079,21 +1079,27 @@ above, and those checks do not refuse them.
 
 - **Making an account an administrator** revokes its app keys, so an account
   whose keys were its only way in has none. Another administrator's account
-  is the Owner's alone to change, so the Owner fixes it: while local password
-  sign-in is on, by setting a password for it or making it a sign-in link (an
-  administrator's link gives the password route only). While local password
-  sign-in is off, a password signs in only a break-glass account, and neither
-  email match nor linking (which needs the person signed in) can give an
-  administrator a provider account, so nothing short of the Owner making the
-  account break-glass, or turning local password sign-in back on, and then
-  setting its password, lets it in.
+  is the Owner's alone to change, so the Owner fixes it. While local password
+  sign-in is on, the Owner sets a password for it or makes it a sign-in link
+  (an administrator's link gives the password route only). While it is off, a
+  password signs in only a break-glass account, so the Owner does one of
+  three things: links the account to a provider account by its exact subject
+  (`createAdminUserIdentity`; email match never attaches an identity to an
+  administrator, and the person's own linking needs them signed in); makes
+  the account break-glass and sets its password, or makes it a sign-in link
+  once it is break-glass; or turns local password sign-in back on and sets
+  its password.
 - **Clearing break-glass while local password sign-in is off** ends the
-  account's password sign-in and, with it, the local keys that need it. An
-  account with no provider account it can use then has no way in until the
-  Owner sets break-glass again or local password sign-in is turned back on;
-  for the reason above it can't be given a provider account instead. The
-  last usable break-glass account can't be cleared (409
+  account's password sign-in and, with it, its local keys. An account with
+  no provider account it can use then has no way in until the Owner links it
+  to one, sets break-glass again, or local password sign-in is turned back
+  on. The last usable break-glass account can't be cleared (409
   `break_glass_required`).
+
+With shell access to a node, `silo auth local-login enable` turns local
+password sign-in back on, and with `-user <name> -temporary-password` it turns
+one account's local password sign-in on and gives it a temporary password,
+which signs in while the setting is on or the account is break-glass.
 
 ### Sign-in links
 
