@@ -292,8 +292,11 @@ the fingerprint. Nothing on the poll changes for the TV.
   A sign-in provider refusing an identity withdraws the approvals made
   through that identity, and the person denies or revokes one at a time.
   Ending a single session writes no request row. Collecting takes the account
-  row before the request row, as each of these does, so a collect after one
-  commits is refused, and one before it succeeds for the account as it was.
+  row before the request row, as each of these does, so whichever takes the
+  account row first decides the order: a withdrawal that takes it first means
+  the collect is refused; a collect that takes it first is judged as the
+  account was, and still answers `expired` or `denied` for a request that is
+  expired or denied on its own.
 
 `GET /api/v2/auth/device/capability` reports `preapprove: true`.
 
