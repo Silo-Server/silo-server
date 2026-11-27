@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -36,6 +37,21 @@ func (t secretTable) carriedFor(keys AppKeyCarry) secretTable {
 	spec.restoredStay = false
 	t.carry = &spec
 	return t
+}
+
+// deleteUncarried deletes the restored credentials that are not the same
+// as a live one the carry writes (owned), none with restoredStay, and
+// returns how many.
+func (t secretTable) deleteUncarried(ctx context.Context, tx pgx.Tx, columns []string, rows, owned, live string) (int64, error) {
+	c := t.carry
+	if c.restoredStay {
+		return 0, nil
+	}
+	same := slices.DeleteFunc(slices.Clone(c.same), func(col string) bool { return !slices.Contains(columns, col) })
+	tag, err := tx.Exec(ctx, fmt.Sprintf(`DELETE FROM %s t WHERE %s AND NOT EXISTS (
+		SELECT 1 FROM %s WHERE (%s) AND (%s) = (%s))`,
+		t.name, c.credential, rows, owned, prefixed("r.", same), prefixed("t.", same)), live)
+	return tag.RowsAffected(), err
 }
 
 // userRestored is the SQL condition, over the live row r, that its account

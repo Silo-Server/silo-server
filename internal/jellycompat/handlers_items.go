@@ -2322,13 +2322,18 @@ func (h *ItemsHandler) browseEpisodeItems(ctx context.Context, session *Session,
 // mixedEpisodeBrowser returns the episode browse when a search lists Episode
 // beside other types, such as IncludeItemTypes=Episode,Movie; Ids narrow both
 // parts. The media_items browse serves the other types but holds no episodes
-// (#4257, #4546). As in Jellyfin, a type filter at the user root and an
-// IncludeItemTypes that names Episode under a library ParentId search
-// recursively even without Recursive. A non-recursive library browse whose
-// Episode comes only from an ExcludeItemTypes filter lists the library's
-// direct children, which are never episodes.
+// (#4257, #4546). Favorites or an Ids lookup without a type filter ask for
+// every type, as in Jellyfin, so they list episodes too (#5331); a plain
+// browse without a type filter keeps to the media_items types. As in Jellyfin,
+// a type filter at the user root and an IncludeItemTypes that names Episode
+// under a library ParentId search recursively even without Recursive. A
+// non-recursive library browse whose Episode comes only from an
+// ExcludeItemTypes filter, or from no type filter, lists the library's direct
+// children, which are never episodes.
 func (h *ItemsHandler) mixedEpisodeBrowser(query itemsQuery) (episodeBrowser, bool) {
-	if (!query.recursive && query.parentLibraryID > 0 && !query.includesEpisode) || len(query.itemTypes) < 2 || !slices.Contains(query.itemTypes, compatEpisodeType) || !query.allowsVideo() {
+	listsEpisode := (len(query.itemTypes) >= 2 && slices.Contains(query.itemTypes, compatEpisodeType)) ||
+		(!query.hasItemTypeFilter && (query.isFavorite || len(query.specificIDs) > 0))
+	if (!query.recursive && query.parentLibraryID > 0 && !query.includesEpisode) || !listsEpisode || !query.allowsVideo() {
 		return nil, false
 	}
 	repo, ok := h.episodeRepo.(episodeBrowser)
@@ -2954,7 +2959,10 @@ func (h *ItemsHandler) handleBrowseItems(w http.ResponseWriter, r *http.Request,
 	episodeRepo, mixed := h.mixedEpisodeBrowser(query)
 	if mixed {
 		browseQuery.itemTypes = slices.DeleteFunc(slices.Clone(query.itemTypes), func(t string) bool { return t == compatEpisodeType })
-		browseQuery.itemType = browseQuery.itemTypes[0]
+		// Without a type filter the media_items browse serves every other type.
+		if len(browseQuery.itemTypes) > 0 {
+			browseQuery.itemType = browseQuery.itemTypes[0]
+		}
 	}
 	// Limit=0 asks only for TotalRecordCount (Wholphin's letter jump); the
 	// catalog treats a zero limit as its default page, so fetch one row.

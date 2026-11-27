@@ -327,6 +327,10 @@ const (
 	PasswordMinLengthCeiling = 72
 )
 
+// ServerPublicURLSettingKey is the server's public URL. OAuth sign-in needs
+// it, so turning local password sign-in off reads it too.
+const ServerPublicURLSettingKey = "server.public_url"
+
 // External sign-in settings (docs/architecture/external-sign-in.md).
 const (
 	// AuthLocalPasswordLoginSettingKey turns local password sign-in on or off
@@ -338,9 +342,6 @@ const (
 	// (docs/architecture/app-keys.md). On by default. Off, the app key
 	// capability reports disabled.
 	AuthAppKeySignInSettingKey = "auth.app_key_sign_in"
-	// ServerPublicURLSettingKey is the server's public origin, which OAuth
-	// sign-in needs for its callback.
-	ServerPublicURLSettingKey = "server.public_url"
 	// AuthEmailAutoMatchSettingKey links a first external sign-in to the
 	// unlinked account holding the same email, but only when the provider
 	// says the email is verified. Off by default: an email match lets whoever

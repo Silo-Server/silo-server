@@ -270,7 +270,7 @@ func NativeStartPath(prefix string, installID int) string {
 // public URL is configured, so the flow has an origin to resume on and a
 // callback the provider knows.
 func (h *OAuthHandler) NativeSignInAvailable() bool {
-	return h.currentHostBaseURL() != ""
+	return OAuthSignInServed(h.currentHostBaseURL())
 }
 
 // OnPublicOrigin reports whether r arrived on the configured public origin.
@@ -515,7 +515,7 @@ func (h *OAuthHandler) consumeLinkTicket(ctx context.Context, value string, inst
 // checkStart refuses a start that cannot succeed before anything is
 // written or the browser is bounced.
 func (h *OAuthHandler) checkStart(ctx context.Context, req OAuthStartRequest) error {
-	if h.currentHostBaseURL() == "" {
+	if !OAuthSignInServed(h.currentHostBaseURL()) {
 		return &OAuthHandshakeError{Status: http.StatusConflict, Message: "Silo public URL is not configured"}
 	}
 	if req.LinkTicket != "" && !req.Native {
@@ -1154,7 +1154,7 @@ func (h *OAuthHandler) StartLink(ctx context.Context, userID int, prefix, ticket
 	if !h.LinkingAvailable() {
 		return OAuthStartResult{}, ErrLinkTicketUnavailable
 	}
-	if h.currentHostBaseURL() == "" {
+	if !OAuthSignInServed(h.currentHostBaseURL()) {
 		return OAuthStartResult{}, ErrOAuthPublicOriginRequired
 	}
 	ticket, err := h.consumeLinkTicket(ctx, ticketValue, 0)

@@ -477,8 +477,8 @@ type CarriedCredentials struct {
 	// Kept counts the live rows kept, by table.
 	Kept map[string]int
 	// Dropped names the live credentials left out because their owner is
-	// not in the restored data or has more authority there, without key
-	// material.
+	// not in the restored data, is another account there (sameAccount), or
+	// has more authority there, without key material.
 	Dropped []string
 	// Stricter names the security switches kept at the live server's
 	// stricter value (stricterFlags).
@@ -525,7 +525,7 @@ func carryCredentials(ctx context.Context, loader DatabaseLoader, dbURL, liveURL
 	}
 	_, _ = fmt.Fprintf(out, "Kept this server's %s in place of the backup's: %s.\n", carriedKinds, strings.Join(kept, ", "))
 	if len(carriedRows.Dropped) > 0 {
-		_, _ = fmt.Fprintf(out, "Dropped %d whose owner is not in the backup or has more authority there than here, or that the backup's older schema cannot hold beside another account's: %s\n",
+		_, _ = fmt.Fprintf(out, "Dropped %d whose owner is not in the backup, is another account there with the same id, or has more authority there than here, or that the backup's older schema cannot hold beside another account's: %s\n",
 			len(carriedRows.Dropped), strings.Join(carriedRows.Dropped, ", "))
 	}
 	if len(carriedRows.Cleared) > 0 {
@@ -585,6 +585,9 @@ func (l PGLoader) CarryCredentials(ctx context.Context, dbURL, liveURL string, k
 		}
 		tables, live = keepWhere(tables, live, keep)
 		scrubbed, liveState.scrubbed = keepWhere(scrubbed, liveState.scrubbed, keep)
+		if err := sameAccounts(ctx, tx, liveState.accounts); err != nil {
+			return err
+		}
 		// The stricter switches first, so the authority the carry compares
 		// is the restored server's as it will start: an account kept
 		// disabled, a library deleted since restored disabled.
@@ -622,7 +625,7 @@ func (l PGLoader) CarryCredentials(ctx context.Context, dbURL, liveURL string, k
 				return fmt.Errorf("%s: %w", table.name, err)
 			}
 		}
-		return nil
+		return advanceAccountIDs(ctx, tx, liveState.accounts)
 	})
 	return result, err
 }
@@ -658,10 +661,14 @@ func keepWhere(tables []secretTable, rows []string, keep func(secretTable) bool)
 }
 
 // carriedOwners writes carried_owners, the accounts whose live credentials
-// the restored database keeps: those in it with no more authority there
-// than live.
+// the restored database keeps: those that are the same account in it
+// (same_accounts) with no more authority there than live.
 func carriedOwners(ctx context.Context, tx pgx.Tx, live map[int]accountAuthority) error {
-	ids := slices.Sorted(maps.Keys(live))
+	var ids []int
+	if err := tx.QueryRow(ctx, `SELECT coalesce(array_agg(r.id ORDER BY r.id), '{}') FROM unnest($1::bigint[]) AS r(id) WHERE `+sameAccount("id"),
+		slices.Sorted(maps.Keys(live))).Scan(&ids); err != nil {
+		return err
+	}
 	restored, err := readAuthority(ctx, tx, ids)
 	if err != nil {
 		return err
@@ -704,6 +711,7 @@ type liveCredentials struct {
 	pluginCallbackMode bool
 
 	authority map[int]accountAuthority
+	accounts  liveAccounts
 	grants    map[grantKey]grantPolicy
 	// stricter is each stricterFlags entry's live rows.
 	stricter []liveFlags
@@ -738,6 +746,9 @@ func readLiveCredentials(ctx context.Context, liveURL string, tables []secretTab
 			return err
 		}
 		if state.authority, err = readAuthority(ctx, tx, owners); err != nil {
+			return err
+		}
+		if state.accounts, err = readLiveAccounts(ctx, tx); err != nil {
 			return err
 		}
 		if state.grants, err = inviteePolicies(ctx, tx, tables, into); err != nil {
@@ -934,21 +945,6 @@ func (t secretTable) carryInto(ctx context.Context, tx pgx.Tx, live string, resu
 		}
 	}
 	return nil
-}
-
-// deleteUncarried deletes the restored credentials that are not the same
-// as a live one the carry writes (owned), none with restoredStay, and
-// returns how many.
-func (t secretTable) deleteUncarried(ctx context.Context, tx pgx.Tx, columns []string, rows, owned, live string) (int64, error) {
-	c := t.carry
-	if c.restoredStay {
-		return 0, nil
-	}
-	same := slices.DeleteFunc(slices.Clone(c.same), func(col string) bool { return !slices.Contains(columns, col) })
-	tag, err := tx.Exec(ctx, fmt.Sprintf(`DELETE FROM %s t WHERE %s AND NOT EXISTS (
-		SELECT 1 FROM %s WHERE (%s) AND (%s) = (%s))`,
-		t.name, c.credential, rows, owned, prefixed("r.", same), prefixed("t.", same)), live)
-	return tag.RowsAffected(), err
 }
 
 // stageCarried moves the staged column of every restored row the upsert

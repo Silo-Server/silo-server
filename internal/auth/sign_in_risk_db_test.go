@@ -204,12 +204,13 @@ func TestAccountsAtRiskDB(t *testing.T) {
 // work as its only way in.
 func TestLocalLoginOffRefusesKeysOnlyDB(t *testing.T) {
 	env := newExternalSignInEnv(t)
+	env.addUsableProvider(t)
 	ctx := t.Context()
 	env.riskAccount(t, "keysonly-glass", models.RoleAdmin, true, true)
 	keysOnly := env.riskAccount(t, "keysonly-member", models.RoleUser, false, false)
 	env.riskKey(t, keysOnly, models.DeviceKeyStatusActive, nil)
 
-	err := CheckLocalLoginSettingChange(ctx, env.pool, "true", "false")
+	err := CheckLocalLoginSettingChange(ctx, env.pool, LocalLoginSettings{LocalPasswordLogin: "true"}, LocalLoginSettings{LocalPasswordLogin: "false"})
 	risk, ok := errors.AsType[*AccountsAtRiskError](err)
 	if !ok || !errors.Is(err, ErrLastSignInMethod) || !listsAccount(risk.Accounts, keysOnly) {
 		t.Fatalf("turning local passwords off = %v, want the keys-only account named", err)
@@ -224,7 +225,7 @@ func TestLocalLoginOffRefusesKeysOnlyDB(t *testing.T) {
 		keysOnly, externalSignInPasswordHash); err != nil {
 		t.Fatal(err)
 	}
-	if err := CheckLocalLoginSettingChange(ctx, env.pool, "true", "false"); listsAccountErr(err, keysOnly) {
+	if err := CheckLocalLoginSettingChange(ctx, env.pool, LocalLoginSettings{LocalPasswordLogin: "true"}, LocalLoginSettings{LocalPasswordLogin: "false"}); listsAccountErr(err, keysOnly) {
 		t.Fatalf("with a password = %v", err)
 	}
 

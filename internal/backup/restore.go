@@ -378,7 +378,13 @@ func (p postLoad) carry(ctx context.Context, loader DatabaseLoader, dbURL, carry
 		"leaving out all of the backup's "+carriedKinds+", and app keys", func() error {
 			authorityRestricted = true
 			carried, err = carryCredentials(ctx, loader, dbURL, "", AppKeysLeftOut, p.out)
-			return err
+			if err != nil || carryFrom == "" {
+				return err
+			}
+			// This deployment's backup: its account ids are the live
+			// server's, and the carry that would have moved the sequence
+			// past them did not run.
+			return loader.AdvanceAccountIDs(ctx, dbURL, carryFrom)
 		}); err != nil {
 		return SettledAppKeys{}, err
 	}
@@ -625,6 +631,10 @@ type DatabaseLoader interface {
 	// returns them: the fallback when CarryPluginReleases cannot run on a
 	// backup's older schema.
 	DisablePlugins(ctx context.Context, dbURL string) ([]string, error)
+	// AdvanceAccountIDs moves dbURL's account id sequence past every id
+	// liveURL has used, as CarryCredentials does when it carries: the
+	// fallback when CarryCredentials cannot run on a backup's older schema.
+	AdvanceAccountIDs(ctx context.Context, dbURL, liveURL string) error
 	// FinishPluginProvisionRestore clears restored status and sets a fresh
 	// provisioning hold when the restore restricted plugin state.
 	FinishPluginProvisionRestore(ctx context.Context, dbURL, liveURL string, foreign, restricted bool) (string, error)

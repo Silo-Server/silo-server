@@ -11,7 +11,6 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
-	"github.com/Silo-Server/silo-server/internal/plugins"
 )
 
 // The facts below are written as SQL over users u, so one query can judge
@@ -20,59 +19,12 @@ import (
 // it leaves with no way in with AccountHasNoWayInSQL, so the restore and
 // the settings checks agree.
 
-// usablePasswordSQL is models.User.HasLocalPassword: a stored hash and the
-// account's own local password sign-in on. Whether the server accepts local
-// passwords is separate (passwordWorksSQL).
-const usablePasswordSQL = `(u.local_password_login_enabled AND COALESCE(u.password_hash, '') <> '')`
-
 // usableIdentitySQL is an identity of the account at one of providers (a
 // SQL int[] expression, the installations signInProviders answers): a
 // provider the person can sign in with from an ordinary device.
 func usableIdentitySQL(providers string) string {
 	return `EXISTS (SELECT 1 FROM plugin_auth_identities i
 	WHERE i.user_id = u.id AND i.plugin_installation_id = ANY(` + providers + `))`
-}
-
-// primarySignInBindingSQL is the SQL test that the plugin_auth_bindings row
-// named by alias is an enabled OIDC or LDAP binding: enabled, and not a
-// network identity binding, which signs in only people on its network.
-func primarySignInBindingSQL(alias string) string {
-	return alias + `.enabled AND NOT ` + plugins.AuthBindingIsNetworkSQL(alias+".plugin_installation_id", alias+".capability_id")
-}
-
-// signInProviders answers the installations whose identities can sign people
-// in: an enabled installation with an enabled OIDC or LDAP binding
-// (primarySignInBindingSQL), and for an OAuth binding a public URL
-// (OAuthSignInServed). A network identity signs in only from a device on
-// its network, and an OAuth provider signs nobody in without a public URL,
-// so neither counts; a credentials (directory) provider needs no public URL.
-// It is the one rule for "a provider people can sign in with" here, written
-// so a single definition can replace it and any other copy.
-func signInProviders(ctx context.Context, db dbQuerier, publicURL string) ([]int, error) {
-	rows, err := db.Query(ctx, `SELECT p.id, COALESCE((SELECT c.metadata->'auth_modes' FROM plugin_capabilities c
-			WHERE c.plugin_installation_id = b.plugin_installation_id AND c.capability_type = 'auth_provider.v1'
-				AND c.capability_id = b.capability_id), '[]'::jsonb)
-		FROM plugin_installations p
-		JOIN plugin_auth_bindings b ON b.plugin_installation_id = p.id AND `+primarySignInBindingSQL("b")+`
-		WHERE p.enabled`)
-	if err != nil {
-		return nil, fmt.Errorf("checking for an enabled sign-in provider: %w", err)
-	}
-	type binding struct {
-		InstallationID int
-		Modes          []string
-	}
-	bindings, err := pgx.CollectRows(rows, pgx.RowToStructByPos[binding])
-	if err != nil {
-		return nil, fmt.Errorf("checking for an enabled sign-in provider: %w", err)
-	}
-	providers := []int{}
-	for _, b := range bindings {
-		if ProviderModeForAuthModes(b.Modes) != ProviderModeOAuth || OAuthSignInServed(publicURL) {
-			providers = append(providers, b.InstallationID)
-		}
-	}
-	return providers, nil
 }
 
 // SignInProviderInstallations is signInProviders with the public URL db
@@ -90,7 +42,7 @@ func SignInProviderInstallations(ctx context.Context, db dbQuerier) ([]int, erro
 // server allows local passwords (localOn, a boolean SQL expression) or the
 // account is break-glass (localPasswordPolicy).
 func passwordWorksSQL(localOn string) string {
-	return `(` + usablePasswordSQL + ` AND (` + localOn + ` OR u.break_glass))`
+	return `(` + passwordSignsInSQL("u") + ` AND (` + localOn + ` OR u.break_glass))`
 }
 
 // keyWorksSQL is a key that signs in while app key sign-in is on, with local
@@ -187,7 +139,7 @@ type AccountAtRisk struct {
 var accountsAtRiskSQL = map[SignInChange]string{
 	ChangeAppKeysOff: `NOT ` + passwordWorksSQL("$2") + ` AND NOT ` + usableIdentitySQL("$1") + ` AND ` + keyWorksSQL("$2"),
 	ChangeLocalPasswordsOff: `NOT ` + passwordWorksSQL("false") + ` AND NOT ` + usableIdentitySQL("$1") +
-		` AND ((NOT ` + usablePasswordSQL + ` AND ` + keyWorksSQL("true") + `) OR ` + keyWorksSQL("false") + `)`,
+		` AND ((NOT (` + passwordSignsInSQL("u") + `) AND ` + keyWorksSQL("true") + `) OR ` + keyWorksSQL("false") + `)`,
 }
 
 // AccountsAtRisk lists the enabled accounts change would leave with no way
@@ -253,7 +205,7 @@ func accountsAtRisk(ctx context.Context, db dbQuerier, change SignInChange, sett
 // order.
 func listAccountsAtRisk(ctx context.Context, db dbQuerier, where string, args ...any) ([]AccountAtRisk, error) {
 	rows, err := db.Query(ctx, `SELECT u.id, COALESCE(u.username::text, u.email::text, ''), u.role, u.is_owner,
-			u.break_glass, `+usablePasswordSQL+`
+			u.break_glass, `+passwordSignsInSQL("u")+`
 		FROM users u
 		WHERE u.enabled AND `+where+`
 		ORDER BY lower(COALESCE(u.username::text, u.email::text, '')), u.id`, args...)

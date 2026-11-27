@@ -194,6 +194,10 @@ func historyImportAPIError(err error) *APIError {
 		errors.Is(err, historyimport.ErrPlexSessionNotFound),
 		errors.Is(err, historyimport.ErrMappingNotFound):
 		return &APIError{Status: http.StatusNotFound, Code: policyErrorNotFound, Message: err.Error(), cause: err}
+	case errors.Is(err, historyimport.ErrInvalidInput):
+		return &APIError{Status: http.StatusBadRequest, Code: policyErrorBadRequest, Message: err.Error(), cause: err}
+	case errors.Is(err, historyimport.ErrUnexpectedSourceResponse):
+		return &APIError{Status: http.StatusServiceUnavailable, Code: "dependency_unavailable", Message: historyimport.UnexpectedSourceResponseMessage, cause: err}
 	case errors.Is(err, historyimport.ErrConnectSessionExpired),
 		errors.Is(err, historyimport.ErrConnectSessionUsed),
 		errors.Is(err, historyimport.ErrPlexSessionExpired),
@@ -207,9 +211,6 @@ func historyImportAPIError(err error) *APIError {
 	default:
 		if status := historyimport.UpstreamHTTPStatus(err); status > 0 {
 			return HistoryImportUpstreamAPIError(status)
-		}
-		if err != nil && looksLikeValidationError(err) {
-			return &APIError{Status: http.StatusBadRequest, Code: policyErrorBadRequest, Message: err.Error(), cause: err}
 		}
 		slog.Error("history import: unhandled error", "error", err)
 		return &APIError{Status: http.StatusInternalServerError, Code: policyErrorInternal, Message: "History import request failed", cause: err}
@@ -241,24 +242,4 @@ func historyImportUpstreamError(status int) (int, string, string) {
 	default:
 		return http.StatusBadGateway, "bad_gateway", "The source server couldn't complete the import right now. Please try again."
 	}
-}
-
-func looksLikeValidationError(err error) bool {
-	message := err.Error()
-	return message == "profile_id is required" ||
-		message == "unsupported source type" ||
-		message == "direct server_url imports are no longer supported" ||
-		message == "exactly one of connect_session_id or source_id is required" ||
-		message == "selected server not found in connect session" ||
-		message == "selected server does not expose a usable address" ||
-		message == "jellyfin_base_url, jellyfin_username, and jellyfin_password are required" ||
-		message == "source_id is required" ||
-		message == "username and password are required" ||
-		message == "name, source_type, and base_url are required" ||
-		message == "plex OAuth not completed yet" ||
-		message == "selected Plex server not found in session" ||
-		message == "selected Plex server has no usable address" ||
-		message == "plex_token is required for predefined Plex sources" ||
-		message == "source is not a Plex server" ||
-		message == "plex_session_id or source_id is required for Plex imports"
 }

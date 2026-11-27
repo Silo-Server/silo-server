@@ -101,7 +101,11 @@ refused with `422 validation_failed` and the detail
 `<key> is managed internally`, and nothing is written. The batch PUT checks `If-Match` before the
 keys, so a stale validator still answers 412. Turning
 `auth.local_password_login` off while no enabled break-glass administrator can
-sign in with a password is `409 break_glass_required`.
+sign in with a password is `409 break_glass_required`, and while no OIDC or
+LDAP provider people can sign in with is on it is
+`409 sign_in_provider_required`. An OpenID Connect provider counts only with
+`server.public_url` set, so clearing `server.public_url` while password
+sign-in is off and that provider is the only one is refused the same way.
 
 Two more refusals keep every account a way in, both `409 last_sign_in_method`
 with a detail that names the accounts (the first ten, then how many more):

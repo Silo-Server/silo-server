@@ -41,8 +41,8 @@ func (s *IdentityService) ListForUser(ctx context.Context, userID int) ([]Linked
 
 // CanUnlinkOwn reports whether UnlinkOwn would let the account disconnect
 // any of its identities now: it has another enabled identity, or its local password
-// still signs in (local password sign-in on for the account, and either the
-// server switch on or the account break-glass).
+// still signs in (a password that signs in, models.User.HasLocalPassword, and
+// either the server switch on or the account break-glass).
 func (s *IdentityService) CanUnlinkOwn(ctx context.Context, userID int) (bool, error) {
 	user, err := userByID(ctx, s.pool, userID)
 	if err != nil {
@@ -55,7 +55,7 @@ func (s *IdentityService) CanUnlinkOwn(ctx context.Context, userID int) (bool, e
 	if identities >= 2 {
 		return true, nil
 	}
-	if !user.LocalPasswordLoginEnabled {
+	if !user.HasLocalPassword() {
 		return false, nil
 	}
 	if user.BreakGlass {
@@ -81,19 +81,9 @@ func (s *IdentityService) UnlinkOwn(ctx context.Context, userID int, identityID 
 		if err != nil {
 			return err
 		}
-		canUseLocal := false
-		if user.LocalPasswordLoginEnabled {
-			canUseLocal = user.BreakGlass
-			if !canUseLocal {
-				// Serialize with a settings write that could turn local sign-in
-				// off between this check and the delete.
-				if err := lockServerSettings(ctx, tx); err != nil {
-					return err
-				}
-				if canUseLocal, err = localPasswordLoginAllowed(ctx, tx); err != nil {
-					return err
-				}
-			}
+		canUseLocal, err := passwordSignsInNow(ctx, tx, user)
+		if err != nil {
+			return err
 		}
 		if !canUseLocal && identities == 0 {
 			return ErrLastSignInMethod
@@ -106,6 +96,24 @@ func (s *IdentityService) UnlinkOwn(ctx context.Context, userID int, identityID 
 	}
 	auditAuthEvent(ctx, "identity_unlinked", auditInstallationID, removed.InstallationID, auditUserID, userID, "method", "self")
 	return nil
+}
+
+// passwordSignsInNow reports whether user's own password signs in now: a
+// password that signs in (models.User.HasLocalPassword), and either the
+// account break-glass or the server switch on. Reading the switch takes the
+// settings lock, to serialize with a settings write that could turn local
+// sign-in off between this check and the caller's change.
+func passwordSignsInNow(ctx context.Context, tx pgx.Tx, user *models.User) (bool, error) {
+	if !user.HasLocalPassword() {
+		return false, nil
+	}
+	if user.BreakGlass {
+		return true, nil
+	}
+	if err := lockServerSettings(ctx, tx); err != nil {
+		return false, err
+	}
+	return localPasswordLoginAllowed(ctx, tx)
 }
 
 // AdminLinkInput is an administrator linking an account to a provider

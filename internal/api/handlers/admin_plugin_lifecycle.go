@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/pluginhost"
 	"github.com/Silo-Server/silo-server/internal/plugins"
@@ -29,6 +30,41 @@ type PluginInstallationUpdateInput struct {
 // ErrPluginUpdateUnavailable reports an apply-update on an installation with
 // no recorded available version or no repository to update from.
 var ErrPluginUpdateUnavailable = errors.New("plugin has no applicable update")
+
+// lifecycleCommitTimeout bounds the work a lifecycle change does after its
+// write committed.
+const lifecycleCommitTimeout = 30 * time.Second
+
+// stopAfterCommit stops installation id's plugin once a change that disables
+// or removes it has committed, through the service or stopForTest. The
+// service keeps it running only when it reads the row and finds it enabled,
+// so an enable that committed since keeps its process; a row that is gone or
+// cannot be read is stopped (Service.StopUnlessEnabled). The read is detached
+// from the request: the change already holds. A failure, including a failed
+// read, is logged: the row already says the plugin is off, and reconciliation
+// on every node stops a process whose row no longer runs.
+func (h *PluginHandler) stopAfterCommit(ctx context.Context, id int) {
+	stop := h.stopForTest
+	if stop == nil {
+		stop = func(id int) error {
+			detached, cancel := context.WithTimeout(context.WithoutCancel(ctx), lifecycleCommitTimeout)
+			defer cancel()
+			return h.service.StopUnlessEnabled(detached, id)
+		}
+	}
+	if err := stop(id); err != nil && !errors.Is(err, pluginhost.ErrClientNotFound) {
+		slog.WarnContext(ctx, "stopping plugin after its change was saved", "component", "api", "installation_id", id, "error", err)
+	}
+}
+
+// afterLifecycleCommit reconciles and notifies after a committed lifecycle
+// change. The change already holds, so the request's cancellation does not
+// cut this short; a timeout bounds it.
+func (h *PluginHandler) afterLifecycleCommit(ctx context.Context) {
+	detached, cancel := context.WithTimeout(context.WithoutCancel(ctx), lifecycleCommitTimeout)
+	defer cancel()
+	h.service.OnLifecycleChange(detached)
+}
 
 func (h *PluginHandler) pluginLifecycleReady() error {
 	if h == nil || h.installations == nil || h.service == nil {
@@ -82,9 +118,11 @@ func (h *PluginHandler) installedPluginView(ctx context.Context, result *plugins
 	return h.buildInstallationResponse(ctx, result.Installation, result.Manifest)
 }
 
-// UpdateAdminPluginInstallation assigns enabled and/or update_policy. Disabling
-// stops the running plugin first; any enabled change rebuilds the event
-// subscriber index. Repeating the same assignment converges on one row.
+// UpdateAdminPluginInstallation assigns enabled and/or update_policy.
+// Disabling stops the running plugin once the change is saved, so a refused
+// change (the last sign-in provider while password sign-in is off) never
+// stopped it; any enabled change rebuilds the event subscriber index.
+// Repeating the same assignment converges on one row.
 // Errors: plugins.ErrInstallationNotFound, ErrPluginBuiltinInstallation.
 func (h *PluginHandler) UpdateAdminPluginInstallation(ctx context.Context, id int, in PluginInstallationUpdateInput) (PluginInstallationView, error) {
 	if err := h.pluginLifecycleReady(); err != nil {
@@ -107,19 +145,17 @@ func (h *PluginHandler) UpdateAdminPluginInstallation(ctx context.Context, id in
 		}
 	}
 
-	if in.Enabled != nil && !*in.Enabled && current.Enabled {
-		if err := h.service.Stop(id); err != nil && !errors.Is(err, pluginhost.ErrClientNotFound) {
-			return PluginInstallationView{}, err
-		}
-	}
 	if err := h.installations.Update(ctx, id, plugins.UpdateInstallationInput{Enabled: in.Enabled, UpdatePolicy: in.UpdatePolicy}); err != nil {
 		if errors.Is(err, plugins.ErrBuiltinInstallationImmutable) {
 			return PluginInstallationView{}, ErrPluginBuiltinInstallation
 		}
 		return PluginInstallationView{}, err
 	}
+	if in.Enabled != nil && !*in.Enabled && current.Enabled {
+		h.stopAfterCommit(ctx, id)
+	}
 	if in.Enabled != nil {
-		h.service.OnLifecycleChange(ctx)
+		h.afterLifecycleCommit(ctx)
 	}
 	installation, err := h.installations.GetByID(ctx, id)
 	if err != nil {
@@ -198,10 +234,11 @@ func (h *PluginHandler) RestartAdminPluginInstallation(ctx context.Context, id i
 	return h.buildInstallationResponse(ctx, restarted, nil)
 }
 
-// DeleteAdminPluginInstallation stops the plugin, deletes its row (dependent
-// rows cascade) and removes its files. The row delete and the file removal are
-// not one transaction, and a repeat finds no row: a lost response is not a
-// receipt. Errors: plugins.ErrInstallationNotFound, ErrPluginBuiltinInstallation.
+// DeleteAdminPluginInstallation deletes the plugin's row (dependent rows
+// cascade), then stops the plugin and removes its files. A refused delete
+// (the last sign-in provider while password sign-in is off) never stopped
+// it. The row delete and the file removal are not one transaction, and a
+// repeat finds no row: a lost response is not a receipt. Errors: plugins.ErrInstallationNotFound, ErrPluginBuiltinInstallation.
 func (h *PluginHandler) DeleteAdminPluginInstallation(ctx context.Context, id int) error {
 	if h == nil || h.installations == nil {
 		return apiError(http.StatusServiceUnavailable, "unavailable", "Plugin stores not configured")
@@ -220,27 +257,20 @@ func (h *PluginHandler) DeleteAdminPluginInstallation(ctx context.Context, id in
 	if ownership.Managed {
 		return &plugins.ManagedByEnvironmentError{Field: "installation"}
 	}
-
-	stopped := false
-	if h.service != nil {
-		if err := h.service.Stop(id); err != nil && !errors.Is(err, pluginhost.ErrClientNotFound) {
-			return err
+	// The plugin stops after the delete commits and before its files go.
+	err = h.installations.DeleteThen(ctx, id, func() {
+		if h.service != nil || h.stopForTest != nil {
+			h.stopAfterCommit(ctx, id)
 		}
-		stopped = true
-	}
-	if err := h.installations.Delete(ctx, id); err != nil {
-		if stopped && installation.Enabled {
-			if _, restartErr := h.service.Start(ctx, id); restartErr != nil {
-				slog.ErrorContext(ctx, "restarting plugin after failed uninstall", "component", "api", "installation_id", id, "error", restartErr)
-			}
-		}
+	})
+	if err != nil {
 		if errors.Is(err, plugins.ErrBuiltinInstallationImmutable) {
 			return ErrPluginBuiltinInstallation
 		}
 		return err
 	}
 	if h.service != nil {
-		h.service.OnLifecycleChange(ctx)
+		h.afterLifecycleCommit(ctx)
 	}
 	return nil
 }

@@ -191,11 +191,8 @@ export function useCreateHistoryImportRun() {
       toast.success(t("web.common.toast.historyImport.queued"));
       queryClient.invalidateQueries({ queryKey: historyImportKeys.runs() });
     },
-    onError: (err) => {
+    onError: () => {
       queryClient.invalidateQueries({ queryKey: historyImportKeys.runs() });
-      toast.error(
-        err instanceof Error ? err.message : t("web.common.toast.historyImport.startFailed"),
-      );
     },
   });
 }

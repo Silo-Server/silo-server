@@ -140,6 +140,7 @@ func TestPublicURLWritesKeepAWayInDB(t *testing.T) {
 // app keys off.
 func TestSwitchOffKeepsOwnerProtectionDB(t *testing.T) {
 	f := newSwitchWriteFixture(t)
+	f.addUsableProvider(t)
 	ctx := t.Context()
 	h := &AdminHandler{SettingsRepo: serversettings.NewServerSettingsRepo(f.pool), pool: f.pool}
 	f.restoreSetting(t, config.AuthLocalPasswordLoginSettingKey)
@@ -226,6 +227,7 @@ func TestSwitchOffKeepsOwnerProtectionDB(t *testing.T) {
 // key, which needs no local password, so the write is refused naming it.
 func TestLocalPasswordsOffJudgesTheStateLeftDB(t *testing.T) {
 	f := newSwitchWriteFixture(t)
+	f.addUsableProvider(t)
 	ctx := t.Context()
 	h := &AdminHandler{SettingsRepo: serversettings.NewServerSettingsRepo(f.pool), pool: f.pool}
 	f.restoreSetting(t, config.AuthLocalPasswordLoginSettingKey)

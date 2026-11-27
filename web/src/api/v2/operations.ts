@@ -292,6 +292,7 @@ export const v2Operations = {
   "GET /api/v2/admin/settings/sensitive-status": "getAdminSensitiveSettingsStatus",
   "GET /api/v2/admin/settings/{key}": "getAdminSetting",
   "GET /api/v2/admin/sign-in/accounts-at-risk": "listSignInAccountsAtRisk",
+  "GET /api/v2/admin/sign-in/local-password-off/accounts": "listAdminLocalPasswordOffAccounts",
   "GET /api/v2/admin/stats": "getAdminDashboardStats",
   "GET /api/v2/admin/stats/api-clients": "getAdminDashboardAPIClients",
   "GET /api/v2/admin/stats/api-clients/{session_id}/endpoints":

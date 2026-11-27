@@ -229,18 +229,48 @@ func decodeUpstreamJSON(ctx context.Context, body io.Reader, out any, listing *l
 	return err
 }
 
-var errUpstreamBytesLimit = errors.New("byte limit reached")
+var (
+	errUpstreamBytesLimit = errors.New("byte limit reached")
+	errUpstreamJSONDecode = errors.New("unexpected upstream JSON response")
+	errUpstreamBodyRead   = errors.New("upstream response body read failed")
+)
+
+type bodyReadErrorTracker struct {
+	r       io.Reader
+	readErr error
+}
+
+func (t *bodyReadErrorTracker) Read(p []byte) (int, error) {
+	n, err := t.r.Read(p)
+	if err != nil && !errors.Is(err, io.EOF) && t.readErr == nil {
+		t.readErr = err
+	}
+	return n, err
+}
 
 // decodeLimitedJSON decodes body into out, reading at most limit bytes and
 // maxUpstreamResponseValues JSON values. It returns the bytes read. The
 // decoder buffers a whole value before it unmarshals, so a body stopped by
 // either limit allocates nothing for its contents.
 func decodeLimitedJSON(body io.Reader, out any, limit int64) (int64, error) {
-	limited := &io.LimitedReader{R: body, N: limit + 1}
+	tracker := &bodyReadErrorTracker{r: body}
+	limited := &io.LimitedReader{R: tracker, N: limit + 1}
 	err := json.NewDecoder(&jsonValueCounter{r: limited, limit: maxUpstreamResponseValues}).Decode(out)
 	read := limit + 1 - limited.N
 	if limited.N <= 0 {
 		return read, errUpstreamBytesLimit
+	}
+	if errors.Is(err, ErrUpstreamResponseTooLarge) {
+		return read, err
+	}
+	if err != nil && tracker.readErr != nil {
+		if errors.Is(tracker.readErr, context.Canceled) {
+			return read, tracker.readErr
+		}
+		return read, fmt.Errorf("%w: %w", errUpstreamBodyRead, tracker.readErr)
+	}
+	if err != nil {
+		return read, fmt.Errorf("%w: %w", errUpstreamJSONDecode, err)
 	}
 	return read, err
 }

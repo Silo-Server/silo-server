@@ -27,11 +27,26 @@ func TestHistoryImportAPIErrorKeepsTheCauseForV2(t *testing.T) {
 	for _, err := range []error{
 		fmt.Errorf("%w: %w", historyimport.ErrSourceUnreachable, dial),
 		fmt.Errorf("%w: choose a server and enter the Emby username", historyimport.ErrInvalidInput),
+		fmt.Errorf("authenticating against Emby server: %w", historyimport.ErrUnexpectedSourceResponse),
 	} {
 		out := historyImportAPIError(err)
 		if !errors.Is(out, err) {
 			t.Fatalf("historyImportAPIError(%v) = %+v, want it to wrap its cause", err, out)
 		}
+	}
+}
+
+func TestHistoryImportAPIErrorMapsValidationAndUnexpectedResponse(t *testing.T) {
+	invalid := fmt.Errorf("%w: emby_base_url must be an HTTP or HTTPS URL without credentials, query parameters, or fragments", historyimport.ErrInvalidInput)
+	out := historyImportAPIError(invalid)
+	if out.Status != http.StatusBadRequest || out.Code != policyErrorBadRequest || !errors.Is(out, historyimport.ErrInvalidInput) {
+		t.Fatalf("ErrInvalidInput mapping = %+v", out)
+	}
+
+	unexpected := fmt.Errorf("authenticating against Emby server: %w", historyimport.ErrUnexpectedSourceResponse)
+	out = historyImportAPIError(unexpected)
+	if out.Status != http.StatusServiceUnavailable || out.Code != "dependency_unavailable" || out.Message != historyimport.UnexpectedSourceResponseMessage || !errors.Is(out, historyimport.ErrUnexpectedSourceResponse) {
+		t.Fatalf("ErrUnexpectedSourceResponse mapping = %+v", out)
 	}
 }
 

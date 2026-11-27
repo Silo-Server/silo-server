@@ -243,6 +243,7 @@ func TestAppKeySwitchWriteEndsKeySessionsDB(t *testing.T) {
 // naming it. Turning both off is refused naming it too.
 func TestAppKeysOffJudgedOnTheBatchLocalSettingDB(t *testing.T) {
 	f := newSwitchWriteFixture(t)
+	f.addUsableProvider(t)
 	ctx := t.Context()
 	h := &AdminHandler{SettingsRepo: serversettings.NewServerSettingsRepo(f.pool), pool: f.pool}
 	existing, err := h.AccountsAtRisk(ctx, auth.ChangeAppKeysOff)
@@ -422,5 +423,23 @@ func TestGuardedSwitchWriteOnOneConnectionDB(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// addUsableProvider installs a sign-in provider people can use (an enabled
+// installation with an enabled binding that reads as a credentials
+// provider, so it needs no public URL) with no identities: turning local
+// passwords off needs one (sign_in_provider_required), and it changes no
+// account's way in.
+func (f *switchWriteFixture) addUsableProvider(t *testing.T) {
+	t.Helper()
+	var id int
+	if err := f.pool.QueryRow(t.Context(), `INSERT INTO plugin_installations (plugin_id, version, install_path, enabled, update_policy, kind)
+		VALUES ($1, '0', '/nonexistent/'||$1, true, 'manual', 'plugin') RETURNING id`, "usable-provider-"+f.suffix).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = f.pool.Exec(context.Background(), `DELETE FROM plugin_installations WHERE id = $1`, id) })
+	if _, err := f.pool.Exec(t.Context(), `INSERT INTO plugin_auth_bindings (plugin_installation_id, capability_id, enabled) VALUES ($1, 'directory', true)`, id); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -136,8 +136,11 @@
 # available episode air date counts only episodes with a file in a library:
 # files the bulk episode link attaches count, also when an air-date correction
 # holds the series row meanwhile, and deleting a library drops its episodes.
+# Specials do not extend a series' last aired date, and the upgrade repairs
+# values that counted them.
 ./internal/catalog TestSeriesAirDatesFollowEpisodesAndCalendarDB
 ./internal/scanner TestBulkLinkEpisodesAdvancesSeriesAvailableAirDateDB
+./migrations TestSeriesLastAirDateSkipSpecialsMigrationPostgres
 
 # Poster availability counts only files the viewer can play, and stays blank
 # when a regular season has no episode rows.
@@ -330,6 +333,21 @@
 ./internal/auth TestExternalSignInDemoModeDB
 ./internal/auth TestExternalAccountCannotPreemptInitialSetupDB
 ./internal/auth TestPluginAuthBindingCallbackModeDB
+./internal/auth TestLocalPasswordOffAccountsDB
+./internal/auth TestLocalPasswordOffCountsOpenIDConnectLinkOnlyWithPublicURLDB
+./internal/auth TestEnableAccountLocalLoginDB
+./internal/auth TestBreakGlassWithoutPasswordIsNotCountedDB
+./internal/auth TestUninstallAddsNoLockCycleDB
+./internal/auth TestUnlinkNeedsAPasswordThatSignsInDB
+./internal/auth TestLocalPasswordOffKeepsOpenSessionsDB
+./internal/auth TestSignInProviderGuardDB
+./internal/auth TestSignInProviderGuardSerializesWithSettingsSaveDB
+./internal/auth TestServerWithoutUsableProviderCanStillBeRepairedAndManagedDB
+./internal/plugins TestProvisionAppliesDeclarationThatLeavesNoSignInProviderDB
+./internal/plugins TestSignInWarningOnlyOnPluginsThatCanBeTheProviderDB
+./internal/plugins TestStoredSignInWarningIsWorkedOutAgainDB
+./internal/api/handlers TestLocalLoginSettingRequiresBreakGlassDB
+./internal/api/handlers TestPluginDisableAndUninstallRefusedBeforeStopDB
 ./internal/auth TestLoginSessionActivityAndAdminRevocationDB
 ./internal/auth TestDeviceKeyRevocationEndsItsSessionsDB
 ./internal/auth TestAccountKeyRulesDB
@@ -1592,6 +1610,10 @@
 ./internal/backup TestControlConnectionIsNeverOnTheLiveDatabaseDB
 ./internal/backup TestCustomPoliciesComeFromTheLiveServerDB
 ./internal/backup TestCarryMatchesAProfileWithinItsAccountDB
+./internal/backup TestFullRestoreCarriesCredentialsOnlyOntoTheSameAccountDB
+./internal/backup TestFullRestoreKeepsTheLiveAccountIDSequenceDB
+./internal/backup TestFullRestoreLeavingOutCredentialsKeepsTheLiveAccountIDSequenceDB
+./internal/backup TestFullRestoreOfAnotherDeploymentKeepsItsAccountIDSequenceDB
 ./internal/backup TestCarrySwapsDestinationNamesDB
 ./internal/backup TestBackupWritesManifestLastDB
 ./internal/backup TestSubsystemLockSerializesBackupsAndDeletesDB
@@ -1680,6 +1702,7 @@
 ./internal/backup TestImportsReadInBatchesDB
 ./internal/historyimport TestMatchAllAgreesWithMatchDB
 ./internal/historyimport TestEnqueuePersonalRunAllowsOneActiveRunPerAccount
+./internal/historyimport TestEnqueuePersonalRunAcceptsCustomEmby
 ./internal/backup TestCollectionImportKeepsTheProfileQuotaDB
 ./internal/backup TestNewAccountNeedsItsPrimaryProfileDB
 
@@ -1834,3 +1857,4 @@
 ./internal/apiv2 TestLimitedSessionDeleteDB
 ./internal/apiv2 TestDemoVisitorOnALimitedSessionDB
 ./internal/apiv2 TestLimitedSessionPagesByIDDB
+./internal/apiv2 TestDemoVisitorSessionListDB
