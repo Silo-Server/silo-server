@@ -71,18 +71,29 @@ func (t *Task) Execute(ctx context.Context, progress taskmanager.ProgressReporte
 }
 
 func (s *Service) backupTime(ctx context.Context) string {
-	if s.opts.Settings == nil {
-		return config.DefaultBackupTime
-	}
-	raw, err := s.opts.Settings.Get(ctx, config.BackupTimeSettingKey)
+	at, err := s.readBackupTime(ctx)
 	if err != nil {
 		return config.DefaultBackupTime
 	}
+	return at
+}
+
+// readBackupTime is backupTime, except that a setting it cannot read is an
+// error rather than the default. An unset or invalid backup.time is still
+// the default.
+func (s *Service) readBackupTime(ctx context.Context) (string, error) {
+	if s.opts.Settings == nil {
+		return config.DefaultBackupTime, nil
+	}
+	raw, err := s.opts.Settings.Get(ctx, config.BackupTimeSettingKey)
+	if err != nil {
+		return "", fmt.Errorf("reading %s: %w", config.BackupTimeSettingKey, err)
+	}
 	hour, minute, ok := config.ParseBackupTime(raw)
 	if !ok {
-		return config.DefaultBackupTime
+		return config.DefaultBackupTime, nil
 	}
-	return fmt.Sprintf("%02d:%02d", hour, minute)
+	return fmt.Sprintf("%02d:%02d", hour, minute), nil
 }
 
 // nightlySlot is the scheduled time a nightly run at now belongs to: the

@@ -328,8 +328,15 @@ func (s *Service) lockScheduled(ctx context.Context) (*pendingRun, RunResult, er
 		// Every API server fires the trigger; under the lock, the first to
 		// finish the slot's backup leaves the others nothing to do. The run
 		// records this slot, so moving backup.time while it runs cannot leave
-		// tonight open for a second copy.
-		slot = nightlySlot(s.opts.Now(), s.backupTime(ctx), s.opts.Location)
+		// tonight open for a second copy. A backup.time it cannot read fails
+		// the run: the default time would name another slot, which could skip
+		// tonight or leave it open for another server.
+		at, err := s.readBackupTime(ctx)
+		if err != nil {
+			held.Release(context.WithoutCancel(ctx))
+			return nil, RunResult{}, err
+		}
+		slot = nightlySlot(s.opts.Now(), at, s.opts.Location)
 		done, err := s.slotBackedUp(ctx, slot)
 		if err != nil || done {
 			held.Release(context.WithoutCancel(ctx))

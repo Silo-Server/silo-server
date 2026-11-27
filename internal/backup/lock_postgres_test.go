@@ -387,6 +387,29 @@ func TestNightlyRecordsTheSlotItWasAdmittedForDB(t *testing.T) {
 	}
 }
 
+// TestNightlyFailsWhenBackupTimeCannotBeReadDB: a nightly run that cannot
+// read backup.time fails with the read error and records no slot. Taking
+// the 04:00 default would back up against the wrong slot, or skip a night
+// another server never backed up (#4672). Once the setting reads again, the
+// same night's run backs up.
+func TestNightlyFailsWhenBackupTimeCannotBeReadDB(t *testing.T) {
+	ctx := t.Context()
+	opts, _ := upgradeOptions(t)
+	opts.Status = PostgresStatus{Pool: opts.Pool}
+	opts.Location = time.UTC
+	opts.Now = func() time.Time { return time.Date(2026, 10, 30, 6, 0, 30, 0, time.UTC) }
+	settings := &mapSettings{values: map[string]string{config.BackupTimeSettingKey: "06:00"}}
+	unreadable := opts
+	unreadable.Settings = unreadableSettings{settings, config.BackupTimeSettingKey}
+	if result, err := New(unreadable).RunTask(ctx, nil); err == nil || !strings.Contains(err.Error(), "connection reset") {
+		t.Fatalf("nightly run with an unreadable backup.time = %+v, %v; want the read error", result, err)
+	}
+	opts.Settings = settings
+	if result, err := New(opts).RunTask(ctx, nil); err != nil || result.Skipped != "" {
+		t.Fatalf("the same night's run once backup.time reads = %+v, %v; want a backup", result, err)
+	}
+}
+
 func blobstoreRoot(t *testing.T, store blobstore.Store) string {
 	t.Helper()
 	root, ok := strings.CutPrefix(blobstore.Location(store), blobstore.BackendLocal+"|")
