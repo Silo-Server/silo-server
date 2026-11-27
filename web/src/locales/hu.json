@@ -641,6 +641,12 @@
       "value": "A munkamenet lejárt. Jelentkezzen be újra."
     }
   ],
+  "error.sign_in_provider_required": [
+    {
+      "type": 0,
+      "value": "Amíg a jelszavas bejelentkezés ki van kapcsolva, bekapcsolva kell maradnia egy olyan bejelentkezési szolgáltatónak, amelyet a felhasználók használni tudnak. Az OpenID Connect szolgáltatóhoz a szerver nyilvános URL-je is szükséges."
+    }
+  ],
   "error.snapshot_request_conflict": [
     {
       "type": 0,
@@ -78911,6 +78917,20 @@
       "value": "Előbb kapcsoljon be egy bejelentkezési szolgáltatót. Ha a jelszavas bejelentkezés ki van kapcsolva, és egyetlen szolgáltató sincs bekapcsolva, csak a vészhelyzeti rendszergazdák tudnának bejelentkezni."
     }
   ],
+  "web.admin.settings.signIn.page.noPublicUrlError": [
+    {
+      "type": 0,
+      "value": "Először állítsa be a szerver nyilvános URL-jét. Enélkül a(z) "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " szolgáltató senkit sem tud bejelentkeztetni, így kikapcsolt jelszavas bejelentkezés mellett csak a vészhozzáférésű rendszergazdák tudnának bejelentkezni."
+    }
+  ],
   "web.admin.settings.signIn.page.passwordMinLengthDescription": [
     {
       "type": 0,
@@ -79001,6 +79021,246 @@
       "value": "API-kulcsok létrehozásának engedélyezése a felhasználóknak"
     }
   ],
+  "web.admin.settings.signIn.passwordsOff.confirm": [
+    {
+      "type": 0,
+      "value": "Jelszavas bejelentkezés kikapcsolása"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.description": [
+    {
+      "type": 0,
+      "value": "Jelszóval csak a vészhozzáférésű rendszergazdák fognak bejelentkezni. Mindenki más a(z) "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " szolgáltatóval jelentkezik be."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkAutoCreate": [
+    {
+      "type": 0,
+      "value": "A(z) "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " szolgáltató az első bejelentkezéskor fiókot hoz létre, így ha ezek közül valaki bejelentkezik vele, mielőtt összekapcsolná, új, különálló fiókot kap."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkExplain": [
+    {
+      "type": 0,
+      "value": "Mindegyiket kapcsolja össze a(z) "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " szolgáltató egy fiókjával a saját oldaláról a Felhasználók oldalon."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " fiók nem tud bejelentkezni, amíg egy rendszergazda össze nem kapcsolja"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " fiók nem tud bejelentkezni, amíg egy rendszergazda össze nem kapcsolja"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loadFailed": [
+    {
+      "type": 0,
+      "value": "Nem sikerült ellenőrizni, mely fiókokat érinti ez. Ettől még kikapcsolhatja."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loading": [
+    {
+      "type": 0,
+      "value": "A jelszóval bejelentkező felhasználók ellenőrzése…"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchExplain": [
+    {
+      "type": 0,
+      "value": "Ha a(z) "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " szolgáltató bejelentkezéskor megerősíti valamelyik e-mail-címet, a Silo összekapcsolja az illető személyt a fiókjával."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " fiók e-mail-cím alapján kapcsolódik"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " fiók e-mail-cím alapján kapcsolódik"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.more": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "További "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " megjelenítése"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "További "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " megjelenítése"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.moreFailed": [
+    {
+      "type": 0,
+      "value": "Nem sikerült további fiókokat betölteni. Próbálja újra."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.nobodyAffected": [
+    {
+      "type": 0,
+      "value": "Ezután is minden fiók be tud jelentkezni."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.administrator": [
+    {
+      "type": 0,
+      "value": "Rendszergazda"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.emailMatchOff": [
+    {
+      "type": 0,
+      "value": "Az e-mail-egyeztetés ki van kapcsolva"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.noEmail": [
+    {
+      "type": 0,
+      "value": "Nincs e-mail-cím"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.sessions": [
+    {
+      "type": 0,
+      "value": "Ez senkit sem jelentkeztet ki. A már bejelentkezett felhasználók bejelentkezve maradnak, az API-kulcsaik továbbra is működnek, és továbbra is jóváhagyhatnak új eszközöket. Ha valakit ki szeretne jelentkeztetni, zárja le a munkameneteit a saját oldaláról a "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Felhasználók"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " oldalon."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.title": [
+    {
+      "type": 0,
+      "value": "Kikapcsolja a jelszavas bejelentkezést?"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.usersLink": [
+    {
+      "type": 0,
+      "value": "Az összes fiók megtekintése a Felhasználók oldalon"
+    }
+  ],
   "web.admin.settings.signIn.provider.accounts.title": [
     {
       "type": 0,
@@ -79043,6 +79303,28 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.provider.binding.turnOffBlocked": [
+    {
+      "type": 0,
+      "value": "A jelszavas bejelentkezés ki van kapcsolva, így a vészhozzáférésű rendszergazdák kivételével mindenki a(z) "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " szolgáltatóval jelentkezik be. Először kapcsolja vissza a jelszavas bejelentkezést, majd kapcsolja ki a(z) "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " szolgáltatót."
     }
   ],
   "web.admin.settings.signIn.provider.binding.turnOffConfirm": [
@@ -135669,6 +135951,12 @@
       "value": "E-mail-cím vagy felhasználónév"
     }
   ],
+  "web.settings.historyImport.embyDirectHelp": [
+    {
+      "type": 0,
+      "value": "Adja meg annak az Emby-szervernek az alap URL-jét, amelyről importálni szeretne."
+    }
+  ],
   "web.settings.historyImport.embyPassword": [
     {
       "type": 0,
@@ -135679,6 +135967,12 @@
     {
       "type": 0,
       "value": "Hagyja üresen, ha a fióknak nincs jelszava"
+    }
+  ],
+  "web.settings.historyImport.embyServerUrl": [
+    {
+      "type": 0,
+      "value": "Emby-szerver URL-je"
     }
   ],
   "web.settings.historyImport.embyUsername": [
@@ -135829,6 +136123,12 @@
     {
       "type": 0,
       "value": "Plex-fiók"
+    }
+  ],
+  "web.settings.historyImport.mode.serverUrl": [
+    {
+      "type": 0,
+      "value": "Szerver-URL"
     }
   ],
   "web.settings.historyImport.newImport.description": [
@@ -136122,7 +136422,7 @@
   "web.settings.historyImport.source.emby": [
     {
       "type": 0,
-      "value": "Emby Connect vagy mentett szerver"
+      "value": "Emby Connect, szerver-URL vagy mentett szerver"
     }
   ],
   "web.settings.historyImport.source.jellyfin": [

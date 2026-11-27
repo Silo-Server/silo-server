@@ -146,3 +146,14 @@ func externalSignInFixtureCases() []fixtureCase {
 			status: http.StatusCreated, assertHeaders: append([]string{"Location"}, json...), schema: schema("AccountIdentity")},
 	}
 }
+
+// localPasswordOffFixtureCases covers the read of who loses sign-in when
+// local password sign-in is turned off. Records are synthetic.
+func localPasswordOffFixtureCases() []fixtureCase {
+	return []fixtureCase{
+		{name: "list_admin_local_password_off_accounts_ok", operationID: "listAdminLocalPasswordOffAccounts",
+			scenario: "Before turning password sign-in off, an administrator reads the first accounts email auto-match can link, with both group totals.",
+			method:   http.MethodGet, path: "/api/v2/admin/sign-in/local-password-off/accounts?group=email_match&limit=1", headers: actingRequestAdmin,
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/AdminLocalPasswordOffAccounts"},
+	}
+}

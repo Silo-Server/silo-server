@@ -9913,6 +9913,27 @@
       "body_file": "list_admin_collections_ok.json"
     },
     {
+      "name": "list_admin_local_password_off_accounts_ok",
+      "operation_id": "listAdminLocalPasswordOffAccounts",
+      "scenario": "Before turning password sign-in off, an administrator reads the first accounts email auto-match can link, with both group totals.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/sign-in/local-password-off/accounts?group=email_match&limit=1",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-primary"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminLocalPasswordOffAccounts",
+      "body_file": "list_admin_local_password_off_accounts_ok.json"
+    },
+    {
       "name": "list_admin_playback_history_ok",
       "operation_id": "listAdminPlaybackHistory",
       "scenario": "Administrator playback history page carries string IDs, instants, a nullable duration and a scoped cursor.",

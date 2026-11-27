@@ -351,7 +351,7 @@ func toAdminUserResponse(u *models.User, group *access.GroupPolicy) AdminUserVie
 		DownloadTranscodeAllowed:   clonePtr(u.DownloadTranscodeAllowed),
 		RequestsAllowed:            clonePtr(u.RequestsAllowed),
 		AccessGroupID:              clonePtr(u.AccessGroupID),
-		PasswordLogin:              u.LocalPasswordLoginEnabled && u.PasswordHash != "",
+		PasswordLogin:              u.HasLocalPassword(),
 		PasswordChangeRequired:     u.PasswordChangeRequired,
 		IsOwner:                    u.IsOwner,
 		BreakGlass:                 u.BreakGlass,
@@ -1526,22 +1526,39 @@ func shouldPersistAdminSetting(stored map[string]string, key, normalized string,
 	return normalized != "" && effectiveChanged
 }
 
-// checkLocalLoginSetting refuses turning local password sign-in off while no
-// break-glass admin could still sign in with a password. It runs inside the
-// settings mutation, which holds the settings lock that break-glass changes
-// also take.
+// checkLocalLoginSetting refuses a save that would leave local password
+// sign-in off with no break-glass admin or no sign-in provider people can
+// use (auth.CheckLocalLoginSettingChange). It runs inside the settings
+// mutation, which holds the settings lock that break-glass and sign-in
+// provider changes also take.
 func (h *AdminHandler) checkLocalLoginSetting(ctx context.Context, tx pgx.Tx, before, after map[string]string) error {
-	key := config.AuthLocalPasswordLoginSettingKey
-	if before[key] == after[key] {
+	local, url := config.AuthLocalPasswordLoginSettingKey, config.ServerPublicURLSettingKey
+	if before[local] == after[local] && before[url] == after[url] {
 		return nil
 	}
+	was := auth.LocalLoginSettings{LocalPasswordLogin: before[local], PublicURL: before[url]}
+	will := auth.LocalLoginSettings{LocalPasswordLogin: after[local], PublicURL: after[url]}
 	if tx != nil {
-		return breakGlassError(auth.CheckLocalLoginSettingChange(ctx, tx, before[key], after[key]))
+		return localLoginSettingError(auth.CheckLocalLoginSettingChange(ctx, tx, was, will), was)
 	}
 	if h.pool == nil {
 		return ErrAdminSettingsUnavailable
 	}
-	return breakGlassError(auth.CheckLocalLoginSettingChange(ctx, h.pool, before[key], after[key]))
+	return localLoginSettingError(auth.CheckLocalLoginSettingChange(ctx, h.pool, was, will), was)
+}
+
+// localLoginSettingError answers a refused change. was is what the save
+// changes from: a save turning password sign-in off is told to turn a
+// provider on, and one that would take the provider's public URL away while
+// passwords are already off is told to turn passwords back on first.
+func localLoginSettingError(err error, was auth.LocalLoginSettings) error {
+	if !errors.Is(err, auth.ErrSignInProviderRequired) {
+		return breakGlassError(err)
+	}
+	if on, parseErr := strconv.ParseBool(strings.TrimSpace(was.LocalPasswordLogin)); parseErr == nil && !on {
+		return apiError(http.StatusConflict, "sign_in_provider_required", "Password sign-in is off, and an OpenID Connect provider needs server.public_url to sign anyone in. Turn password sign-in back on first. Break-glass administrators can sign in with a password either way")
+	}
+	return apiError(http.StatusConflict, "sign_in_provider_required", "Turn on a sign-in provider that can sign people in before turning local password sign-in off; an OpenID Connect provider also needs server.public_url")
 }
 
 // errBackupKeyNotConfirmed refuses switching backups to S3 before the admin

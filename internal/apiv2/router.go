@@ -1285,6 +1285,7 @@ var externalSignInProblemTypes = map[string]ProblemType{
 	TypeIdentityLinkedElsewhere.ID: TypeIdentityLinkedElsewhere,
 	TypeProviderAlreadyEnabled.ID:  TypeProviderAlreadyEnabled,
 	TypeBreakGlassRequired.ID:      TypeBreakGlassRequired,
+	TypeSignInProviderRequired.ID:  TypeSignInProviderRequired,
 	TypeLastSignInMethod.ID:        TypeLastSignInMethod,
 	TypeProviderUnavailable.ID:     TypeProviderUnavailable,
 	TypeAlreadyLinked.ID:           TypeAlreadyLinked,

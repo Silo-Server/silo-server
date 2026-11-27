@@ -641,6 +641,12 @@
       "value": "你的会话已过期。请重新登录。"
     }
   ],
+  "error.sign_in_provider_required": [
+    {
+      "type": 0,
+      "value": "密码登录关闭期间，必须保持至少一个可供用户使用的登录提供商处于开启状态。OpenID Connect还需要服务器的公共URL。"
+    }
+  ],
   "error.snapshot_request_conflict": [
     {
       "type": 0,
@@ -72491,6 +72497,20 @@
       "value": "请先开启一个登录提供商。如果关闭密码登录且未开启任何提供商，将只有应急管理员能登录。"
     }
   ],
+  "web.admin.settings.signIn.page.noPublicUrlError": [
+    {
+      "type": 0,
+      "value": "请先设置服务器的公共URL。没有它，"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "无法让任何人登录；关闭密码登录后，只有应急管理员能够登录。"
+    }
+  ],
   "web.admin.settings.signIn.page.passwordMinLengthDescription": [
     {
       "type": 0,
@@ -72581,6 +72601,205 @@
       "value": "允许用户创建API密钥"
     }
   ],
+  "web.admin.settings.signIn.passwordsOff.confirm": [
+    {
+      "type": 0,
+      "value": "关闭密码登录"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.description": [
+    {
+      "type": 0,
+      "value": "只有应急管理员可以使用密码登录。其他所有人都将使用"
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "登录。"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkAutoCreate": [
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "会在首次登录时创建账户。因此，如果其中有人在你关联之前使用它登录，他们会获得一个新的独立账户。"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkExplain": [
+    {
+      "type": 0,
+      "value": "请在用户中打开每个账户的页面，将其关联到"
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "账户。"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "个账户在管理员关联之前无法登录"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loadFailed": [
+    {
+      "type": 0,
+      "value": "无法检查此操作会影响哪些账户。你仍然可以关闭它。"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loading": [
+    {
+      "type": 0,
+      "value": "正在检查哪些人使用密码登录"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchExplain": [
+    {
+      "type": 0,
+      "value": "当"
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "在登录时确认其中某个电子邮件地址后，Silo会将此人连接到其账户。"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "个账户通过电子邮件连接"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.more": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "再显示"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "个"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.moreFailed": [
+    {
+      "type": 0,
+      "value": "无法加载更多账户。请重试。"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.nobodyAffected": [
+    {
+      "type": 0,
+      "value": "此操作后，所有账户仍可登录。"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.administrator": [
+    {
+      "type": 0,
+      "value": "管理员"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.emailMatchOff": [
+    {
+      "type": 0,
+      "value": "电子邮件匹配已关闭"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.noEmail": [
+    {
+      "type": 0,
+      "value": "无电子邮件"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.sessions": [
+    {
+      "type": 0,
+      "value": "此操作不会让任何人退出登录。已登录的人将保持登录状态，他们的API密钥仍可使用，并且仍可批准新设备。如需让某人退出登录，请在"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "用户"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "中打开其页面并结束其会话。"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.title": [
+    {
+      "type": 0,
+      "value": "关闭密码登录？"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.usersLink": [
+    {
+      "type": 0,
+      "value": "在用户中查看所有账户"
+    }
+  ],
   "web.admin.settings.signIn.provider.accounts.title": [
     {
       "type": 0,
@@ -72615,6 +72834,28 @@
     {
       "type": 0,
       "value": "无法更改"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "。"
+    }
+  ],
+  "web.admin.settings.signIn.provider.binding.turnOffBlocked": [
+    {
+      "type": 0,
+      "value": "密码登录已关闭，因此除应急管理员外，所有人都通过"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "登录。请先重新开启密码登录，然后再关闭"
     },
     {
       "type": 1,
@@ -125200,6 +125441,12 @@
       "value": "邮箱或用户名"
     }
   ],
+  "web.settings.historyImport.embyDirectHelp": [
+    {
+      "type": 0,
+      "value": "输入要从中导入的Emby服务器的基础URL。"
+    }
+  ],
   "web.settings.historyImport.embyPassword": [
     {
       "type": 0,
@@ -125210,6 +125457,12 @@
     {
       "type": 0,
       "value": "如果账户没有密码，请留空"
+    }
+  ],
+  "web.settings.historyImport.embyServerUrl": [
+    {
+      "type": 0,
+      "value": "Emby服务器URL"
     }
   ],
   "web.settings.historyImport.embyUsername": [
@@ -125360,6 +125613,12 @@
     {
       "type": 0,
       "value": "Plex账户"
+    }
+  ],
+  "web.settings.historyImport.mode.serverUrl": [
+    {
+      "type": 0,
+      "value": "服务器URL"
     }
   ],
   "web.settings.historyImport.newImport.description": [
@@ -125657,7 +125916,7 @@
   "web.settings.historyImport.source.emby": [
     {
       "type": 0,
-      "value": "Emby Connect或已保存的服务器"
+      "value": "Emby Connect、服务器URL或已保存的服务器"
     }
   ],
   "web.settings.historyImport.source.jellyfin": [

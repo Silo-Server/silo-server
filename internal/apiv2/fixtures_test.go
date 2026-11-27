@@ -1795,6 +1795,7 @@ func fixtureCases() []fixtureCase {
 	cases = append(cases, adminPlaybackHistoryDetailFixtureCases()...)
 	cases = append(cases, adminInsightsFixtureCases()...)
 	cases = append(cases, adminSessionEgressFixtureCases()...)
+	cases = append(cases, localPasswordOffFixtureCases()...)
 	return cases
 }
 

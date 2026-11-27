@@ -2533,7 +2533,7 @@ summary. Run credentials and private dispatch metadata never appear in these res
 
 A server address the user supplied must be on the public internet unless the
 account is an admin or an admin turned on `media_servers.allow_private_destinations`.
-That covers a typed Jellyfin or Plex URL and the server addresses Emby Connect or
+That covers a typed Emby, Jellyfin, or Plex URL and the server addresses Emby Connect or
 plex.tv list for the account; servers an admin configured as import sources are
 exempt. A refused address returns `422 validation_failed` whose detail says the
 address is on the server's local network. Cloud metadata, link-local, and other blocked addresses are refused
@@ -2550,9 +2550,16 @@ because each probe carries the Plex token. Addresses the account may not reach u
 the policy above are skipped, and the run is refused only when none remain; the eight
 raced are the first that remain. The Plex token is removed from any redirect that
 leaves the host it was sent to or downgrades from HTTPS to HTTP.
-`GET /api/v2/history-imports/capability` reports `plex_connection_fallback` and
-`max_plex_connections`. A server without it rejects `plex_base_urls` as an unknown
-member, so check the capability before sending the field.
+`GET /api/v2/history-imports/capability` reports `plex_connection_fallback`,
+`max_plex_connections`, and `emby_custom_server`. A server without those capabilities
+rejects `plex_base_urls` or `emby_base_url` as unknown members, so check the capability
+before sending them.
+
+Direct Emby imports accept `emby_base_url` with `username` and an optional `password`
+on `POST /api/v2/history-imports/runs`, mutually exclusive with `connect_session_id`
+and `source_id`, and run with `connection_mode` set to `"custom"`. Non-JSON or
+incomplete `2xx` sign-in responses from an Emby or Jellyfin server return
+`503 dependency_unavailable` with `Retry-After: 30` rather than an internal error.
 
 New queued personal imports survive server restart. Source changes invalidate captured
 configuration without retargeting the import; stale running executions fail without replay.

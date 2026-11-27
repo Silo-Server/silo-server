@@ -260,10 +260,10 @@ const opListAdminPlaybackSessions = "listAdminPlaybackSessions"
 
 func registerAdminPlaybackSessions(reg *Registry) {
 	cursors := NewCursors(reg.deps.CursorSecret)
-	op := func(path, id string) Operation {
-		return Operation{Operation: humaOp("GET", Prefix+"/admin/sessions"+path, id, "admin", "Read live playback observations; these do not confer control authority. Pagination bounds the SQL source and response using session identity."), Class: ClassActingAdmin, ServiceBacked: true}
+	op := func(path, id, summary string) Operation {
+		return Operation{Operation: humaOp("GET", Prefix+"/admin/sessions"+path, id, "admin", summary), Class: ClassActingAdmin, ServiceBacked: true}
 	}
-	Register(reg, op("/capabilities", "getAdminPlaybackSessionCapabilities"), func(_ context.Context, _ *CapabilityInput) (*AdminPlaybackSessionCapabilitiesOutput, error) {
+	Register(reg, op("/capabilities", "getAdminPlaybackSessionCapabilities", "Discover live playback observation features and supported row fields on this server."), func(_ context.Context, _ *CapabilityInput) (*AdminPlaybackSessionCapabilitiesOutput, error) {
 		out := new(AdminPlaybackSessionCapabilitiesOutput)
 		out.Body.Available = reg.deps.AdminPlaybackSessions != nil && reg.deps.AdminPlaybackSessions.AdminPlaybackSessionsAvailable()
 		out.Body.UserFilter = out.Body.Available
@@ -295,7 +295,7 @@ func registerAdminPlaybackSessions(reg *Registry) {
 		out.Body.Egress = out.Body.Available && reg.deps.AdminSessionEgress != nil
 		return out, nil
 	})
-	Register(reg, op("", opListAdminPlaybackSessions), func(ctx context.Context, in *AdminPlaybackSessionsInput) (*AdminPlaybackSessionsOutput, error) {
+	Register(reg, op("", opListAdminPlaybackSessions, "Read live playback observations; these do not confer control authority. Pagination bounds the SQL source and response using session identity."), func(ctx context.Context, in *AdminPlaybackSessionsInput) (*AdminPlaybackSessionsOutput, error) {
 		if reg.deps.AdminPlaybackSessions == nil || !reg.deps.AdminPlaybackSessions.AdminPlaybackSessionsAvailable() {
 			return nil, unavailable("administrator playback sessions")
 		}
@@ -337,7 +337,7 @@ func registerAdminPlaybackSessions(reg *Registry) {
 		}
 		return &AdminPlaybackSessionsOutput{Body: Paginated(items, next)}, nil
 	})
-	summary := op("/summary", "getAdminPlaybackSummary")
+	summary := op("/summary", "getAdminPlaybackSummary", "Read a bounded sample and total count of live playback observations without session identifiers or diagnostic metadata.")
 	summary.Description = "Read a bounded sample and total count of live playback observations, optionally filtered by account, without session identifiers or diagnostic metadata."
 	Register(reg, summary, func(ctx context.Context, in *AdminPlaybackSummaryInput) (*AdminPlaybackSummaryOutput, error) {
 		if reg.deps.AdminPlaybackSessions == nil || !reg.deps.AdminPlaybackSessions.AdminPlaybackSessionsAvailable() {
