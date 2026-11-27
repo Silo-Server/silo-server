@@ -122,3 +122,43 @@ func TestJellyfinWarningLogErrorDropsResponseBody(t *testing.T) {
 		t.Fatalf("warningLogError(emby) = %q, want only the status", got)
 	}
 }
+
+// Jellyfin reports a multi-episode file (S01E04-E05) as one item with
+// IndexNumberEnd. A played one imports a play for every episode it covers,
+// splitting its runtime, as the Emby import does; a favorite of the same file
+// keeps the first episode's share (#5358).
+func TestJellyfinProviderExpandsPlayedEpisodeRange(t *testing.T) {
+	t.Parallel()
+
+	played := time.Date(2026, 11, 1, 20, 0, 0, 0, time.UTC)
+	file := jellyfinItem{
+		ID: "ep-4", Type: "Episode", Name: "Part One", SeriesID: "series-1", SeriesName: "The Show",
+		ParentIndexNumber: 1, IndexNumber: 4, IndexNumberEnd: 5, RunTimeTicks: 36_000_000_000,
+		ProviderIDs: map[string]string{"Tvdb": "1004"},
+		UserData:    jellyfinUserData{Played: true, PlayCount: 1, LastPlayedDate: &played},
+	}
+	series := jellyfinItem{ID: "series-1", Type: "Series", Name: "The Show", ProviderIDs: map[string]string{"Tvdb": "100"}}
+	server := newJellyfinFetchServer(t, map[string][]jellyfinItem{
+		"IsPlayed":   {file},
+		"IsFavorite": {file},
+	}, map[string]jellyfinItem{"series-1": series})
+
+	records, _, err := NewJellyfinProvider(newUnthrottledJellyfinClient(), jellyfinLocalAuth{BaseURL: server.URL, UserID: "user-1", AccessToken: "token-1"}).Fetch(trustLoopback(context.Background()))
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	byID := map[string]Record{}
+	for _, record := range records {
+		byID[record.ExternalID] = record
+	}
+	first, second := byID["ep-4"], byID["ep-4#E5"]
+	if !first.Played || first.EpisodeNumber != 4 || first.DurationSeconds != 1800 || first.TVDBID != "1004" {
+		t.Fatalf("range first episode = %+v, want E04 played with half the runtime and its own TVDB ID", first)
+	}
+	if !first.Favorite {
+		t.Fatalf("range first episode = %+v, want the file's favorite on it", first)
+	}
+	if !second.Played || second.SeasonNumber != 1 || second.EpisodeNumber != 5 || second.DurationSeconds != 1800 || second.TVDBID != "" {
+		t.Fatalf("range second episode = %+v, want E05 played with half the runtime and no episode IDs", second)
+	}
+}

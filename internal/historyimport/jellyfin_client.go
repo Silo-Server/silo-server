@@ -69,6 +69,7 @@ type jellyfinItem struct {
 	SeriesID          string            `json:"SeriesId"`
 	ProviderIDs       map[string]string `json:"ProviderIds"`
 	IndexNumber       int               `json:"IndexNumber"`
+	IndexNumberEnd    int               `json:"IndexNumberEnd"`
 	ParentIndexNumber int               `json:"ParentIndexNumber"`
 	UserData          jellyfinUserData  `json:"UserData"`
 }

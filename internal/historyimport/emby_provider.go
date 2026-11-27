@@ -39,9 +39,9 @@ func NewEmbyProvider(client *EmbyClient, auth embyLocalAuth) *EmbyProvider {
 	return &EmbyProvider{client: client, auth: auth}
 }
 
-// maxEmbyEpisodeRange bounds how many episodes one multi-episode file expands
+// maxEpisodeRange bounds how many episodes one multi-episode file expands
 // to; a wider range is imported as its first episode only.
-const maxEmbyEpisodeRange = 10
+const maxEpisodeRange = 10
 
 // embySeriesLookup resolves a page's series through a fixed-size cache. A
 // failed lookup stops further ones for the run: Emby answers them the same
@@ -251,11 +251,18 @@ func (p *EmbyProvider) streamFavorites(ctx context.Context, from *StreamPosition
 // and number. A partly watched file stays one record: its position cannot be
 // attributed to a single episode.
 func embyWatchedRecords(item embyItem, series embyItem) []Record {
-	record := normalizeEmbyItem(item, series)
+	return episodeRangeRecords(normalizeEmbyItem(item, series), item.ID, item.IndexNumber, item.IndexNumberEnd)
+}
+
+// episodeRangeRecords expands a played episode record whose file covers
+// episodes first to last into one record per episode, splitting its runtime
+// evenly; the later ones carry itemID#E<n> and match by series identity and
+// number. Any other record comes back alone. Emby and Jellyfin both report a
+// multi-episode file as one item with IndexNumberEnd.
+func episodeRangeRecords(record Record, itemID string, first, last int) []Record {
 	// The remote server supplies these numbers: bound them before subtracting,
 	// and loop over an offset so an end of math.MaxInt cannot wrap the counter.
-	first, last := item.IndexNumber, item.IndexNumberEnd
-	if record.Kind != KindEpisode || !record.Played || first < 0 || last <= first || last-first >= maxEmbyEpisodeRange {
+	if record.Kind != KindEpisode || !record.Played || first < 0 || last <= first || last-first >= maxEpisodeRange {
 		return []Record{record}
 	}
 	count := last - first + 1
@@ -264,7 +271,7 @@ func embyWatchedRecords(item embyItem, series embyItem) []Record {
 	for offset := 1; offset < count; offset++ {
 		episode := first + offset
 		next := record
-		next.ExternalID = fmt.Sprintf("%s#E%d", item.ID, episode)
+		next.ExternalID = fmt.Sprintf("%s#E%d", itemID, episode)
 		next.EpisodeNumber = episode
 		next.IMDbID, next.TMDBID, next.TVDBID = "", "", ""
 		records = append(records, next)
