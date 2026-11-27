@@ -22,7 +22,7 @@ import (
 // withdrawing one) is not a side write and is not listed here.
 var sideWriteTables = []string{"auth_sessions", "device_login_requests", "auth_device_keys", "auth_person_keys", "auth_sign_in_links"}
 
-// allowedSideWrites names each trigger and foreign-key action that writes one
+// allowedSideWrites names each trigger, rule and foreign-key action that writes one
 // of sideWriteTables, or writes another table on a write to one, with why it
 // is safe.
 var allowedSideWrites = map[string]string{
@@ -79,13 +79,13 @@ var sqlCall = regexp.MustCompile(`(?i)(?:"?public"?\.)?\b([a-z_][a-z0-9_]*)\s*\(
 // consequence of a write to another table, or another table as a consequence
 // of a write to one of them, unless allowedSideWrites names it with its
 // reason. It reads the migrated schema, so a migration that adds one fails
-// here until the list says why it is safe. A trigger function's own writes
-// are read, and so are the writes of each function it calls in this
-// database's own schema, one level down; a called function that itself calls
-// another of the schema's functions fails as one it cannot classify. It
-// cannot see SQL built at run time (EXECUTE of a string) in a function body.
-// A listed table that does not exist yet is skipped and reported, unless a
-// migration creates it, which fails.
+// here until the list says why it is safe. Every trigger and every rule in
+// the schema is read, wherever it is, with the functions of this database's
+// own schema it calls, followed through the functions those call until no new
+// one appears; a chain deeper than maxCallDepth fails as one it cannot
+// classify. It cannot see SQL built at run time (EXECUTE of a string) in a
+// function body. A listed table that does not exist yet is skipped and
+// reported, unless a migration creates it, which fails.
 func TestNoUnlistedSideWritesDB(t *testing.T) {
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
@@ -107,14 +107,7 @@ func TestNoUnlistedSideWritesDB(t *testing.T) {
 	}
 	checkTriggers(t, pool, tables, check)
 	checkForeignKeyActions(t, pool, tables, check)
-	var rules []string
-	if err := pool.QueryRow(ctx, `SELECT COALESCE(array_agg(tablename || '.' || rulename), '{}') FROM pg_rules
-		WHERE schemaname = 'public' AND tablename = ANY($1)`, tables).Scan(&rules); err != nil {
-		t.Fatal(err)
-	}
-	for _, rule := range rules {
-		t.Errorf("rule %s rewrites writes to a guarded table; express it in Go or as a listed trigger", rule)
-	}
+	checkRules(t, pool, tables, check)
 	for _, name := range slices.Sorted(maps.Keys(allowedSideWrites)) {
 		if !seen[name] {
 			t.Errorf("allowedSideWrites lists %s, which no longer writes another table; remove it", name)
@@ -151,9 +144,9 @@ func presentGuardedTables(t *testing.T, pool *pgxpool.Pool) []string {
 	return present
 }
 
-// checkTriggers reads every trigger on a guarded table, and every trigger
-// whose function writes a guarded table, with the functions it calls one
-// level down.
+// checkTriggers reads every trigger in the schema: one on a guarded table
+// that writes another table, or one anywhere that writes a guarded table,
+// through its function or any function that reaches.
 func checkTriggers(t *testing.T, pool *pgxpool.Pool, tables []string, check func(name, what string)) {
 	t.Helper()
 	ctx := t.Context()
@@ -187,17 +180,18 @@ func checkTriggers(t *testing.T, pool *pgxpool.Pool, tables []string, check func
 				check(tr.name, "is a trigger on "+tr.table+" that writes the guarded table "+w)
 			}
 		}
-		if guarded {
-			for _, fn := range unclassified {
-				t.Errorf("trigger %s on %s calls %s, which calls further functions of the schema; this test cannot classify it", tr.name, tr.table, fn)
-			}
+		for _, fn := range unclassified {
+			t.Errorf("trigger %s on %s reaches %s through more than %d calls; this test cannot classify it", tr.name, tr.table, fn, maxCallDepth)
 		}
 	}
 }
 
-// triggerWrites answers the tables body writes, and those the schema's own
-// functions it calls write; and the called functions that call further
-// functions of the schema, which it does not follow.
+// maxCallDepth bounds how many calls deep functionWrites follows.
+const maxCallDepth = 8
+
+// triggerWrites answers the tables body writes, and those written by every
+// function of the schema it reaches through calls, followed until no new
+// function appears; and the functions still unread past maxCallDepth.
 func triggerWrites(ctx context.Context, t *testing.T, pool *pgxpool.Pool, body string) (written, unclassified []string) {
 	t.Helper()
 	add := func(b string) {
@@ -208,18 +202,75 @@ func triggerWrites(ctx context.Context, t *testing.T, pool *pgxpool.Pool, body s
 		}
 	}
 	add(body)
-	for _, name := range schemaFunctionsCalled(ctx, t, pool, body) {
-		var def string
-		if err := pool.QueryRow(ctx, `SELECT pg_get_functiondef(p.oid) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-			WHERE n.nspname = 'public' AND p.proname = $1 AND p.prokind IN ('f', 'p') LIMIT 1`, name).Scan(&def); err != nil {
+	read := map[string]bool{}
+	next := schemaFunctionsCalled(ctx, t, pool, body)
+	for depth := 1; len(next) > 0; depth++ {
+		if depth > maxCallDepth {
+			return written, next
+		}
+		var found []string
+		for _, name := range next {
+			if read[name] {
+				continue
+			}
+			read[name] = true
+			var defs []string
+			if err := pool.QueryRow(ctx, `SELECT COALESCE(array_agg(pg_get_functiondef(p.oid)), '{}') FROM pg_proc p
+				JOIN pg_namespace n ON n.oid = p.pronamespace
+				WHERE n.nspname = 'public' AND p.proname = $1 AND p.prokind IN ('f', 'p')`, name).Scan(&defs); err != nil {
+				t.Fatal(err)
+			}
+			for _, def := range defs {
+				add(def)
+				for _, called := range schemaFunctionsCalled(ctx, t, pool, def) {
+					if !read[called] && !slices.Contains(found, called) {
+						found = append(found, called)
+					}
+				}
+			}
+		}
+		next = found
+	}
+	return written, nil
+}
+
+// checkRules reads every rule in the schema: one on a guarded table, or one
+// anywhere whose action writes a guarded table, directly or through the
+// functions it reaches.
+func checkRules(t *testing.T, pool *pgxpool.Pool, tables []string, check func(name, what string)) {
+	t.Helper()
+	ctx := t.Context()
+	rows, err := pool.Query(ctx, `SELECT rulename::text, tablename::text, definition FROM pg_rules WHERE schemaname = 'public'`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	type rule struct{ name, table, definition string }
+	var rules []rule
+	for rows.Next() {
+		var r rule
+		if err := rows.Scan(&r.name, &r.table, &r.definition); err != nil {
 			t.Fatal(err)
 		}
-		add(def)
-		if len(schemaFunctionsCalled(ctx, t, pool, def)) > 0 {
-			unclassified = append(unclassified, name)
+		rules = append(rules, r)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range rules {
+		if slices.Contains(tables, r.table) {
+			check(r.name, "is a rule on the guarded table "+r.table)
+			continue
+		}
+		written, unclassified := triggerWrites(ctx, t, pool, r.definition)
+		for _, w := range written {
+			if slices.Contains(tables, w) {
+				check(r.name, "is a rule on "+r.table+" that writes the guarded table "+w)
+			}
+		}
+		for _, fn := range unclassified {
+			t.Errorf("rule %s on %s reaches %s through more than %d calls; this test cannot classify it", r.name, r.table, fn, maxCallDepth)
 		}
 	}
-	return written, unclassified
 }
 
 // schemaFunctionsCalled answers the functions of the public schema body

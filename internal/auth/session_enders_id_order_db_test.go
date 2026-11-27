@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -51,12 +52,14 @@ func (e *keyEnv) storeSessions(t *testing.T, n int, insert func(t *testing.T, id
 	return nil
 }
 
-// requireLocksInIDOrder holds the lowest of sessions from a helper
-// connection, starts end, waits until end is blocked by that helper, and
-// then takes each other session FOR UPDATE NOWAIT from a third connection:
-// all must be free, which they are only while end has locked nothing past
-// the lowest, that is, only if it locks in id order. Then it lets end finish.
-func (e *keyEnv) requireLocksInIDOrder(t *testing.T, sessions []string, end func(context.Context) error) {
+// requireLocksInIDOrder holds sessions[k] from a helper connection, starts
+// end, waits until end is blocked by that helper, and then takes each other
+// session FOR UPDATE NOWAIT from a third connection: every session below k
+// must be taken already (end locked it before waiting) and every one above k
+// free (end has not reached it). Run for each k, that is the whole order:
+// an ender that locked A, C, B is caught held at B, with C taken. Then it
+// lets end finish.
+func (e *keyEnv) requireLocksInIDOrder(t *testing.T, sessions []string, k int, end func(context.Context) error) {
 	t.Helper()
 	ctx := t.Context()
 	hold, err := e.pool.Begin(ctx)
@@ -64,7 +67,7 @@ func (e *keyEnv) requireLocksInIDOrder(t *testing.T, sessions []string, end func
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = hold.Rollback(context.Background()) })
-	if _, err := hold.Exec(ctx, `SELECT 1 FROM auth_sessions WHERE id = $1 FOR UPDATE`, sessions[0]); err != nil {
+	if _, err := hold.Exec(ctx, `SELECT 1 FROM auth_sessions WHERE id = $1 FOR UPDATE`, sessions[k]); err != nil {
 		t.Fatal(err)
 	}
 	var holder int
@@ -86,9 +89,9 @@ func (e *keyEnv) requireLocksInIDOrder(t *testing.T, sessions []string, end func
 		}
 		select {
 		case err := <-done:
-			t.Fatalf("the ender finished without waiting on the lowest session: %v", err)
+			t.Fatalf("the ender finished without waiting on session %d of %d: %v", k, len(sessions), err)
 		case <-deadline.Done():
-			t.Fatal("the ender never waited on the lowest session")
+			t.Fatalf("the ender never waited on session %d of %d", k, len(sessions))
 		case <-time.After(10 * time.Millisecond):
 		}
 	}
@@ -96,14 +99,27 @@ func (e *keyEnv) requireLocksInIDOrder(t *testing.T, sessions []string, end func
 	if err != nil {
 		t.Fatal(err)
 	}
-	var taken []string
-	for _, id := range sessions[1:] {
-		_, err := probe.Exec(ctx, `SELECT 1 FROM auth_sessions WHERE id = $1 FOR UPDATE NOWAIT`, id)
-		if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && pgErr.Code == "55P03" {
-			taken = append(taken, id)
-			break
-		} else if err != nil {
+	t.Cleanup(func() { _ = probe.Rollback(context.Background()) })
+	var wrong []string
+	for i, id := range sessions {
+		if i == k {
+			continue
+		}
+		// A savepoint per probe, so a refused NOWAIT leaves the probe usable.
+		if _, err := probe.Exec(ctx, `SAVEPOINT p`); err != nil {
 			t.Fatal(err)
+		}
+		_, err := probe.Exec(ctx, `SELECT 1 FROM auth_sessions WHERE id = $1 FOR UPDATE NOWAIT`, id)
+		pgErr, isErr := errors.AsType[*pgconn.PgError](err)
+		taken := isErr && pgErr.Code == "55P03"
+		if err != nil && !taken {
+			t.Fatal(err)
+		}
+		if _, err := probe.Exec(ctx, `ROLLBACK TO SAVEPOINT p`); err != nil {
+			t.Fatal(err)
+		}
+		if taken != (i < k) {
+			wrong = append(wrong, fmt.Sprintf("session %d taken=%v", i, taken))
 		}
 	}
 	_ = probe.Rollback(ctx)
@@ -113,13 +129,14 @@ func (e *keyEnv) requireLocksInIDOrder(t *testing.T, sessions []string, end func
 	if err := <-done; err != nil {
 		t.Fatalf("the ender failed: %v", err)
 	}
-	if len(taken) > 0 {
-		t.Fatalf("the ender locked a higher session (%s) before the lowest: it does not lock in id order", taken[0])
+	if len(wrong) > 0 {
+		t.Fatalf("held at session %d, the ender does not lock in id order: %s", k, strings.Join(wrong, ", "))
 	}
 }
 
 // Every path that ends or deletes several sessions locks them in id order:
-// held at its lowest session, it holds none of the others. Each case gives
+// held at any one of its sessions, it holds every lower one and no higher
+// one. Each case gives
 // the account eight sessions of the kinds that path takes.
 func TestSessionEndersLockInIDOrderDB(t *testing.T) {
 	env := newKeyEnv(t, "idorder")
@@ -127,8 +144,12 @@ func TestSessionEndersLockInIDOrderDB(t *testing.T) {
 	cases := env.idOrderCases()
 	for i, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			env.setSetting(t, config.AuthAppKeySignInSettingKey, "true")
-			c.run(t, fmt.Sprintf("idorder-%d", i))
+			for k := range 8 {
+				t.Run(fmt.Sprintf("held at %d", k), func(t *testing.T) {
+					env.setSetting(t, config.AuthAppKeySignInSettingKey, "true")
+					c.run(t, fmt.Sprintf("idorder-%d-%d", i, k), k)
+				})
+			}
 		})
 	}
 }
@@ -136,7 +157,7 @@ func TestSessionEndersLockInIDOrderDB(t *testing.T) {
 // idOrderCase is one session ender of TestSessionEndersLockInIDOrderDB.
 type idOrderCase struct {
 	name string
-	run  func(t *testing.T, label string)
+	run  func(t *testing.T, label string, k int)
 }
 
 // idOrderCases gives each ender eight sessions of the kinds it takes.
@@ -147,49 +168,49 @@ func (e *keyEnv) idOrderCases() []idOrderCase {
 		return user, enrolled.DeviceID
 	}
 	return []idOrderCase{
-		{"the switch-off sweep", func(t *testing.T, label string) {
+		{"the switch-off sweep", func(t *testing.T, label string, k int) {
 			user, key := keyed(t, label)
 			ids := e.storeSessions(t, 8, e.sessionOf(user.ID, models.SessionOpenedAppKey, &key, nil))
-			e.requireLocksInIDOrder(t, ids, func(ctx context.Context) error { return switchOff(ctx, e.pool) })
+			e.requireLocksInIDOrder(t, ids, k, func(ctx context.Context) error { return switchOff(ctx, e.pool) })
 		}},
-		{"ending all of an account's sessions", func(t *testing.T, label string) {
+		{"ending all of an account's sessions", func(t *testing.T, label string, k int) {
 			user := e.localAccount(t, label, models.RoleUser)
 			ids := e.storeSessions(t, 8, e.sessionOf(user.ID, models.SessionOpenedPassword, nil, nil))
-			e.requireLocksInIDOrder(t, ids, e.inAccountTx(user.ID, func(ctx context.Context, tx pgx.Tx) error {
+			e.requireLocksInIDOrder(t, ids, k, e.inAccountTx(user.ID, func(ctx context.Context, tx pgx.Tx) error {
 				return revokeSignInsInTransaction(ctx, tx, user.ID, nil)
 			}))
 		}},
-		{"the administrator ending all of an account's sessions", func(t *testing.T, label string) {
+		{"the administrator ending all of an account's sessions", func(t *testing.T, label string, k int) {
 			user := e.localAccount(t, label, models.RoleUser)
 			admin := e.localAccount(t, label+"-admin", models.RoleAdmin)
 			ids := e.storeSessions(t, 8, e.sessionOf(user.ID, models.SessionOpenedPassword, nil, nil))
-			e.requireLocksInIDOrder(t, ids, func(ctx context.Context) error {
+			e.requireLocksInIDOrder(t, ids, k, func(ctx context.Context) error {
 				_, err := e.svc.sessions.RevokeAsAdmin(ctx, admin.ID, user.ID, nil)
 				return err
 			})
 		}},
-		{"revoking one device key", func(t *testing.T, label string) {
+		{"revoking one device key", func(t *testing.T, label string, k int) {
 			user, key := keyed(t, label)
 			ids := e.storeSessions(t, 8, e.sessionOf(user.ID, models.SessionOpenedAppKey, &key, nil))
-			e.requireLocksInIDOrder(t, ids, func(ctx context.Context) error {
+			e.requireLocksInIDOrder(t, ids, k, func(ctx context.Context) error {
 				return NewAppKeyRepository(e.pool).RevokeDeviceKey(ctx, user.ID, key)
 			})
 		}},
-		{"revoking an account's keys", func(t *testing.T, label string) {
+		{"revoking an account's keys", func(t *testing.T, label string, k int) {
 			user, key := keyed(t, label)
 			ids := e.storeSessions(t, 8, e.sessionOf(user.ID, models.SessionOpenedAppKey, &key, nil))
-			e.requireLocksInIDOrder(t, ids, e.inAccountTx(user.ID, func(ctx context.Context, tx pgx.Tx) error {
+			e.requireLocksInIDOrder(t, ids, k, e.inAccountTx(user.ID, func(ctx context.Context, tx pgx.Tx) error {
 				return revokeAccountKeysTx(ctx, tx, user.ID)
 			}))
 		}},
-		{"unlinking an identity", func(t *testing.T, _ string) {
+		{"unlinking an identity", func(t *testing.T, _ string, k int) {
 			_, enrolled := e.enrollFromProvider(t)
 			ids := e.storeSessions(t, 8, e.sessionOf(e.user.ID, models.SessionOpenedAppKey, &enrolled.DeviceID, nil))
-			e.requireLocksInIDOrder(t, ids, e.inAccountTx(e.user.ID, func(ctx context.Context, tx pgx.Tx) error {
+			e.requireLocksInIDOrder(t, ids, k, e.inAccountTx(e.user.ID, func(ctx context.Context, tx pgx.Tx) error {
 				return revokeIdentityKeysTx(ctx, tx, e.user.ID, e.identityID)
 			}))
 		}},
-		{"deleting an account", func(t *testing.T, label string) {
+		{"deleting an account", func(t *testing.T, label string, k int) {
 			// Password sessions as well as key sessions, the lowest a
 			// password one: deleting the keys locks only theirs.
 			user, key := keyed(t, label)
@@ -202,13 +223,13 @@ func (e *keyEnv) idOrderCases() []idOrderCase {
 					e.sessionOf(user.ID, models.SessionOpenedAppKey, &key, nil)(t, id)
 				}
 			})
-			e.requireLocksInIDOrder(t, ids, func(ctx context.Context) error {
+			e.requireLocksInIDOrder(t, ids, k, func(ctx context.Context) error {
 				_, err := NewUserRepository(e.pool).MutateAdminAccount(ctx, user.ID, -1, nil,
 					func(*models.User, pgx.Tx) (bool, error) { return true, nil })
 				return err
 			})
 		}},
-		{"replacing a temporary password", func(t *testing.T, label string) {
+		{"replacing a temporary password", func(t *testing.T, label string, k int) {
 			user := e.localAccount(t, label, models.RoleUser)
 			keep := uuid.NewString()
 			e.sessionOf(user.ID, models.SessionOpenedPassword, nil, nil)(t, keep)
@@ -217,15 +238,15 @@ func (e *keyEnv) idOrderCases() []idOrderCase {
 			if err := e.pool.QueryRow(t.Context(), `SELECT password_hash FROM users WHERE id = $1`, user.ID).Scan(&hash); err != nil {
 				t.Fatal(err)
 			}
-			e.requireLocksInIDOrder(t, ids, func(ctx context.Context) error {
+			e.requireLocksInIDOrder(t, ids, k, func(ctx context.Context) error {
 				return NewUserRepository(e.pool).ReplaceTemporaryPassword(ctx, user.ID, hash, "a new long password 9", keep)
 			})
 		}},
-		{"ending sessions viewing as an account after a role change", func(t *testing.T, label string) {
+		{"ending sessions viewing as an account after a role change", func(t *testing.T, label string, k int) {
 			user := e.localAccount(t, label, models.RoleUser)
 			admin := e.localAccount(t, label+"-admin", models.RoleAdmin)
 			ids := e.storeSessions(t, 8, e.sessionOf(user.ID, models.SessionOpenedImpersonation, nil, &admin.ID))
-			e.requireLocksInIDOrder(t, ids, e.inAccountTx(user.ID, func(ctx context.Context, tx pgx.Tx) error {
+			e.requireLocksInIDOrder(t, ids, k, e.inAccountTx(user.ID, func(ctx context.Context, tx pgx.Tx) error {
 				return endImpersonationsInvolving(ctx, tx, user.ID)
 			}))
 		}},
