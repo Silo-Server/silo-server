@@ -1633,3 +1633,4 @@
 ./internal/apiv2 TestLimitedSessionDeleteDB
 ./internal/apiv2 TestDemoVisitorOnALimitedSessionDB
 ./internal/apiv2 TestLimitedSessionPagesByIDDB
+./internal/apiv2 TestDemoVisitorSessionListDB

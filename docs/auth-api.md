@@ -27,7 +27,7 @@ devices and playback sessions. All paths below use `/api/v2`.
 | Operation | Authorization and behavior |
 | --- | --- |
 | `GET /auth/sessions/capabilities` (`getLoginSessionCapabilities`) | Authenticated account. Reports `available`, `last_seen`, `admin_management` and `revoke_other_sessions`, with the standard capability state, permission answer and revision. `revoke_other_sessions` is false in [demo mode](#demo-mode) for a caller that is not an administrator, and for a session opened by device sign-in, which may end only itself. |
-| `GET /auth/sessions` (`listSessions`) | Lists the caller's live, unrevoked login sessions, newest first, with cursor pagination. Account-level access does not require profile selection. |
+| `GET /auth/sessions` (`listSessions`) | Lists the caller's live, unrevoked login sessions, newest first, with cursor pagination. A caller that gets the reduced page, a session limited to itself or a [demo](#demo-mode) visitor, is listed by id instead (see [sessions opened by device sign-in](#sessions-opened-by-device-sign-in)). Account-level access does not require profile selection. |
 | `DELETE /auth/sessions/{id}` (`deleteSession`) | Revokes a session owned by the caller. Unknown or another account's session returns 404. Ending another session of the same account is 403 `permission_denied` for a session opened by device sign-in, which may end only itself, and in [demo mode](#demo-mode) for a caller that is not an administrator. |
 | `GET /admin/users/{user_id}/login-sessions` (`listAdminUserLoginSessions`) | Acting admin. Lists a selected account's live login sessions. The cursor is bound to the operation, administrator and target account. |
 | `DELETE /admin/users/{user_id}/login-sessions/{session_id}` (`deleteAdminUserLoginSession`) | Acting admin. Revokes one session of the selected account; 204 on success, 404 for an unknown or mismatched session. |
@@ -248,6 +248,7 @@ The change revokes every other session of the account, since each was opened wit
 the temporary password.
 In [demo mode](#demo-mode) an account that is not an administrator cannot change its
 password, a temporary one included, so such an account can only read `GET /account/me` and
+`GET /account/password/capability` (which answers `allowed: false`), refresh its tokens, and
 sign out until an administrator sets it a regular password or turns demo mode off. Don't give
 a demo's shared account a temporary password.
 An administrator impersonating the account is not restricted. Jellyfin and
@@ -406,6 +407,8 @@ the caller's own values, since they have no null form. The page is ordered by `i
 cursor holds only the last id, so neither tells which sessions are newer. A cursor minted for
 one kind of caller is `400 invalid_cursor` for the other. `limit` and `page.has_more` behave as
 for any caller.
+In [demo mode](#demo-mode) a caller that is not an administrator gets this same page, since
+the account's other sessions are other visitors'.
 
 `deleteSession` from a limited caller ends its own session as for any caller. Another session
 of the account is `403 permission_denied`, with a detail saying a device signed in with a code
@@ -1068,8 +1071,8 @@ is not an administrator. Demo mode refuses that account any change one visitor c
 lock out, sign out or take over the others. An operation marked demo-restricted
 (`DemoRestricted` in `internal/apiv2`, `x-silo-demo-restricted` in the OpenAPI document)
 answers a caller that is not an administrator `403 permission_denied` with the detail "This
-action is not available in demo mode." Reads are never restricted, and administrators are
-never restricted.
+action is not available in demo mode." Reads are not restricted, except that `listSessions`
+shows a visitor less (see below), and administrators are never restricted.
 
 Every request reads `demo.enabled` (one setting read, no time-based cache), through one
 `demomode.Setting` per process shared by every surface that enforces demo mode. Only the
@@ -1094,6 +1097,15 @@ A visitor cannot:
 
 - change the account password (`changePassword`), and so cannot sign the account out
   everywhere either;
+- see another session of the account in `listSessions` beyond its `id` and `current`: the
+  page is the reduced one a session limited to itself gets (see
+  [sessions opened by device sign-in](#sessions-opened-by-device-sign-in)), ordered by id. A
+  session that already gets that page is unaffected by demo mode: the setting is not read for
+  it, and its cursor stays valid when demo mode is switched on or off. For any other visitor,
+  a cursor from before the switch is `400 invalid_cursor`, and when the process has never read
+  the setting, `listSessions` is `500 internal_error` rather than the full page. A personal
+  API key of the account, which has no session of its own, gets that `500` too, and
+  `403 permission_denied` once the setting has been read and demo mode is on;
 - link or unlink an external sign-in (`createAccountIdentityLinkTicket`,
   `startAccountIdentityLink`, `completeAccountIdentityLink`,
   `linkAccountIdentityWithCredentials`, `linkAccountIdentityWithNetwork`,
@@ -1106,8 +1118,11 @@ account resolution: a linking flow that ends on an account that is not an admini
 demo mode is on, including one started before demo mode was turned on, is refused with
 `not_permitted` and attaches nothing. Email auto-match (`auth.email_auto_match`) does not apply
 in demo mode, as when it is off, so a provider sign-in whose verified email equals the demo
-account's goes on as an unmatched one: account creation refuses the taken email
-(`409 email_in_use`) where the binding's `auto_provision` is on, and the sign-in is
+account's goes on as an unmatched one: account creation refuses the taken email where the
+binding's `auto_provision` is on (`409 email_in_use` on the JSON sign-ins, `login` through a
+directory provider and `signInWithNetworkIdentity`; the browser redirect flow carries no status
+and reports `reason=email_in_use` on `/login?error=oauth_failed`, or `error=email_in_use` on a
+native app's redirect), and the sign-in is
 `account_required` where it is off. Matching applies to no account in demo mode, not only the
 shared demo account. Demo mode is read before resolution's transaction; a process that has
 never read it fails the link and matches nothing.
