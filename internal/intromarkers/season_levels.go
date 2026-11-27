@@ -33,8 +33,13 @@ const (
 	// edges had to be intersected.
 	levelIntersectionPenalty = 0.10
 	// levelSupportCorrelation is the least mean correlation a supporting
-	// stretch needs.
-	levelSupportCorrelation = 0.80
+	// stretch needs. A level trace of the same recording in two lossy
+	// encodes agrees to about 0.7 in the quiet parts of an opening and to
+	// 0.95 in the loud ones, and a season's episodes are not encoded alike:
+	// on the Pioneer One episodes one episode's theme scores 0.74 to 0.78
+	// against three partners whose own pairs score 0.82 to 0.86, so a gate
+	// of 0.8 lost that episode's opening while the theme was plainly shared.
+	levelSupportCorrelation = 0.72
 	// levelPairCorrelation is the least mean correlation a season of two
 	// episodes accepts, where no third episode can confirm.
 	levelPairCorrelation = 0.85
@@ -46,6 +51,10 @@ const (
 	// may end before its end counts as cut off, which says nothing about
 	// where the intro ends.
 	levelEdgeMarginSeconds = 0.3
+	// introPositionBandSeconds is how much later than the season's own intros
+	// an opening may start. Beyond it the shared audio is a reprise or a
+	// trailer. It is generous: a cold open runs to a couple of minutes.
+	introPositionBandSeconds = 110.0
 	// levelHeadStartFraction is the share of the episode before which an
 	// intro must start. A shared theme later than this is a reprise or a
 	// preview montage, not the opening.
@@ -68,7 +77,10 @@ type levelPair struct {
 // levelStretch is a pair result as one file sees it.
 type levelStretch struct {
 	Start, End float64
-	Partner    string
+	// PartnerStart is where the partner's own span starts, which is where the
+	// season places this opening; it is what the position band reads.
+	PartnerStart float64
+	Partner      string
 	// Supporters is how many partner episodes agreed on the span.
 	Supporters int
 	// Intersected reports that the edges are the supporters' intersection
@@ -165,6 +177,61 @@ func sortLevelInputs(ordered []levelsInput) {
 
 // collectLevelStretches compares the season's envelopes and returns, per file,
 // the stretches its partners share with it.
+// levelAdjacentMergeSeconds is the gap within which two shared runs of one pair
+// are one recording. A pair's runs break where a few windows dip under the
+// correlation gate — one encode's quiet passage against another's — and those
+// pieces carry the same music either side of them.
+const levelAdjacentMergeSeconds = 2.5
+
+// levelAdjacentDropDB is how far the level of the gap between two runs has to
+// fall below the runs themselves before the gap is silence rather than a dip.
+const levelAdjacentDropDB = 12.0
+
+// mergeAdjacentPairs joins the runs of one pair that a dip in correlation split
+// in two, keeping the length-weighted mean of their correlations. The test is
+// the sound in the gap, not its length alone: two runs of one recording are
+// separated by a passage that is still sounding, only less similar, while a
+// studio logo and the theme after it are separated by silence — so a logo stays
+// its own recording however short the gap. Runs further apart than
+// levelAdjacentMergeSeconds stay apart too.
+func mergeAdjacentPairs(env envelope, pairs []levelPair) []levelPair {
+	if len(pairs) < 2 {
+		return pairs
+	}
+	merged := make([]levelPair, 0, len(pairs))
+	current := pairs[0]
+	weight := current.End - current.Start
+	for _, pair := range pairs[1:] {
+		if pair.Start-current.End > levelAdjacentMergeSeconds || silenceBetween(env, current, pair) {
+			merged = append(merged, current)
+			current, weight = pair, pair.End-pair.Start
+			continue
+		}
+		length := pair.End - pair.Start
+		if total := weight + length; total > 0 {
+			current.Correlation = (current.Correlation*weight + pair.Correlation*length) / total
+		}
+		current.End = math.Max(current.End, pair.End)
+		weight += length
+	}
+	return append(merged, current)
+}
+
+// silenceBetween reports that the gap between two runs is quiet enough to be
+// silence rather than a passage the correlation mis-scored.
+func silenceBetween(env envelope, left, right levelPair) bool {
+	if right.Start <= left.End {
+		return false
+	}
+	before, okBefore := env.medianBetween(left.Start, left.End)
+	after, okAfter := env.medianBetween(right.Start, right.End)
+	gap, okGap := env.medianBetween(left.End, right.Start)
+	if !okBefore || !okAfter || !okGap {
+		return false
+	}
+	return gap < math.Min(before, after)-levelAdjacentDropDB
+}
+
 func collectLevelStretches(ordered []levelsInput, envelopes []envelope, cfg Config) map[int]map[string][]levelStretch {
 	stretches := map[int]map[string][]levelStretch{}
 	record := func(i, j int, pair levelPair) {
@@ -172,17 +239,19 @@ func collectLevelStretches(ordered []levelsInput, envelopes []envelope, cfg Conf
 		leftWindow := levelsWindow(left.Candidate, cfg)
 		rightWindow := levelsWindow(right.Candidate, cfg)
 		addLevelStretch(stretches, left.Candidate.FileID, right.Candidate.EpisodeID, levelStretch{
-			Start:       pair.Start,
-			End:         pair.End,
-			Correlation: pair.Correlation,
-			ClippedEnd:  pair.End >= leftWindow.End-levelEdgeMarginSeconds,
+			Start:        pair.Start,
+			End:          pair.End,
+			PartnerStart: pair.PartnerStart,
+			Correlation:  pair.Correlation,
+			ClippedEnd:   pair.End >= leftWindow.End-levelEdgeMarginSeconds,
 		})
 		partnerEnd := pair.PartnerStart + (pair.End - pair.Start)
 		addLevelStretch(stretches, right.Candidate.FileID, left.Candidate.EpisodeID, levelStretch{
-			Start:       pair.PartnerStart,
-			End:         partnerEnd,
-			Correlation: pair.Correlation,
-			ClippedEnd:  partnerEnd >= rightWindow.End-levelEdgeMarginSeconds,
+			Start:        pair.PartnerStart,
+			End:          partnerEnd,
+			PartnerStart: pair.Start,
+			Correlation:  pair.Correlation,
+			ClippedEnd:   partnerEnd >= rightWindow.End-levelEdgeMarginSeconds,
 		})
 	}
 	episodesDiffer := func(i, j int) bool {
@@ -199,7 +268,7 @@ func collectLevelStretches(ordered []levelsInput, envelopes []envelope, cfg Conf
 			return
 		}
 		compared[key] = struct{}{}
-		for _, pair := range sharedRuns(envelopes[i], envelopes[j], defaultLevelMatchConfig()) {
+		for _, pair := range mergeAdjacentPairs(envelopes[i], sharedRuns(envelopes[i], envelopes[j], defaultLevelMatchConfig())) {
 			record(i, j, pair)
 		}
 	}
@@ -414,6 +483,21 @@ func consensusLevelStretch(cluster []levelStretch, minimumCorrelation, minimumSe
 			intersected = true
 		}
 	}
+	// An opening starts at the same point of a season's episodes, give or take
+	// a cold open. Shared audio that starts well after the point the other
+	// episodes start theirs is a reprise, or a theme reused as a trailer, not
+	// the opening: the Pioneer One episodes carry their theme 33 seconds into
+	// episode two, where the season's intros are 90 seconds earlier, and both
+	// the Chromaprint path and this one placed it as an intro until the band
+	// was read.
+	partnerStarts := make([]float64, 0, len(cluster))
+	for _, stretch := range cluster {
+		partnerStarts = append(partnerStarts, stretch.PartnerStart)
+	}
+	if later := start - medianSeconds(partnerStarts); later > introPositionBandSeconds {
+		return levelStretch{}, false
+	}
+
 	duration := end - start
 	maximum := math.Min(levelMaximumSeconds, float64(cfg.MaximumIntroDurationSeconds))
 	if duration < minimumSeconds || duration > maximum {

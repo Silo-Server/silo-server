@@ -360,7 +360,34 @@ every start would otherwise repeat the comparison. Admin refresh compares both
 kinds again, and admin re-detection compares again the kinds it asks for:
 the intro, the credits, or both.
 
-### Where credits start
+#### What the comparison places on real media
+
+The six Pioneer One episodes Blender released are the reference engine's worked
+example, and `pioneer_comparison_test.go` measures against the times its demo
+data records (`PIONEER_DIR=... go test ./internal/intromarkers/ -run Pioneer -v`).
+Both paths find all four openings; the Chromaprint path also places two intros
+that are not there, and its starts are 2.3 s earlier on average:
+
+| episode | reference | Chromaprint path | envelope path |
+|---|---|---|---|
+| 1 | none | 5.16–27.06 (invented) | none |
+| 2 | none | 366.54–405.66 (the theme, reused) | none |
+| 3 | 270.02–299.17 | 264.82–305.54 | 266.80–306.20 |
+| 4 | 280.41–299.98 | 275.64–315.75 | 280.16–308.12 |
+| 5 | 187.56–220.89 | 184.37–223.56 | 186.80–214.75 |
+| 6 | 232.98–266.60 | 228.90–269.62 | 229.70–269.28 |
+
+Three rules came from those numbers: supporting runs merge across a passage
+that is still sounding (one episode's theme scores 0.74 against three partners
+whose own pairs score 0.82, and unmerged it was lost), the supporting
+correlation gate is 0.72 rather than 0.80 for the same reason, and an opening
+may not start more than 110 seconds after the point the season's other episodes
+start theirs — episode two's reused theme sits 121 seconds later than the
+season's intros. The envelope costs about 2.5 times the decode time of the
+fingerprint (levels 2–8 s per episode against 1–2 s here), which is the price of
+an edge that lands within a frame.
+
+## Where credits start
 
 End credits usually cut from the last shot to black, and the first name appears
 some seconds later. The audio match cannot see any of that: the credits' music

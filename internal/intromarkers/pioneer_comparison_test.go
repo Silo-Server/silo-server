@@ -12,9 +12,17 @@ import (
 	"time"
 )
 
-// Measures both intro paths on the Pioneer One episodes Blender released
-// (archive.org), against the reference times in the reference engine's demo
-// data. Not part of the suite: it needs media that is not in the repository.
+// TestPioneerComparison measures the intro comparison on the six Pioneer One
+// episodes Blender released, against the reference times the reference engine's
+// demo data records for them. It runs only when PIONEER_DIR points at the
+// episodes, because the media is a 3 GB download from archive.org and does not
+// belong in the repository:
+//
+//	PIONEER_DIR=/media/pioneer go test ./internal/intromarkers/ -run Pioneer -v
+//
+// The reference engine (tikkamasalla/introkiller-engine) documents the same
+// episodes as its worked example, so these are the numbers to compare an old
+// path against a new one on real, lossy, broadcast encodes.
 func TestPioneerComparison(t *testing.T) {
 	dir := os.Getenv("PIONEER_DIR")
 	if dir == "" {
@@ -22,7 +30,11 @@ func TestPioneerComparison(t *testing.T) {
 	}
 	reference := map[int][2]float64{3: {270.02, 299.17}, 4: {280.41, 299.98}, 5: {187.56, 220.89}, 6: {232.98, 266.60}}
 	candidates := pioneerCandidates(t, dir)
-	cfg := DefaultConfig("/usr/bin/ffmpeg")
+	ffmpeg := os.Getenv("FFMPEG_PATH")
+	if ffmpeg == "" {
+		ffmpeg = "/usr/local/bin/ffmpeg"
+	}
+	cfg := DefaultConfig(ffmpeg)
 	ctx := context.Background()
 
 	t.Run("envelope", func(t *testing.T) {
@@ -50,6 +62,8 @@ func TestPioneerComparison(t *testing.T) {
 
 }
 
+// report prints each file's placed intro next to the reference, so a run reads
+// as a table of errors rather than a pass or a fail.
 func report(t *testing.T, candidates []Candidate, segments map[int]Segment, reference map[int][2]float64) {
 	t.Helper()
 	for _, candidate := range candidates {
