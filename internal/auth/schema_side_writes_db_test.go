@@ -2,7 +2,6 @@ package auth
 
 import (
 	"context"
-	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -25,47 +24,53 @@ var sideWriteTables = []string{"auth_sessions", "device_login_requests", "auth_d
 // allowedSideWrites names each trigger, rule and foreign-key action that writes one
 // of sideWriteTables, or writes another table on a write to one, with why it
 // is safe.
-var allowedSideWrites = map[string]string{
+// sideWrite names a trigger, rule or foreign-key action: its kind, the
+// relation it belongs to (a trigger's or rule's table, a foreign key's child
+// table) and its name, so one kind of object never inherits another's
+// exception by sharing its name.
+type sideWrite struct{ kind, relation, name string }
+
+var allowedSideWrites = map[sideWrite]string{
 	// Trigger on device_login_requests writing auth_sessions.
-	"device_login_requests_bind_remote_playback": "collecting a remote-playback request binds the session the same " +
+	{"trigger", "device_login_requests", "device_login_requests_bind_remote_playback"}: "collecting a remote-playback request binds the session the same " +
 		"transaction just created and named on the request: no other transaction can hold that session row",
 
 	// Actions when a session is deleted.
-	"device_login_requests_auth_session_id_fkey": "deleting a session nulls the request that produced it: session row, " +
+	{"foreign key", "device_login_requests", "device_login_requests_auth_session_id_fkey"}: "deleting a session nulls the request that produced it: session row, " +
 		"then request row, the order every path takes",
-	"device_login_requests_preapproved_session_id_fkey": "deleting a session nulls the requests it approved in advance: " +
+	{"foreign key", "device_login_requests", "device_login_requests_preapproved_session_id_fkey"}: "deleting a session nulls the requests it approved in advance: " +
 		"session row, then request row, the order every path takes; the expired-session cleanup skips a session " +
 		"whose request row another transaction holds",
 	// Actions when a key is deleted.
-	"auth_device_keys_person_key_fkey": "only deleting an account deletes person keys, under the account lock and " +
+	{"foreign key", "auth_device_keys", "auth_device_keys_person_key_fkey"}: "only deleting an account deletes person keys, under the account lock and " +
 		"after its device keys",
-	"auth_sessions_device_key_fkey": "only deleting an account deletes device keys, under the account lock and after " +
+	{"foreign key", "auth_sessions", "auth_sessions_device_key_fkey"}: "only deleting an account deletes device keys, under the account lock and after " +
 		"locking the account's sessions in id order",
 	// Actions when an account is deleted.
-	"auth_sessions_user_id_fkey": "only deleting an account deletes it, under the account lock and after locking " +
+	{"foreign key", "auth_sessions", "auth_sessions_user_id_fkey"}: "only deleting an account deletes it, under the account lock and after locking " +
 		"every session of the account, and those viewing as it, in id order",
-	"auth_sessions_impersonator_user_id_fkey": "only deleting an account deletes it, after locking the sessions " +
+	{"foreign key", "auth_sessions", "auth_sessions_impersonator_user_id_fkey"}: "only deleting an account deletes it, after locking the sessions " +
 		"viewing as it in id order with the account's own",
-	"device_login_requests_approved_by_user_id_fkey": "only deleting an account deletes it, under the account lock, " +
+	{"foreign key", "device_login_requests", "device_login_requests_approved_by_user_id_fkey"}: "only deleting an account deletes it, under the account lock, " +
 		"which approving and collecting a device sign-in also take first, and after its sessions",
-	"auth_person_keys_user_id_fkey": "deleting an account deletes its keys itself, under the account lock, before " +
+	{"foreign key", "auth_person_keys", "auth_person_keys_user_id_fkey"}: "deleting an account deletes its keys itself, under the account lock, before " +
 		"the account row",
-	"auth_device_keys_user_id_fkey": "deleting an account deletes its keys itself, under the account lock, before " +
+	{"foreign key", "auth_device_keys", "auth_device_keys_user_id_fkey"}: "deleting an account deletes its keys itself, under the account lock, before " +
 		"the account row",
-	"auth_sign_in_links_user_id_fkey": "deleting an account ends its links itself (EndSignInLinksTx, after its sessions " +
+	{"foreign key", "auth_sign_in_links", "auth_sign_in_links_user_id_fkey"}: "deleting an account ends its links itself (EndSignInLinksTx, after its sessions " +
 		"and requests) before the account row; link rows reference no session or request, and every path takes them " +
 		"after the account's row",
-	"auth_sign_in_links_created_by_fkey": "deleting an account that made links for other accounts nulls only their " +
+	{"foreign key", "auth_sign_in_links", "auth_sign_in_links_created_by_fkey"}: "deleting an account that made links for other accounts nulls only their " +
 		"maker column, holding the deleted account's row; no path takes an account row after a link row, so nothing " +
 		"holding a link row waits on it",
 	// Actions when a provider identity is deleted.
-	"auth_sessions_identity_id_fkey": "an identity is deleted under its own lock (unlink) or its installation's " +
+	{"foreign key", "auth_sessions", "auth_sessions_identity_id_fkey"}: "an identity is deleted under its own lock (unlink) or its installation's " +
 		"(uninstall), and every path that writes several of an account's sessions takes the account's identities " +
 		"first (lockIdentitiesBeforeSessions); the switch-off sweep takes every installation first",
-	"device_login_requests_approved_identity_id_fkey": "collecting a request approved through an identity locks the " +
+	{"foreign key", "device_login_requests", "device_login_requests_approved_identity_id_fkey"}: "collecting a request approved through an identity locks the " +
 		"identity before the request row (lockPreapprovalIdentity), the order a deletion takes them",
 	// Action when a profile is deleted.
-	"device_login_requests_approved_profile_fkey": "deleting a profile takes the account and its identities before " +
+	{"foreign key", "device_login_requests", "device_login_requests_approved_profile_fkey"}: "deleting a profile takes the account and its identities before " +
 		"the profile row, whose deletion clears the requests approved for it",
 }
 
@@ -98,19 +103,19 @@ func TestNoUnlistedSideWritesDB(t *testing.T) {
 	}
 	t.Cleanup(pool.Close)
 	tables := presentGuardedTables(t, pool)
-	seen := map[string]bool{}
-	check := func(name, what string) {
-		seen[name] = true
-		if _, ok := allowedSideWrites[name]; !ok {
-			t.Errorf("%s %s; list it in allowedSideWrites with why it is safe, or remove it", name, what)
+	seen := map[sideWrite]bool{}
+	check := func(w sideWrite, what string) {
+		seen[w] = true
+		if _, ok := allowedSideWrites[w]; !ok {
+			t.Errorf("%s %s on %s %s; list it in allowedSideWrites with why it is safe, or remove it", w.kind, w.name, w.relation, what)
 		}
 	}
 	checkTriggers(t, pool, tables, check)
 	checkForeignKeyActions(t, pool, tables, check)
 	checkRules(t, pool, tables, check)
-	for _, name := range slices.Sorted(maps.Keys(allowedSideWrites)) {
-		if !seen[name] {
-			t.Errorf("allowedSideWrites lists %s, which no longer writes another table; remove it", name)
+	for w := range allowedSideWrites {
+		if !seen[w] {
+			t.Errorf("allowedSideWrites lists %s %s on %s, which no longer writes another table; remove it", w.kind, w.name, w.relation)
 		}
 	}
 }
@@ -147,7 +152,7 @@ func presentGuardedTables(t *testing.T, pool *pgxpool.Pool) []string {
 // checkTriggers reads every trigger in the schema: one on a guarded table
 // that writes another table, or one anywhere that writes a guarded table,
 // through its function or any function that reaches.
-func checkTriggers(t *testing.T, pool *pgxpool.Pool, tables []string, check func(name, what string)) {
+func checkTriggers(t *testing.T, pool *pgxpool.Pool, tables []string, check func(w sideWrite, what string)) {
 	t.Helper()
 	ctx := t.Context()
 	rows, err := pool.Query(ctx, `SELECT t.tgname, t.tgrelid::regclass::text, pg_get_functiondef(t.tgfoid)
@@ -175,9 +180,9 @@ func checkTriggers(t *testing.T, pool *pgxpool.Pool, tables []string, check func
 			switch {
 			case w == tr.table:
 			case guarded:
-				check(tr.name, "is a trigger on "+tr.table+" that writes "+w)
+				check(sideWrite{"trigger", tr.table, tr.name}, "writes "+w)
 			case slices.Contains(tables, w):
-				check(tr.name, "is a trigger on "+tr.table+" that writes the guarded table "+w)
+				check(sideWrite{"trigger", tr.table, tr.name}, "writes the guarded table "+w)
 			}
 		}
 		for _, fn := range unclassified {
@@ -237,7 +242,7 @@ func triggerWrites(ctx context.Context, t *testing.T, pool *pgxpool.Pool, body s
 // checkRules reads every rule in the schema: one on a guarded table, or one
 // anywhere whose action writes a guarded table, directly or through the
 // functions it reaches.
-func checkRules(t *testing.T, pool *pgxpool.Pool, tables []string, check func(name, what string)) {
+func checkRules(t *testing.T, pool *pgxpool.Pool, tables []string, check func(w sideWrite, what string)) {
 	t.Helper()
 	ctx := t.Context()
 	rows, err := pool.Query(ctx, `SELECT rulename::text, tablename::text, definition FROM pg_rules WHERE schemaname = 'public'`)
@@ -258,13 +263,13 @@ func checkRules(t *testing.T, pool *pgxpool.Pool, tables []string, check func(na
 	}
 	for _, r := range rules {
 		if slices.Contains(tables, r.table) {
-			check(r.name, "is a rule on the guarded table "+r.table)
+			check(sideWrite{"rule", r.table, r.name}, "rewrites writes to a guarded table")
 			continue
 		}
 		written, unclassified := triggerWrites(ctx, t, pool, r.definition)
 		for _, w := range written {
 			if slices.Contains(tables, w) {
-				check(r.name, "is a rule on "+r.table+" that writes the guarded table "+w)
+				check(sideWrite{"rule", r.table, r.name}, "writes the guarded table "+w)
 			}
 		}
 		for _, fn := range unclassified {
@@ -299,7 +304,7 @@ func schemaFunctionsCalled(ctx context.Context, t *testing.T, pool *pgxpool.Pool
 
 // checkForeignKeyActions reads every foreign key with an action other than
 // NO ACTION or RESTRICT whose child or parent is a guarded table.
-func checkForeignKeyActions(t *testing.T, pool *pgxpool.Pool, tables []string, check func(name, what string)) {
+func checkForeignKeyActions(t *testing.T, pool *pgxpool.Pool, tables []string, check func(w sideWrite, what string)) {
 	t.Helper()
 	rows, err := pool.Query(t.Context(), `SELECT conname, conrelid::regclass::text, confrelid::regclass::text, confdeltype::text, confupdtype::text
 		FROM pg_constraint WHERE contype = 'f'
@@ -313,7 +318,7 @@ func checkForeignKeyActions(t *testing.T, pool *pgxpool.Pool, tables []string, c
 		if err := rows.Scan(&name, &child, &parent, &del, &upd); err != nil {
 			t.Fatal(err)
 		}
-		check(name, "is a foreign key action on "+child+" when "+parent+" rows are deleted ("+del+") or updated ("+upd+")")
+		check(sideWrite{"foreign key", child, name}, "acts when "+parent+" rows are deleted ("+del+") or updated ("+upd+")")
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatal(err)
