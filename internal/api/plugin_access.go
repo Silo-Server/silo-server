@@ -119,7 +119,7 @@ func (p *pluginAccessResolver) resolve(r *http.Request) pluginAccess {
 		return pluginAccess{}
 	}
 	// Plugin launch tokens copy the role of the access token they were minted
-	// from, and a role change keeps the session, so admin access follows the
+	// from, and a demotion keeps the session, so admin access follows the
 	// account's current role rather than the token's.
 	// A remote-playback handoff only plays on its device; plugins are not
 	// part of that.

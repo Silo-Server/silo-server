@@ -8,16 +8,18 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-func TestUpdateAdminAccountSignsOutOnlyForCredentialAndEnabledChanges(t *testing.T) {
+func TestUpdateAdminAccountSignsOutOnlyForCredentialEnabledAndPromotionChanges(t *testing.T) {
 	permissions := []string{"marker_edit"}
 	quality := "720p"
 	password := "a-new-long-password"
 	disabled := false
 	admin := models.RoleAdmin
+	user := models.RoleUser
 	tests := []struct {
-		name       string
-		input      models.UpdateUserInput
-		wantRevoke bool
+		name        string
+		currentRole string
+		input       models.UpdateUserInput
+		wantRevoke  bool
 	}{
 		// The v2 group move reads the group inside the account transaction, so
 		// that case is covered by TestUpdateRequiresSessionRevocation.
@@ -26,11 +28,19 @@ func TestUpdateAdminAccountSignsOutOnlyForCredentialAndEnabledChanges(t *testing
 		{name: "playback quality cleared", input: models.UpdateUserInput{MaxPlaybackQuality: models.ClearValue[string]()}},
 		{name: "password", input: models.UpdateUserInput{Password: &password}, wantRevoke: true},
 		{name: "disable", input: models.UpdateUserInput{Enabled: &disabled}, wantRevoke: true},
-		{name: "role", input: models.UpdateUserInput{Role: &admin}},
+		// Sessions opened for an ordinary account, such as every visitor's on
+		// a public demo, must not become administrator sessions.
+		{name: "promotion", currentRole: models.RoleUser, input: models.UpdateUserInput{Role: &admin}, wantRevoke: true},
+		{name: "role unchanged", currentRole: models.RoleAdmin, input: models.UpdateUserInput{Role: &admin}},
+		{name: "demotion", currentRole: models.RoleAdmin, input: models.UpdateUserInput{Role: &user}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h, repo := newScopedKeyAdminHandler(models.RoleUser)
+			role := tt.currentRole
+			if role == "" {
+				role = models.RoleUser
+			}
+			h, repo := newScopedKeyAdminHandler(role)
 			current := "1080p"
 			repo.user.MaxPlaybackQuality = &current
 			var notified []int
