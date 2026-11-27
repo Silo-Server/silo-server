@@ -41,7 +41,7 @@ func TestNodeExtractorReleasesCapacityAfterFailure(t *testing.T) {
 			if _, err := extractor.Extract(t.Context(), nil, nodeRequest()); err == nil {
 				t.Fatal("failed request returned success")
 			}
-			reserved, release := planner.ReserveTranscodeWork("download-after-failure")
+			reserved, release := planner.ReserveTranscodeWork("download-after-failure", nodepool.JobKindVideoTranscode)
 			defer release()
 			if reserved == nil {
 				t.Fatal("failed request retained capacity")
@@ -86,7 +86,7 @@ func TestNodeExtractorReleasesCapacityOnCancellation(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("canceled request did not finish")
 	}
-	reserved, release := planner.ReserveTranscodeWork("download-after-cancellation")
+	reserved, release := planner.ReserveTranscodeWork("download-after-cancellation", nodepool.JobKindVideoTranscode)
 	defer release()
 	if reserved == nil {
 		t.Fatal("canceled request retained capacity")
@@ -123,7 +123,7 @@ func TestInFlightTrickplayReservesCapacityUntilRequestEnds(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("remote extraction did not start")
 	}
-	reserved, release := planner.ReserveTranscodeWork("download-while-extracting")
+	reserved, release := planner.ReserveTranscodeWork("download-while-extracting", nodepool.JobKindVideoTranscode)
 	release()
 	if reserved != nil {
 		t.Fatal("in-flight trickplay did not consume the node's capacity")
@@ -134,7 +134,7 @@ func TestInFlightTrickplayReservesCapacityUntilRequestEnds(t *testing.T) {
 	updated.MaxJobs = new(2)
 	planner.SetNodes([]*nodepool.Node{&updated})
 	planner.ApplyHealth(node.ID, node.URL, true, 1, 0, "", nil, nil, time.Now())
-	reserved, release = planner.ReserveTranscodeWork("download-after-health-update")
+	reserved, release = planner.ReserveTranscodeWork("download-after-health-update", nodepool.JobKindVideoTranscode)
 	release()
 	if reserved == nil {
 		t.Fatal("health-reported extraction and its reservation counted twice")
@@ -148,7 +148,7 @@ func TestInFlightTrickplayReservesCapacityUntilRequestEnds(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("remote extraction did not finish")
 	}
-	reserved, release = planner.ReserveTranscodeWork("download-after-extracting")
+	reserved, release = planner.ReserveTranscodeWork("download-after-extracting", nodepool.JobKindVideoTranscode)
 	defer release()
 	if reserved == nil {
 		t.Fatal("completed trickplay did not release capacity")

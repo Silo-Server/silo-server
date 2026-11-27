@@ -92,7 +92,7 @@ function hold(mock: Mock) {
 
 async function pasteCallback(url: string) {
   const user = userEvent.setup();
-  const input = screen.getByRole("textbox", { name: "Browser URL" }) as HTMLInputElement;
+  const input = screen.getByRole("textbox", { name: "Final browser URL" }) as HTMLInputElement;
   await user.click(input);
   input.select();
   await user.paste(url);
@@ -286,7 +286,7 @@ describe("ChatGPTConnection", () => {
     expect(
       screen.getByRole("heading", { name: "You’re using your ChatGPT plan" }),
     ).toBeInTheDocument();
-    expect(screen.queryByRole("textbox", { name: "Browser URL" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Final browser URL" })).not.toBeInTheDocument();
   });
 
   it.each(["status", "response"])(
@@ -484,7 +484,7 @@ describe("ChatGPTConnection", () => {
       statusVersion++;
       view.rerender(<ChatGPTConnection model="" onModelChange={vi.fn()} />);
     });
-    expect(screen.getByRole("textbox", { name: "Browser URL" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Final browser URL" })).toBeInTheDocument();
     expect(mocks.error).not.toHaveBeenCalled();
     expect(mocks.completeReset).not.toHaveBeenCalled();
     await submitCallback();
@@ -507,7 +507,7 @@ describe("ChatGPTConnection", () => {
       statusVersion++;
       view.rerender(<ChatGPTConnection model="" onModelChange={vi.fn()} />);
     });
-    expect(screen.queryByRole("textbox", { name: "Browser URL" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Final browser URL" })).not.toBeInTheDocument();
     expect(mocks.error).toHaveBeenCalledOnce();
     expect(mocks.complete).not.toHaveBeenCalled();
   });
@@ -540,7 +540,7 @@ describe("ChatGPTConnection", () => {
       statusFetching = true;
       view.rerender(<ChatGPTConnection model="" onModelChange={vi.fn()} />);
     });
-    expect(screen.queryByRole("textbox", { name: "Browser URL" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Final browser URL" })).not.toBeInTheDocument();
     expect(mocks.error).not.toHaveBeenCalled();
     act(() => {
       statusFetching = false;
@@ -578,7 +578,7 @@ describe("ChatGPTConnection", () => {
     await userEvent.click(screen.getByRole("button", { name: "Continue with ChatGPT" }));
     await submitCallback();
     expect(screen.getByRole("dialog")).toBeInTheDocument();
-    expect(screen.getByRole("alert")).toHaveTextContent("Could not complete sign-in");
+    expect(screen.getByRole("alert")).toHaveTextContent("Couldn’t complete sign-in");
     expect(mocks.refetch).toHaveBeenCalledOnce();
     expect(mocks.complete).toHaveBeenCalledOnce();
     expect(mocks.success).not.toHaveBeenCalled();
@@ -606,7 +606,7 @@ describe("ChatGPTConnection", () => {
     await pasteCallback("private-code");
     await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
     await userEvent.click(screen.getByRole("button", { name: "Continue with ChatGPT" }));
-    expect(screen.getByRole("textbox", { name: "Browser URL" })).toHaveValue("");
+    expect(screen.getByRole("textbox", { name: "Final browser URL" })).toHaveValue("");
     expect(mocks.completeReset).toHaveBeenCalled();
   });
 
@@ -624,7 +624,9 @@ describe("ChatGPTConnection", () => {
       statusVersion++;
       view.rerender(<ChatGPTConnection model="gpt-6.1-sol" onModelChange={vi.fn()} />);
     });
-    expect(mocks.error).toHaveBeenCalledWith(expect.stringContaining("Sign-in did not complete"));
+    expect(mocks.error).toHaveBeenCalledWith(
+      expect.stringContaining("ChatGPT sign-in didn’t finish"),
+    );
     expect(mocks.success).not.toHaveBeenCalled();
     expect(
       screen.queryByRole("heading", { name: "You’re using your ChatGPT plan" }),
@@ -641,7 +643,9 @@ describe("ChatGPTConnection", () => {
     render(<ChatGPTConnection model="gpt-6.1-sol" onModelChange={vi.fn()} />);
     await userEvent.click(screen.getByRole("button", { name: "Disconnect" }));
     expect(mocks.disconnect).toHaveBeenCalledWith("app");
-    expect(mocks.error).toHaveBeenCalledWith(expect.stringContaining("Disconnected locally"));
+    expect(mocks.error).toHaveBeenCalledWith(
+      expect.stringContaining("Removed from Silo, but ChatGPT couldn’t confirm disconnect"),
+    );
     expect(mocks.success).not.toHaveBeenCalled();
   });
 

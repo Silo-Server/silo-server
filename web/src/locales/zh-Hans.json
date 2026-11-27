@@ -641,6 +641,12 @@
       "value": "你的会话已过期。请重新登录。"
     }
   ],
+  "error.sign_in_provider_required": [
+    {
+      "type": 0,
+      "value": "密码登录关闭期间，必须保持至少一个可供用户使用的登录提供商处于开启状态。OpenID Connect还需要服务器的公共URL。"
+    }
+  ],
   "error.snapshot_request_conflict": [
     {
       "type": 0,
@@ -9571,7 +9577,7 @@
   "web.admin.autoscan.connections.delete.description": [
     {
       "type": 0,
-      "value": "“"
+      "value": "将删除“"
     },
     {
       "type": 1,
@@ -9579,7 +9585,7 @@
     },
     {
       "type": 0,
-      "value": "”将被移除。只要还有扫描来源引用此连接，就无法删除。请先重新配置这些来源。"
+      "value": "”。只要仍有扫描来源在使用此连接，就无法删除——请先更新这些来源。"
     }
   ],
   "web.admin.autoscan.connections.delete.title": [
@@ -9609,7 +9615,7 @@
   "web.admin.autoscan.connections.dialog.description": [
     {
       "type": 0,
-      "value": "复用你已在请求中配置的服务器（Sonarr/Radarr），或输入你自己的凭据。"
+      "value": "复用请求中的Sonarr或Radarr服务器，或手动输入凭据。"
     }
   ],
   "web.admin.autoscan.connections.dialog.editTitle": [
@@ -9621,7 +9627,7 @@
   "web.admin.autoscan.connections.dialog.kind": [
     {
       "type": 0,
-      "value": "类型"
+      "value": "服务"
     }
   ],
   "web.admin.autoscan.connections.dialog.loadingServers": [
@@ -9633,7 +9639,7 @@
   "web.admin.autoscan.connections.dialog.noRequestServers": [
     {
       "type": 0,
-      "value": "还没有Sonarr或Radarr服务器。请先在"
+      "value": "请求中还没有Sonarr或Radarr服务器。请在"
     },
     {
       "type": 8,
@@ -9641,7 +9647,7 @@
       "children": [
         {
           "type": 0,
-          "value": "设置 › 请求"
+          "value": "设置→请求"
         }
       ]
     },
@@ -9653,7 +9659,7 @@
   "web.admin.autoscan.connections.dialog.requestServer": [
     {
       "type": 0,
-      "value": "请求服务器"
+      "value": "请求中的服务器"
     }
   ],
   "web.admin.autoscan.connections.dialog.requestServerOption": [
@@ -9793,7 +9799,7 @@
   "web.admin.autoscan.connections.list.columnKind": [
     {
       "type": 0,
-      "value": "类型"
+      "value": "服务"
     }
   ],
   "web.admin.autoscan.connections.list.columnName": [
@@ -9805,7 +9811,7 @@
   "web.admin.autoscan.connections.list.columnSource": [
     {
       "type": 0,
-      "value": "来源"
+      "value": "凭据"
     }
   ],
   "web.admin.autoscan.connections.list.columnURL": [
@@ -9823,7 +9829,7 @@
   "web.admin.autoscan.connections.list.description": [
     {
       "type": 0,
-      "value": "用于需要访问服务器（如Sonarr或Radarr）的来源的凭据。Webhook来源无需凭据。"
+      "value": "已保存的凭据，供连接到Sonarr或Radarr等服务器的来源使用。Webhook来源无需凭据。"
     }
   ],
   "web.admin.autoscan.connections.list.editLabel": [
@@ -9847,13 +9853,13 @@
   "web.admin.autoscan.connections.list.own": [
     {
       "type": 0,
-      "value": "独立"
+      "value": "手动"
     }
   ],
   "web.admin.autoscan.connections.list.reused": [
     {
       "type": 0,
-      "value": "复用自请求"
+      "value": "来自请求"
     }
   ],
   "web.admin.autoscan.connections.list.title": [
@@ -11559,13 +11565,13 @@
   "web.admin.backups.backUpNow.keyNotConfirmed": [
     {
       "type": 0,
-      "value": "已暂停，需先确认密钥。"
+      "value": "已暂停，直到你确认此服务器的SECRET_KEY。"
     }
   ],
   "web.admin.backups.backUpNow.noStorage": [
     {
       "type": 0,
-      "value": "此服务器没有用于备份的存储。"
+      "value": "未配置备份存储。"
     }
   ],
   "web.admin.backups.backUpNow.unreachable": [
@@ -11595,25 +11601,25 @@
   "web.admin.backups.command.group": [
     {
       "type": 0,
-      "value": "替换整个服务器"
+      "value": "完整服务器恢复"
     }
   ],
   "web.admin.backups.command.groupDescription": [
     {
       "type": 0,
-      "value": "完整恢复会替换数据库，因此必须先停止服务器。"
+      "value": "此操作会替换整个数据库，因此在运行此命令前请先停止Silo。"
     }
   ],
   "web.admin.backups.command.hintBucket": [
     {
       "type": 0,
-      "value": "该命令使用上方选中的备份（未选中时使用最新的备份），并从存储桶读取。请在其环境中设置SILO_BACKUP_S3_ENDPOINT、SILO_BACKUP_S3_REGION、SILO_BACKUP_S3_ACCESS_KEY、SILO_BACKUP_S3_SECRET_KEY和SILO_BACKUP_S3_PATH_STYLE。"
+      "value": "此命令会从存储桶读取上方选中的备份（或最新的备份）。请在该命令的环境中设置SILO_BACKUP_S3_ENDPOINT、SILO_BACKUP_S3_REGION、SILO_BACKUP_S3_ACCESS_KEY、SILO_BACKUP_S3_SECRET_KEY和SILO_BACKUP_S3_PATH_STYLE。"
     }
   ],
   "web.admin.backups.command.hintBucketEncrypted": [
     {
       "type": 0,
-      "value": "该命令使用上方选中的备份（未选中时使用最新的备份），并从存储桶读取。请在其环境中设置此服务器的SECRET_KEY，以及SILO_BACKUP_S3_ENDPOINT、SILO_BACKUP_S3_REGION、SILO_BACKUP_S3_ACCESS_KEY、SILO_BACKUP_S3_SECRET_KEY和SILO_BACKUP_S3_PATH_STYLE。"
+      "value": "此命令会从存储桶读取上方选中的备份（或最新的备份）。请在该命令的环境中设置此服务器的SECRET_KEY，以及SILO_BACKUP_S3_ENDPOINT、SILO_BACKUP_S3_REGION、SILO_BACKUP_S3_ACCESS_KEY、SILO_BACKUP_S3_SECRET_KEY和SILO_BACKUP_S3_PATH_STYLE。"
     }
   ],
   "web.admin.backups.command.hintDownload": [
@@ -11655,7 +11661,7 @@
   "web.admin.backups.confirmKey.button": [
     {
       "type": 0,
-      "value": "确认密钥"
+      "value": "确认SECRET_KEY"
     }
   ],
   "web.admin.backups.content.group": [
@@ -12597,7 +12603,7 @@
   "web.admin.backups.location.bucketDescription": [
     {
       "type": 0,
-      "value": "保存在Silo也用于存放头像和诊断包的私有S3存储桶中，并使用你的SECRET_KEY加密。"
+      "value": "使用Silo的私有S3存储桶（与头像和诊断包共用），并使用你的SECRET_KEY加密。"
     }
   ],
   "web.admin.backups.location.change": [
@@ -12621,7 +12627,7 @@
   "web.admin.backups.location.noneDescription": [
     {
       "type": 0,
-      "value": "此服务器没有用于备份的私有存储：其封面图存放在S3中，且尚未设置私有存储桶。请在存储设置中添加私有存储桶以开启备份。"
+      "value": "此服务器将封面图存放在S3中，但未配置私有存储桶。请在存储设置中添加私有存储桶，以便将备份存放在其中。"
     }
   ],
   "web.admin.backups.location.nowhere": [
@@ -12645,13 +12651,13 @@
   "web.admin.backups.location.s3": [
     {
       "type": 0,
-      "value": "在S3存储桶中"
+      "value": "在单独的S3存储桶中"
     }
   ],
   "web.admin.backups.location.s3Description": [
     {
       "type": 0,
-      "value": "存放在此服务器之外，使用你的SECRET_KEY加密。"
+      "value": "存放在此服务器之外的专用S3存储桶中，并使用你的SECRET_KEY加密。"
     }
   ],
   "web.admin.backups.location.setUp": [
@@ -17795,7 +17801,7 @@
   "web.admin.backups.schedule.enabledDescription": [
     {
       "type": 0,
-      "value": "关闭后将不再创建新备份。已保存的副本会保留。"
+      "value": "关闭后将停止计划备份。现有副本会保留。"
     }
   ],
   "web.admin.backups.schedule.first": [
@@ -17859,7 +17865,7 @@
   "web.admin.backups.schedule.groupDescription": [
     {
       "type": 0,
-      "value": "由集群中的一台服务器执行备份。只有在新备份成功后才会删除最旧的副本。"
+      "value": "在集群中，每次备份仅由一台服务器执行。只有在新备份成功后，才会删除旧副本。"
     }
   ],
   "web.admin.backups.schedule.keep": [
@@ -18167,7 +18173,7 @@
   "web.admin.backups.table.otherKeyNoteWithCheck": [
     {
       "type": 0,
-      "value": "使用另一个SECRET_KEY加密（密钥校验码"
+      "value": "使用不同的SECRET_KEY加密（指纹"
     },
     {
       "type": 1,
@@ -18181,7 +18187,7 @@
   "web.admin.backups.table.otherKeyReason": [
     {
       "type": 0,
-      "value": "只有拥有创建该备份时所用SECRET_KEY的服务器才能恢复它或解密其文件。"
+      "value": "只有使用相同SECRET_KEY的服务器才能恢复或解密此备份。"
     }
   ],
   "web.admin.backups.table.restore": [
@@ -18847,7 +18853,7 @@
   "web.admin.backups.warning.keyNotConfirmed": [
     {
       "type": 0,
-      "value": "在你确认此服务器的SECRET_KEY之前，备份到此存储桶的操作会暂停。"
+      "value": "备份到此存储桶的操作已暂停，直到你确认已保存此服务器的SECRET_KEY副本。"
     }
   ],
   "web.admin.backups.warnings.copied": [
@@ -22837,7 +22843,7 @@
   "web.admin.common.downloadAccess.conversionOff": [
     {
       "type": 0,
-      "value": "服务器未准备适合设备的副本，因此所有下载都是原始文件。请在"
+      "value": "适合设备的副本已关闭，因此所有下载都使用原始文件。请在"
     },
     {
       "type": 8,
@@ -22877,7 +22883,7 @@
   "web.admin.common.editorConflict.message": [
     {
       "type": 0,
-      "value": "此内容已被另一位管理员更改。你的编辑已保留。请重新加载以查看最新版本，然后再保存。"
+      "value": "另一位管理员已更改此内容。你的编辑仍显示在屏幕上，但重新加载会将其替换为最新版本。"
     }
   ],
   "web.admin.common.editorConflict.reload": [
@@ -22927,7 +22933,7 @@
   "web.admin.common.emailTest.saveFirst": [
     {
       "type": 0,
-      "value": "请先保存更改；测试使用已保存的设置。"
+      "value": "测试使用你已保存的设置——如有更改，请先保存。"
     }
   ],
   "web.admin.common.emailTest.selectProfile": [
@@ -51973,7 +51979,7 @@
   "web.admin.recommendations.jobs.cacheRefreshed": [
     {
       "type": 0,
-      "value": "最新缓存行写入于"
+      "value": "上次刷新于"
     },
     {
       "type": 1,
@@ -51983,7 +51989,7 @@
   "web.admin.recommendations.jobs.cowatch": [
     {
       "type": 0,
-      "value": "共同观看矩阵"
+      "value": "共同观看数据"
     }
   ],
   "web.admin.recommendations.jobs.embeddings": [
@@ -52053,7 +52059,7 @@
   "web.admin.recommendations.jobs.noRun": [
     {
       "type": 0,
-      "value": "没有已完成的运行记录"
+      "value": "尚无已完成的运行记录"
     }
   ],
   "web.admin.recommendations.jobs.percent": [
@@ -52121,7 +52127,7 @@
           "value": [
             {
               "type": 0,
-              "value": "上次过期清理完成于"
+              "value": "上次口味画像刷新完成于"
             },
             {
               "type": 1,
@@ -52177,7 +52183,7 @@
           "value": [
             {
               "type": 0,
-              "value": "上次过期清理失败于"
+              "value": "上次口味画像刷新失败于"
             },
             {
               "type": 1,
@@ -52269,7 +52275,7 @@
   "web.admin.recommendations.lock.body": [
     {
       "type": 0,
-      "value": "此安装已锁定到其首个存储嵌入所在的嵌入空间。"
+      "value": "Silo会锁定到首次使用的嵌入模型，以确保所有已存储的嵌入保持兼容。"
     }
   ],
   "web.admin.recommendations.lock.model": [
@@ -52299,13 +52305,13 @@
   "web.admin.recommendations.page.restartRequired": [
     {
       "type": 0,
-      "value": "一项或多项设置已更改。需要重启服务器才能使更改生效。"
+      "value": "请重启服务器以应用你的更改。"
     }
   ],
   "web.admin.recommendations.page.subtitle": [
     {
       "type": 0,
-      "value": "配置AI驱动的推荐引擎。需要pgvector以及在AI服务中连接的嵌入提供商。"
+      "value": "为你的媒体库提供个性化推荐。需要pgvector以及在AI服务中配置的嵌入提供商。"
     }
   ],
   "web.admin.recommendations.page.title": [
@@ -52317,7 +52323,7 @@
   "web.admin.recommendations.reset.body": [
     {
       "type": 0,
-      "value": "删除嵌入锁定、所有条目嵌入和个人推荐行，并清除口味画像，以便你切换嵌入模型。之后请运行嵌入作业；口味画像会在其影片重新嵌入后重建。"
+      "value": "清除模型锁定、已存储的嵌入、个人推荐和口味画像，以便你切换模型。之后请运行嵌入作业；口味画像会在作品重新嵌入时自动重建。"
     }
   ],
   "web.admin.recommendations.reset.button": [
@@ -52329,7 +52335,7 @@
   "web.admin.recommendations.reset.confirmBody": [
     {
       "type": 0,
-      "value": "所有条目嵌入和个人推荐行都将被删除，口味画像也将被清除。在嵌入作业重新运行之前，个人推荐和语义搜索将不可用。"
+      "value": "将删除所有已存储的嵌入和个人推荐，并清除口味画像。在嵌入作业再次运行之前，个人推荐和语义搜索将不可用。"
     }
   ],
   "web.admin.recommendations.reset.confirmButton": [
@@ -52525,7 +52531,7 @@
   "web.admin.recommendations.settings.confirmClear": [
     {
       "type": 0,
-      "value": "确认清除"
+      "value": "移除"
     }
   ],
   "web.admin.recommendations.settings.notConfigured": [
@@ -55926,13 +55932,13 @@
   "web.admin.settings.ai.chatgptConnection.browserUrl": [
     {
       "type": 0,
-      "value": "浏览器URL"
+      "value": "最终浏览器URL"
     }
   ],
   "web.admin.settings.ai.chatgptConnection.callbackInvalid": [
     {
       "type": 0,
-      "value": "ChatGPT完成登录后，粘贴地址栏中的完整URL。"
+      "value": "登录URL无效。请在ChatGPT完成登录后，粘贴浏览器地址栏中的完整URL。"
     }
   ],
   "web.admin.settings.ai.chatgptConnection.chooseAccount": [
@@ -55950,7 +55956,7 @@
   "web.admin.settings.ai.chatgptConnection.completeFailed": [
     {
       "type": 0,
-      "value": "无法完成登录。请检查粘贴的URL。如果本次尝试已过期，请关闭此对话框并重新开始。"
+      "value": "无法完成登录。请检查粘贴的URL；如果本次尝试已过期，请取消并重新开始。"
     }
   ],
   "web.admin.settings.ai.chatgptConnection.connect": [
@@ -56014,7 +56020,7 @@
   "web.admin.settings.ai.chatgptConnection.disconnectFailed": [
     {
       "type": 0,
-      "value": "无法断开ChatGPT。请先刷新连接状态，然后重试。"
+      "value": "无法断开ChatGPT连接。请重新加载页面并重试。"
     }
   ],
   "web.admin.settings.ai.chatgptConnection.disconnectNumbered": [
@@ -56036,7 +56042,7 @@
   "web.admin.settings.ai.chatgptConnection.disconnectedLocally": [
     {
       "type": 0,
-      "value": "已在本地断开连接。请打开ChatGPT用量设置，确认该应用已断开连接。"
+      "value": "已从Silo中移除，但ChatGPT无法确认断开连接。请检查ChatGPT用量设置，并在其中撤销访问权限。"
     }
   ],
   "web.admin.settings.ai.chatgptConnection.gotIt": [
@@ -56116,13 +56122,13 @@
   "web.admin.settings.ai.chatgptConnection.signInIncomplete": [
     {
       "type": 0,
-      "value": "登录未完成。请选择“使用ChatGPT继续”重试。"
+      "value": "ChatGPT登录未完成。请选择“使用ChatGPT继续”以重试。"
     }
   ],
   "web.admin.settings.ai.chatgptConnection.startFailed": [
     {
       "type": 0,
-      "value": "无法开始ChatGPT登录。请刷新连接状态，然后重试。"
+      "value": "无法开始ChatGPT登录。请重新加载页面并重试。"
     }
   ],
   "web.admin.settings.ai.chatgptConnection.step1": [
@@ -56146,7 +56152,7 @@
   "web.admin.settings.ai.chatgptConnection.switchFailed": [
     {
       "type": 0,
-      "value": "无法切换ChatGPT账户。请刷新连接状态。"
+      "value": "无法切换ChatGPT账户。请重新加载页面并重试。"
     }
   ],
   "web.admin.settings.ai.chatgptConnection.usagePaused": [
@@ -56180,7 +56186,7 @@
   "web.admin.settings.ai.chatgptRow.chatOnly": [
     {
       "type": 0,
-      "value": "套餐仅提供聊天，不提供语音或嵌入。"
+      "value": "仅支持聊天，不支持语音或嵌入。"
     }
   ],
   "web.admin.settings.ai.chatgptRow.signInNeeded": [
@@ -56202,7 +56208,7 @@
   "web.admin.settings.ai.chatgptRow.usedByText": [
     {
       "type": 0,
-      "value": "由文本模型使用。套餐仅提供聊天，不提供语音或嵌入。"
+      "value": "正被文本模型使用。仅支持聊天，不支持语音或嵌入。"
     }
   ],
   "web.admin.settings.ai.embeddingProvider.connect": [
@@ -56214,7 +56220,7 @@
   "web.admin.settings.ai.embeddingProvider.description": [
     {
       "type": 0,
-      "value": "在AI服务中连接。ChatGPT套餐不包含嵌入模型。"
+      "value": "在AI服务中管理提供商。ChatGPT套餐不包含嵌入模型。"
     }
   ],
   "web.admin.settings.ai.embeddingProvider.label": [
@@ -56278,7 +56284,7 @@
   "web.admin.settings.ai.features.translateDescriptionsDescription": [
     {
       "type": 0,
-      "value": "为管理员或观众请求的项目翻译简介和标语。"
+      "value": "在加入队列时翻译项目简介和标语，如果开启了下方选项，也会在查看时翻译。"
     }
   ],
   "web.admin.settings.ai.features.translateSubtitles": [
@@ -56390,7 +56396,7 @@
             },
             {
               "type": 0,
-              "value": "个"
+              "value": "个模型"
             }
           ]
         }
@@ -56402,7 +56408,7 @@
   "web.admin.settings.ai.page.batchSizeInvalid": [
     {
       "type": 0,
-      "value": "字幕批量大小必须是正整数。"
+      "value": "每次请求的字幕行数必须是大于或等于1的整数。"
     }
   ],
   "web.admin.settings.ai.page.chooseReasoning": [
@@ -56420,7 +56426,7 @@
   "web.admin.settings.ai.page.chunkInvalid": [
     {
       "type": 0,
-      "value": "转录分段长度必须在60到600秒之间。"
+      "value": "每次请求的音频时长必须是60到600秒之间的整数。"
     }
   ],
   "web.admin.settings.ai.page.connectChatgpt": [
@@ -56432,7 +56438,7 @@
   "web.admin.settings.ai.page.contextLinesInvalid": [
     {
       "type": 0,
-      "value": "字幕上下文行数必须是0或正整数。"
+      "value": "作为上下文发送的前后行数必须是大于或等于0的整数。"
     }
   ],
   "web.admin.settings.ai.page.features": [
@@ -56444,13 +56450,13 @@
   "web.admin.settings.ai.page.featuresIntro": [
     {
       "type": 0,
-      "value": "这里的功能都不按计划运行：字幕任务在观众或管理员请求字幕轨道时开始；简介翻译在管理员将其加入队列或观众打开详情页时开始。"
+      "value": "这里的功能都不会按计划运行。字幕作业仅在收到请求时开始；简介会在管理员加入队列或有人打开作品详情页时翻译。"
     }
   ],
   "web.admin.settings.ai.page.intro": [
     {
       "type": 0,
-      "value": "每个AI提供商只需连接一次。文本、语音转文字和推荐嵌入各自从此列表中选择提供商和模型。"
+      "value": "每个AI提供商只需连接一次，然后在下方为文本、语音转文字和嵌入分配提供商和模型。"
     }
   ],
   "web.admin.settings.ai.page.loading": [
@@ -56462,7 +56468,7 @@
   "web.admin.settings.ai.page.maxConcurrentInvalid": [
     {
       "type": 0,
-      "value": "最大并发作业数必须是正整数。"
+      "value": "同时运行的作业数必须是大于或等于1的整数。"
     }
   ],
   "web.admin.settings.ai.page.models": [
@@ -56480,7 +56486,7 @@
   "web.admin.settings.ai.page.quotaInvalid": [
     {
       "type": 0,
-      "value": "转录限额必须是0或正整数。"
+      "value": "每个账户的转录次数必须是大于或等于0的整数。"
     }
   ],
   "web.admin.settings.ai.page.speechCheckFailed": [
@@ -56528,7 +56534,7 @@
   "web.admin.settings.ai.providers.addDescription": [
     {
       "type": 0,
-      "value": "每个提供商只需连接一次。之后，它的密钥将用于所有选择它的作业。"
+      "value": "每个提供商只需连接一次，之后可在任何兼容模型中重复使用。"
     }
   ],
   "web.admin.settings.ai.providers.addSubmit": [
@@ -56552,7 +56558,7 @@
   "web.admin.settings.ai.providers.apiKeyOptional": [
     {
       "type": 0,
-      "value": "不需要密钥的本地端点可留空。"
+      "value": "如果你的本地端点不需要密钥，请留空。"
     }
   ],
   "web.admin.settings.ai.providers.baseUrl": [
@@ -56564,13 +56570,13 @@
   "web.admin.settings.ai.providers.baseUrlCustom": [
     {
       "type": 0,
-      "value": "任何兼容OpenAI API的端点。"
+      "value": "任何兼容OpenAI的API端点。"
     }
   ],
   "web.admin.settings.ai.providers.baseUrlLocal": [
     {
       "type": 0,
-      "value": "请使用Silo容器能访问的主机；localhost指的是Silo本身。"
+      "value": "请使用Silo可以访问的URL。在Docker中，localhost指的是Silo容器本身。"
     }
   ],
   "web.admin.settings.ai.providers.baseUrlProxy": [
@@ -56582,7 +56588,7 @@
   "web.admin.settings.ai.providers.checkFailed": [
     {
       "type": 0,
-      "value": "无法运行检查。"
+      "value": "连接测试失败。"
     }
   ],
   "web.admin.settings.ai.providers.connected": [
@@ -56610,7 +56616,7 @@
     },
     {
       "type": 0,
-      "value": "。请在模型下为作业选择它。"
+      "value": "。请在模型下分配该提供商以开始使用。"
     }
   ],
   "web.admin.settings.ai.providers.continue": [
@@ -56640,7 +56646,7 @@
   "web.admin.settings.ai.providers.notUsed": [
     {
       "type": 0,
-      "value": "未被任何作业使用"
+      "value": "未分配给任何模型"
     }
   ],
   "web.admin.settings.ai.providers.remove": [
@@ -56660,7 +56666,7 @@
     },
     {
       "type": 0,
-      "value": "使用；请先在那里选择其他提供商。"
+      "value": "使用。请先分配其他提供商。"
     }
   ],
   "web.admin.settings.ai.providers.removeConfirm": [
@@ -56672,7 +56678,7 @@
   "web.admin.settings.ai.providers.removeDescription": [
     {
       "type": 0,
-      "value": "Silo会丢弃已保存的密钥。要使用该提供商，需重新连接。"
+      "value": "将移除此提供商及任何已保存的API密钥。你之后可以重新添加。"
     }
   ],
   "web.admin.settings.ai.providers.removeFailed": [
@@ -56712,7 +56718,7 @@
   "web.admin.settings.ai.providers.retypeKey": [
     {
       "type": 0,
-      "value": "新地址需要重新输入API密钥，或将其清除。"
+      "value": "已保存的密钥不会发送到新主机。请为此URL重新输入API密钥，或将其清除。"
     }
   ],
   "web.admin.settings.ai.providers.saveFailed": [
@@ -56738,19 +56744,19 @@
   "web.admin.settings.ai.providers.selectedOnceAdded": [
     {
       "type": 0,
-      "value": "添加后会在此处自动选中。"
+      "value": "添加后将自动选择此提供商。"
     }
   ],
   "web.admin.settings.ai.providers.serves": [
     {
       "type": 0,
-      "value": "提供功能"
+      "value": "支持的功能"
     }
   ],
   "web.admin.settings.ai.providers.servesDescription": [
     {
       "type": 0,
-      "value": "此端点能处理的请求类型。"
+      "value": "此端点支持的AI功能。"
     }
   ],
   "web.admin.settings.ai.providers.setUpChatgpt": [
@@ -56796,7 +56802,7 @@
   "web.admin.settings.ai.providers.typeAnyCapability": [
     {
       "type": 0,
-      "value": "由你选择提供的功能"
+      "value": "由你选择支持的功能"
     }
   ],
   "web.admin.settings.ai.providers.typeAnyEndpoint": [
@@ -56826,7 +56832,7 @@
   "web.admin.settings.ai.providers.unusedUntilSelected": [
     {
       "type": 0,
-      "value": "在模型下有作业选择该提供商之前，它不会被使用。"
+      "value": "只有在模型下分配此提供商后，它才会被使用。"
     }
   ],
   "web.admin.settings.ai.providers.usedBy": [
@@ -56854,7 +56860,7 @@
     },
     {
       "type": 0,
-      "value": "使用。新密钥保存后会立即生效。"
+      "value": "使用。此处的更改会在保存后立即生效。"
     }
   ],
   "web.admin.settings.ai.speech.modelPlaceholder": [
@@ -56866,7 +56872,7 @@
   "web.admin.settings.ai.speech.noProvider": [
     {
       "type": 0,
-      "value": "请在提供商下添加支持语音的提供商。ChatGPT套餐不包含此功能。"
+      "value": "请在提供商下添加支持语音的提供商。ChatGPT套餐不包含语音转文字。"
     }
   ],
   "web.admin.settings.ai.speech.providerDescription": [
@@ -56989,7 +56995,7 @@
   "web.admin.settings.ai.text.reasoningDescription": [
     {
       "type": 0,
-      "value": "更高的推理强度可改善复杂翻译，但会耗费更多时间和token。"
+      "value": "更高的级别可改善复杂翻译的效果，但耗时更长，且会消耗更多token。"
     }
   ],
   "web.admin.settings.ai.text.reasoningLevel": [
@@ -57089,7 +57095,7 @@
   "web.admin.settings.ai.text.serviceTierDescription": [
     {
       "type": 0,
-      "value": "默认使用你的OpenAI项目设置。快速和超快费用更高，且需要模型支持。"
+      "value": "“默认”会使用你的OpenAI项目设置。“快速/优先”和“超快”费用更高，且需要支持的模型。"
     }
   ],
   "web.admin.settings.ai.text.serviceTierOption": [
@@ -57135,7 +57141,7 @@
   "web.admin.settings.ai.text.tagline": [
     {
       "type": 0,
-      "value": "字幕文本、简介和标语"
+      "value": "翻译字幕、简介和标语"
     }
   ],
   "web.admin.settings.ai.text.test": [
@@ -57207,7 +57213,7 @@
   "web.admin.settings.ai.tuning.allowanceResets": [
     {
       "type": 0,
-      "value": "额度重置周期"
+      "value": "额度时间窗口"
     }
   ],
   "web.admin.settings.ai.tuning.audioPerRequest": [
@@ -57243,7 +57249,7 @@
   "web.admin.settings.ai.tuning.jobsAtOnceDescription": [
     {
       "type": 0,
-      "value": "由同一服务器进程中的所有AI作业共享；每个进程有各自的配额。"
+      "value": "由每个服务器实例中的所有AI作业共享；在集群中，每个实例各有自己的限制。"
     }
   ],
   "web.admin.settings.ai.tuning.perAccount": [
@@ -57255,7 +57261,7 @@
   "web.admin.settings.ai.tuning.perAccountCaption": [
     {
       "type": 0,
-      "value": "按登录账户计算，由该账户下的所有个人资料共享。"
+      "value": "按账户计算，并由该账户下的所有个人资料共享。"
     }
   ],
   "web.admin.settings.ai.tuning.quotaPeriodOption": [
@@ -57347,7 +57353,7 @@
   "web.admin.settings.ai.tuning.serverWideCaption": [
     {
       "type": 0,
-      "value": "整个服务器使用同一设置，无论作业属于谁。"
+      "value": "适用于整个服务器，无论由谁启动作业。"
     }
   ],
   "web.admin.settings.ai.tuning.transcriptions": [
@@ -57359,7 +57365,7 @@
   "web.admin.settings.ai.tuning.transcriptionsHint": [
     {
       "type": 0,
-      "value": "该账户下的所有个人资料共用这一额度。"
+      "value": "适用于从音频生成字幕（不适用于字幕翻译）。"
     }
   ],
   "web.admin.settings.ai.unit.seconds": [
@@ -57371,7 +57377,7 @@
   "web.admin.settings.ai.unsavedNote": [
     {
       "type": 0,
-      "value": "未保存。测试会使用此处输入的内容。"
+      "value": "有未保存的更改。测试将使用这些值；请在下方保存以应用。"
     }
   ],
   "web.admin.settings.appearance.badgeImages.group": [
@@ -57489,7 +57495,7 @@
   "web.admin.settings.appearance.logos.storageNeeded": [
     {
       "type": 0,
-      "value": "图片上传需要图稿存储（本地磁盘或S3），请在"
+      "value": "请在"
     },
     {
       "type": 8,
@@ -57503,7 +57509,7 @@
     },
     {
       "type": 0,
-      "value": "设置中配置。"
+      "value": "设置中配置本地磁盘或S3以上传图片。"
     }
   ],
   "web.admin.settings.appearance.logos.wordmark.description": [
@@ -57521,7 +57527,7 @@
   "web.admin.settings.appearance.overlays.enabled.description": [
     {
       "type": 0,
-      "value": "所有个人资料的默认设置。个人资料自行开启或关闭标记后，将保留其自己的选择。"
+      "value": "所有个人资料的默认设置。已自行设置偏好的个人资料将保留其选择。"
     }
   ],
   "web.admin.settings.appearance.overlays.enabled.label": [
@@ -57533,7 +57539,7 @@
   "web.admin.settings.appearance.overlays.group": [
     {
       "type": 0,
-      "value": "卡片叠加层"
+      "value": "海报徽章"
     }
   ],
   "web.admin.settings.appearance.overlays.images": [
@@ -57581,7 +57587,7 @@
   "web.admin.settings.appearance.overlays.style.description": [
     {
       "type": 0,
-      "value": "未自行选择的用户使用此默认设置。"
+      "value": "未自行选择的个人资料将使用此默认设置。"
     }
   ],
   "web.admin.settings.appearance.overlays.style.label": [
@@ -57599,7 +57605,7 @@
   "web.admin.settings.appearance.restoreDialog.description": [
     {
       "type": 0,
-      "value": "将服务器范围的标记默认设置替换为Silo的内置配置。标记的开启/关闭开关不受影响，且在你保存之前不会写入任何内容。"
+      "value": "将服务器全局的徽章默认设置重置为Silo内置设置。你的徽章总开关保持不变，且在你保存前不会应用任何更改。"
     }
   ],
   "web.admin.settings.appearance.restoreDialog.title": [
@@ -57623,7 +57629,7 @@
   "web.admin.settings.appearance.titlePages.titleArt.description": [
     {
       "type": 0,
-      "value": "未自行选择的用户使用此默认设置。每个人仍可为自己更改。"
+      "value": "所有个人资料的默认设置。各个个人资料仍可自行更改。"
     }
   ],
   "web.admin.settings.attention.hide": [
@@ -57675,13 +57681,13 @@
   "web.admin.settings.autoscan.polling.debounce.description": [
     {
       "type": 0,
-      "value": "在此时间范围内跳过对未更改文件的重复报告。已更改或已删除的文件仍会扫描。"
+      "value": "在此时间窗口内忽略对未更改文件的重复报告。已更改或已删除的文件仍会被扫描。"
     }
   ],
   "web.admin.settings.autoscan.polling.debounce.label": [
     {
       "type": 0,
-      "value": "防抖"
+      "value": "防抖窗口"
     }
   ],
   "web.admin.settings.autoscan.polling.description": [
@@ -57717,13 +57723,13 @@
   "web.admin.settings.compatibilityProxies.advanced.addressStreamGrant": [
     {
       "type": 0,
-      "value": "允许同一地址免登录播放"
+      "value": "允许同一IP地址免登录播放"
     }
   ],
   "web.admin.settings.compatibilityProxies.advanced.addressStreamGrantDescription": [
     {
       "type": 0,
-      "value": "部分Jellyfin应用（如Findroid）会在未登录的情况下打开直接播放和下载链接。开启后，如果同一网络地址上已登录的应用在过去2小时内请求播放该文件，Silo就会处理此类请求。这样一来，共享该地址的任何人（例如同一家庭网络、移动运营商或VPN上的用户）也都能播放该文件。仅在你使用这类应用时才开启此选项。"
+      "value": "适用于像Findroid这样在未登录情况下打开直接播放和下载链接的应用。同一IP地址上已登录的应用请求播放某文件后，将在2小时内允许访问该文件。共享该IP的任何人（同一家庭网络、移动运营商或VPN）也都能播放——仅在你使用这类应用时开启。"
     }
   ],
   "web.admin.settings.compatibilityProxies.advanced.playbackTtl": [
@@ -57759,7 +57765,7 @@
   "web.admin.settings.compatibilityProxies.advanced.serverIdDescription": [
     {
       "type": 0,
-      "value": "只读。更改后，所有Jellyfin应用都会将其视为新服务器。"
+      "value": "只读，因为更改后所有Jellyfin应用都会将此视为新服务器。"
     }
   ],
   "web.admin.settings.compatibilityProxies.advanced.serverIdPending": [
@@ -57777,7 +57783,7 @@
   "web.admin.settings.compatibilityProxies.advanced.serverNameDescription": [
     {
       "type": 0,
-      "value": "与常规中的服务器名称相互独立。"
+      "value": "与常规设置中的服务器名称相互独立。"
     }
   ],
   "web.admin.settings.compatibilityProxies.advanced.sessionTtl": [
@@ -57843,7 +57849,7 @@
   "web.admin.settings.compatibilityProxies.details.chosenVersion": [
     {
       "type": 0,
-      "value": "所选版本"
+      "value": "已配置的网页播放器版本"
     }
   ],
   "web.admin.settings.compatibilityProxies.details.currentJob": [
@@ -57867,7 +57873,7 @@
   "web.admin.settings.compatibilityProxies.details.installedAt": [
     {
       "type": 0,
-      "value": "安装位置"
+      "value": "安装文件夹"
     }
   ],
   "web.admin.settings.compatibilityProxies.details.licenseFile": [
@@ -57921,7 +57927,7 @@
   "web.admin.settings.compatibilityProxies.details.title": [
     {
       "type": 0,
-      "value": "下载详情"
+      "value": "状态和安装详情"
     }
   ],
   "web.admin.settings.compatibilityProxies.details.yes": [
@@ -57933,7 +57939,7 @@
   "web.admin.settings.compatibilityProxies.jellyfin.address": [
     {
       "type": 0,
-      "value": "Jellyfin应用应使用的地址"
+      "value": "供Jellyfin应用使用的服务器URL"
     }
   ],
   "web.admin.settings.compatibilityProxies.jellyfin.enable": [
@@ -57945,7 +57951,7 @@
   "web.admin.settings.compatibilityProxies.jellyfin.loopbackWarning": [
     {
       "type": 0,
-      "value": "只有此服务器能访问该地址。请使用其他设备可以访问的地址。"
+      "value": "该URL仅在此服务器上有效。请输入其他设备可以访问的URL。"
     }
   ],
   "web.admin.settings.compatibilityProxies.loading": [
@@ -57957,13 +57963,13 @@
   "web.admin.settings.compatibilityProxies.operation.installMessage": [
     {
       "type": 0,
-      "value": "正在下载并构建Jellyfin网页播放器"
+      "value": "正在下载并构建Jellyfin网页播放器。"
     }
   ],
   "web.admin.settings.compatibilityProxies.operation.installing": [
     {
       "type": 0,
-      "value": "正在安装Jellyfin Web UI"
+      "value": "正在安装Jellyfin网页播放器"
     }
   ],
   "web.admin.settings.compatibilityProxies.operation.percent": [
@@ -57979,19 +57985,19 @@
   "web.admin.settings.compatibilityProxies.operation.progressLabel": [
     {
       "type": 0,
-      "value": "Jellyfin Web安装进度"
+      "value": "Jellyfin网页播放器进度"
     }
   ],
   "web.admin.settings.compatibilityProxies.operation.removeMessage": [
     {
       "type": 0,
-      "value": "正在移除已下载的Jellyfin网页播放器"
+      "value": "正在从服务器删除已下载的网页播放器文件。"
     }
   ],
   "web.admin.settings.compatibilityProxies.operation.removing": [
     {
       "type": 0,
-      "value": "正在移除Jellyfin Web UI"
+      "value": "正在移除Jellyfin网页播放器"
     }
   ],
   "web.admin.settings.compatibilityProxies.operation.started": [
@@ -58025,7 +58031,7 @@
   "web.admin.settings.compatibilityProxies.web.busy": [
     {
       "type": 0,
-      "value": "Web UI忙碌中"
+      "value": "正在处理……"
     }
   ],
   "web.admin.settings.compatibilityProxies.web.description": [
@@ -58037,13 +58043,13 @@
   "web.admin.settings.compatibilityProxies.web.disable": [
     {
       "type": 0,
-      "value": "停用Web UI"
+      "value": "停用网页播放器"
     }
   ],
   "web.admin.settings.compatibilityProxies.web.enable": [
     {
       "type": 0,
-      "value": "启用Web UI"
+      "value": "启用网页播放器"
     }
   ],
   "web.admin.settings.compatibilityProxies.web.heading": [
@@ -58055,13 +58061,13 @@
   "web.admin.settings.compatibilityProxies.web.install": [
     {
       "type": 0,
-      "value": "安装Web UI"
+      "value": "安装网页播放器"
     }
   ],
   "web.admin.settings.compatibilityProxies.web.installerMissingTools": [
     {
       "type": 0,
-      "value": "下载器缺少必需的工具"
+      "value": "缺少必需的服务器工具"
     }
   ],
   "web.admin.settings.compatibilityProxies.web.licensePresent": [
@@ -58073,7 +58079,7 @@
   "web.admin.settings.compatibilityProxies.web.missingCommands": [
     {
       "type": 0,
-      "value": "在服务器上安装以下命令之前，Silo无法下载它："
+      "value": "在服务器上安装以下工具以下载网页播放器："
     },
     {
       "type": 1,
@@ -58095,7 +58101,7 @@
   "web.admin.settings.compatibilityProxies.web.remove": [
     {
       "type": 0,
-      "value": "移除Web UI"
+      "value": "移除网页播放器"
     }
   ],
   "web.admin.settings.compatibilityProxies.web.saveFirst": [
@@ -58113,7 +58119,7 @@
   "web.admin.settings.compatibilityProxies.web.update": [
     {
       "type": 0,
-      "value": "更新Web UI"
+      "value": "更新网页播放器"
     }
   ],
   "web.admin.settings.compatibilityProxies.web.versionInstalled": [
@@ -58165,7 +58171,7 @@
   "web.admin.settings.downloads.artifactDir.description": [
     {
       "type": 0,
-      "value": "留空则使用此服务器转码目录旁的silo-download-artifacts文件夹。转码节点使用其自身转码目录中的download-artifacts，除非该节点设置了自己的目录。"
+      "value": "留空则使用此服务器转码目录旁的silo-download-artifacts文件夹。除非另有配置，转码节点会使用其转码目录中的download-artifacts。"
     }
   ],
   "web.admin.settings.downloads.artifactDir.label": [
@@ -58177,7 +58183,7 @@
   "web.admin.settings.downloads.budget.hint": [
     {
       "type": 0,
-      "value": "适用于此服务器及所有未设置自身配额的节点。超出配额时，先删除缓存文件，按最久未使用的顺序删除；仍有设备在等待的文件会保留。"
+      "value": "适用于此服务器及未设置自身配额的节点。超出配额时，会优先删除最久未使用的缓存文件；等待中的下载会保留。"
     }
   ],
   "web.admin.settings.downloads.budget.label": [
@@ -58189,7 +58195,7 @@
   "web.admin.settings.downloads.diskCeiling.description": [
     {
       "type": 0,
-      "value": "磁盘占用超过此值时，无论配额如何，都会提前删除该位置的缓存文件。范围为50到95；当下载与转码共用磁盘时，节点在95%时停止接受播放。"
+      "value": "磁盘占用超过此值时，即使未超出配额也会提前删除缓存文件（50–95%）。当下载与转码共用磁盘时，转码节点会在占用达到95%时停止接受播放。"
     }
   ],
   "web.admin.settings.downloads.diskCeiling.label": [
@@ -58201,7 +58207,7 @@
   "web.admin.settings.downloads.enabled.description": [
     {
       "type": 0,
-      "value": "整个服务器的开关。开启时，由访问组和账户决定谁可以下载。关闭时，任何人都无法下载。"
+      "value": "整个服务器的开关。开启时，由访问组和账户控制谁可以下载；关闭时，任何人都无法下载。"
     }
   ],
   "web.admin.settings.downloads.enabled.label": [
@@ -58219,7 +58225,7 @@
   "web.admin.settings.downloads.loadError": [
     {
       "type": 0,
-      "value": "无法加载下载设置。请先重试，再编辑限制。"
+      "value": "无法加载下载设置。请先重试，再进行编辑。"
     }
   ],
   "web.admin.settings.downloads.perUser.bandwidth.label": [
@@ -58231,7 +58237,7 @@
   "web.admin.settings.downloads.perUser.concurrent.hint": [
     {
       "type": 0,
-      "value": "按用户计数，与每用户带宽上限同时生效。"
+      "value": "每位用户允许同时进行的最大下载数。"
     }
   ],
   "web.admin.settings.downloads.perUser.concurrent.label": [
@@ -58261,7 +58267,7 @@
   "web.admin.settings.downloads.perUser.period.description": [
     {
       "type": 0,
-      "value": "统计每个用户下载数的滚动时间窗口，例如24h或168h。"
+      "value": "上述限制的滚动时间窗口，例如24h或168h。"
     }
   ],
   "web.admin.settings.downloads.perUser.period.label": [
@@ -58285,7 +58291,7 @@
   "web.admin.settings.downloads.server.cacheHours.description": [
     {
       "type": 0,
-      "value": "没有任何下载在等待的已准备文件在最后一次使用后保留的小时数，以便其他下载或重新下载复用。范围为0到720；为0时，文件在不再被需要且十分钟未使用后删除。"
+      "value": "已准备文件在最后一次下载后保留以便复用的小时数（0–720）。设为0时，不再需要的文件会在最后一次使用10分钟后删除。"
     }
   ],
   "web.admin.settings.downloads.server.cacheHours.label": [
@@ -58309,7 +58315,7 @@
   "web.admin.settings.downloads.server.localFallback.label": [
     {
       "type": 0,
-      "value": "工作节点不可用时在本地准备"
+      "value": "转码节点不可用时在此服务器准备"
     }
   ],
   "web.admin.settings.downloads.serverBandwidth.hint": [
@@ -58327,7 +58333,7 @@
   "web.admin.settings.downloads.storageLink": [
     {
       "type": 0,
-      "value": "查看服务器和节点上的存储"
+      "value": "查看下载存储"
     }
   ],
   "web.admin.settings.downloads.title": [
@@ -58339,7 +58345,7 @@
   "web.admin.settings.downloads.transcode.description": [
     {
       "type": 0,
-      "value": "转换设备无法播放的视频，并提供较低画质。关闭时，所有下载都保留原始视频，即使设备无法播放。"
+      "value": "转换不兼容的视频并提供较低画质选项。关闭时，下载始终使用原始文件，即使设备无法播放。"
     }
   ],
   "web.admin.settings.downloads.transcode.label": [
@@ -58579,7 +58585,7 @@
   "web.admin.settings.general.network.lanDiscovery.description": [
     {
       "type": 0,
-      "value": "同一网络中的Silo应用在添加服务器时会列出此服务器，无需手动输入地址。需要网络支持组播（Docker主机网络，而非默认网桥）。"
+      "value": "允许同一网络中的Silo应用自动发现此服务器。需要组播网络（在Docker中使用主机模式，而非默认网桥）。"
     }
   ],
   "web.admin.settings.general.network.lanDiscovery.label": [
@@ -58591,7 +58597,7 @@
   "web.admin.settings.general.network.localUrl.description": [
     {
       "type": 0,
-      "value": "家庭网络中的设备直接访问Silo的地址：主机IP加Silo监听的端口，或在Docker下发布的端口。已登录的应用在可访问时会自动通过加密连接切换到此地址。如果应用已能在本地网络中找到服务器，请留空。"
+      "value": "本地直连地址（主机IP和端口，或Docker发布的端口）。已登录的应用在可访问时会自动通过加密连接切换到此地址。如果本地发现已正常工作，请留空。"
     }
   ],
   "web.admin.settings.general.network.localUrl.label": [
@@ -58603,19 +58609,19 @@
   "web.admin.settings.general.network.publicUrl.description": [
     {
       "type": 0,
-      "value": "用户打开的HTTPS地址。用于WebSocket来源和邮件通知中的链接。"
+      "value": "用于访问Silo的HTTPS地址。WebSocket连接、登录重定向和邮件链接都需要它。"
     }
   ],
   "web.admin.settings.general.network.publicUrl.label": [
     {
       "type": 0,
-      "value": "Silo公共URL"
+      "value": "公共URL"
     }
   ],
   "web.admin.settings.general.network.trustedProxies.description": [
     {
       "type": 0,
-      "value": "以逗号分隔的代理地址范围；留空则保留私有网络默认值。"
+      "value": "允许转发客户端IP的CIDR范围，以逗号分隔。留空则信任默认私有网络范围。"
     }
   ],
   "web.admin.settings.general.network.trustedProxies.label": [
@@ -58683,7 +58689,7 @@
   "web.admin.settings.health.email.notSetUp": [
     {
       "type": 0,
-      "value": "无法发送邀请和重置邮件"
+      "value": "无法发送邀请或密码重置邮件"
     }
   ],
   "web.admin.settings.health.email.ready": [
@@ -58717,7 +58723,7 @@
   "web.admin.settings.health.publicUrl.notSet": [
     {
       "type": 0,
-      "value": "邀请和重置链接以及登录提供商需要它"
+      "value": "邀请链接、密码重置和登录提供商都需要它"
     }
   ],
   "web.admin.settings.health.search.checking": [
@@ -58729,7 +58735,7 @@
   "web.admin.settings.health.search.degraded": [
     {
       "type": 0,
-      "value": "搜索正以降级模式运行"
+      "value": "搜索已降级"
     }
   ],
   "web.admin.settings.health.search.label": [
@@ -58829,7 +58835,7 @@
   "web.admin.settings.health.storage.notSetUp": [
     {
       "type": 0,
-      "value": "封面图和上传文件没有存放位置"
+      "value": "无法保存封面图和上传文件"
     }
   ],
   "web.admin.settings.health.storage.publicAndPrivate": [
@@ -58881,13 +58887,13 @@
   "web.admin.settings.hooks.invitations.authorityChanged": [
     {
       "type": 0,
-      "value": "邀请权限已更改。"
+      "value": "此请求运行期间，你登录的个人资料已更改。"
     }
   ],
   "web.admin.settings.hooks.invitations.repeatedCursor": [
     {
       "type": 0,
-      "value": "邀请游标重复。请重新加载历史记录。"
+      "value": "邀请列表不同步。请重新加载历史记录。"
     }
   ],
   "web.admin.settings.hooks.inviteCodes.createFailed": [
@@ -58917,7 +58923,7 @@
   "web.admin.settings.hooks.inviteCodes.topUpFailed": [
     {
       "type": 0,
-      "value": "重新补充次数前，请检查该邀请码当前的最大使用次数。"
+      "value": "请先检查该邀请码当前的最大使用次数，然后再重试。"
     },
     {
       "type": 1,
@@ -58927,13 +58933,13 @@
   "web.admin.settings.hooks.inviteCodes.topUpUnconfirmed": [
     {
       "type": 0,
-      "value": "无法确认结果。"
+      "value": "无法确认是否已添加使用次数。"
     }
   ],
   "web.admin.settings.hooks.inviteCodes.toppedUp": [
     {
       "type": 0,
-      "value": "邀请码已补充次数"
+      "value": "已为邀请码添加使用次数"
     }
   ],
   "web.admin.settings.hooks.inviteCodes.updateFailed": [
@@ -58969,7 +58975,7 @@
   "web.admin.settings.hooks.serverNotificationChannels.createInProgress": [
     {
       "type": 0,
-      "value": "目标已在创建中。"
+      "value": "已在创建渠道"
     }
   ],
   "web.admin.settings.hooks.serverNotificationChannels.deleteFailed": [
@@ -59035,7 +59041,7 @@
   "web.admin.settings.hooks.settings.jellyfinWeb.installFailed": [
     {
       "type": 0,
-      "value": "安装Jellyfin Web资源失败"
+      "value": "安装Jellyfin网页播放器失败"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinWeb.installStarted": [
@@ -59047,7 +59053,7 @@
   "web.admin.settings.hooks.settings.jellyfinWeb.removeFailed": [
     {
       "type": 0,
-      "value": "移除Jellyfin Web资源失败"
+      "value": "移除Jellyfin网页播放器失败"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinWeb.removeStarted": [
@@ -59077,7 +59083,7 @@
   "web.admin.settings.invitations.capabilitiesFailed": [
     {
       "type": 0,
-      "value": "无法加载邀请功能。"
+      "value": "无法检查邀请设置。"
     },
     {
       "type": 8,
@@ -59085,7 +59091,7 @@
       "children": [
         {
           "type": 0,
-          "value": "重新加载功能"
+          "value": "重试"
         }
       ]
     }
@@ -59139,7 +59145,7 @@
   "web.admin.settings.invitations.create.emailHint": [
     {
       "type": 0,
-      "value": "此地址既是邀请的发送目标，也是对方登录用的用户名。"
+      "value": "用于发送邀请，并作为对方的登录用户名。"
     }
   ],
   "web.admin.settings.invitations.create.emailLabel": [
@@ -59157,7 +59163,7 @@
   "web.admin.settings.invitations.create.emailOptionBody": [
     {
       "type": 0,
-      "value": "我们会通过电子邮件发送链接。你也可以复制链接。"
+      "value": "Silo会通过电子邮件发送链接。你也可以复制链接。"
     }
   ],
   "web.admin.settings.invitations.create.emailOptionUnavailable": [
@@ -59201,13 +59207,13 @@
   "web.admin.settings.invitations.create.finePrintEmail": [
     {
       "type": 0,
-      "value": "该链接仅能使用一次，7天后过期。之后重新发送会生成新链接，并使此链接失效。"
+      "value": "此链接仅可使用一次，7天后过期。之后重新发送会生成新链接，并使此链接失效。"
     }
   ],
   "web.admin.settings.invitations.create.finePrintLink": [
     {
       "type": 0,
-      "value": "该链接仅能使用一次，7天后过期。任何拥有此链接的人都可以使用它。如果链接落入他人之手，请在历史记录中撤销。"
+      "value": "此链接仅可使用一次，7天后过期。任何拥有此链接的人都可以使用——如果分享给了错误的人，请在历史记录中撤销。"
     }
   ],
   "web.admin.settings.invitations.create.inheritGroup": [
@@ -59219,7 +59225,7 @@
   "web.admin.settings.invitations.create.libraryHint": [
     {
       "type": 0,
-      "value": "接受邀请时创建的账户将沿用所选访问组的媒体库范围。"
+      "value": "使用所选访问组允许的媒体库。"
     }
   ],
   "web.admin.settings.invitations.create.linkOption": [
@@ -59237,7 +59243,7 @@
   "web.admin.settings.invitations.create.noDefaultProfile": [
     {
       "type": 0,
-      "value": "此服务器无法以原子方式创建默认个人资料。请关闭个人资料选项，以创建不含个人资料的邀请。"
+      "value": "此服务器无法通过邀请创建首个个人资料。必须关闭“创建对方的首个个人资料”才能继续。"
     }
   ],
   "web.admin.settings.invitations.create.noteHintEmail": [
@@ -59297,7 +59303,7 @@
   "web.admin.settings.invitations.create.reloadBeforeRetry": [
     {
       "type": 0,
-      "value": "再次尝试前，请先重新加载历史记录；该邀请可能已存在。"
+      "value": "该邀请可能已创建。重试前请先重新加载历史记录进行检查。"
     }
   ],
   "web.admin.settings.invitations.create.reloadFailed": [
@@ -59363,7 +59369,7 @@
   "web.admin.settings.invitations.delivery.failed": [
     {
       "type": 0,
-      "value": "邀请已创建，但电子邮件发送失败或状态不确定。此链接仍然有效，请自行发送。"
+      "value": "邀请已创建，但电子邮件发送失败或无法确认。链接仍然有效——请自行分享。"
     }
   ],
   "web.admin.settings.invitations.delivery.linkCreated": [
@@ -59389,7 +59395,7 @@
   "web.admin.settings.invitations.delivery.notConfigured": [
     {
       "type": 0,
-      "value": "未配置电子邮件。邀请已创建；请自行发送此链接。"
+      "value": "此服务器未设置电子邮件。邀请已创建——请自行分享此链接。"
     }
   ],
   "web.admin.settings.invitations.delivery.sent": [
@@ -59403,7 +59409,7 @@
     },
     {
       "type": 0,
-      "value": "。无法保证对方一定收到。你可以复制下方的链接。"
+      "value": "。你也可以复制下方的链接，以防邮件未能送达。"
     }
   ],
   "web.admin.settings.invitations.deliveryLabel.emailSent": [
@@ -59421,7 +59427,7 @@
   "web.admin.settings.invitations.deliveryLabel.emailUnconfirmedTitle": [
     {
       "type": 0,
-      "value": "电子邮件发送失败或状态不确定。链接仍然有效。"
+      "value": "电子邮件发送失败或无法确认，但链接仍然有效。"
     }
   ],
   "web.admin.settings.invitations.deliveryLabel.link": [
@@ -59491,7 +59497,7 @@
   "web.admin.settings.invitations.loadingCapabilities": [
     {
       "type": 0,
-      "value": "正在加载邀请功能……"
+      "value": "正在检查邀请设置……"
     }
   ],
   "web.admin.settings.invitations.notConfigured": [
@@ -59503,7 +59509,7 @@
   "web.admin.settings.invitations.publicUrlMissing": [
     {
       "type": 0,
-      "value": "请设置Silo公开URL以创建邀请链接。"
+      "value": "请在"
     },
     {
       "type": 8,
@@ -59514,6 +59520,10 @@
           "value": "常规设置"
         }
       ]
+    },
+    {
+      "type": 0,
+      "value": "中设置服务器的公共URL，以创建邀请链接。"
     }
   ],
   "web.admin.settings.invitations.reloadHistory": [
@@ -59525,13 +59535,13 @@
   "web.admin.settings.invitations.resend.creating": [
     {
       "type": 0,
-      "value": "正在创建新邀请……"
+      "value": "正在创建新链接……"
     }
   ],
   "web.admin.settings.invitations.resend.description": [
     {
       "type": 0,
-      "value": "新链接会使之前的链接失效。"
+      "value": "创建新链接会使之前的链接失效。"
     }
   ],
   "web.admin.settings.invitations.resend.finePrint": [
@@ -59549,13 +59559,13 @@
   "web.admin.settings.invitations.resend.uncertain": [
     {
       "type": 0,
-      "value": "结果可能不确定。再次重新发送前，请先重新加载历史记录。"
+      "value": "新链接可能已创建。重试前请先重新加载历史记录进行检查。"
     }
   ],
   "web.admin.settings.invitations.resendFailed": [
     {
       "type": 0,
-      "value": "无法重新发送邀请。继续之前，请先重新加载历史记录。"
+      "value": "无法创建新邀请链接。重试前请先重新加载历史记录。"
     }
   ],
   "web.admin.settings.invitations.revoke.confirm": [
@@ -59599,7 +59609,7 @@
   "web.admin.settings.invitations.row.copyNewLink": [
     {
       "type": 0,
-      "value": "复制新链接，不发送邮件"
+      "value": "创建新链接且不发送邮件"
     }
   ],
   "web.admin.settings.invitations.row.emailNewLink": [
@@ -59663,7 +59673,7 @@
   "web.admin.settings.invitations.row.revokeLink": [
     {
       "type": 0,
-      "value": "撤销此链接"
+      "value": "撤销邀请"
     }
   ],
   "web.admin.settings.invitations.status.accepted": [
@@ -59875,7 +59885,7 @@
     },
     {
       "type": 0,
-      "value": "——开启前这些邀请码无法使用。"
+      "value": "——在开启"
     },
     {
       "type": 8,
@@ -59883,15 +59893,19 @@
       "children": [
         {
           "type": 0,
-          "value": "公开注册设置"
+          "value": "公开注册"
         }
       ]
+    },
+    {
+      "type": 0,
+      "value": "前，这些邀请码无法使用。"
     }
   ],
   "web.admin.settings.inviteCodes.signupsOn": [
     {
       "type": 0,
-      "value": "邀请码仅在公开注册开启时有效。"
+      "value": "邀请码仅在"
     },
     {
       "type": 8,
@@ -59899,9 +59913,13 @@
       "children": [
         {
           "type": 0,
-          "value": "公开注册设置"
+          "value": "公开注册"
         }
       ]
+    },
+    {
+      "type": 0,
+      "value": "开启时有效。"
     }
   ],
   "web.admin.settings.inviteCodes.status.active": [
@@ -59985,7 +60003,7 @@
   "web.admin.settings.inviteCodes.topUp.title": [
     {
       "type": 0,
-      "value": "增加邀请码次数"
+      "value": "为邀请码添加使用次数"
     }
   ],
   "web.admin.settings.inviteCodes.topUpForm.adding": [
@@ -60009,7 +60027,7 @@
   "web.admin.settings.inviteCodes.topUpForm.submit": [
     {
       "type": 0,
-      "value": "添加次数"
+      "value": "添加使用次数"
     }
   ],
   "web.admin.settings.inviteCodes.topUpLabel": [
@@ -60023,7 +60041,7 @@
     },
     {
       "type": 0,
-      "value": "增加次数"
+      "value": "添加使用次数"
     }
   ],
   "web.admin.settings.inviteCodes.usageCount": [
@@ -60075,7 +60093,7 @@
     },
     {
       "type": 0,
-      "value": "（不支持此功能）"
+      "value": "（不支持）"
     }
   ],
   "web.admin.settings.lib.aiProviders.option.removed": [
@@ -60117,13 +60135,13 @@
   "web.admin.settings.lib.externalSignIn.checkStatus.unavailable": [
     {
       "type": 0,
-      "value": "无法连接提供商；Silo会在下次刷新时再次检查"
+      "value": "无法连接提供商；Silo会在下次刷新时重试"
     }
   ],
   "web.admin.settings.lib.externalSignIn.checkStatus.unsupported": [
     {
       "type": 0,
-      "value": "提供商无法重新检查此账户：会话在固定时长后结束，如果此人在该时长内未通过提供商登录，其API密钥和Audiobookshelf会话将被移除"
+      "value": "提供商无法重新检查此账户：会话会在固定时间后过期，除非对方在此之前再次通过该提供商登录，否则将移除API密钥和Audiobookshelf会话"
     }
   ],
   "web.admin.settings.lib.externalSignIn.error.accountChanged": [
@@ -60135,7 +60153,7 @@
   "web.admin.settings.lib.externalSignIn.error.ownerOnly": [
     {
       "type": 0,
-      "value": "只有服务器所有者才能更改其他管理员的登录方式。"
+      "value": "只有服务器所有者才能更改其他管理员的登录设置。"
     }
   ],
   "web.admin.settings.lib.externalSignIn.error.selectProfile": [
@@ -60159,7 +60177,7 @@
   "web.admin.settings.lib.externalSignIn.problem.breakGlassRequired": [
     {
       "type": 0,
-      "value": "此服务器已关闭密码登录，此操作将导致没有可使用密码登录的紧急管理员。请先在设置→登录中重新开启密码登录，或将另一位管理员设为紧急管理员。"
+      "value": "密码登录已关闭，因此必须至少保留一位支持密码登录的紧急管理员。请先在设置→登录中重新开启密码登录，或为另一位管理员开启紧急账户。"
     }
   ],
   "web.admin.settings.lib.externalSignIn.problem.identityLinkedElsewhere": [
@@ -60177,25 +60195,25 @@
   "web.admin.settings.lib.externalSignIn.problem.providerAlreadyEnabled": [
     {
       "type": 0,
-      "value": "已开启另一个登录提供商。服务器同一时间只能有一个登录提供商，外加一个网络登录（如Tailscale）：请先关闭另一个。"
+      "value": "另一个登录提供商处于启用状态。请先关闭它——同一时间仅允许启用一个（Tailscale等网络登录除外）。"
     }
   ],
   "web.admin.settings.libraryMetadata.general.allVersions.description": [
     {
       "type": 0,
-      "value": "当一个作品位于多个媒体库中时，无论观众从哪里打开，其详情页都会列出观众可访问的所有版本。关闭后，仅列出观众打开时所在媒体库中的文件。播放始终可使用所有版本。"
+      "value": "当作品位于多个媒体库中时，在详情页列出所有可访问的版本。关闭时，仅显示当前媒体库中的版本。播放始终会考虑所有版本。"
     }
   ],
   "web.admin.settings.libraryMetadata.general.allVersions.label": [
     {
       "type": 0,
-      "value": "在详情页显示所有媒体库版本"
+      "value": "显示所有媒体库中的版本"
     }
   ],
   "web.admin.settings.libraryMetadata.general.fallbackLanguage.description": [
     {
       "type": 0,
-      "value": "当媒体库的元数据语言缺少标题、简介和海报时使用，优先于原始语言。现有项目会在下次手动刷新时更新。"
+      "value": "当媒体库语言缺少标题、简介或海报时使用的回退语言，优先于原始语言。现有项目会在下次手动刷新时更新。"
     }
   ],
   "web.admin.settings.libraryMetadata.general.fallbackLanguage.label": [
@@ -60219,7 +60237,7 @@
   "web.admin.settings.libraryMetadata.maturity.description": [
     {
       "type": 0,
-      "value": "适用于设有最高年龄分级的个人资料，该分级在每个个人资料中设置。"
+      "value": "适用于设有年龄分级上限的个人资料，该上限在每个个人资料中设置。"
     }
   ],
   "web.admin.settings.libraryMetadata.maturity.group": [
@@ -60237,13 +60255,13 @@
   "web.admin.settings.libraryMetadata.maturity.unrated.description": [
     {
       "type": 0,
-      "value": "适用于设有年龄分级上限的个人资料：决定它们能否看到没有分级或标记为“未分级”的影片。服务器无法识别的分级在任何情况下都会对它们隐藏。没有上限的个人资料始终能看到这些影片。"
+      "value": "决定设有年龄分级上限的个人资料是否能看到无分级或标记为“未分级”的作品。无法识别的分级无论如何都会保持隐藏；没有上限的个人资料始终能看到它们。"
     }
   ],
   "web.admin.settings.libraryMetadata.maturity.unrated.hide": [
     {
       "type": 0,
-      "value": "对设有上限的个人资料隐藏"
+      "value": "对有分级限制的个人资料隐藏"
     }
   ],
   "web.admin.settings.libraryMetadata.maturity.unrated.label": [
@@ -60255,13 +60273,13 @@
   "web.admin.settings.libraryMetadata.ratings.description": [
     {
       "type": 0,
-      "value": "IMDb和TMDB评分没有开关：只要受支持的元数据插件或影片的.nfo文件提供了这些评分，影片就会显示它们。元数据提供商可以添加其他评分；开启某个评分后，所有应用的影片页面都会显示其分数。影片页面最多按此顺序显示三个评分，因此开启的评分只会在排在它前面的评分少于三个时显示。Rotten Tomatoes评分还会显示在海报角标上。开启某个评分前，请查看其条款：部分评分（例如Rotten Tomatoes）限制他人展示其分数的方式。"
+      "value": "只要插件或.nfo文件提供了IMDb和TMDB评分，它们就会始终显示。开启下方的其他来源，即可在所有应用中显示——每个详情页按此顺序最多共显示3个评分。Rotten Tomatoes还会显示在海报角标上。请先查看各来源的条款：部分来源（例如Rotten Tomatoes）会限制其分数的展示方式。"
     }
   ],
   "web.admin.settings.libraryMetadata.ratings.empty": [
     {
       "type": 0,
-      "value": "没有元数据插件添加其他评分。"
+      "value": "没有已启用的元数据插件提供其他评分。"
     }
   ],
   "web.admin.settings.libraryMetadata.ratings.fromProvider": [
@@ -60289,13 +60307,13 @@
   "web.admin.settings.libraryMetadata.ratings.undeclared.description": [
     {
       "type": 0,
-      "value": "在已启用的插件重新添加这些评分之前，它们不会显示任何内容。请将其关闭，以免它们自行恢复。"
+      "value": "在已启用的插件重新提供这些评分之前，它们会保持隐藏。将其关闭可防止它们之后重新出现。"
     }
   ],
   "web.admin.settings.libraryMetadata.ratings.undeclared.heading": [
     {
       "type": 0,
-      "value": "未由已启用的插件添加"
+      "value": "已启用的插件不再提供"
     }
   ],
   "web.admin.settings.libraryMetadata.scanning.group": [
@@ -60319,7 +60337,7 @@
   "web.admin.settings.libraryMetadata.scanning.matcherBatch.description": [
     {
       "type": 0,
-      "value": "每个匹配线程每轮领取的项目数。"
+      "value": "每个匹配工作线程一次获取的项目数。"
     }
   ],
   "web.admin.settings.libraryMetadata.scanning.matcherBatch.label": [
@@ -60331,7 +60349,7 @@
   "web.admin.settings.libraryMetadata.scanning.matcherWorkers.description": [
     {
       "type": 0,
-      "value": "Silo同时查找的项目数。"
+      "value": "Silo同时与元数据提供商匹配的项目数。"
     }
   ],
   "web.admin.settings.libraryMetadata.scanning.matcherWorkers.label": [
@@ -60343,7 +60361,7 @@
   "web.admin.settings.libraryMetadata.scanning.personRefresh.description": [
     {
       "type": 0,
-      "value": "每台服务器每分钟在后台查找的演职人员数量。打开人物页面不受此限制。"
+      "value": "每台服务器在后台更新演职人员元数据的上限。打开人物页面不受此限制。"
     }
   ],
   "web.admin.settings.libraryMetadata.scanning.personRefresh.label": [
@@ -60355,7 +60373,7 @@
   "web.admin.settings.libraryMetadata.scanning.realtime.description": [
     {
       "type": 0,
-      "value": "已对所有媒体库关闭。开启后，由每个媒体库自己的开关决定是否监视其文件夹。"
+      "value": "关闭时，所有媒体库都会停用文件夹监视。开启时，由每个媒体库各自的设置项控制。"
     }
   ],
   "web.admin.settings.libraryMetadata.scanning.realtime.label": [
@@ -60385,7 +60403,7 @@
   "web.admin.settings.libraryMetadata.subtitleSync.auto.description": [
     {
       "type": 0,
-      "value": "将字幕与视频音频对齐：下载和上传的字幕在添加时对齐，其他字幕在首次播放时对齐。可修正为其他版本制作的字幕。"
+      "value": "下载和上传的字幕会在添加时同步，其他字幕会在首次播放时同步。可修正时间轴对应其他版本的字幕。"
     }
   ],
   "web.admin.settings.libraryMetadata.subtitleSync.auto.label": [
@@ -60415,7 +60433,7 @@
   "web.admin.settings.libraryMetadata.subtitleSync.execution.description": [
     {
       "type": 0,
-      "value": "同步会解码文件中几分钟的音频。"
+      "value": "字幕同步会为每个文件解码几分钟的音频，这会占用CPU。"
     }
   ],
   "web.admin.settings.libraryMetadata.subtitleSync.execution.label": [
@@ -60529,7 +60547,7 @@
   "web.admin.settings.logging.server.level.description": [
     {
       "type": 0,
-      "value": "设置容器日志的级别；“调试”输出量很大，仅在排查问题时使用。无论如何设置，服务器日志页面都会记录“信息”及以上级别。"
+      "value": "控制控制台和容器的日志输出。“调试”级别输出非常详细，仅在排查问题时使用。服务器日志页面始终记录“信息”及以上级别。"
     }
   ],
   "web.admin.settings.logging.server.level.error": [
@@ -60559,13 +60577,13 @@
   "web.admin.settings.logging.server.quiet.description": [
     {
       "type": 0,
-      "value": "丢弃以这些词中任意一个开头的日志行。"
+      "value": "以逗号分隔的日志行前缀，匹配的日志行将从控制台和容器输出中丢弃。"
     }
   ],
   "web.admin.settings.logging.server.quiet.label": [
     {
       "type": 0,
-      "value": "静默日志前缀"
+      "value": "屏蔽日志前缀"
     }
   ],
   "web.admin.settings.logging.title": [
@@ -60583,7 +60601,7 @@
   "web.admin.settings.markers.provider.autoLocalDescription": [
     {
       "type": 0,
-      "value": "共享在此服务器上检测到、且达到“高级”中最低置信度的片头和片尾。"
+      "value": "发送本地检测到、且达到“高级”中自动共享最低置信度的标记。"
     }
   ],
   "web.admin.settings.markers.provider.close": [
@@ -60601,13 +60619,13 @@
   "web.admin.settings.markers.provider.connectedOff": [
     {
       "type": 0,
-      "value": "已连接 · 关闭"
+      "value": "已配置 · 关闭"
     }
   ],
   "web.admin.settings.markers.provider.contributeEnabled": [
     {
       "type": 0,
-      "value": "允许与此提供商共享"
+      "value": "允许与此提供商共享标记"
     }
   ],
   "web.admin.settings.markers.provider.contributeMinConfidence": [
@@ -60619,7 +60637,7 @@
   "web.admin.settings.markers.provider.contributeMinConfidenceDescription": [
     {
       "type": 0,
-      "value": "选择0%到100%之间的值。建议：95%。"
+      "value": "仅自动共享置信度达到或高于此值的本地检测标记。建议：95%。"
     }
   ],
   "web.admin.settings.markers.provider.empty": [
@@ -60657,7 +60675,7 @@
   "web.admin.settings.markers.provider.fetchMinConfidenceDescription": [
     {
       "type": 0,
-      "value": "跳过此提供商评分较低的标记，以便由其他提供商或本地检测补充。0%表示使用所有标记。"
+      "value": "忽略低于此阈值的标记，以便由其他提供商或本地检测接管。0%表示使用所有标记。"
     }
   ],
   "web.admin.settings.markers.provider.fix": [
@@ -60803,7 +60821,7 @@
   "web.admin.settings.markers.tasks.contributeDescription": [
     {
       "type": 0,
-      "value": "将此服务器上检测到的符合条件的片头和片尾发送给已开启自动共享的提供商，并将保存时未能送达的手动更正发送给接受更正的提供商。"
+      "value": "将符合条件的本地检测片头和片尾发送给已开启自动共享的提供商，并为接受更正的提供商重试未能送达的手动更正。"
     }
   ],
   "web.admin.settings.markers.tasks.contributeName": [
@@ -61053,7 +61071,7 @@
   "web.admin.settings.network.direct.connected.connectedSince": [
     {
       "type": 0,
-      "value": "开始使用此路径"
+      "value": "直连开始时间"
     }
   ],
   "web.admin.settings.network.direct.connected.device": [
@@ -61071,7 +61089,7 @@
   "web.admin.settings.network.direct.connected.peerEndpoint": [
     {
       "type": 0,
-      "value": "对端端点"
+      "value": "远程地址"
     }
   ],
   "web.admin.settings.network.direct.connected.title": [
@@ -61103,13 +61121,13 @@
   "web.admin.settings.network.direct.description": [
     {
       "type": 0,
-      "value": "检查此服务器是否已准备好使用直连。"
+      "value": "允许设备通过UDP直连到此服务器，并检查网络就绪状态。"
     }
   ],
   "web.admin.settings.network.direct.effective": [
     {
       "type": 0,
-      "value": "生效值："
+      "value": "当前生效："
     },
     {
       "type": 1,
@@ -61149,7 +61167,7 @@
   "web.admin.settings.network.direct.feature.pmtu_fallback": [
     {
       "type": 0,
-      "value": "PMTU回退"
+      "value": "路径MTU回退"
     }
   ],
   "web.admin.settings.network.direct.feature.reachability": [
@@ -61253,7 +61271,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "向路由器请求UPnP、NAT-PMP或PCP端口映射。"
+      "value": "通过UPnP、NAT-PMP或PCP请求路由器自动转发端口。"
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -61283,7 +61301,7 @@
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "开启此项会启动直连引擎。它会打开一个UDP端口，并在“端口映射”开启时向路由器请求端口映射。“运行检查”只会读取主机的状态。"
+      "value": "开启此项会打开一个用于直连的UDP端口，并在“端口映射”开启时请求路由器转发该端口。“运行检查”仅检查当前状态。"
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
@@ -61337,7 +61355,7 @@
   "web.admin.settings.network.direct.reason.invalid": [
     {
       "type": 0,
-      "value": "值无效；按关闭处理"
+      "value": "值无效；已关闭"
     }
   ],
   "web.admin.settings.network.direct.reason.invalid_default": [
@@ -61603,7 +61621,7 @@
   "web.admin.settings.network.direct.stunServers.description": [
     {
       "type": 0,
-      "value": "以逗号分隔的列表，最多包含八个host:port条目。留空则使用默认值。"
+      "value": "最多8个以逗号分隔的host:port条目。留空则使用默认值。"
     }
   ],
   "web.admin.settings.network.direct.stunServers.label": [
@@ -61621,7 +61639,7 @@
   "web.admin.settings.network.direct.udpDescription": [
     {
       "type": 0,
-      "value": "允许设备通过直连UDP路径访问此服务器。UDP端口由"
+      "value": "允许设备通过UDP直连到此服务器。UDP端口由"
     },
     {
       "type": 1,
@@ -61629,7 +61647,7 @@
     },
     {
       "type": 0,
-      "value": "设置，此处为只读。"
+      "value": "设置，无法在此处更改。"
     }
   ],
   "web.admin.settings.network.host.apiServer": [
@@ -61655,7 +61673,7 @@
       "children": [
         {
           "type": 0,
-          "value": "以完成此主机的注册。"
+          "value": "以完成此主机的连接。"
         }
       ]
     }
@@ -61675,7 +61693,7 @@
   "web.admin.settings.network.host.lastHeard": [
     {
       "type": 0,
-      "value": "最后通信时间："
+      "value": "上次上报："
     },
     {
       "type": 1,
@@ -61759,13 +61777,13 @@
   "web.admin.settings.network.page.intro": [
     {
       "type": 0,
-      "value": "网络访问提供商会为此服务器在Tailscale等覆盖网络上提供身份，让客户端无需端口转发或公共反向代理即可访问它。提供商是插件：从插件页面安装后，它就会显示在这里。"
+      "value": "将此服务器连接到Tailscale等覆盖网络，使客户端无需端口转发或公共反向代理即可访问它。请从插件页面安装提供商插件。"
     }
   ],
   "web.admin.settings.network.page.noProvidersBody": [
     {
       "type": 0,
-      "value": "没有已安装的插件提供网络访问。请从插件页面安装网络访问提供商，以将此服务器连接到覆盖网络。"
+      "value": "从插件页面安装网络访问提供商，即可在此处进行管理。"
     }
   ],
   "web.admin.settings.network.page.noProvidersTitle": [
@@ -61851,7 +61869,7 @@
   "web.admin.settings.nodeRouting.description": [
     {
       "type": 0,
-      "value": "哪台机器执行Remux或转码，以及哪台机器将串流发送给播放器。“优先”路由会回退到API服务器；“仅限”路由则不会。"
+      "value": "选择由哪台服务器负责Remux和转码，以及由哪台服务器向播放器发送串流。“优先”选项在不可用时会回退；“仅限”选项绝不回退。"
     }
   ],
   "web.admin.settings.nodeRouting.egress.preferProxy": [
@@ -61881,13 +61899,13 @@
   "web.admin.settings.nodeRouting.execution.workerOnly": [
     {
       "type": 0,
-      "value": "仅限任意工作节点"
+      "value": "仅限工作节点"
     }
   ],
   "web.admin.settings.nodeRouting.fields.directPlayEgress.description": [
     {
       "type": 0,
-      "value": "原始字节无需执行节点。"
+      "value": "直接播放会原样发送原始文件，因此不需要转码或Remux服务器。"
     }
   ],
   "web.admin.settings.nodeRouting.fields.directPlayEgress.label": [
@@ -61905,7 +61923,7 @@
   "web.admin.settings.nodeRouting.fields.remuxExecution.description": [
     {
       "type": 0,
-      "value": "工作节点可以是代理节点或转码节点。“优先转码节点”会在支持时于转码节点上运行HLS或渐进式Remux；渐进式输出会通过所选代理中继。"
+      "value": "工作节点包括代理节点和转码节点。“优先转码节点”会在支持时于转码节点上运行HLS或渐进式Remux，并通过所选代理中继渐进式串流。"
     }
   ],
   "web.admin.settings.nodeRouting.fields.remuxExecution.label": [
@@ -61923,7 +61941,7 @@
   "web.admin.settings.nodeRouting.fields.videoTranscodeExecution.description": [
     {
       "type": 0,
-      "value": "视频转码的工作节点是转码节点；代理节点仅提供出口。"
+      "value": "在工作节点中，只有转码节点可以执行视频转码；代理节点仅负责分发串流。"
     }
   ],
   "web.admin.settings.nodeRouting.fields.videoTranscodeExecution.label": [
@@ -61953,7 +61971,7 @@
   "web.admin.settings.nodeRouting.paths.description": [
     {
       "type": 0,
-      "value": "箭头表示软回退顺序；“仅限”模式绝不会越过该边界。"
+      "value": "箭头表示某台服务器不可用时的回退顺序。“仅限”路由绝不回退。"
     }
   ],
   "web.admin.settings.nodeRouting.paths.directPlay": [
@@ -61995,7 +62013,7 @@
   "web.admin.settings.nodeRouting.presets.description": [
     {
       "type": 0,
-      "value": "一次性设置“高级”下的全部5条路由；“自定义”不会被保存。"
+      "value": "一次性应用“高级”下的全部5条路由。"
     }
   ],
   "web.admin.settings.nodeRouting.presets.gpu": [
@@ -62061,7 +62079,7 @@
   "web.admin.settings.nodeRouting.preview.remux.workerOnly": [
     {
       "type": 0,
-      "value": "仅限任意工作节点"
+      "value": "仅限工作节点"
     }
   ],
   "web.admin.settings.nodeRouting.preview.route": [
@@ -62099,13 +62117,13 @@
   "web.admin.settings.nodeRouting.warnings.proxyOnlyClients": [
     {
       "type": 0,
-      "value": "仅限代理出口要求每个原生客户端都支持授权媒体来源；较旧的客户端可能无法启动该工作负载。"
+      "value": "仅限代理出口需要使用支持代理串流的最新版原生客户端。较旧的客户端可能无法开始播放。"
     }
   ],
   "web.admin.settings.nodeRouting.warnings.stranded": [
     {
       "type": 0,
-      "value": "某条“仅限”路由当前没有可用的健康节点。仍可保存，以便节点稍后加入。"
+      "value": "某条“仅限”路由当前没有健康节点。如果节点稍后会加入，你仍可以保存。"
     }
   ],
   "web.admin.settings.notifications.delivery": [
@@ -62117,7 +62135,7 @@
   "web.admin.settings.notifications.deliveryDescription": [
     {
       "type": 0,
-      "value": "通知的发送位置。渠道关闭时仍可编辑其设置，以便在开启前准备就绪。"
+      "value": "选择Silo发送通知的位置。你可以在开启前先配置任何渠道。"
     }
   ],
   "web.admin.settings.notifications.digestHour": [
@@ -62135,13 +62153,13 @@
   "web.admin.settings.notifications.discord.appConnected": [
     {
       "type": 0,
-      "value": "Discord应用已连接"
+      "value": "应用已配置"
     }
   ],
   "web.admin.settings.notifications.discord.appNotConnected": [
     {
       "type": 0,
-      "value": "Discord应用未连接"
+      "value": "应用未配置"
     }
   ],
   "web.admin.settings.notifications.discord.application": [
@@ -62189,7 +62207,7 @@
   "web.admin.settings.notifications.discord.clearConfirm": [
     {
       "type": 0,
-      "value": "清除"
+      "value": "清除凭据"
     }
   ],
   "web.admin.settings.notifications.discord.clearCredentials": [
@@ -62267,7 +62285,21 @@
   "web.admin.settings.notifications.discord.guideBot": [
     {
       "type": 0,
-      "value": "Bot页面：重置并复制"
+      "value": "在"
+    },
+    {
+      "type": 8,
+      "value": "b",
+      "children": [
+        {
+          "type": 0,
+          "value": "Bot"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "页面，重置并复制"
     },
     {
       "type": 8,
@@ -62281,7 +62313,21 @@
     },
     {
       "type": 0,
-      "value": "。将所有Privileged Gateway Intents（Presence、Server Members、Message Content）保持"
+      "value": "。将所有"
+    },
+    {
+      "type": 8,
+      "value": "b",
+      "children": [
+        {
+          "type": 0,
+          "value": "Privileged Gateway Intents"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "（Presence、Server Members、Message Content）保持"
     },
     {
       "type": 8,
@@ -62341,7 +62387,7 @@
   "web.admin.settings.notifications.discord.guideIntro": [
     {
       "type": 0,
-      "value": "在"
+      "value": "在Discord Developer Portal（"
     },
     {
       "type": 8,
@@ -62355,13 +62401,13 @@
     },
     {
       "type": 0,
-      "value": "中设置："
+      "value": "）中："
     }
   ],
   "web.admin.settings.notifications.discord.guideInvite": [
     {
       "type": 0,
-      "value": "将这三项凭据粘贴到下方并保存，然后使用邀请按钮将机器人添加到你的Discord服务器。它"
+      "value": "将三项凭据粘贴到下方并保存，然后邀请机器人加入你的Discord服务器。它"
     },
     {
       "type": 8,
@@ -62375,13 +62421,27 @@
     },
     {
       "type": 0,
-      "value": "——只要是成员就能向其他成员发送私信；用户必须与机器人同在该服务器中才能收到私信。"
+      "value": "——只要同在该服务器中，它就能向用户发送私信。"
     }
   ],
   "web.admin.settings.notifications.discord.guideOAuth": [
     {
       "type": 0,
-      "value": "OAuth2页面：复制"
+      "value": "在"
+    },
+    {
+      "type": 8,
+      "value": "b",
+      "children": [
+        {
+          "type": 0,
+          "value": "OAuth2"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "页面，复制"
     },
     {
       "type": 8,
@@ -62395,7 +62455,7 @@
     },
     {
       "type": 0,
-      "value": "，重置并复制"
+      "value": "，然后重置并复制"
     },
     {
       "type": 8,
@@ -62409,7 +62469,21 @@
     },
     {
       "type": 0,
-      "value": "，然后在Redirects下使用此服务器的公开URL添加"
+      "value": "。在"
+    },
+    {
+      "type": 8,
+      "value": "b",
+      "children": [
+        {
+          "type": 0,
+          "value": "Redirects"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "下，使用你服务器的公开URL添加"
     },
     {
       "type": 8,
@@ -62423,7 +62497,7 @@
     },
     {
       "type": 0,
-      "value": "——必须完全一致。"
+      "value": "（必须完全一致）。"
     }
   ],
   "web.admin.settings.notifications.discord.guidePublicUrl": [
@@ -62447,7 +62521,7 @@
   "web.admin.settings.notifications.discord.inviteCopyFailed": [
     {
       "type": 0,
-      "value": "无法复制邀请链接——请选中后手动复制"
+      "value": "无法复制邀请链接。请使用“邀请机器人加入服务器”直接打开。"
     }
   ],
   "web.admin.settings.notifications.discord.mustBeInServer": [
@@ -62459,7 +62533,7 @@
   "web.admin.settings.notifications.discord.perEpisode": [
     {
       "type": 0,
-      "value": "允许用户选择每集发送私信"
+      "value": "允许每集发送私信"
     }
   ],
   "web.admin.settings.notifications.discord.saveFirst": [
@@ -62595,7 +62669,7 @@
   "web.admin.settings.notifications.email.description": [
     {
       "type": 0,
-      "value": "为选择接收的用户发送每日摘要或每集一封邮件。"
+      "value": "为选择接收的用户发送每日摘要或每集邮件。"
     }
   ],
   "web.admin.settings.notifications.email.mailMissing": [
@@ -62607,7 +62681,7 @@
   "web.admin.settings.notifications.email.mailMissingStatus": [
     {
       "type": 0,
-      "value": "未设置邮件服务器。设置之前无法发送任何邮件；请在"
+      "value": "尚未配置邮件服务器。在"
     },
     {
       "type": 8,
@@ -62615,13 +62689,13 @@
       "children": [
         {
           "type": 0,
-          "value": "电子邮件页面"
+          "value": "电子邮件设置"
         }
       ]
     },
     {
       "type": 0,
-      "value": "中设置。"
+      "value": "中完成设置前，Silo无法发送邮件。"
     }
   ],
   "web.admin.settings.notifications.email.mailReady": [
@@ -62653,7 +62727,7 @@
   "web.admin.settings.notifications.email.perEpisode": [
     {
       "type": 0,
-      "value": "允许用户选择每集发送邮件"
+      "value": "允许每集发送邮件"
     }
   ],
   "web.admin.settings.notifications.email.summaryAt": [
@@ -62697,7 +62771,7 @@
   "web.admin.settings.notifications.loadFailedDescription": [
     {
       "type": 0,
-      "value": "此处显示的值可能与服务器的实际状态不符。请重新加载以重试。"
+      "value": "控件已隐藏，以防覆盖你服务器的当前设置。请重新加载以重试。"
     }
   ],
   "web.admin.settings.notifications.loadFailedTitle": [
@@ -62709,19 +62783,19 @@
   "web.admin.settings.notifications.perEpisodeOffDescription": [
     {
       "type": 0,
-      "value": "关闭时改为发送每日摘要。"
+      "value": "关闭时，用户将改为收到每日摘要。"
     }
   ],
   "web.admin.settings.notifications.relay.applyUrl": [
     {
       "type": 0,
-      "value": "注册以应用新的中继URL。"
+      "value": "请注册或轮换上方的凭据，以应用新的中继URL。"
     }
   ],
   "web.admin.settings.notifications.relay.chipConfigured": [
     {
       "type": 0,
-      "value": "已配置中继"
+      "value": "已注册"
     }
   ],
   "web.admin.settings.notifications.relay.chipFirstSend": [
@@ -62751,7 +62825,7 @@
   "web.admin.settings.notifications.relay.clearDescription": [
     {
       "type": 0,
-      "value": "在重新注册中继之前，将停止移动推送。"
+      "value": "移动推送通知将立即停止，直到你重新注册中继。"
     }
   ],
   "web.admin.settings.notifications.relay.clearFailed": [
@@ -62803,29 +62877,33 @@
   "web.admin.settings.notifications.relay.description": [
     {
       "type": 0,
-      "value": "通过Silo中继进行移动推送，由APNs或FCM送达。"
+      "value": "通过Silo中继（APNs和FCM）向iOS和Android应用发送推送通知。"
     }
   ],
   "web.admin.settings.notifications.relay.expirationUnknown": [
     {
       "type": 0,
-      "value": "过期时间未知；Silo会在下次续期时刷新凭据。"
+      "value": "凭据过期时间未知。Silo会自动刷新。"
     }
   ],
   "web.admin.settings.notifications.relay.expired": [
     {
       "type": 0,
-      "value": "已过期；Silo会在下次发送前续期。"
+      "value": "凭据已过期。Silo会在下次推送前续期。"
     }
   ],
   "web.admin.settings.notifications.relay.expires": [
+    {
+      "type": 0,
+      "value": "凭据将于"
+    },
     {
       "type": 1,
       "value": "date"
     },
     {
       "type": 0,
-      "value": "过期；Silo会自动续期。"
+      "value": "过期。Silo会自动续期。"
     }
   ],
   "web.admin.settings.notifications.relay.noCredential": [
@@ -62837,41 +62915,57 @@
   "web.admin.settings.notifications.relay.notRegistered": [
     {
       "type": 0,
-      "value": "尚未注册；Silo会在首次推送时注册。"
+      "value": "尚未注册。Silo会在首次推送时自动注册。"
     }
   ],
   "web.admin.settings.notifications.relay.ready": [
     {
+      "type": 0,
+      "value": "中继已注册——部署"
+    },
+    {
       "type": 1,
       "value": "deployment"
     },
     {
       "type": 0,
-      "value": "的凭据已就绪"
+      "value": "。"
     }
   ],
   "web.admin.settings.notifications.relay.readyKey": [
     {
+      "type": 0,
+      "value": "中继已注册——部署"
+    },
+    {
       "type": 1,
       "value": "deployment"
     },
     {
       "type": 0,
-      "value": "的凭据已就绪，密钥"
+      "value": "，密钥"
     },
     {
       "type": 1,
       "value": "key"
+    },
+    {
+      "type": 0,
+      "value": "。"
     }
   ],
   "web.admin.settings.notifications.relay.readyKeyRelay": [
     {
+      "type": 0,
+      "value": "中继已注册——部署"
+    },
+    {
       "type": 1,
       "value": "deployment"
     },
     {
       "type": 0,
-      "value": "的凭据已就绪，密钥"
+      "value": "，密钥"
     },
     {
       "type": 1,
@@ -62879,25 +62973,37 @@
     },
     {
       "type": 0,
-      "value": "，中继请求"
+      "value": "，请求"
     },
     {
       "type": 1,
       "value": "request"
+    },
+    {
+      "type": 0,
+      "value": "。"
     }
   ],
   "web.admin.settings.notifications.relay.readyRelay": [
+    {
+      "type": 0,
+      "value": "中继已注册——部署"
+    },
     {
       "type": 1,
       "value": "deployment"
     },
     {
       "type": 0,
-      "value": "的凭据已就绪，中继请求"
+      "value": "，请求"
     },
     {
       "type": 1,
       "value": "request"
+    },
+    {
+      "type": 0,
+      "value": "。"
     }
   ],
   "web.admin.settings.notifications.relay.register": [
@@ -62927,7 +63033,7 @@
   "web.admin.settings.notifications.relay.reregistrationNote": [
     {
       "type": 0,
-      "value": "中继凭据已被清除，或中继已停用此部署。请重新注册以创建新部署。其他中继拒绝情况会自动恢复。"
+      "value": "推送投递已暂停，因为中继凭据已被清除，或中继已停用此部署。请重新注册以创建新部署并恢复投递。"
     }
   ],
   "web.admin.settings.notifications.relay.rotate": [
@@ -62945,7 +63051,7 @@
   "web.admin.settings.notifications.relay.urlDescription": [
     {
       "type": 0,
-      "value": "在下方注册时保存。"
+      "value": "在下方注册或轮换凭据时生效。"
     }
   ],
   "web.admin.settings.notifications.reload": [
@@ -62995,7 +63101,7 @@
   "web.admin.settings.notifications.serverChannels.currentHost": [
     {
       "type": 0,
-      "value": "当前指向"
+      "value": "留空以保留"
     },
     {
       "type": 1,
@@ -63017,7 +63123,7 @@
   "web.admin.settings.notifications.serverChannels.deleteDescription": [
     {
       "type": 0,
-      "value": "服务器事件将不再发布到此目标。此操作无法撤销。"
+      "value": "Silo将停止向此频道发布服务器事件。此操作无法撤销。"
     }
   ],
   "web.admin.settings.notifications.serverChannels.deleteTitle": [
@@ -63037,7 +63143,7 @@
   "web.admin.settings.notifications.serverChannels.dialogDescription": [
     {
       "type": 0,
-      "value": "服务器频道广播全服务器范围的事件——每个个人资料看到的内容都相同。Discord webhook URL会显示为原生嵌入内容；其他任何HTTPS端点会收到签名的JSON。"
+      "value": "向共享频道发布全服务器事件，不按账户或媒体库访问权限筛选。Discord webhook URL会以嵌入内容形式发布；其他HTTPS URL将收到签名的JSON。"
     }
   ],
   "web.admin.settings.notifications.serverChannels.disabled": [
@@ -63057,7 +63163,7 @@
     },
     {
       "type": 0,
-      "value": "重新启用此频道后，将从现在开始恢复发布。"
+      "value": "重新开启此频道即可恢复发布新事件。"
     }
   ],
   "web.admin.settings.notifications.serverChannels.edit": [
@@ -63179,7 +63285,7 @@
     },
     {
       "type": 0,
-      "value": "。请检查目标URL。"
+      "value": "。请检查webhook URL。"
     }
   ],
   "web.admin.settings.notifications.serverChannels.lastFailureWhen": [
@@ -63201,7 +63307,7 @@
     },
     {
       "type": 0,
-      "value": "。请检查目标URL。"
+      "value": "。请检查webhook URL。"
     }
   ],
   "web.admin.settings.notifications.serverChannels.lastPost": [
@@ -63300,6 +63406,10 @@
                       "value": "status"
                     },
                     {
+                      "type": 0,
+                      "value": "，"
+                    },
+                    {
                       "type": 1,
                       "value": "duration_ms"
                     },
@@ -63344,6 +63454,10 @@
                     {
                       "type": 1,
                       "value": "status"
+                    },
+                    {
+                      "type": 0,
+                      "value": "，"
                     },
                     {
                       "type": 1,
@@ -63404,6 +63518,10 @@
                       "value": "status"
                     },
                     {
+                      "type": 0,
+                      "value": "，"
+                    },
+                    {
                       "type": 1,
                       "value": "duration_ms"
                     },
@@ -63458,6 +63576,10 @@
                       "value": "status"
                     },
                     {
+                      "type": 0,
+                      "value": "，"
+                    },
+                    {
                       "type": 1,
                       "value": "duration_ms"
                     },
@@ -63505,7 +63627,7 @@
   "web.admin.settings.notifications.serverChannelsCard.description": [
     {
       "type": 0,
-      "value": "发布到共享目标的全服务器公告。"
+      "value": "发布到共享Discord或自定义webhook的全服务器公告。"
     }
   ],
   "web.admin.settings.notifications.serverChannelsCard.destinations": [
@@ -63521,7 +63643,7 @@
             },
             {
               "type": 0,
-              "value": "个目标"
+              "value": "个频道"
             }
           ]
         }
@@ -63603,7 +63725,7 @@
   "web.admin.settings.notifications.webhooks.allowPrivateDescription": [
     {
       "type": 0,
-      "value": "允许局域网和localhost目标；仅用于开发。"
+      "value": "允许localhost和局域网地址。仅用于开发。"
     }
   ],
   "web.admin.settings.notifications.webhooks.allowPrivateWarning": [
@@ -63621,13 +63743,13 @@
   "web.admin.settings.notifications.webhooks.deliveriesDescription": [
     {
       "type": 0,
-      "value": "由每个服务器进程单独计数。超出限制的调用会被丢弃；收件箱通知仍会送达。"
+      "value": "按每个服务器实例单独生效，不跨集群共享。超出的webhook投递会被丢弃，但应用内通知仍会送达。"
     }
   ],
   "web.admin.settings.notifications.webhooks.description": [
     {
       "type": 0,
-      "value": "用户为自己创建的webhook，包括Discord或通用webhook。"
+      "value": "用户为自己设置的Discord或自定义HTTPS webhook。"
     }
   ],
   "web.admin.settings.notifications.webhooks.perMinute": [
@@ -63645,7 +63767,7 @@
   "web.admin.settings.notifications.webhooks.privateAllowed": [
     {
       "type": 0,
-      "value": "已允许私有目标"
+      "value": "已允许私有地址"
     }
   ],
   "web.admin.settings.notifications.webhooks.title": [
@@ -63723,7 +63845,7 @@
   "web.admin.settings.playback.execution.localServer": [
     {
       "type": 0,
-      "value": "本地服务器"
+      "value": "此服务器"
     }
   ],
   "web.admin.settings.playback.execution.nodesOnly": [
@@ -63741,7 +63863,7 @@
   "web.admin.settings.playback.execution.preferNodes": [
     {
       "type": 0,
-      "value": "优先使用转码节点"
+      "value": "可用时使用转码节点"
     }
   ],
   "web.admin.settings.playback.execution.thisServer": [
@@ -63773,13 +63895,13 @@
     },
     {
       "type": 0,
-      "value": "未通过硬件检查（转码节点）"
+      "value": "在转码节点上未通过硬件检查"
     }
   ],
   "web.admin.settings.playback.hwAccel.description": [
     {
       "type": 0,
-      "value": "自动会选择最佳设备。如果启动失败，会先保持GPU编码并改用CPU解码，再回退到软件编码。"
+      "value": "自动会选择最佳设备。如果GPU转码启动失败，Silo会先尝试CPU解码搭配GPU编码，再回退到软件转码。"
     }
   ],
   "web.admin.settings.playback.hwAccel.detected": [
@@ -63875,7 +63997,7 @@
     },
     {
       "type": 0,
-      "value": "需要Silo在macOS上原生运行，而不是在Docker中运行（转码节点）"
+      "value": "要求转码节点在macOS上原生运行，而不是在Docker中运行"
     }
   ],
   "web.admin.settings.playback.hwAccel.noneFound": [
@@ -63901,7 +64023,7 @@
   "web.admin.settings.playback.hwAccel.notAccessibleNode": [
     {
       "type": 0,
-      "value": "此服务器无法访问"
+      "value": "转码节点无法访问"
     },
     {
       "type": 1,
@@ -63909,7 +64031,7 @@
     },
     {
       "type": 0,
-      "value": "设备（转码节点）"
+      "value": "设备"
     }
   ],
   "web.admin.settings.playback.hwAccel.notFound": [
@@ -63925,15 +64047,11 @@
   "web.admin.settings.playback.hwAccel.notFoundNode": [
     {
       "type": 0,
-      "value": "此服务器上未找到"
+      "value": "转码节点上未找到"
     },
     {
       "type": 1,
       "value": "backend"
-    },
-    {
-      "type": 0,
-      "value": "（转码节点）"
     }
   ],
   "web.admin.settings.playback.hwAccel.nvencFirstDevice": [
@@ -63995,7 +64113,7 @@
   "web.admin.settings.playback.markers.detectionWorkersDescription": [
     {
       "type": 0,
-      "value": "Silo同时分析的季或电影数量，每个都使用独立的FFmpeg进程。默认为1。如果存储和CPU有余量，可调高此值以更快处理大型媒体库。"
+      "value": "同时分析的季或电影数量（每个运行一个FFmpeg进程）。默认为1；如果CPU和存储允许，可调高此值以加快大型媒体库的扫描速度。"
     }
   ],
   "web.admin.settings.playback.markers.group": [
@@ -64019,7 +64137,7 @@
   "web.admin.settings.playback.markers.lazyPlaybackBoth": [
     {
       "type": 0,
-      "value": "开始播放时先在线查找。对于在线提供商没有的片头或片尾，Silo会使用此服务器的CPU进行检测。"
+      "value": "开始播放时先在线检查，再使用此服务器的CPU检测在线未找到的片头或片尾标记。"
     }
   ],
   "web.admin.settings.playback.markers.lazyPlaybackLocal": [
@@ -64049,7 +64167,7 @@
   "web.admin.settings.playback.markers.modeDescription": [
     {
       "type": 0,
-      "value": "在线标记优先。如果媒体库中已保存在线的片头或片尾标记，Silo会跳过对应的本地检测。本地检测会占用CPU。"
+      "value": "在线标记优先——当已保存在线片头或片尾标记时，Silo会跳过本地检测。本地检测会占用CPU。"
     }
   ],
   "web.admin.settings.playback.markers.modeLocal": [
@@ -64121,7 +64239,7 @@
   "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
     {
       "type": 0,
-      "value": "0到1440。在Silo应用中暂停达到此时长的视频将被结束，并释放其串流和所有转码；再次播放时会从同一位置继续。一起看、投屏和有声书不受影响。设为0则关闭此功能。"
+      "value": "结束Silo应用中已暂停的视频会话，以释放串流和转码资源；播放会从同一位置继续。不影响一起看、投屏或有声书。范围0–1440（设为0则关闭）。"
     }
   ],
   "web.admin.settings.playback.previews.chapterExecution": [
@@ -64139,7 +64257,7 @@
   "web.admin.settings.playback.previews.chapterWorkersDescription": [
     {
       "type": 0,
-      "value": "Silo同时从多少个文件提取章节缩略图。另有一个工作线程只处理正在播放的影片，这样它们不会在队列中等待。"
+      "value": "同时处理的文件数。另保留一个工作线程专用于正在播放的影片，使其无需在队列中等待。"
     }
   ],
   "web.admin.settings.playback.previews.group": [
@@ -64151,13 +64269,13 @@
   "web.admin.settings.playback.previews.groupDescription": [
     {
       "type": 0,
-      "value": "章节缩略图和拖动预览需在媒体库页面中为每个媒体库分别开启。"
+      "value": "请在媒体库中为每个媒体库开启章节缩略图和拖动预览。"
     }
   ],
   "web.admin.settings.playback.previews.groupDescriptionNoTrickplay": [
     {
       "type": 0,
-      "value": "章节缩略图需在媒体库页面中为每个媒体库分别开启。"
+      "value": "请在媒体库中为每个媒体库开启章节缩略图。"
     }
   ],
   "web.admin.settings.playback.previews.hdrBestEffort": [
@@ -64205,7 +64323,7 @@
   "web.admin.settings.playback.previews.intervalDescription": [
     {
       "type": 0,
-      "value": "拖动预览之间的时间，5到60秒。更改后会重新生成所有媒体库的预览。"
+      "value": "拖动预览之间的间隔秒数（5–60）。更改此项会重新生成所有媒体库的拖动预览。"
     }
   ],
   "web.admin.settings.playback.previews.librariesLink": [
@@ -64253,7 +64371,7 @@
   "web.admin.settings.playback.previews.trickplayNodeCapacityDescription": [
     {
       "type": 0,
-      "value": "一个转码节点同时为多少个文件生成拖动预览（涵盖所有服务器），范围为1到64。每个文件都计入该节点的作业上限，因此请为播放留出余量。"
+      "value": "每个转码节点在所有服务器上的并发拖动预览作业数（1–64）。每项都计入节点的作业上限，因此请为播放留出余量。"
     }
   ],
   "web.admin.settings.playback.previews.trickplayWorkers": [
@@ -64265,7 +64383,7 @@
   "web.admin.settings.playback.previews.trickplayWorkersDescription": [
     {
       "type": 0,
-      "value": "每台服务器同时为多少个文件生成拖动预览。它们以低优先级运行，播放优先。"
+      "value": "每台服务器同时处理的文件数。以低优先级运行，确保播放优先。"
     }
   ],
   "web.admin.settings.playback.previews.width": [
@@ -64277,7 +64395,7 @@
   "web.admin.settings.playback.previews.widthDescription": [
     {
       "type": 0,
-      "value": "章节缩略图以及播放器在拖动时显示的缩略图的宽度，160到640。更改后会全部重新生成；在逐个替换之前，播放器会继续使用当前的图像。"
+      "value": "适用于章节缩略图和拖动预览（160–640px）。更改此项会重新生成现有图像；在替换前，播放器会继续使用当前图像。"
     }
   ],
   "web.admin.settings.playback.remake.intervalCount": [
@@ -64289,7 +64407,7 @@
           "value": [
             {
               "type": 0,
-              "value": "将按新的间隔重新生成"
+              "value": "将在后台按新的间隔重新生成"
             },
             {
               "type": 1,
@@ -64297,7 +64415,7 @@
             },
             {
               "type": 0,
-              "value": "个文件的拖动预览。此操作在后台运行，对于大型媒体库可能需要很长时间；在逐个替换之前，播放器会继续使用当前的图像。"
+              "value": "个文件的拖动预览。在大型媒体库中可能需要较长时间；在替换前，播放器会继续使用当前图像。"
             }
           ]
         }
@@ -64309,7 +64427,7 @@
   "web.admin.settings.playback.remake.intervalExisting": [
     {
       "type": 0,
-      "value": "将按新的间隔重新生成现有的拖动预览。此操作在后台运行，对于大型媒体库可能需要很长时间；在逐个替换之前，播放器会继续使用当前的图像。"
+      "value": "将在后台按新的间隔重新生成现有的拖动预览。在大型媒体库中可能需要较长时间；在替换前，播放器会继续使用当前图像。"
     }
   ],
   "web.admin.settings.playback.remake.intervalTitle": [
@@ -64327,7 +64445,7 @@
           "value": [
             {
               "type": 0,
-              "value": "将按新的宽度重新生成所有章节缩略图和"
+              "value": "将在后台按新的宽度重新生成所有章节缩略图和"
             },
             {
               "type": 1,
@@ -64335,7 +64453,7 @@
             },
             {
               "type": 0,
-              "value": "个文件的拖动预览。此操作在后台运行，对于大型媒体库可能需要很长时间；在逐个替换之前，播放器会继续使用当前的图像。"
+              "value": "个文件的拖动预览。在大型媒体库中可能需要较长时间；在替换前，播放器会继续使用当前图像。"
             }
           ]
         }
@@ -64347,13 +64465,13 @@
   "web.admin.settings.playback.remake.widthExisting": [
     {
       "type": 0,
-      "value": "将按新的宽度重新生成所有章节缩略图和现有的拖动预览。此操作在后台运行，对于大型媒体库可能需要很长时间；在逐个替换之前，播放器会继续使用当前的图像。"
+      "value": "将在后台按新的宽度重新生成所有章节缩略图和现有的拖动预览。在大型媒体库中可能需要较长时间；在替换前，播放器会继续使用当前图像。"
     }
   ],
   "web.admin.settings.playback.remake.widthNoPreviews": [
     {
       "type": 0,
-      "value": "将按新的宽度重新生成所有章节缩略图。此操作在后台运行，对于大型媒体库可能需要很长时间；在逐个替换之前，播放器会继续使用当前的图像。"
+      "value": "将在后台按新的宽度重新生成所有章节缩略图。在大型媒体库中可能需要较长时间；在替换前，播放器会继续使用当前图像。"
     }
   ],
   "web.admin.settings.playback.remake.widthTitle": [
@@ -64371,7 +64489,7 @@
   "web.admin.settings.playback.speedTests.automaticDescription": [
     {
       "type": 0,
-      "value": "仅当服务器没有设备的当前测速结果时，应用才会测试该设备的连接。关闭后，观众仍可在设置中运行“测试速度”。"
+      "value": "仅当没有当前测速结果时，应用才会测试连接速度。关闭后，观众仍可在设置中运行“测试速度”。"
     }
   ],
   "web.admin.settings.playback.speedTests.group": [
@@ -64389,7 +64507,7 @@
   "web.admin.settings.playback.speedTests.maxAgeDescription": [
     {
       "type": 0,
-      "value": "1到30。测速结果超过此时间后，应用会重新测试。"
+      "value": "测速结果超过此时间后，应用会重新测试（1–30天）。"
     }
   ],
   "web.admin.settings.playback.title": [
@@ -64431,7 +64549,7 @@
   "web.admin.settings.playback.transcoding.backBufferHint": [
     {
       "type": 0,
-      "value": "保留这么长时间的已下载媒体，以便即时向后拖动，然后回收更早的转码分段。设为0可停用清理；启用时的值必须至少为120秒。与转码限速配合使用，可同时限制客户端播放位置前后的磁盘用量。"
+      "value": "保留此时长（秒）的已转码视频以便即时向后拖动，然后删除更早的分段。设为0可关闭清理（开启时最小为120）。与转码限速配合使用，可限制总磁盘占用。"
     }
   ],
   "web.admin.settings.playback.transcoding.bufferAhead": [
@@ -64449,7 +64567,7 @@
   "web.admin.settings.playback.transcoding.copyKeyframePlaylistDescription": [
     {
       "type": 0,
-      "value": "实验性功能。当Silo复制文件的视频时，根据文件的关键帧从一开始就列出所有分段，而不是使用随Silo复制而增长的播放列表。可防止Safari在播放中途卡住。如果跳转到远超Silo已复制部分的位置，Silo会从该处重新开始复制。"
+      "value": "实验性功能。根据关键帧预先生成完整的视频复制播放列表，而不是在播放过程中逐步增长。有助于防止Safari在播放中途卡住；大幅向前拖动时会从该位置重新开始复制。"
     }
   ],
   "web.admin.settings.playback.transcoding.dir": [
@@ -64481,7 +64599,7 @@
   "web.admin.settings.playback.transcoding.enabledDescription": [
     {
       "type": 0,
-      "value": "关闭后绝不重新编码视频。Silo仍会为需要的设备重新封装文件并转换音频。"
+      "value": "关闭后，Silo绝不会重新编码视频，但仍会在设备需要时重新封装文件并转换音频。"
     }
   ],
   "web.admin.settings.playback.transcoding.ffmpegPath": [
@@ -64513,13 +64631,13 @@
   "web.admin.settings.playback.transcoding.hardwareToneMap": [
     {
       "type": 0,
-      "value": "启用硬件HDR色调映射"
+      "value": "硬件HDR色调映射"
     }
   ],
   "web.admin.settings.playback.transcoding.hardwareToneMapHint": [
     {
       "type": 0,
-      "value": "允许经过验证的本地或远程GPU执行器在转码时将HDR视频转换为SDR。"
+      "value": "在转码时使用此服务器或转码节点上受支持的GPU，将HDR视频转换为SDR。"
     }
   ],
   "web.admin.settings.playback.transcoding.preferLower": [
@@ -64537,7 +64655,7 @@
   "web.admin.settings.playback.transcoding.softwareToneMap": [
     {
       "type": 0,
-      "value": "启用软件HDR色调映射"
+      "value": "软件HDR色调映射"
     }
   ],
   "web.admin.settings.playback.transcoding.softwareToneMapHint": [
@@ -64633,7 +64751,7 @@
   "web.admin.settings.providers.markerLookupDisabled": [
     {
       "type": 0,
-      "value": "在线标记查询已停用。可在"
+      "value": "在线标记查询已关闭，因此不会使用这些提供商。可在"
     },
     {
       "type": 8,
@@ -64685,19 +64803,19 @@
   "web.admin.settings.providers.mdblist.clearDescription": [
     {
       "type": 0,
-      "value": "MDBList搜索和浏览将停止工作。已通过URL导入的列表不受影响。"
+      "value": "搜索和浏览MDBList将停止工作。已通过URL导入的列表不受影响。"
     }
   ],
   "web.admin.settings.providers.mdblist.clearTitle": [
     {
       "type": 0,
-      "value": "要清除MDBList凭据吗？"
+      "value": "要清除MDBList API密钥吗？"
     }
   ],
   "web.admin.settings.providers.mdblist.cleared": [
     {
       "type": 0,
-      "value": "已清除MDBList凭据"
+      "value": "已清除MDBList API密钥"
     }
   ],
   "web.admin.settings.providers.mdblist.close": [
@@ -64721,7 +64839,7 @@
   "web.admin.settings.providers.mdblist.intro": [
     {
       "type": 0,
-      "value": "有了密钥，合集导入就能搜索和浏览MDBList列表；粘贴列表URL导入则无需密钥。请在"
+      "value": "导入合集时搜索和浏览MDBList需要此密钥。粘贴列表URL导入则无需密钥。可在"
     },
     {
       "type": 8,
@@ -64735,7 +64853,7 @@
     },
     {
       "type": 0,
-      "value": "获取密钥。"
+      "value": "获取。"
     }
   ],
   "web.admin.settings.providers.mdblist.manage": [
@@ -64747,13 +64865,13 @@
   "web.admin.settings.providers.mdblist.nothingToSave": [
     {
       "type": 0,
-      "value": "MDBList没有需要保存的内容。"
+      "value": "请输入要保存的API密钥。"
     }
   ],
   "web.admin.settings.providers.mdblist.saved": [
     {
       "type": 0,
-      "value": "已保存MDBList凭据"
+      "value": "已保存MDBList API密钥"
     }
   ],
   "web.admin.settings.providers.mdblist.saving": [
@@ -64765,7 +64883,7 @@
   "web.admin.settings.providers.mdblist.tagline": [
     {
       "type": 0,
-      "value": "列表"
+      "value": "合集导入"
     }
   ],
   "web.admin.settings.providers.mdblist.testConnection": [
@@ -64795,7 +64913,7 @@
   "web.admin.settings.providers.metadataNote": [
     {
       "type": 0,
-      "value": "元数据提供商（包括TMDB、TheTVDB和MDBList评分）在"
+      "value": "请在"
     },
     {
       "type": 8,
@@ -64809,7 +64927,7 @@
     },
     {
       "type": 0,
-      "value": "中连接。"
+      "value": "中配置元数据提供商（TMDB、TheTVDB和MDBList评分）。"
     }
   ],
   "web.admin.settings.providers.subtitles.apiKey": [
@@ -64827,7 +64945,7 @@
   "web.admin.settings.providers.subtitles.clearDescription": [
     {
       "type": 0,
-      "value": "将"
+      "value": "关闭"
     },
     {
       "type": 1,
@@ -64835,7 +64953,7 @@
     },
     {
       "type": 0,
-      "value": "保存为已停用，并清除其已存储的凭据。此更改在本服务器上的应用情况会单独报告；其他服务器可能仍在使用旧设置。"
+      "value": "并移除其已保存的凭据。保存后，Silo会显示此服务器是否已应用该更改；其他服务器可能仍在使用旧设置。"
     }
   ],
   "web.admin.settings.providers.subtitles.clearTitle": [
@@ -64867,7 +64985,7 @@
   "web.admin.settings.providers.subtitles.connectedOff": [
     {
       "type": 0,
-      "value": "已连接 · 关闭"
+      "value": "已配置 · 关闭"
     }
   ],
   "web.admin.settings.providers.subtitles.enable": [
@@ -64889,13 +65007,13 @@
   "web.admin.settings.providers.subtitles.loadFailed": [
     {
       "type": 0,
-      "value": "无法加载已保存的配置。请先重新加载再编辑。"
+      "value": "无法加载已保存的设置。请先重新加载再编辑。"
     }
   ],
   "web.admin.settings.providers.subtitles.loadingEditor": [
     {
       "type": 0,
-      "value": "正在加载已保存的配置……"
+      "value": "正在加载已保存的设置……"
     }
   ],
   "web.admin.settings.providers.subtitles.manage": [
@@ -64913,13 +65031,13 @@
   "web.admin.settings.providers.subtitles.reload": [
     {
       "type": 0,
-      "value": "重新加载已保存的配置（放弃草稿）"
+      "value": "重新加载已保存的设置（放弃更改）"
     }
   ],
   "web.admin.settings.providers.subtitles.saveNotConfirmed": [
     {
       "type": 0,
-      "value": "保存未得到确认。你的草稿已保留。请先选择“重新加载已保存的配置”进行检查，再进行其他更改。"
+      "value": "保存未得到确认，你的更改仍保留在当前界面。请先选择“重新加载已保存的设置”查看已存储的内容，再进行其他更改。"
     }
   ],
   "web.admin.settings.providers.subtitles.saving": [
@@ -64931,7 +65049,7 @@
   "web.admin.settings.providers.subtitles.taglineApiKey": [
     {
       "type": 0,
-      "value": "API密钥提供商"
+      "value": "通过API密钥获取字幕"
     }
   ],
   "web.admin.settings.providers.subtitles.taglineCommunity": [
@@ -65015,25 +65133,25 @@
   "web.admin.settings.recommendations.advanced.diversity.hint": [
     {
       "type": 0,
-      "value": "0 = 最大多样性，1 = 最大相关性"
+      "value": "0 = 更多样，1 = 更匹配"
     }
   ],
   "web.admin.settings.recommendations.advanced.diversity.label": [
     {
       "type": 0,
-      "value": "多样性Lambda"
+      "value": "相关性与多样性（0–1）"
     }
   ],
   "web.admin.settings.recommendations.advanced.halfLife.hint": [
     {
       "type": 0,
-      "value": "旧信号权重衰减的速度"
+      "value": "较早活动的权重衰减至一半所需的天数。"
     }
   ],
   "web.admin.settings.recommendations.advanced.halfLife.label": [
     {
       "type": 0,
-      "value": "时间衰减半衰期（天）"
+      "value": "偏好衰减半衰期（天）"
     }
   ],
   "web.admin.settings.recommendations.advanced.title": [
@@ -65057,7 +65175,7 @@
   "web.admin.settings.recommendations.embeddingLockNote": [
     {
       "type": 0,
-      "value": "切换到其他模型需要重置嵌入，这会删除所有嵌入。改用提供相同模型的其他提供商会在重启后生效。"
+      "value": "要切换模型，请在下方重置嵌入（这会删除所有已存储的嵌入）。切换到使用相同模型的其他提供商将在重启后生效。"
     }
   ],
   "web.admin.settings.recommendations.external.addToDiscover": [
@@ -65081,13 +65199,13 @@
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
-      "value": "启用发现推荐"
+      "value": "显示发现推荐"
     }
   ],
   "web.admin.settings.recommendations.external.enabledHint": [
     {
       "type": 0,
-      "value": "在请求的发现页中添加个人行，显示尚未加入媒体库的作品。使用嵌入提供商和TMDB。"
+      "value": "在请求的发现页中添加个性化行，显示尚未加入媒体库的作品。使用你的嵌入提供商和TMDB。"
     }
   ],
   "web.admin.settings.recommendations.external.maxTitles": [
@@ -65099,19 +65217,19 @@
   "web.admin.settings.recommendations.external.maxTitlesHint": [
     {
       "type": 0,
-      "value": "服务器保留多少部不在媒体库中的作品用于推荐。每部作品都会在TMDB上查询并进行嵌入。嵌入通常成本很低，但数值越高，视你的嵌入提供商而定，可能花费更多或耗时更长，并占用更多存储空间。"
+      "value": "从TMDB获取并嵌入用于推荐的非媒体库作品。上限越高，占用的存储空间越多，并可能增加嵌入时间或提供商费用。"
     }
   ],
   "web.admin.settings.recommendations.external.missingFromDiscover": [
     {
       "type": 0,
-      "value": "你的发现页面还没有显示任何推荐行。"
+      "value": "你的发现页面还没有包含任何推荐行。"
     }
   ],
   "web.admin.settings.recommendations.external.needsRecommendations": [
     {
       "type": 0,
-      "value": "请先开启上方的启用推荐并重启服务器，发现推荐才能运行。"
+      "value": "请先开启上方的推荐并重启服务器，发现推荐才能运行。"
     }
   ],
   "web.admin.settings.recommendations.external.needsRequests": [
@@ -65149,7 +65267,7 @@
   "web.admin.settings.recommendations.general.enabled": [
     {
       "type": 0,
-      "value": "启用推荐"
+      "value": "推荐"
     }
   ],
   "web.admin.settings.recommendations.general.title": [
@@ -65161,49 +65279,49 @@
   "web.admin.settings.recommendations.schedule.cowatchCron": [
     {
       "type": 0,
-      "value": "共同观看Cron"
+      "value": "共同观看数据"
     }
   ],
   "web.admin.settings.recommendations.schedule.cronHint": [
     {
       "type": 0,
-      "value": "Cron表达式"
+      "value": "Cron表达式，例如0 3 * * *"
     }
   ],
   "web.admin.settings.recommendations.schedule.embeddingsCron": [
     {
       "type": 0,
-      "value": "嵌入Cron"
+      "value": "嵌入"
     }
   ],
   "web.admin.settings.recommendations.schedule.externalCron": [
     {
       "type": 0,
-      "value": "发现推荐Cron"
+      "value": "发现推荐"
     }
   ],
   "web.admin.settings.recommendations.schedule.recommendationsCron": [
     {
       "type": 0,
-      "value": "推荐Cron"
+      "value": "推荐"
     }
   ],
   "web.admin.settings.recommendations.schedule.tasteProfilesCron": [
     {
       "type": 0,
-      "value": "口味画像Cron"
+      "value": "口味画像"
     }
   ],
   "web.admin.settings.recommendations.schedule.title": [
     {
       "type": 0,
-      "value": "计划"
+      "value": "计划（cron）"
     }
   ],
   "web.admin.settings.redis.db.description": [
     {
       "type": 0,
-      "value": "替换URL中的编号。共用一个Redis的每个安装都需要各自的编号。"
+      "value": "覆盖URL中的数据库编号。共享同一个Redis的每个Silo服务器都需要各自的编号。"
     }
   ],
   "web.admin.settings.redis.db.label": [
@@ -65227,7 +65345,7 @@
   "web.admin.settings.redis.unavailable.description": [
     {
       "type": 0,
-      "value": "无法加载受保护的凭据状态。请重新加载此页面以编辑Redis。"
+      "value": "无法检查已保存的Redis凭据或环境变量管理的设置。请重新加载此页面以编辑Redis设置。"
     }
   ],
   "web.admin.settings.redis.unavailable.title": [
@@ -65343,7 +65461,7 @@
   "web.admin.settings.requests.conditions.description": [
     {
       "type": 0,
-      "value": "请求必须符合所有条件。如果某个条件列出了多个值，符合其中一个即可。"
+      "value": "请求必须符合以下所有条件（对于“属于以下任一项”，符合列出的任一值即可）。"
     }
   ],
   "web.admin.settings.requests.conditions.heading": [
@@ -65537,7 +65655,7 @@
           "value": [
             {
               "type": 0,
-              "value": "在发出请求时读取，因此之后完结的剧集仍会留在原先发送到的位置。没有TMDB状态的剧集不符合条件。"
+              "value": "在请求时检查——之后完结的剧集仍会留在其原有服务器上。没有TMDB状态的剧集不符合条件。"
             }
           ]
         },
@@ -65545,7 +65663,7 @@
           "value": [
             {
               "type": 0,
-              "value": "在发出请求时读取，因此之后完结的剧集仍会留在原先发送到的位置。没有TMDB状态的剧集符合条件。"
+              "value": "在请求时检查——之后完结的剧集仍会留在其原有服务器上。没有TMDB状态的剧集仍符合条件。"
             }
           ]
         }
@@ -65575,7 +65693,7 @@
       "children": [
         {
           "type": 0,
-          "value": "接收："
+          "value": "摘要："
         }
       ]
     },
@@ -65645,7 +65763,7 @@
   "web.admin.settings.requests.destination.fourKCaptionForceDual": [
     {
       "type": 0,
-      "value": "每个请求都会与HD版本一同发送（常规）。"
+      "value": "每个请求都会与HD版本一同发送（在常规中设置）。"
     }
   ],
   "web.admin.settings.requests.destination.hdVersion": [
@@ -65694,13 +65812,13 @@
   "web.admin.settings.requests.destination.noUhdServers": [
     {
       "type": 0,
-      "value": "没有标记为4K的服务器。在服务器上开启“4K服务器”，即可向其发送4K版本。"
+      "value": "尚未配置4K服务器。请在服务器设置中开启“4K服务器”以路由4K版本。"
     }
   ],
   "web.admin.settings.requests.destination.noneChosen": [
     {
       "type": 0,
-      "value": "未选择任何项，因此将使用"
+      "value": "未选择任何项时，将使用"
     },
     {
       "type": 1,
@@ -65708,7 +65826,7 @@
     },
     {
       "type": 0,
-      "value": "自身的"
+      "value": "的默认"
     },
     {
       "type": 1,
@@ -65812,7 +65930,7 @@
     },
     {
       "type": 0,
-      "value": "（已关闭）"
+      "value": "（已禁用）"
     }
   ],
   "web.admin.settings.requests.destination.serverWrongType": [
@@ -65864,7 +65982,7 @@
           "value": [
             {
               "type": 0,
-              "value": "没有规则匹配时剧集的去向。将设置项保留为服务器默认，即可使用服务器自身的设置。"
+              "value": "未匹配规则的剧集请求的去向。将任意字段保留为服务器默认，即可保留服务器自身的设置。"
             }
           ]
         },
@@ -65872,7 +65990,7 @@
           "value": [
             {
               "type": 0,
-              "value": "没有规则匹配时电影的去向。将设置项保留为服务器默认，即可使用服务器自身的设置。"
+              "value": "未匹配规则的电影请求的去向。将任意字段保留为服务器默认，即可保留服务器自身的设置。"
             }
           ]
         }
@@ -65912,7 +66030,7 @@
   "web.admin.settings.requests.general.allowRequestsDescription": [
     {
       "type": 0,
-      "value": "用户可以请求服务器上没有的电影和剧集。"
+      "value": "允许用户请求媒体库中没有的电影和剧集。"
     }
   ],
   "web.admin.settings.requests.general.approval": [
@@ -65924,7 +66042,7 @@
   "web.admin.settings.requests.general.approvalAdmin": [
     {
       "type": 0,
-      "value": "由管理员审批"
+      "value": "需要管理员审批"
     }
   ],
   "web.admin.settings.requests.general.approvalAuto": [
@@ -65942,7 +66060,7 @@
   "web.admin.settings.requests.general.forceDualDescription": [
     {
       "type": 0,
-      "value": "通常，只有当用户的播放限制允许4K，且有服务器接收4K时，才会请求4K版本。开启后，每个请求都会同时请求4K。"
+      "value": "默认情况下，仅当请求者的播放限制允许4K时才会请求4K。开启后，只要路由中包含4K服务器，就会为所有人请求4K。"
     }
   ],
   "web.admin.settings.requests.general.label": [
@@ -65960,7 +66078,7 @@
   "web.admin.settings.requests.general.limitWindowInvalid": [
     {
       "type": 0,
-      "value": "请至少设置为1天。"
+      "value": "请输入不小于1的整数。"
     }
   ],
   "web.admin.settings.requests.general.limitWindowUnit": [
@@ -65977,10 +66095,6 @@
   ],
   "web.admin.settings.requests.general.overridableDefault": [
     {
-      "type": 0,
-      "value": "服务器范围的默认值。"
-    },
-    {
       "type": 8,
       "value": "link",
       "children": [
@@ -65992,7 +66106,7 @@
     },
     {
       "type": 0,
-      "value": "和账户可以覆盖此设置。"
+      "value": "和单个账户可以覆盖此默认值。"
     }
   ],
   "web.admin.settings.requests.general.requestLimit": [
@@ -66004,7 +66118,7 @@
   "web.admin.settings.requests.general.requestLimitDescription": [
     {
       "type": 0,
-      "value": "一个账户在下方周期内可请求的作品数量。已拒绝和失败的请求不计入。设为0时，只有拥有自己的组限额或账户限额的账户才能请求。"
+      "value": "账户在限制周期内最多可请求的作品数。已拒绝和失败的请求不计入。设为0则默认不允许请求。"
     }
   ],
   "web.admin.settings.requests.general.requestLimitInvalid": [
@@ -66028,7 +66142,7 @@
   "web.admin.settings.requests.general.watchlistDescription": [
     {
       "type": 0,
-      "value": "当有人将媒体库中没有的作品添加到待看清单时，系统会替其请求该作品，如同其选择了“请求”。每个个人资料都可以为自己关闭此功能。"
+      "value": "当有人将媒体库中缺失的作品添加到待看清单时，自动提交请求。每个个人资料都可以关闭此功能。"
     }
   ],
   "web.admin.settings.requests.list.addRule": [
@@ -66196,7 +66310,7 @@
           "value": [
             {
               "type": 0,
-              "value": "选择没有规则接收时剧集的去向。"
+              "value": "选择没有规则匹配时剧集的去向。"
             }
           ]
         },
@@ -66204,7 +66318,7 @@
           "value": [
             {
               "type": 0,
-              "value": "选择没有规则接收时电影的去向。"
+              "value": "选择没有规则匹配时电影的去向。"
             }
           ]
         }
@@ -66214,7 +66328,7 @@
   "web.admin.settings.requests.list.fallbackFirst": [
     {
       "type": 0,
-      "value": "请先为其他全部选择去向。"
+      "value": "请先为“其他所有内容”选择服务器。"
     }
   ],
   "web.admin.settings.requests.list.fallbackHd": [
@@ -66272,7 +66386,7 @@
     },
     {
       "type": 0,
-      "value": "的更多选项"
+      "value": "的更多操作"
     }
   ],
   "web.admin.settings.requests.list.moveDown": [
@@ -66344,7 +66458,7 @@
             },
             {
               "type": 0,
-              "value": "服务器，才能发送剧集请求。"
+              "value": "服务器，以开始路由剧集请求。"
             }
           ]
         },
@@ -66360,7 +66474,7 @@
             },
             {
               "type": 0,
-              "value": "服务器，才能发送电影请求。"
+              "value": "服务器，以开始路由电影请求。"
             }
           ]
         }
@@ -67198,7 +67312,7 @@
   "web.admin.settings.requests.model.trace.decidesHdNone": [
     {
       "type": 0,
-      "value": "决定HD：无"
+      "value": "不发送HD"
     }
   ],
   "web.admin.settings.requests.model.trace.decidesUhd": [
@@ -67210,7 +67324,7 @@
   "web.admin.settings.requests.model.trace.decidesUhdNone": [
     {
       "type": 0,
-      "value": "决定4K：无"
+      "value": "不发送4K"
     }
   ],
   "web.admin.settings.requests.model.trace.fails": [
@@ -67718,7 +67832,7 @@
   "web.admin.settings.requests.presets.changeDescription": [
     {
       "type": 0,
-      "value": "更改此规则接收哪些请求，然后选择它们的去向。"
+      "value": "调整此规则匹配哪些请求，然后选择它们的去向。"
     }
   ],
   "web.admin.settings.requests.presets.custom": [
@@ -67932,7 +68046,7 @@
   "web.admin.settings.requests.preview.caption": [
     {
       "type": 0,
-      "value": "按已保存的规则，查看请求会匹配哪条规则，以及每个版本会发送到哪里。"
+      "value": "使用已保存的规则测试作品会被路由到哪里。"
     }
   ],
   "web.admin.settings.requests.preview.checking": [
@@ -68078,7 +68192,7 @@
   "web.admin.settings.requests.preview.requesterHint": [
     {
       "type": 0,
-      "value": "仅针对特定用户的规则只会匹配这些用户的请求。"
+      "value": "选择一个账户，以测试按请求者筛选的规则。"
     }
   ],
   "web.admin.settings.requests.preview.resultYear": [
@@ -68170,7 +68284,7 @@
   "web.admin.settings.requests.routing.advancedDescription": [
     {
       "type": 0,
-      "value": "Silo从上往下检查规则。第一条匹配请求的规则决定其去向；没有规则匹配的请求会发送到“其余所有”。更改会立即保存。"
+      "value": "规则按从上到下的顺序运行；每个版本由第一条匹配的规则处理，未匹配的内容会发送到“其他所有内容”。更改会自动保存。"
     }
   ],
   "web.admin.settings.requests.routing.brandsFailed": [
@@ -68200,13 +68314,13 @@
   "web.admin.settings.requests.routing.brandsNeedRequests": [
     {
       "type": 0,
-      "value": "开启请求后，才能按名称选择电视网和制片公司。"
+      "value": "请在常规中开启“允许请求”，以按名称选择电视网和制片公司。"
     }
   ],
   "web.admin.settings.requests.routing.label": [
     {
       "type": 0,
-      "value": "请求去向"
+      "value": "路由"
     }
   ],
   "web.admin.settings.requests.routing.loadFailed": [
@@ -68254,7 +68368,7 @@
   "web.admin.settings.requests.routingMode.animeNote": [
     {
       "type": 0,
-      "value": "动漫剧集会以动漫剧集类型发送到Sonarr，因此集的编号方式与动漫发布方式一致。"
+      "value": "动漫剧集会以动漫剧集类型发送到Sonarr，以使用动漫集数编号。"
     }
   ],
   "web.admin.settings.requests.routingMode.label": [
@@ -68292,7 +68406,7 @@
   "web.admin.settings.requests.routingMode.onlyUhdServer": [
     {
       "type": 0,
-      "value": "— 只有4K服务器，因此HD版本无处可去。请添加一个未标记为4K的"
+      "value": "— 仅有4K服务器，因此不会发送HD版本。请在上方添加一个非4K的"
     },
     {
       "type": 1,
@@ -68340,7 +68454,7 @@
   "web.admin.settings.requests.routingMode.standardBlocked": [
     {
       "type": 0,
-      "value": "“标准”目前无法路由请求。"
+      "value": "目前无法使用标准路由。"
     },
     {
       "type": 1,
@@ -68348,13 +68462,13 @@
     },
     {
       "type": 0,
-      "value": "在你切换到“高级”或移除服务器之前，将由规则决定去向。"
+      "value": "在你切换到高级路由或移除服务器之前，Silo将使用你的高级规则。"
     }
   ],
   "web.admin.settings.requests.routingMode.standardDescription": [
     {
       "type": 0,
-      "value": "每个请求都会发送到对应类型的服务器，并使用该服务器自身的设置。"
+      "value": "直接将电影和剧集发送到对应的服务器，并使用该服务器的设置。"
     }
   ],
   "web.admin.settings.requests.routingMode.standardUnavailable": [
@@ -68376,7 +68490,7 @@
   "web.admin.settings.requests.routingMode.uhdNote": [
     {
       "type": 0,
-      "value": "要将4K版本发送到单独的服务器，请添加该服务器并开启“4K服务器”。添加第二个同类型服务器会开启“高级”。"
+      "value": "要单独路由4K版本，请添加服务器并开启“4K服务器”。添加同类型的第二个HD或4K服务器将切换到高级路由。"
     }
   ],
   "web.admin.settings.requests.routingMode.uhdServer": [
@@ -68398,7 +68512,7 @@
   "web.admin.settings.requests.ruleEditor.deleteDescription": [
     {
       "type": 0,
-      "value": "它接收的请求将交给下方的规则，或发送到“其余所有”。"
+      "value": "匹配的请求将交由下方的规则处理，或发送到“其他所有内容”。"
     }
   ],
   "web.admin.settings.requests.ruleEditor.deleteRule": [
@@ -68424,7 +68538,7 @@
   "web.admin.settings.requests.ruleEditor.description": [
     {
       "type": 0,
-      "value": "选择此规则接收哪些请求，以及它们的去向。"
+      "value": "选择此规则匹配哪些请求，以及它们的去向。"
     }
   ],
   "web.admin.settings.requests.ruleEditor.editTitle": [
@@ -68446,7 +68560,7 @@
   "web.admin.settings.requests.ruleEditor.nameHint": [
     {
       "type": 0,
-      "value": "显示在列表中。留空则自动描述此规则。"
+      "value": "显示在规则列表中。留空则自动生成名称。"
     }
   ],
   "web.admin.settings.requests.ruleEditor.saveRule": [
@@ -68476,7 +68590,7 @@
   "web.admin.settings.requests.serverEditor.apiKeyHint": [
     {
       "type": 0,
-      "value": "在该服务器的“设置 › 常规”中查找。"
+      "value": "可在Radarr、Sonarr或你的请求应用的“设置 → 常规”中查找。"
     }
   ],
   "web.admin.settings.requests.serverEditor.apiKeyNotNeeded": [
@@ -68506,7 +68620,7 @@
   "web.admin.settings.requests.serverEditor.deleteBlocked": [
     {
       "type": 0,
-      "value": "路由仍在将请求发送到这里（"
+      "value": "正被路由使用（"
     },
     {
       "type": 1,
@@ -68514,13 +68628,13 @@
     },
     {
       "type": 0,
-      "value": "）；请先将它们发送到其他位置。"
+      "value": "）。删除此服务器前，请先重新分配这些路由。"
     }
   ],
   "web.admin.settings.requests.serverEditor.deleteDescription": [
     {
       "type": 0,
-      "value": "Silo将不再向它发送请求，复用它的Autoscan连接也会丢失连接详情。"
+      "value": "Silo将停止向此服务器发送请求，共享此服务器的Autoscan连接也将丢失连接详情。"
     }
   ],
   "web.admin.settings.requests.serverEditor.deleteDescriptionClearsFallback": [
@@ -68532,7 +68646,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Silo将不再向它发送请求，复用它的Autoscan连接也会丢失连接详情。剧集的“其余所有”也会一并移除，因此在你添加其他服务器之前，这些请求将无处可去。"
+              "value": "Silo将停止向此服务器发送请求，共享的Autoscan连接也将丢失连接详情。这还会清除剧集的“其他所有内容”，因此在你添加其他服务器之前，未匹配的请求将不会被路由。"
             }
           ]
         },
@@ -68540,7 +68654,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Silo将不再向它发送请求，复用它的Autoscan连接也会丢失连接详情。电影的“其余所有”也会一并移除，因此在你添加其他服务器之前，这些请求将无处可去。"
+              "value": "Silo将停止向此服务器发送请求，共享的Autoscan连接也将丢失连接详情。这还会清除电影的“其他所有内容”，因此在你添加其他服务器之前，未匹配的请求将不会被路由。"
             }
           ]
         }
@@ -68576,7 +68690,7 @@
   "web.admin.settings.requests.serverEditor.description": [
     {
       "type": 0,
-      "value": "已批准的请求会发送到这里。路由决定发送哪些请求。"
+      "value": "Silo会根据你的路由设置，将已批准的请求发送到此处。"
     }
   ],
   "web.admin.settings.requests.serverEditor.detected": [
@@ -68618,7 +68732,7 @@
   "web.admin.settings.requests.serverEditor.kindMismatch": [
     {
       "type": 0,
-      "value": "此地址响应为"
+      "value": "此URL响应为"
     },
     {
       "type": 1,
@@ -68682,7 +68796,7 @@
           "value": [
             {
               "type": 0,
-              "value": "无法从服务器读取根文件夹和配置文件。请检查URL和API密钥，然后选择“测试”。"
+              "value": "无法从此服务器加载根文件夹和配置文件。请检查URL和API密钥，然后选择“测试”。"
             }
           ]
         },
@@ -68690,7 +68804,7 @@
           "value": [
             {
               "type": 0,
-              "value": "无法从服务器读取根文件夹和配置文件。请检查URL，然后选择“测试”。"
+              "value": "无法从此服务器加载根文件夹和配置文件。请检查URL，然后选择“测试”。"
             }
           ]
         },
@@ -68698,7 +68812,7 @@
           "value": [
             {
               "type": 0,
-              "value": "无法从服务器读取根文件夹和配置文件。请检查API密钥，然后选择“测试”。"
+              "value": "无法从此服务器加载根文件夹和配置文件。请检查API密钥，然后选择“测试”。"
             }
           ]
         },
@@ -68706,7 +68820,7 @@
           "value": [
             {
               "type": 0,
-              "value": "无法从服务器读取根文件夹和配置文件。请检查服务器的设置，然后选择“测试”。"
+              "value": "无法从此服务器加载根文件夹和配置文件。请检查服务器设置，然后选择“测试”。"
             }
           ]
         }
@@ -68820,7 +68934,7 @@
   "web.admin.settings.requests.serverEditor.typeLocked": [
     {
       "type": 0,
-      "value": "路由会将请求发送到这里（"
+      "value": "正被路由使用（"
     },
     {
       "type": 1,
@@ -68828,7 +68942,7 @@
     },
     {
       "type": 0,
-      "value": "）。要切换类型，请先更改路由。"
+      "value": "）。更改服务器类型前，请先更新这些路由。"
     }
   ],
   "web.admin.settings.requests.serverEditor.typePlaceholder": [
@@ -68846,7 +68960,7 @@
   "web.admin.settings.requests.serverEditor.uhdServerDescription": [
     {
       "type": 0,
-      "value": "使用标准路由时，4K版本会发送到这里，其他内容则发送到同类型的另一台服务器。"
+      "value": "使用此服务器接收4K版本而非HD版本。使用标准路由时，4K版本会自动发送到此处。"
     }
   ],
   "web.admin.settings.requests.serverEditor.url": [
@@ -68906,7 +69020,7 @@
   "web.admin.settings.requests.servers.noPlugin": [
     {
       "type": 0,
-      "value": "请求通过插件发送到Sonarr、Radarr或其他请求服务器。请先从"
+      "value": "请先在"
     },
     {
       "type": 8,
@@ -68920,7 +69034,7 @@
     },
     {
       "type": 0,
-      "value": "安装一个。"
+      "value": "中安装插件，以连接Sonarr、Radarr或其他请求服务器。"
     }
   ],
   "web.admin.settings.requests.servers.routeUsage": [
@@ -69094,13 +69208,13 @@
     },
     {
       "type": 0,
-      "value": "”会先捕获其中的大部分。"
+      "value": "”会先匹配其中的大部分。"
     }
   ],
   "web.admin.settings.requests.warnings.animeSeriesType": [
     {
       "type": 0,
-      "value": "Sonarr会将这些添加为标准剧集。"
+      "value": "Sonarr的剧集类型未设为动漫，这可能导致动漫集数编号出错。"
     }
   ],
   "web.admin.settings.requests.warnings.fixAnimeSeriesType": [
@@ -69124,7 +69238,7 @@
   "web.admin.settings.requests.warnings.forceDual": [
     {
       "type": 0,
-      "value": "“同时为每部作品请求4K版本”已开启，但其他所有内容不会发送4K版本。没有规则发送到4K服务器的作品只会获得HD版本。"
+      "value": "“同时为每部作品请求4K版本”已开启，但“其他所有内容”没有配置4K服务器。未被任何规则路由到4K服务器的作品只会获得HD版本。"
     }
   ],
   "web.admin.settings.requests.warnings.neverUsed": [
@@ -69138,13 +69252,13 @@
     },
     {
       "type": 0,
-      "value": "”会捕获此规则的所有请求。"
+      "value": "”已匹配所有这些请求。"
     }
   ],
   "web.admin.settings.requests.warnings.serverMissing": [
     {
       "type": 0,
-      "value": "此规则发送到的某台服务器已不存在。"
+      "value": "此路由使用的某台服务器已不存在。"
     }
   ],
   "web.admin.settings.requests.warnings.serverNeedsSetup": [
@@ -69154,7 +69268,7 @@
     },
     {
       "type": 0,
-      "value": "需要设置。"
+      "value": "需先完成设置才能接收请求。"
     }
   ],
   "web.admin.settings.requests.warnings.serverOffFallback": [
@@ -69164,7 +69278,7 @@
     },
     {
       "type": 0,
-      "value": "已关闭。在它重新开启之前，发送到那里的请求无法处理。"
+      "value": "已禁用。在你重新启用前，路由到此处的请求不会被发送。"
     }
   ],
   "web.admin.settings.requests.warnings.serverOffRule": [
@@ -69174,7 +69288,7 @@
     },
     {
       "type": 0,
-      "value": "已关闭。在它重新开启之前，此规则发送到那里的请求无法处理。"
+      "value": "已禁用。在你重新启用前，匹配此规则的请求不会被发送。"
     }
   ],
   "web.admin.settings.requests.warnings.serverWrongKind": [
@@ -69232,7 +69346,7 @@
   "web.admin.settings.search.ai.description": [
     {
       "type": 0,
-      "value": "AI提供商、每个AI作业使用的模型，以及使用它们的功能。"
+      "value": "AI提供商、模型分配以及使用它们的功能。"
     }
   ],
   "web.admin.settings.search.ai.label": [
@@ -69496,7 +69610,7 @@
   "web.admin.settings.search.autoscan.description": [
     {
       "type": 0,
-      "value": "Autoscan检查轮询来源的频率，以及其来源连接的服务器。"
+      "value": "Autoscan来源的默认轮询间隔和已保存的连接。"
     }
   ],
   "web.admin.settings.search.autoscan.label": [
@@ -69634,7 +69748,7 @@
   "web.admin.settings.search.credentialStatusError": [
     {
       "type": 0,
-      "value": "无法加载受保护凭据的状态。请重新加载此页面，以编辑搜索引擎和Meilisearch连接。"
+      "value": "无法检查已保存的Meilisearch凭据或由环境变量管理的设置。请重新加载此页面，以编辑搜索引擎和Meilisearch连接。"
     }
   ],
   "web.admin.settings.search.degradedFallback": [
@@ -69760,7 +69874,7 @@
   "web.admin.settings.search.email.description": [
     {
       "type": 0,
-      "value": "Silo用于发送邀请、密码重置和通知邮件的邮件服务器。"
+      "value": "用于邀请、密码重置和通知的外发邮件服务器。"
     }
   ],
   "web.admin.settings.search.email.label": [
@@ -69838,7 +69952,7 @@
   "web.admin.settings.search.general.description": [
     {
       "type": 0,
-      "value": "服务器的名称和公开地址、其前端的代理，以及Redis。"
+      "value": "服务器名称、网络地址、反向代理、数据库和Redis。"
     }
   ],
   "web.admin.settings.search.general.label": [
@@ -69940,13 +70054,13 @@
   "web.admin.settings.search.group": [
     {
       "type": 0,
-      "value": "搜索"
+      "value": "目录搜索"
     }
   ],
   "web.admin.settings.search.library.description": [
     {
       "type": 0,
-      "value": "作品列出哪些版本、扫描、年龄分级限制、评分和字幕同步。"
+      "value": "作品版本、备用语言、扫描、年龄分级限制、评分和字幕同步。"
     }
   ],
   "web.admin.settings.search.library.label": [
@@ -70120,7 +70234,7 @@
   "web.admin.settings.search.meili.apiKey.hint": [
     {
       "type": 0,
-      "value": "主密钥，或可读写该索引的密钥。"
+      "value": "主密钥，或具有索引读写权限的密钥（可选）。"
     }
   ],
   "web.admin.settings.search.meili.apiKey.label": [
@@ -70138,7 +70252,7 @@
   "web.admin.settings.search.meili.batch.label": [
     {
       "type": 0,
-      "value": "每批发送到索引的项目数"
+      "value": "每批索引的项目数"
     }
   ],
   "web.admin.settings.search.meili.index.description": [
@@ -70174,19 +70288,19 @@
   "web.admin.settings.search.meili.ratio.description": [
     {
       "type": 0,
-      "value": "0表示按词排序，1表示按含义排序。"
+      "value": "取值范围为0到1。0表示仅按词语排序；1表示仅按含义排序。"
     }
   ],
   "web.admin.settings.search.meili.ratio.label": [
     {
       "type": 0,
-      "value": "按含义匹配的结果占比"
+      "value": "按含义排序的权重"
     }
   ],
   "web.admin.settings.search.meili.semantic.description": [
     {
       "type": 0,
-      "value": "同时匹配简介含义相近的项目。"
+      "value": "即使没有精确的词语匹配，也能查找简介相似的项目。需要在推荐中配置嵌入模型。"
     }
   ],
   "web.admin.settings.search.meili.semantic.enablingWarning": [
@@ -70222,7 +70336,7 @@
   "web.admin.settings.search.networkAccess.description": [
     {
       "type": 0,
-      "value": "无需端口转发即可访问此服务器的覆盖网络提供商，例如Tailscale。"
+      "value": "无需端口转发即可将此服务器连接到Tailscale或其他覆盖网络。"
     }
   ],
   "web.admin.settings.search.networkAccess.label": [
@@ -70234,7 +70348,7 @@
   "web.admin.settings.search.notifications.description": [
     {
       "type": 0,
-      "value": "推送渠道和服务器频道。"
+      "value": "推送、电子邮件、Discord、Webhook和全服务器公告。"
     }
   ],
   "web.admin.settings.search.notifications.label": [
@@ -70660,7 +70774,7 @@
   "web.admin.settings.search.providers.description": [
     {
       "type": 0,
-      "value": "Simkl等观看提供商插件、字幕提供商账户、MDBList列表密钥以及跳过标记提供商。"
+      "value": "Simkl等观看提供商、MDBList合集导入、字幕账户和跳过标记提供商。"
     }
   ],
   "web.admin.settings.search.providers.label": [
@@ -70794,7 +70908,7 @@
   "web.admin.settings.search.requests.description": [
     {
       "type": 0,
-      "value": "请求限额与审批、Sonarr和Radarr服务器，以及请求的去向。"
+      "value": "审批、请求限额、Sonarr和Radarr服务器以及请求路由。"
     }
   ],
   "web.admin.settings.search.requests.label": [
@@ -70914,7 +71028,7 @@
   "web.admin.settings.search.search.description": [
     {
       "type": 0,
-      "value": "搜索引擎：内置Postgres，或支持容错拼写的Meilisearch。"
+      "value": "内置Postgres搜索，或可选的支持拼写容错和按含义搜索的Meilisearch。"
     }
   ],
   "web.admin.settings.search.search.label": [
@@ -70998,7 +71112,7 @@
   "web.admin.settings.search.security.description": [
     {
       "type": 0,
-      "value": "Silo可以联系哪些本地服务器，以及请求速率限制。"
+      "value": "本地媒体服务器访问和请求速率限制。"
     }
   ],
   "web.admin.settings.search.security.label": [
@@ -71226,7 +71340,7 @@
   "web.admin.settings.search.status.answering": [
     {
       "type": 0,
-      "value": "正在响应搜索"
+      "value": "当前搜索引擎"
     }
   ],
   "web.admin.settings.search.status.automaticMaintenance": [
@@ -71238,7 +71352,7 @@
   "web.admin.settings.search.status.compressedVectors": [
     {
       "type": 0,
-      "value": "压缩向量"
+      "value": "压缩嵌入"
     }
   ],
   "web.admin.settings.search.status.configured": [
@@ -71268,13 +71382,13 @@
   "web.admin.settings.search.status.documents": [
     {
       "type": 0,
-      "value": "文档"
+      "value": "已索引项目"
     }
   ],
   "web.admin.settings.search.status.droppedEvents": [
     {
       "type": 0,
-      "value": "已丢弃的事件"
+      "value": "失败的更新"
     }
   ],
   "web.admin.settings.search.status.embeddingModel": [
@@ -71298,7 +71412,7 @@
   "web.admin.settings.search.status.health": [
     {
       "type": 0,
-      "value": "运行状况"
+      "value": "Meilisearch运行状况"
     }
   ],
   "web.admin.settings.search.status.healthy": [
@@ -71316,13 +71430,13 @@
   "web.admin.settings.search.status.itemsWithVectors": [
     {
       "type": 0,
-      "value": "含向量的项目"
+      "value": "含嵌入的项目"
     }
   ],
   "web.admin.settings.search.status.lastFallback": [
     {
       "type": 0,
-      "value": "上次回退"
+      "value": "上次回退到Postgres"
     }
   ],
   "web.admin.settings.search.status.lastSync": [
@@ -71386,7 +71500,7 @@
   "web.admin.settings.search.status.pendingEvents": [
     {
       "type": 0,
-      "value": "待处理事件"
+      "value": "待处理更新"
     }
   ],
   "web.admin.settings.search.status.postgresFullText": [
@@ -71440,13 +71554,13 @@
   "web.admin.settings.search.status.semanticRatio": [
     {
       "type": 0,
-      "value": "语义结果占比"
+      "value": "按含义排序的权重"
     }
   ],
   "web.admin.settings.search.status.semanticReadiness": [
     {
       "type": 0,
-      "value": "语义搜索就绪状态"
+      "value": "按含义搜索就绪状态"
     }
   ],
   "web.admin.settings.search.status.staleUntilRebuild": [
@@ -71538,7 +71652,7 @@
   "web.admin.settings.search.status.vectorCoverage": [
     {
       "type": 0,
-      "value": "向量覆盖率"
+      "value": "嵌入覆盖率"
     }
   ],
   "web.admin.settings.search.storage.description": [
@@ -71688,19 +71802,19 @@
   "web.admin.settings.security.backend.description": [
     {
       "type": 0,
-      "value": "Redis会在多台服务器之间共享计数器，重启后也会保留。"
+      "value": "使用Redis在多台服务器之间共享速率限制计数器。更改将在重启后生效。"
     }
   ],
   "web.admin.settings.security.backend.descriptionNoRedis": [
     {
       "type": 0,
-      "value": "Redis会在多台服务器之间共享计数器，重启后也会保留。请先在常规页面设置Redis。"
+      "value": "在常规设置中配置Redis，以在多台服务器之间共享速率限制计数器。更改将在重启后生效。"
     }
   ],
   "web.admin.settings.security.backend.drift": [
     {
       "type": 0,
-      "value": "正在运行的限流器使用的是"
+      "value": "速率限制当前使用的是"
     },
     {
       "type": 5,
@@ -71752,13 +71866,13 @@
     },
     {
       "type": 0,
-      "value": "后端。如果重启后仍未解决，请检查已保存的后端是否可以访问。"
+      "value": "计数器存储。如果重启后仍未解决，请检查已保存的计数器存储是否可访问。"
     }
   ],
   "web.admin.settings.security.backend.label": [
     {
       "type": 0,
-      "value": "计数器存储位置"
+      "value": "计数器存储"
     }
   ],
   "web.admin.settings.security.backend.memory": [
@@ -71842,7 +71956,7 @@
   "web.admin.settings.security.global.description": [
     {
       "type": 0,
-      "value": "所有受速率限制的路由的总上限。"
+      "value": "所有受速率限制端点的总上限。"
     }
   ],
   "web.admin.settings.security.global.label": [
@@ -71866,7 +71980,7 @@
   "web.admin.settings.security.localNetwork.description": [
     {
       "type": 0,
-      "value": "允许所有账户从本地网络地址（如192.168.x.x或localhost）上的Plex、Emby和Jellyfin服务器导入历史记录并与之同步。管理员始终可以这样做。"
+      "value": "允许所有账户导入观看历史并与本地Plex、Emby或Jellyfin服务器（例如192.168.x.x或localhost）同步。管理员始终拥有访问权限。"
     }
   ],
   "web.admin.settings.security.localNetwork.group": [
@@ -71878,25 +71992,25 @@
   "web.admin.settings.security.localNetwork.label": [
     {
       "type": 0,
-      "value": "所有账户均可使用本地服务器"
+      "value": "允许所有账户使用本地媒体服务器"
     }
   ],
   "web.admin.settings.security.localNetwork.warning": [
     {
       "type": 0,
-      "value": "任何能登录的人都可以让此服务器向其本地网络上的设备发送请求。只有在你信任此服务器上的每个账户时，才开启此选项。"
+      "value": "任何已登录的账户都可以让此服务器访问其本地网络上的设备。仅在你信任每个账户时才启用。"
     }
   ],
   "web.admin.settings.security.perAddress.description": [
     {
       "type": 0,
-      "value": "每个IP都有一份额度。已登录的请求还共享一份账户额度，大小为其4倍，由所有个人资料、会话、设备和API密钥共用。"
+      "value": "适用于每个IP地址。已登录的账户还会在所有个人资料、会话、设备和API密钥之间共享一个上限（为其4倍）。"
     }
   ],
   "web.admin.settings.security.perAddress.label": [
     {
       "type": 0,
-      "value": "按地址和账户"
+      "value": "按IP地址和账户"
     }
   ],
   "web.admin.settings.security.quotaMode.enforce": [
@@ -71956,7 +72070,7 @@
   "web.admin.settings.security.rateLimit.notRunning": [
     {
       "type": 0,
-      "value": "已启用，但此进程中没有正在运行的限流器，可能启动失败。请检查服务器日志。"
+      "value": "速率限制已启用，但未在此服务器上运行——可能启动失败。请检查服务器日志。"
     }
   ],
   "web.admin.settings.security.session.heading": [
@@ -71968,7 +72082,7 @@
   "web.admin.settings.security.session.quotaDescription": [
     {
       "type": 0,
-      "value": "每个登录会话都有一个请求桶，会在一小时内逐渐补满，可阻止整天都保持在上述限制以内的客户端。播放、下载、管理员和API密钥不计入。“仅记录”会记录用完额度的会话；“强制执行”会拒绝这些会话，直到桶补满。仪表板上的“最繁忙的API客户端”卡片会显示哪些会话发出的请求最多。"
+      "value": "限制每个登录会话的持续API请求数（播放、下载、管理员和API密钥不受限制）。“仅记录”会记录达到上限的会话；“强制执行”会阻止请求，直到配额补充。可在仪表板的“最繁忙的API客户端”卡片中查看请求最多的会话。"
     }
   ],
   "web.admin.settings.security.session.quotaLabel": [
@@ -71980,7 +72094,7 @@
   "web.admin.settings.security.session.sizeDescription": [
     {
       "type": 0,
-      "value": "桶每小时补充的请求数，以及装满时的容量。满桶必须在一周内补满。"
+      "value": "每小时补充速率和最大突发量。突发量不能超过一周的每小时请求总量。"
     }
   ],
   "web.admin.settings.security.session.sizeLabel": [
@@ -72072,7 +72186,7 @@
   "web.admin.settings.signIn.network.autoProvisionDescription": [
     {
       "type": 0,
-      "value": "关闭：只有已连接"
+      "value": "关闭时，只有已连接"
     },
     {
       "type": 1,
@@ -72134,13 +72248,13 @@
   "web.admin.settings.signIn.network.description": [
     {
       "type": 0,
-      "value": "设备通过网络访问此服务器的用户将以设备所有者的身份登录，无需密码。它可以与上方的提供商同时开启。"
+      "value": "通过网络提供商访问此服务器的用户将以设备所有者的身份登录，无需密码。可与上方的单点登录提供商同时使用。"
     }
   ],
   "web.admin.settings.signIn.network.enableDescription": [
     {
       "type": 0,
-      "value": "向设备通过"
+      "value": "向通过"
     },
     {
       "type": 1,
@@ -72148,7 +72262,7 @@
     },
     {
       "type": 0,
-      "value": "访问此服务器的用户显示“以……身份继续”按钮。"
+      "value": "连接的用户显示“以……身份继续”按钮。"
     }
   ],
   "web.admin.settings.signIn.network.enableLabel": [
@@ -72174,21 +72288,7 @@
   "web.admin.settings.signIn.network.howRoles": [
     {
       "type": 0,
-      "value": "角色来自你的tailnet策略中的授权：带有"
-    },
-    {
-      "type": 8,
-      "value": "code",
-      "children": [
-        {
-          "type": 1,
-          "value": "admin_role"
-        }
-      ]
-    },
-    {
-      "type": 0,
-      "value": "的"
+      "value": "在你的tailnet策略中通过"
     },
     {
       "type": 8,
@@ -72202,7 +72302,21 @@
     },
     {
       "type": 0,
-      "value": "授权会使某人成为Silo管理员，带有"
+      "value": "授权分配角色："
+    },
+    {
+      "type": 8,
+      "value": "code",
+      "children": [
+        {
+          "type": 1,
+          "value": "admin_role"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "对应Silo管理员，"
     },
     {
       "type": 8,
@@ -72216,7 +72330,7 @@
     },
     {
       "type": 0,
-      "value": "的则成为普通用户。任何能编辑tailnet策略的人都能将自己设为Silo管理员。没有授权时，用户的角色保持不变，因此移除某人的管理员授权并不会将其降级：请改为授予其"
+      "value": "对应普通用户。任何能编辑该策略的人都可以将自己设为Silo管理员。移除授权不会改变角色；要降级管理员，请授予"
     },
     {
       "type": 8,
@@ -72230,13 +72344,13 @@
     },
     {
       "type": 0,
-      "value": "。策略更改会在下次登录或重新检查访问权限时生效。同时通过你的主登录提供商登录的账户，其角色由该提供商决定。"
+      "value": "。更改将在下次登录或重新检查访问权限时生效。同时使用你的主登录提供商的账户，其角色由该提供商决定。"
     }
   ],
   "web.admin.settings.signIn.network.howSharedTv": [
     {
       "type": 0,
-      "value": "使用共享电视的每个人都会以将该电视登录到"
+      "value": "共享电视会让所有人使用该电视的"
     },
     {
       "type": 1,
@@ -72244,7 +72358,7 @@
     },
     {
       "type": 0,
-      "value": "的人的身份登录，并拥有其角色，因此请用没有管理员授权的人登录共享电视；个人资料会将各自的观看记录分开。请为任何将他人流量转发到此服务器的设备（例如反向代理）添加标签，否则其后的所有人都会以其所有者的身份登录。"
+      "value": "账户及角色登录——请使用非管理员账户，并通过个人资料区分观众。请为反向代理等中继设备添加标签，否则其后的所有人都会以设备所有者的身份登录。"
     },
     {
       "type": 8,
@@ -72270,7 +72384,7 @@
   "web.admin.settings.signIn.network.howWho": [
     {
       "type": 0,
-      "value": "任何设备能通过"
+      "value": "任何通过"
     },
     {
       "type": 1,
@@ -72278,7 +72392,7 @@
     },
     {
       "type": 0,
-      "value": "访问此服务器的人都可以登录，包括与你共享服务器的人；带标签的设备则不能。要加以限制，请将插件的“谁可以登录”设置为已获授"
+      "value": "访问此服务器的人都可以登录，包括你与之共享服务器的人（带标签的设备除外）。要限制访问，请在插件设置中将“谁可以登录”设为需要"
     },
     {
       "type": 8,
@@ -72292,7 +72406,7 @@
     },
     {
       "type": 0,
-      "value": "的人。"
+      "value": "。"
     },
     {
       "type": 1,
@@ -72300,7 +72414,7 @@
     },
     {
       "type": 0,
-      "value": "登录绝不会通过电子邮件匹配现有账户：账户所有者需在自己的登录设置中连接"
+      "value": "绝不会通过电子邮件匹配现有账户。已有账户的用户可在自己的登录设置中连接"
     },
     {
       "type": 1,
@@ -72350,7 +72464,7 @@
   "web.admin.settings.signIn.page.allowPasswordDescription": [
     {
       "type": 0,
-      "value": "关闭：除应急管理员外，所有人都通过提供商登录。至少需要一名应急管理员；服务器所有者默认就是其中之一。"
+      "value": "关闭时，除应急管理员外，所有人都必须使用你的登录提供商。至少需要一名应急管理员（服务器所有者默认为应急管理员）。"
     }
   ],
   "web.admin.settings.signIn.page.allowPasswordLabel": [
@@ -72387,10 +72501,42 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.settings.signIn.page.demoAccountDescription": [
+    {
+      "type": 0,
+      "value": "公开演示的所有访问者都登录到此账户。演示模式开启时，使用此账户的名称及其Silo密码进行的失败登录不计入每个名称的限制，否则所有访问者都会共用这一限制。按地址的请求限制保持不变。留空表示不指定账户。"
+    }
+  ],
+  "web.admin.settings.signIn.page.demoAccountLabel": [
+    {
+      "type": 0,
+      "value": "演示账户ID"
+    }
+  ],
+  "web.admin.settings.signIn.page.demoAccountNames": [
+    {
+      "type": 0,
+      "value": "对应账户"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "。"
+    }
+  ],
+  "web.admin.settings.signIn.page.demoGroup": [
+    {
+      "type": 0,
+      "value": "演示模式"
+    }
+  ],
   "web.admin.settings.signIn.page.emailMatchDescription": [
     {
       "type": 0,
-      "value": "当提供商表明电子邮件已验证时，首次登录会连接到使用相同电子邮件的普通Silo账户。管理员、所有者和应急账户永远不会被匹配。"
+      "value": "首次登录时，如果提供商将电子邮件标记为已验证，则连接到使用相同电子邮件的现有Silo账户。管理员、所有者和应急账户绝不会被匹配。"
     }
   ],
   "web.admin.settings.signIn.page.emailMatchLabel": [
@@ -72402,13 +72548,13 @@
   "web.admin.settings.signIn.page.emailMatchWarning": [
     {
       "type": 0,
-      "value": "在提供商处控制该电子邮件的人将接管该Silo账户。Silo不会验证账户电子邮件，因此被匹配的是最先注册或设置该地址的账户；匹配会使其在所有设备上退出登录并删除其API密钥。仅当提供商验证每个电子邮件且用户无法自行更改时，才开启此选项。"
+      "value": "在你的提供商处控制某个电子邮件的任何人都可以接管最先注册或设置该电子邮件的Silo账户（Silo不会验证电子邮件）。匹配会使该账户在所有设备上退出登录并删除其API密钥。仅当你的提供商验证每个电子邮件且用户无法自行更改时，才开启此选项。"
     }
   ],
   "web.admin.settings.signIn.page.externalUnavailable": [
     {
       "type": 0,
-      "value": "此服务器不支持外部登录，因此只能使用Silo密码登录。"
+      "value": "外部登录在此服务器上不可用。用户只能使用Silo密码登录。"
     }
   ],
   "web.admin.settings.signIn.page.loading": [
@@ -72418,6 +72564,10 @@
     }
   ],
   "web.admin.settings.signIn.page.lockedOutNote": [
+    {
+      "type": 0,
+      "value": "应急管理员可在"
+    },
     {
       "type": 8,
       "value": "code",
@@ -72430,7 +72580,7 @@
     },
     {
       "type": 0,
-      "value": "会为应急管理员显示密码表单，在服务器上运行"
+      "value": "使用密码登录。要从服务器重新开启密码登录，请运行"
     },
     {
       "type": 8,
@@ -72444,7 +72594,7 @@
     },
     {
       "type": 0,
-      "value": "可重新开启密码登录。"
+      "value": "。"
     }
   ],
   "web.admin.settings.signIn.page.lockedOutTitle": [
@@ -72462,13 +72612,13 @@
   "web.admin.settings.signIn.page.noBreakGlassError": [
     {
       "type": 0,
-      "value": "暂时无法关闭密码登录：没有管理员是应急账户。请先在用户页面打开一名管理员并开启“应急账户”，以便在提供商不可用时仍有人能登录。"
+      "value": "暂时无法关闭密码登录。请先在用户页面为至少一名管理员开启“应急账户”，以便在提供商不可用时管理员仍能登录。"
     }
   ],
   "web.admin.settings.signIn.page.noBreakGlassStatus": [
     {
       "type": 0,
-      "value": "尚无应急管理员。请在管理员的"
+      "value": "尚无应急管理员。请在"
     },
     {
       "type": 8,
@@ -72482,13 +72632,27 @@
     },
     {
       "type": 0,
-      "value": "上开启“应急账户”。"
+      "value": "为一名管理员开启“应急账户”。"
     }
   ],
   "web.admin.settings.signIn.page.noProviderError": [
     {
       "type": 0,
       "value": "请先开启一个登录提供商。如果关闭密码登录且未开启任何提供商，将只有应急管理员能登录。"
+    }
+  ],
+  "web.admin.settings.signIn.page.noPublicUrlError": [
+    {
+      "type": 0,
+      "value": "请先设置服务器的公共URL。没有它，"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "无法让任何人登录；关闭密码登录后，只有应急管理员能够登录。"
     }
   ],
   "web.admin.settings.signIn.page.passwordMinLengthDescription": [
@@ -72524,7 +72688,7 @@
   "web.admin.settings.signIn.page.passwordResetDescription": [
     {
       "type": 0,
-      "value": "在登录页面添加“忘记密码？”，让用户可以通过电子邮件获取重置链接。需要配置电子邮件和公共URL。"
+      "value": "在登录页面添加“忘记密码？”，让用户可以通过电子邮件向自己发送重置链接。需要配置邮件发送功能和公共URL。"
     }
   ],
   "web.admin.settings.signIn.page.passwordResetLabel": [
@@ -72572,13 +72736,212 @@
   "web.admin.settings.signIn.page.userApiKeysDescription": [
     {
       "type": 0,
-      "value": "任何账户都可以在设置 → API密钥中为自己的个人资料创建密钥。这些密钥可以读取和更改观看历史、列表和请求，但无法播放或下载媒体。关闭此选项后将无法创建新密钥；现有密钥在被吊销前仍可继续使用。"
+      "value": "账户可在设置 → API密钥中为自己的个人资料创建密钥，用于查看和编辑观看历史、列表和请求（不能播放或下载）。关闭此选项会阻止创建新密钥；现有密钥在被吊销前仍可正常使用。"
     }
   ],
   "web.admin.settings.signIn.page.userApiKeysLabel": [
     {
       "type": 0,
       "value": "允许用户创建API密钥"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.confirm": [
+    {
+      "type": 0,
+      "value": "关闭密码登录"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.description": [
+    {
+      "type": 0,
+      "value": "只有应急管理员可以使用密码登录。其他所有人都将使用"
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "登录。"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkAutoCreate": [
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "会在首次登录时创建账户。因此，如果其中有人在你关联之前使用它登录，他们会获得一个新的独立账户。"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkExplain": [
+    {
+      "type": 0,
+      "value": "请在用户中打开每个账户的页面，将其关联到"
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "账户。"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "个账户在管理员关联之前无法登录"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loadFailed": [
+    {
+      "type": 0,
+      "value": "无法检查此操作会影响哪些账户。你仍然可以关闭它。"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loading": [
+    {
+      "type": 0,
+      "value": "正在检查哪些人使用密码登录"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchExplain": [
+    {
+      "type": 0,
+      "value": "当"
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "在登录时确认其中某个电子邮件地址后，Silo会将此人连接到其账户。"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "个账户通过电子邮件连接"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.more": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "再显示"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "个"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.moreFailed": [
+    {
+      "type": 0,
+      "value": "无法加载更多账户。请重试。"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.nobodyAffected": [
+    {
+      "type": 0,
+      "value": "此操作后，所有账户仍可登录。"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.administrator": [
+    {
+      "type": 0,
+      "value": "管理员"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.emailMatchOff": [
+    {
+      "type": 0,
+      "value": "电子邮件匹配已关闭"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.noEmail": [
+    {
+      "type": 0,
+      "value": "无电子邮件"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.sessions": [
+    {
+      "type": 0,
+      "value": "此操作不会让任何人退出登录。已登录的人将保持登录状态，他们的API密钥仍可使用，并且仍可批准新设备。如需让某人退出登录，请在"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "用户"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "中打开其页面并结束其会话。"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.title": [
+    {
+      "type": 0,
+      "value": "关闭密码登录？"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.usersLink": [
+    {
+      "type": 0,
+      "value": "在用户中查看所有账户"
     }
   ],
   "web.admin.settings.signIn.provider.accounts.title": [
@@ -72602,7 +72965,7 @@
   "web.admin.settings.signIn.provider.autoProvision.description": [
     {
       "type": 0,
-      "value": "提供商允许的用户首次登录时将获得Silo账户。关闭：只有Silo账户已连接的用户才能登录。"
+      "value": "用户首次通过你的提供商登录时自动创建Silo账户。关闭时，只有已连接的Silo账户才能登录。"
     }
   ],
   "web.admin.settings.signIn.provider.autoProvision.label": [
@@ -72625,6 +72988,28 @@
       "value": "。"
     }
   ],
+  "web.admin.settings.signIn.provider.binding.turnOffBlocked": [
+    {
+      "type": 0,
+      "value": "密码登录已关闭，因此除应急管理员外，所有人都通过"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "登录。请先重新开启密码登录，然后再关闭"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "。"
+    }
+  ],
   "web.admin.settings.signIn.provider.binding.turnOffConfirm": [
     {
       "type": 0,
@@ -72634,7 +73019,7 @@
   "web.admin.settings.signIn.provider.binding.turnOffDescription": [
     {
       "type": 0,
-      "value": "使用"
+      "value": "在你重新开启之前，使用"
     },
     {
       "type": 1,
@@ -72642,7 +73027,7 @@
     },
     {
       "type": 0,
-      "value": "登录的用户在其重新开启前将无法登录。他们的Silo账户以及与"
+      "value": "的用户将无法登录。他们的Silo账户和"
     },
     {
       "type": 1,
@@ -72650,7 +73035,7 @@
     },
     {
       "type": 0,
-      "value": "的连接会保留。"
+      "value": "连接会保持不变。"
     }
   ],
   "web.admin.settings.signIn.provider.binding.turnOffDescriptionBreakGlass": [
@@ -72664,7 +73049,7 @@
     },
     {
       "type": 0,
-      "value": "重新开启前，只有应急管理员能登录。Silo账户及其与"
+      "value": "重新开启之前，只有应急管理员可以登录。Silo账户及其"
     },
     {
       "type": 1,
@@ -72672,7 +73057,7 @@
     },
     {
       "type": 0,
-      "value": "的连接会保留。"
+      "value": "连接会保持不变。"
     }
   ],
   "web.admin.settings.signIn.provider.binding.turnOffTitle": [
@@ -72696,7 +73081,7 @@
     },
     {
       "type": 0,
-      "value": "已关闭。现在只能使用Silo密码登录。"
+      "value": "已关闭。用户只能使用Silo密码登录。"
     }
   ],
   "web.admin.settings.signIn.provider.binding.turnedOffBreakGlass": [
@@ -72726,7 +73111,7 @@
     },
     {
       "type": 0,
-      "value": "是当前的登录提供商。一个服务器同一时间只能有一个：要改用"
+      "value": "当前处于开启状态。一次只能开启一个提供商。请先将其关闭，再改用"
     },
     {
       "type": 1,
@@ -72734,7 +73119,7 @@
     },
     {
       "type": 0,
-      "value": "，请先将其关闭。"
+      "value": "。"
     }
   ],
   "web.admin.settings.signIn.provider.blocked.pluginOff": [
@@ -72778,7 +73163,7 @@
   "web.admin.settings.signIn.provider.copy.failed": [
     {
       "type": 0,
-      "value": "无法复制。请选中地址并手动复制。"
+      "value": "无法复制。请选中URI并手动复制。"
     }
   ],
   "web.admin.settings.signIn.provider.header.oauthShown": [
@@ -72830,7 +73215,7 @@
   "web.admin.settings.signIn.provider.loginName.description": [
     {
       "type": 0,
-      "value": "显示在登录页面和应用中用户选择登录方式的位置。"
+      "value": "用户选择登录方式时，显示在登录页面和应用中。"
     }
   ],
   "web.admin.settings.signIn.provider.loginName.directoryName": [
@@ -72888,7 +73273,7 @@
   "web.admin.settings.signIn.provider.loginName.title": [
     {
       "type": 0,
-      "value": "登录按钮"
+      "value": "登录显示名称"
     }
   ],
   "web.admin.settings.signIn.provider.missing.disabled": [
@@ -72966,13 +73351,13 @@
   "web.admin.settings.signIn.provider.register.postLogoutUriDescription": [
     {
       "type": 0,
-      "value": "仅当你开启在提供商处退出登录（位于“高级”下）时才需要。"
+      "value": "仅在“高级”下开启提供商退出登录时才需要。"
     }
   ],
   "web.admin.settings.signIn.provider.register.publicUrlMissing": [
     {
       "type": 0,
-      "value": "重定向URI需要服务器的公共URL。请在"
+      "value": "请在"
     },
     {
       "type": 8,
@@ -72986,7 +73371,7 @@
     },
     {
       "type": 0,
-      "value": "中设置。"
+      "value": "中设置服务器的公共URL，以生成重定向URI。"
     }
   ],
   "web.admin.settings.signIn.provider.register.redirectUri": [
@@ -73082,7 +73467,7 @@
   "web.admin.settings.signIn.provider.slot.oneAtATime": [
     {
       "type": 0,
-      "value": "一个服务器同一时间只能使用一个提供商。要切换，请先关闭"
+      "value": "要切换提供商，请先关闭"
     },
     {
       "type": 1,
@@ -73162,19 +73547,19 @@
   "web.admin.settings.signIn.provider.test.descriptionSaved": [
     {
       "type": 0,
-      "value": "测试已保存的配置。不会保存任何内容。"
+      "value": "测试已保存的配置，不会更改任何设置。"
     }
   ],
   "web.admin.settings.signIn.provider.test.descriptionUnsaved": [
     {
       "type": 0,
-      "value": "在已保存配置的基础上测试你未保存的更改。不会保存任何内容。"
+      "value": "测试你当前的设置（包括未保存的更改），不会保存这些更改。"
     }
   ],
   "web.admin.settings.signIn.provider.test.didNotPass": [
     {
       "type": 0,
-      "value": "测试未通过。"
+      "value": "连接测试失败。"
     }
   ],
   "web.admin.settings.signIn.provider.test.errorFallback": [
@@ -73192,7 +73577,7 @@
   "web.admin.settings.signIn.provider.test.lookUpNote": [
     {
       "type": 0,
-      "value": "填写用户名后，测试还会查找该用户，并显示其所属的组以及将获得的角色。不会使用密码。"
+      "value": "输入用户名，即可预览该用户所属的组和Silo角色。无需密码。"
     }
   ],
   "web.admin.settings.signIn.provider.test.run": [
@@ -73351,13 +73736,13 @@
   "web.admin.settings.storage.active.verifiedLabel": [
     {
       "type": 0,
-      "value": "已验证的存储对象"
+      "value": "已验证的文件"
     }
   ],
   "web.admin.settings.storage.backend": [
     {
       "type": 0,
-      "value": "后端"
+      "value": "存储后端"
     }
   ],
   "web.admin.settings.storage.backendAuto": [
@@ -73369,7 +73754,7 @@
   "web.admin.settings.storage.backendDescription": [
     {
       "type": 0,
-      "value": "Silo存放图片、字幕和其他媒体库资源的位置。"
+      "value": "Silo存储图片、字幕和其他媒体库文件的位置。"
     }
   ],
   "web.admin.settings.storage.backendLocal": [
@@ -73381,13 +73766,13 @@
   "web.admin.settings.storage.backendLockedLocal": [
     {
       "type": 0,
-      "value": "编辑本地路径，或选择S3并填写公共存储。保存后将打开受管理的迁移审核。"
+      "value": "编辑本地路径，或选择S3并配置公共存储。保存后将打开迁移审核。"
     }
   ],
   "web.admin.settings.storage.backendLockedS3": [
     {
       "type": 0,
-      "value": "选择“自动”或“本地磁盘”，以审核从S3进行的受管理迁移。"
+      "value": "选择“自动”或“本地磁盘”，以审核从S3进行的存储迁移。"
     }
   ],
   "web.admin.settings.storage.cacheImages": [
@@ -73399,13 +73784,13 @@
   "web.admin.settings.storage.cacheImagesDescription": [
     {
       "type": 0,
-      "value": "关闭后，客户端将直接从提供商加载图片，且不会使用存放在媒体旁边的图片。之前保存的图片会改回提供商图片，但你在“编辑元数据”中选择了图片的作品除外。"
+      "value": "关闭后，应用会从提供商加载图片，并忽略媒体旁边的图片。已缓存的图片会恢复为提供商图片，但在“编辑元数据”中设置的自定义图片除外。"
     }
   ],
   "web.admin.settings.storage.credentialStatusUnavailable": [
     {
       "type": 0,
-      "value": "无法获取受保护凭据的状态"
+      "value": "无法检查已保存的凭据"
     }
   ],
   "web.admin.settings.storage.dialog.checking": [
@@ -73423,19 +73808,19 @@
   "web.admin.settings.storage.dialog.copyOptionsAvailable": [
     {
       "type": 0,
-      "value": "可以使用基于复制的迁移选项。"
+      "value": "你可以将现有文件复制到新位置。"
     }
   ],
   "web.admin.settings.storage.dialog.description": [
     {
       "type": 0,
-      "value": "Silo会在切换前验证并复制所选数据。如果公共位置发生变化，重启后会在后台协调公共目录引用。旧存储永远不会被自动删除。"
+      "value": "Silo会在切换前验证并复制所选文件。如果公共存储发生变化，重启后会在后台更新媒体库图片链接。旧存储永远不会被自动删除。"
     }
   ],
   "web.admin.settings.storage.dialog.localPath": [
     {
       "type": 0,
-      "value": "本地图片路径"
+      "value": "本地存储路径"
     }
   ],
   "web.admin.settings.storage.dialog.privateEndpointMissing": [
@@ -73447,13 +73832,13 @@
   "web.admin.settings.storage.dialog.queue": [
     {
       "type": 0,
-      "value": "将迁移加入队列"
+      "value": "开始迁移"
     }
   ],
   "web.admin.settings.storage.dialog.queuing": [
     {
       "type": 0,
-      "value": "正在加入队列……"
+      "value": "正在开始……"
     }
   ],
   "web.admin.settings.storage.dialog.retryCheck": [
@@ -73489,19 +73874,19 @@
   "web.admin.settings.storage.dialog.target": [
     {
       "type": 0,
-      "value": "目标"
+      "value": "目标位置"
     }
   ],
   "web.admin.settings.storage.dialog.targetLocal": [
     {
       "type": 0,
-      "value": "本地磁盘（Silo默认行为）"
+      "value": "本地磁盘"
     }
   ],
   "web.admin.settings.storage.dialog.targetLocalSource": [
     {
       "type": 0,
-      "value": "根据后端设置选择。"
+      "value": "根据存储后端设置选择。"
     }
   ],
   "web.admin.settings.storage.dialog.targetPrivate": [
@@ -73541,7 +73926,7 @@
     },
     {
       "type": 0,
-      "value": "请查看管理员诊断信息了解详情。"
+      "value": "请查看服务器诊断信息了解详情。"
     }
   ],
   "web.admin.settings.storage.failed.canceledReason": [
@@ -73571,13 +73956,13 @@
   "web.admin.settings.storage.failure.copy": [
     {
       "type": 0,
-      "value": "复制存储对象失败。"
+      "value": "无法将文件复制到新存储。"
     }
   ],
   "web.admin.settings.storage.failure.preparation": [
     {
       "type": 0,
-      "value": "存储迁移准备失败。"
+      "value": "无法准备存储迁移。"
     }
   ],
   "web.admin.settings.storage.failure.targetCheck": [
@@ -73595,13 +73980,13 @@
   "web.admin.settings.storage.failure.verification": [
     {
       "type": 0,
-      "value": "存储验证失败。"
+      "value": "已复制的文件未通过验证。"
     }
   ],
   "web.admin.settings.storage.group": [
     {
       "type": 0,
-      "value": "存储"
+      "value": "常规"
     }
   ],
   "web.admin.settings.storage.loading": [
@@ -73625,7 +74010,7 @@
   "web.admin.settings.storage.localPathLockedLocal": [
     {
       "type": 0,
-      "value": "更改此路径将打开受管理的迁移。请在Docker中将新路径挂载为卷。"
+      "value": "更改此路径后，保存时将打开存储迁移审核。请在Docker中将新路径挂载为卷。"
     }
   ],
   "web.admin.settings.storage.localPathLockedS3": [
@@ -73643,25 +74028,25 @@
   "web.admin.settings.storage.lockStatusUnavailable": [
     {
       "type": 0,
-      "value": "无法获取存储锁定状态"
+      "value": "存储状态不可用"
     }
   ],
   "web.admin.settings.storage.lockUnknownMove": [
     {
       "type": 0,
-      "value": "无法获取存储锁定状态。迁移存储前，请重新检查状态。"
+      "value": "存储状态不可用。开始迁移前，请重试状态检查。"
     }
   ],
   "web.admin.settings.storage.lockUnknownSave": [
     {
       "type": 0,
-      "value": "无法获取存储锁定状态。保存此位置前，请重新检查状态。"
+      "value": "存储状态不可用。保存此位置前，请重试状态检查。"
     }
   ],
   "web.admin.settings.storage.manualRestart.body": [
     {
       "type": 0,
-      "value": "存储切换已提交，但此主机无法自动重启Silo。请重启服务器，以安全启用新存储。"
+      "value": "你的新存储设置已保存，但Silo无法自动重启。请重启服务器以使用新存储。"
     }
   ],
   "web.admin.settings.storage.manualRestart.title": [
@@ -73673,37 +74058,37 @@
   "web.admin.settings.storage.notes.backfill": [
     {
       "type": 0,
-      "value": "“补全元数据图片”会从已保存的提供商URL下载，而不是从旧的S3下载。"
+      "value": "“补全元数据图片”任务会从已保存的提供商URL下载，而不是从你的旧S3存储桶下载。"
     }
   ],
   "web.admin.settings.storage.notes.metadataRetained": [
     {
       "type": 0,
-      "value": "PostgreSQL中的核心元数据会保留。"
+      "value": "Postgres中的媒体库元数据会完整保留。"
     }
   ],
   "web.admin.settings.storage.notes.privateChanging": [
     {
       "type": 0,
-      "value": "“迁移全部”会将诊断包和目录作业产物复制到新位置；“保留个人上传”和“全新开始”会将它们留在旧位置。"
+      "value": "只有“迁移全部内容”会复制诊断包和目录作业文件；其他选项会将它们留在旧位置。"
     }
   ],
   "web.admin.settings.storage.notes.privateOnly": [
     {
       "type": 0,
-      "value": "“迁移所有私有数据”会将诊断包和目录作业产物复制到新位置；“保留个人资料头像”和“全新开始”会将它们留在旧位置。"
+      "value": "只有“迁移全部私有数据”会复制诊断包和目录作业文件；其他选项会将它们留在旧位置。"
     }
   ],
   "web.admin.settings.storage.notes.privateUnchanged": [
     {
       "type": 0,
-      "value": "个人资料头像、诊断包和目录作业产物会保留在当前存储中。"
+      "value": "个人资料头像、诊断包和目录作业文件会保留在当前位置。"
     }
   ],
   "web.admin.settings.storage.notes.restartRequired": [
     {
       "type": 0,
-      "value": "迁移完成后需要重启。"
+      "value": "迁移完成后，请重启服务器。"
     }
   ],
   "web.admin.settings.storage.notes.sidecar": [
@@ -73721,19 +74106,19 @@
   "web.admin.settings.storage.notes.toLocalMigrateAll": [
     {
       "type": 0,
-      "value": "所有内容（包括诊断包和目录作业产物）都会复制到本地磁盘。"
+      "value": "所有内容（包括诊断包和目录作业文件）都会复制到本地磁盘。"
     }
   ],
   "web.admin.settings.storage.notes.toLocalPreserve": [
     {
       "type": 0,
-      "value": "诊断包和目录作业产物会留在旧的私有存储桶中，切换后将无法使用。"
+      "value": "诊断包和目录作业文件会留在旧的私有存储桶中，切换后将无法访问。"
     }
   ],
   "web.admin.settings.storage.notes.toLocalStartFresh": [
     {
       "type": 0,
-      "value": "“全新开始”不会复制任何内容：上传内容、已下载的字幕、个人资料头像、诊断包和目录作业产物都会留在S3中，切换后将无法使用。"
+      "value": "“全新开始”不会复制任何内容：上传内容、已下载的字幕、个人资料头像、诊断包和目录作业文件都会留在S3中，切换后将无法访问。"
     }
   ],
   "web.admin.settings.storage.phase.canceled": [
@@ -73763,7 +74148,7 @@
   "web.admin.settings.storage.phase.copying": [
     {
       "type": 0,
-      "value": "正在复制存储对象"
+      "value": "正在复制文件"
     }
   ],
   "web.admin.settings.storage.phase.failed": [
@@ -73787,13 +74172,13 @@
   "web.admin.settings.storage.phase.restartPending": [
     {
       "type": 0,
-      "value": "需要重启才能启用存储"
+      "value": "重启服务器以使用新存储"
     }
   ],
   "web.admin.settings.storage.phase.verifying": [
     {
       "type": 0,
-      "value": "正在验证已复制的对象"
+      "value": "正在验证已复制的文件"
     }
   ],
   "web.admin.settings.storage.policy.legend": [
@@ -73811,7 +74196,7 @@
   "web.admin.settings.storage.policy.migrateAllDescription": [
     {
       "type": 0,
-      "value": "复制完整的图片目录树，包括已下载的字幕。私有数据位置变更时，头像、诊断包和目录作业产物也会一并复制。缓存非常大时，这可能需要很长时间。"
+      "value": "复制所有已存储的图片和已下载的字幕；如果私有存储也会迁移，则一并复制个人资料头像、诊断包和目录作业文件。对于大型媒体库，这可能需要较长时间。"
     }
   ],
   "web.admin.settings.storage.policy.preserve": [
@@ -73841,7 +74226,7 @@
   "web.admin.settings.storage.policy.privateMigrateAllDescription": [
     {
       "type": 0,
-      "value": "将个人资料头像、诊断包和目录作业产物复制到新位置。"
+      "value": "将个人资料头像、诊断包和目录作业文件复制到新位置。"
     }
   ],
   "web.admin.settings.storage.policy.privatePreserve": [
@@ -73853,13 +74238,13 @@
   "web.admin.settings.storage.policy.privatePreserveDescription": [
     {
       "type": 0,
-      "value": "将个人资料头像复制到新位置。诊断包和目录产物会留在旧位置，切换后将无法使用。"
+      "value": "复制个人资料头像。诊断包和目录作业文件会留在旧位置，切换后将无法访问。"
     }
   ],
   "web.admin.settings.storage.policy.privateStartFreshDescription": [
     {
       "type": 0,
-      "value": "不读取旧位置。切换后，现有的个人资料头像将显示为缺失；其文件、诊断包和目录产物会留在旧位置。"
+      "value": "跳过旧位置。现有的个人资料头像将显示为缺失，旧头像、诊断包和目录作业文件会保留在原处。"
     }
   ],
   "web.admin.settings.storage.policy.startFresh": [
@@ -73871,13 +74256,13 @@
   "web.admin.settings.storage.policy.startFreshDescription": [
     {
       "type": 0,
-      "value": "不读取旧的图片存储。提供商路径将恢复为TMDB/TVDB URL；自定义图片需要重新上传。已下载的字幕会留在旧存储中，切换后将无法使用。"
+      "value": "跳过旧存储。提供商图片将恢复为TMDB/TVDB URL，自定义图片需要重新上传。已下载的字幕会留在旧位置，切换后将无法访问。"
     }
   ],
   "web.admin.settings.storage.policy.startFreshWithAvatarsDescription": [
     {
       "type": 0,
-      "value": "不读取旧的图片存储。提供商路径将恢复为TMDB/TVDB URL；自定义图片需要重新上传。已下载的字幕会留在旧存储中，切换后将无法使用。个人资料头像也会留在旧存储中，切换后将无法使用。"
+      "value": "跳过旧存储。提供商图片将恢复为TMDB/TVDB URL，自定义图片需要重新上传。已下载的字幕和个人资料头像会留在旧位置，切换后将无法访问。"
     }
   ],
   "web.admin.settings.storage.policy.unavailableNoPrivateBucket": [
@@ -73901,7 +74286,7 @@
   "web.admin.settings.storage.privateGroupDescription": [
     {
       "type": 0,
-      "value": "仅由服务器读取的文件：个人资料头像、诊断包和目录种子产物。使用S3存储时，需要在此为它们设置存储桶；使用本地磁盘时，除非设置了存储桶，否则它们会保存在本地存储路径中。"
+      "value": "仅限服务器使用的文件：个人资料头像、诊断包和目录作业文件。使用S3时，这些文件需要配置此项；使用本地磁盘时，除非设置了存储桶，否则它们会保留在本地存储路径中。"
     }
   ],
   "web.admin.settings.storage.publicGroup": [
@@ -73913,37 +74298,37 @@
   "web.admin.settings.storage.publicGroupDescription": [
     {
       "type": 0,
-      "value": "客户端直接下载的文件：缓存的图片、上传的海报和品牌图片。当“后端”设为S3，或设为“自动”且在此设置了存储桶时使用。"
+      "value": "客户端直接下载的文件：已缓存的图片、上传的海报和品牌图片。当存储后端设为S3，或设为“自动”且设置了存储桶时使用。"
     }
   ],
   "web.admin.settings.storage.recovery.messageBlocked": [
     {
       "type": 0,
-      "value": "恢复已受阻。请查看管理员诊断信息了解详情。"
+      "value": "存储恢复已受阻。请查看服务器诊断信息了解详情。"
     }
   ],
   "web.admin.settings.storage.recovery.messagePending": [
     {
       "type": 0,
-      "value": "重启后将进行图片协调。"
+      "value": "服务器重启后将更新媒体库图片引用。"
     }
   ],
   "web.admin.settings.storage.recovery.messageRunning": [
     {
       "type": 0,
-      "value": "正在协调已提交的图片存储。"
+      "value": "正在为新存储位置更新媒体库图片引用。"
     }
   ],
   "web.admin.settings.storage.recovery.messageWaitingRetry": [
     {
       "type": 0,
-      "value": "协调已暂停，正在等待重试。"
+      "value": "图片引用更新已暂停，正在等待重试。"
     }
   ],
   "web.admin.settings.storage.recovery.needsAttention": [
     {
       "type": 0,
-      "value": "恢复需要处理。请查看管理员诊断信息了解详情。"
+      "value": "存储恢复需要处理。请查看服务器诊断信息了解详情。"
     }
   ],
   "web.admin.settings.storage.recovery.titleBlocked": [
@@ -73979,7 +74364,7 @@
   "web.admin.settings.storage.retryStatus": [
     {
       "type": 0,
-      "value": "重新检查状态"
+      "value": "重新检查"
     }
   ],
   "web.admin.settings.storage.reviewTransition": [
@@ -74033,31 +74418,31 @@
   "web.admin.settings.storage.s3.locationChangeFromLocal": [
     {
       "type": 0,
-      "value": "保存此存储桶将开始从本地存储进行托管迁移。切换前，请选择要复制的内容。"
+      "value": "保存后会打开从本地磁盘开始的存储迁移。在切换前，你可以选择要复制的内容。"
     }
   ],
   "web.admin.settings.storage.s3.locationChangePrivate": [
     {
       "type": 0,
-      "value": "保存此位置将开始托管迁移。你可以全新开始，也可以从当前保存位置复制头像、诊断信息和目录产物；切换前，Silo会验证新旧位置。"
+      "value": "保存后会打开存储迁移。你可以全新开始，也可以复制个人资料头像、诊断包和目录作业文件；切换前，Silo会验证两个位置。"
     }
   ],
   "web.admin.settings.storage.s3.locationChangeS3": [
     {
       "type": 0,
-      "value": "保存此位置将开始托管迁移。你可以全新开始，也可以从当前S3存储复制数据；切换前，Silo会验证新旧位置。"
+      "value": "保存后会打开存储迁移。你可以全新开始，也可以从当前S3位置复制文件；切换前，Silo会验证两个位置。"
     }
   ],
   "web.admin.settings.storage.s3.locationUnlockedPrivate": [
     {
       "type": 0,
-      "value": "Silo会在启动时记录已配置的私有存储桶。请在存储头像、诊断信息或目录产物之前选择它；之后更改需要进行托管迁移。"
+      "value": "Silo会在启动时锁定已配置的私有存储桶。请在存储个人资料头像、诊断包或目录作业文件之前选择它；之后更改需要进行存储迁移。"
     }
   ],
   "web.admin.settings.storage.s3.locationUnlockedPublic": [
     {
       "type": 0,
-      "value": "首次写入图片时会记录此位置。上传的海报、合集图片和品牌图片无法重新下载，因此请在扫描前选择存储桶。"
+      "value": "Silo存储第一张图片后，此位置将被锁定。上传的海报、合集图片和品牌素材无法重新下载，因此请在扫描前选择存储桶。"
     }
   ],
   "web.admin.settings.storage.s3.pathStyle": [
@@ -74129,7 +74514,7 @@
   "web.admin.settings.storage.s3.urlAuth": [
     {
       "type": 0,
-      "value": "资源链接的授权方式"
+      "value": "下载链接的授权方式"
     }
   ],
   "web.admin.settings.storage.s3.urlAuthCloudflare": [
@@ -74159,13 +74544,13 @@
   "web.admin.settings.storage.target.noPrivateBucketLocal": [
     {
       "type": 0,
-      "value": "无私有存储桶：头像、诊断信息和目录产物保存在本地磁盘上。"
+      "value": "无私有存储桶：个人资料头像、诊断包和目录作业文件保留在本地磁盘上。"
     }
   ],
   "web.admin.settings.storage.target.noPrivateBucketS3": [
     {
       "type": 0,
-      "value": "无私有存储桶：头像、诊断信息和目录产物将无法使用。"
+      "value": "无私有存储桶：个人资料头像、诊断包和目录作业文件将无法使用。"
     }
   ],
   "web.admin.settings.storage.target.privateBucket": [
@@ -74257,7 +74642,7 @@
   "web.admin.settings.storage.transitionQueueFailed": [
     {
       "type": 0,
-      "value": "无法将存储迁移加入队列。请检查存储设置，然后重试。"
+      "value": "无法启动存储迁移。请检查你的存储设置，然后重试。"
     }
   ],
   "web.admin.settings.storage.transitionQueued": [
@@ -74291,7 +74676,7 @@
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
-      "value": "此服务器不支持托管存储迁移。"
+      "value": "此服务器不支持存储迁移。"
     }
   ],
   "web.admin.settings.storage.unitSeconds": [
@@ -74317,7 +74702,7 @@
             },
             {
               "type": 0,
-              "value": "个对象"
+              "value": "个文件"
             }
           ]
         }
@@ -74353,7 +74738,7 @@
   "web.admin.settings.watchProviders.footnote": [
     {
       "type": 0,
-      "value": "Simkl、MDBList和其他观看提供商可从"
+      "value": "从"
     },
     {
       "type": 8,
@@ -74367,7 +74752,7 @@
     },
     {
       "type": 0,
-      "value": "安装。提供商的应用凭据位于其插件页面，观众可在个人资料设置中关联自己的账户。"
+      "value": "安装Simkl、MDBList和其他观看提供商。在各提供商的插件页面配置其应用凭据；观众可在个人资料设置中关联自己的账户。"
     }
   ],
   "web.admin.settings.watchProviders.loadError": [
@@ -74391,7 +74776,7 @@
   "web.admin.settings.watchProviders.tagline": [
     {
       "type": 0,
-      "value": "观看提供商插件"
+      "value": "观看历史同步"
     }
   ],
   "web.admin.shell.drawer.close": [
@@ -98850,7 +99235,7 @@
   "web.common.signingSecret.description": [
     {
       "type": 0,
-      "value": "Silo会用此密钥为每次投递签名，以便你的接收端进行验证。它只显示一次——请立即将它保存到接收服务中。如果丢失，你可以稍后轮换密钥。"
+      "value": "Silo会用此密钥为Webhook签名，以便你的服务进行验证。请立即保存——它只显示一次，如果丢失，你可以轮换密钥。"
     }
   ],
   "web.common.signingSecret.saved": [
@@ -114573,19 +114958,19 @@
   "web.notifications.pushPrivacy.generic": [
     {
       "type": 0,
-      "value": "推送通知是通用内容；应用收到推送后，会直接从你的Silo服务器获取私密内容。"
+      "value": "每次推送都不包含私密信息；应用收到推送后，会直接从你的服务器获取通知内容。"
     }
   ],
   "web.notifications.pushPrivacy.metadata": [
     {
       "type": 0,
-      "value": "中继不会接收通知标题、消息正文、媒体名称、用户名、个人资料名称或你的服务器URL。它会处理投递和运营服务所需的技术元数据，包括不透明的部署标识符、推送投递时间、请求状态、应用主题、你自托管的Silo服务器联系中继时使用的IP地址，以及经过哈希处理的设备推送令牌。Apple或Google也可能处理其平台的标准推送投递元数据。"
+      "value": "中继不会接收通知标题、消息正文、媒体名称、用户名、个人资料名称或你的服务器URL。为投递通知并运营服务，它会处理技术元数据，包括不透明的部署ID、推送投递时间、请求状态、应用主题、你的服务器联系中继时使用的IP地址，以及经过哈希处理的设备推送令牌。Apple或Google也可能处理其平台的标准推送投递元数据。"
     }
   ],
   "web.notifications.pushPrivacy.relay": [
     {
       "type": 0,
-      "value": "开启推送通知后，你的Silo服务器会向Silo的推送中继发送一个不含内容的请求，以便Silo通过Apple Push Notification service或Firebase Cloud Messaging投递通知。该中继"
+      "value": "开启推送通知后，你的服务器会向Silo的推送中继发送一个不含内容的请求，以便通过Apple Push Notification service或Firebase Cloud Messaging投递通知。该中继"
     },
     {
       "type": 8,
@@ -119745,7 +120130,7 @@
   "web.profiles.userPolicy.audioTranscodingHint": [
     {
       "type": 0,
-      "value": "仅转换音频，不进行视频编码。"
+      "value": "转换音轨，不重新编码视频。"
     }
   ],
   "web.profiles.userPolicy.downloadTranscodes": [
@@ -125200,6 +125585,12 @@
       "value": "邮箱或用户名"
     }
   ],
+  "web.settings.historyImport.embyDirectHelp": [
+    {
+      "type": 0,
+      "value": "输入要从中导入的Emby服务器的基础URL。"
+    }
+  ],
   "web.settings.historyImport.embyPassword": [
     {
       "type": 0,
@@ -125210,6 +125601,12 @@
     {
       "type": 0,
       "value": "如果账户没有密码，请留空"
+    }
+  ],
+  "web.settings.historyImport.embyServerUrl": [
+    {
+      "type": 0,
+      "value": "Emby服务器URL"
     }
   ],
   "web.settings.historyImport.embyUsername": [
@@ -125360,6 +125757,12 @@
     {
       "type": 0,
       "value": "Plex账户"
+    }
+  ],
+  "web.settings.historyImport.mode.serverUrl": [
+    {
+      "type": 0,
+      "value": "服务器URL"
     }
   ],
   "web.settings.historyImport.newImport.description": [
@@ -125657,7 +126060,7 @@
   "web.settings.historyImport.source.emby": [
     {
       "type": 0,
-      "value": "Emby Connect或已保存的服务器"
+      "value": "Emby Connect、服务器URL或已保存的服务器"
     }
   ],
   "web.settings.historyImport.source.jellyfin": [
@@ -128897,7 +129300,7 @@
   "web.settings.overlays.library.help": [
     {
       "type": 0,
-      "value": "PNG、JPEG或WebP格式，最大4 MB。透明PNG效果最佳。上传后可在徽章的“调整”菜单中选择它，用作图标或用于某个值（如2160p）。"
+      "value": "支持PNG、JPEG或WebP格式，最大4 MB（推荐使用透明PNG）。可在徽章的图片菜单中将其指定为图标，或用于特定值（例如2160p）。"
     }
   ],
   "web.settings.overlays.library.name": [
@@ -128909,7 +129312,7 @@
   "web.settings.overlays.library.needsStorage": [
     {
       "type": 0,
-      "value": "上传图片需要资源存储。请配置存储以上传徽章图片。图片库中已有的图片仍会列在下方，并可删除。"
+      "value": "请在存储设置中配置存储以上传徽章图片。已有图片仍会列在下方，且仍可删除。"
     }
   ],
   "web.settings.overlays.library.pickAnother": [
@@ -129011,7 +129414,7 @@
   "web.settings.overlays.look.reset": [
     {
       "type": 0,
-      "value": "使用样式的原始设计"
+      "value": "重置为样式默认值"
     }
   ],
   "web.settings.overlays.look.shadow": [

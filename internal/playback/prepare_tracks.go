@@ -136,7 +136,9 @@ func PlanPreparedTracks(file *models.MediaFile, targetCodecAudio string, audioTr
 	return plan
 }
 
-func (p *PreparedTracks) allAudioCopied() bool {
+// AllAudioCopied reports whether the layout copies every audio track it keeps,
+// so preparing it encodes no audio.
+func (p *PreparedTracks) AllAudioCopied() bool {
 	for _, track := range p.Audio {
 		if track.Codec != PreparedAudioCopy {
 			return false

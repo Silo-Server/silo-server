@@ -214,11 +214,11 @@ describe("ProvidersSettings", () => {
       expect.anything(),
     );
     expect(within(panel).getByLabelText("API key")).toHaveValue("retained-secret");
-    expect(within(panel).getByText(/Save not confirmed/)).toBeInTheDocument();
+    expect(within(panel).getByText(/Save wasn’t confirmed/)).toBeInTheDocument();
     expect(within(panel).getByRole("button", { name: "Save" })).toBeDisabled();
     expect(mocks.updateProvider).toHaveBeenCalledTimes(1);
     await user.click(
-      within(panel).getByRole("button", { name: "Reload saved configuration (discard draft)" }),
+      within(panel).getByRole("button", { name: "Reload saved settings (discard changes)" }),
     );
     await waitFor(() => expect(within(panel).getByRole("button", { name: "Save" })).toBeEnabled());
     expect(within(panel).getByLabelText("API key")).toHaveValue("");
@@ -302,7 +302,7 @@ describe("ProvidersSettings", () => {
     const panel = screen.getByRole("group", { name: "SubSource" });
     await user.click(within(panel).getByRole("button", { name: "Disconnect" }));
     expect(
-      screen.getByText(/Applying this change on this server is reported separately/),
+      screen.getByText(/Silo shows whether this server applied the change/),
     ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Clear and turn off" }));
     expect(mocks.updateProvider).toHaveBeenCalledWith(
@@ -345,7 +345,7 @@ describe("ProvidersSettings", () => {
       ),
     );
     await waitFor(() =>
-      expect(screen.getByText(/Unable to load saved configuration/)).toBeInTheDocument(),
+      expect(screen.getByText(/Couldn’t load saved settings/)).toBeInTheDocument(),
     );
     expect(
       within(screen.getByRole("group", { name: "SubDL" })).getByRole("button", { name: "Save" }),
@@ -425,7 +425,7 @@ describe("ProvidersSettings", () => {
     await user.click(tile.getByRole("button", { name: "Manage" }));
     await user.click(tile.getByRole("button", { name: /^Advanced/ }));
 
-    const sharing = tile.getByRole("switch", { name: "Allow sharing with this provider" });
+    const sharing = tile.getByRole("switch", { name: "Allow sharing markers with this provider" });
     const automatic = tile.getByRole("switch", {
       name: "Automatically share detected intros and credits",
     });
@@ -459,7 +459,9 @@ describe("ProvidersSettings", () => {
     await user.clear(priority);
     await user.clear(confidence);
     await user.click(tile.getByRole("switch", { name: "Get markers from this provider" }));
-    await user.click(tile.getByRole("switch", { name: "Allow sharing with this provider" }));
+    await user.click(
+      tile.getByRole("switch", { name: "Allow sharing markers with this provider" }),
+    );
 
     expect(priority).toBeEnabled();
     expect(confidence).toBeEnabled();
@@ -482,7 +484,9 @@ describe("ProvidersSettings", () => {
     await user.click(tile.getByRole("button", { name: "Manage" }));
     await user.click(tile.getByRole("button", { name: /^Advanced/ }));
 
-    expect(tile.getByRole("switch", { name: "Allow sharing with this provider" })).toBeDisabled();
+    expect(
+      tile.getByRole("switch", { name: "Allow sharing markers with this provider" }),
+    ).toBeDisabled();
     expect(
       tile.getByRole("switch", { name: "Automatically share detected intros and credits" }),
     ).toBeDisabled();

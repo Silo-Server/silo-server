@@ -82,6 +82,43 @@ export function loginSessionDevice(session: { device_name: string; device_platfo
   };
 }
 
+type SessionShape = {
+  id: string;
+  device_name: string;
+  ip_address: string;
+  created_at: string;
+  expires_at: string;
+  device_id?: string;
+  device_platform?: string;
+  last_seen_at: string | null;
+  current: boolean;
+};
+
+/**
+ * Whether the server sent another session reduced to its id, as it does for a
+ * caller limited to itself and for a demo visitor: nothing of its own, and the
+ * caller's own created_at and expires_at repeated because those have no null
+ * form. Judged from the item and the current session on the same page, so a
+ * full page never loses a real session's details.
+ */
+export function isReducedLoginSession(
+  session: SessionShape,
+  current: SessionShape | null,
+): boolean {
+  return (
+    !session.current &&
+    current !== null &&
+    session.id !== current.id &&
+    session.created_at === current.created_at &&
+    session.expires_at === current.expires_at &&
+    session.device_name === "" &&
+    session.ip_address === "" &&
+    !session.device_id &&
+    !session.device_platform &&
+    session.last_seen_at === null
+  );
+}
+
 /** Whether a session was seen in the last two minutes ("Active now"). */
 export function sessionActive(value: string | null, now = Date.now()): boolean {
   const elapsed = sessionElapsed(value, now);

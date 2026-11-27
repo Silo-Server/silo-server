@@ -641,6 +641,12 @@
       "value": "セッションの有効期限が切れました。もう一度サインインしてください。"
     }
   ],
+  "error.sign_in_provider_required": [
+    {
+      "type": 0,
+      "value": "パスワードによるサインインがオフの間は、利用できるサインインプロバイダーを少なくとも1つオンにしておく必要があります。OpenID ConnectにはサーバーのパブリックURLも必要です。"
+    }
+  ],
   "error.snapshot_request_conflict": [
     {
       "type": 0,
@@ -9583,7 +9589,7 @@
     },
     {
       "type": 0,
-      "value": "」を削除します。スキャンソースがこの接続を参照している間は削除できません。先にそれらのソースの設定を変更してください。"
+      "value": "」を削除します。スキャンソースがこの接続を使用している間は削除できません。先にそれらのソースを更新してください。"
     }
   ],
   "web.admin.autoscan.connections.delete.title": [
@@ -9613,7 +9619,7 @@
   "web.admin.autoscan.connections.dialog.description": [
     {
       "type": 0,
-      "value": "リクエスト（Sonarr/Radarr）で設定済みのサーバーを再利用するか、独自の認証情報を入力してください。"
+      "value": "リクエストのSonarrまたはRadarrサーバーを再利用するか、認証情報を手動で入力してください。"
     }
   ],
   "web.admin.autoscan.connections.dialog.editTitle": [
@@ -9625,7 +9631,7 @@
   "web.admin.autoscan.connections.dialog.kind": [
     {
       "type": 0,
-      "value": "種類"
+      "value": "サービス"
     }
   ],
   "web.admin.autoscan.connections.dialog.loadingServers": [
@@ -9637,7 +9643,7 @@
   "web.admin.autoscan.connections.dialog.noRequestServers": [
     {
       "type": 0,
-      "value": "SonarrまたはRadarrのサーバーがまだありません。先に"
+      "value": "リクエストにSonarrまたはRadarrサーバーがまだありません。"
     },
     {
       "type": 8,
@@ -9645,7 +9651,7 @@
       "children": [
         {
           "type": 0,
-          "value": "設定 › リクエスト"
+          "value": "設定 → リクエスト"
         }
       ]
     },
@@ -9797,7 +9803,7 @@
   "web.admin.autoscan.connections.list.columnKind": [
     {
       "type": 0,
-      "value": "種類"
+      "value": "サービス"
     }
   ],
   "web.admin.autoscan.connections.list.columnName": [
@@ -9809,7 +9815,7 @@
   "web.admin.autoscan.connections.list.columnSource": [
     {
       "type": 0,
-      "value": "ソース"
+      "value": "認証情報"
     }
   ],
   "web.admin.autoscan.connections.list.columnURL": [
@@ -9827,7 +9833,7 @@
   "web.admin.autoscan.connections.list.description": [
     {
       "type": 0,
-      "value": "SonarrやRadarrなど、サーバーに接続するソース用の認証情報です。Webhookソースには不要です。"
+      "value": "SonarrやRadarrなどのサーバーに接続するソース用の保存済み認証情報です。Webhookソースには不要です。"
     }
   ],
   "web.admin.autoscan.connections.list.editLabel": [
@@ -9851,13 +9857,13 @@
   "web.admin.autoscan.connections.list.own": [
     {
       "type": 0,
-      "value": "独自"
+      "value": "手動"
     }
   ],
   "web.admin.autoscan.connections.list.reused": [
     {
       "type": 0,
-      "value": "リクエストから再利用"
+      "value": "リクエストから"
     }
   ],
   "web.admin.autoscan.connections.list.title": [
@@ -11543,13 +11549,13 @@
   "web.admin.backups.backUpNow.keyNotConfirmed": [
     {
       "type": 0,
-      "value": "キーが確認されるまで一時停止しています。"
+      "value": "このサーバーのSECRET_KEYを確認するまで一時停止しています。"
     }
   ],
   "web.admin.backups.backUpNow.noStorage": [
     {
       "type": 0,
-      "value": "このサーバーにはバックアップの保存先がありません。"
+      "value": "バックアップ用のストレージが設定されていません。"
     }
   ],
   "web.admin.backups.backUpNow.unreachable": [
@@ -11579,25 +11585,25 @@
   "web.admin.backups.command.group": [
     {
       "type": 0,
-      "value": "サーバー全体を置き換える"
+      "value": "サーバー全体の復元"
     }
   ],
   "web.admin.backups.command.groupDescription": [
     {
       "type": 0,
-      "value": "すべてを復元するとデータベースが置き換えられるため、先にサーバーを停止する必要があります。"
+      "value": "データベース全体が置き換えられるため、このコマンドを実行する前にSiloを停止してください。"
     }
   ],
   "web.admin.backups.command.hintBucket": [
     {
       "type": 0,
-      "value": "このコマンドは上で選択したバックアップ、または最新のバックアップを使用し、バケットから読み込みます。実行環境でSILO_BACKUP_S3_ENDPOINT、SILO_BACKUP_S3_REGION、SILO_BACKUP_S3_ACCESS_KEY、SILO_BACKUP_S3_SECRET_KEY、SILO_BACKUP_S3_PATH_STYLEを設定してください。"
+      "value": "このコマンドは、上で選択したバックアップ（または最新のバックアップ）をバケットから取得して使用します。コマンドの実行環境でSILO_BACKUP_S3_ENDPOINT、SILO_BACKUP_S3_REGION、SILO_BACKUP_S3_ACCESS_KEY、SILO_BACKUP_S3_SECRET_KEY、SILO_BACKUP_S3_PATH_STYLEを設定してください。"
     }
   ],
   "web.admin.backups.command.hintBucketEncrypted": [
     {
       "type": 0,
-      "value": "このコマンドは上で選択したバックアップ、または最新のバックアップを使用し、バケットから読み込みます。実行環境でこのサーバーのSECRET_KEYと、SILO_BACKUP_S3_ENDPOINT、SILO_BACKUP_S3_REGION、SILO_BACKUP_S3_ACCESS_KEY、SILO_BACKUP_S3_SECRET_KEY、SILO_BACKUP_S3_PATH_STYLEを設定してください。"
+      "value": "このコマンドは、上で選択したバックアップ（または最新のバックアップ）をバケットから取得して使用します。コマンドの実行環境でこのサーバーのSECRET_KEYと、SILO_BACKUP_S3_ENDPOINT、SILO_BACKUP_S3_REGION、SILO_BACKUP_S3_ACCESS_KEY、SILO_BACKUP_S3_SECRET_KEY、SILO_BACKUP_S3_PATH_STYLEを設定してください。"
     }
   ],
   "web.admin.backups.command.hintDownload": [
@@ -11639,7 +11645,7 @@
   "web.admin.backups.confirmKey.button": [
     {
       "type": 0,
-      "value": "キーを確認"
+      "value": "SECRET_KEYを確認"
     }
   ],
   "web.admin.backups.content.group": [
@@ -12601,7 +12607,7 @@
   "web.admin.backups.location.bucketDescription": [
     {
       "type": 0,
-      "value": "Siloがアバターや診断バンドルにも使用するプライベートS3バケットに、SECRET_KEYで暗号化して保存します。"
+      "value": "SiloのプライベートS3バケット（アバターや診断バンドルと共有）に、SECRET_KEYで暗号化して保存します。"
     }
   ],
   "web.admin.backups.location.change": [
@@ -12625,7 +12631,7 @@
   "web.admin.backups.location.noneDescription": [
     {
       "type": 0,
-      "value": "このサーバーにはバックアップ用のプライベートストレージがありません。アートワークはS3にあり、プライベートバケットが設定されていません。バックアップを有効にするには、ストレージの設定でプライベートバケットを追加してください。"
+      "value": "このサーバーはアートワークをS3に保存していますが、プライベートバケットが設定されていません。バックアップを保存するには、ストレージの設定でプライベートバケットを追加してください。"
     }
   ],
   "web.admin.backups.location.nowhere": [
@@ -12649,13 +12655,13 @@
   "web.admin.backups.location.s3": [
     {
       "type": 0,
-      "value": "S3バケット"
+      "value": "別のS3バケット"
     }
   ],
   "web.admin.backups.location.s3Description": [
     {
       "type": 0,
-      "value": "このサーバーの外に、SECRET_KEYで暗号化して保存します。"
+      "value": "このサーバーの外部にある専用のS3バケットに、SECRET_KEYで暗号化して保存します。"
     }
   ],
   "web.admin.backups.location.setUp": [
@@ -17799,7 +17805,7 @@
   "web.admin.backups.schedule.enabledDescription": [
     {
       "type": 0,
-      "value": "オフにすると新しいバックアップは作成されなくなります。保存済みのコピーは残ります。"
+      "value": "オフにするとスケジュールされたバックアップが停止します。既存のコピーは残ります。"
     }
   ],
   "web.admin.backups.schedule.first": [
@@ -17867,7 +17873,7 @@
   "web.admin.backups.schedule.groupDescription": [
     {
       "type": 0,
-      "value": "クラスター内の1台のサーバーがバックアップを作成します。最も古いコピーは、新しいバックアップが成功した後にのみ削除されます。"
+      "value": "クラスターでは、各バックアップは1台のサーバーのみで実行されます。古いコピーは、新しいバックアップが成功した後にのみ削除されます。"
     }
   ],
   "web.admin.backups.schedule.keep": [
@@ -18179,7 +18185,7 @@
   "web.admin.backups.table.otherKeyNoteWithCheck": [
     {
       "type": 0,
-      "value": "別のSECRET_KEYで暗号化（キーチェック"
+      "value": "別のSECRET_KEYで暗号化（フィンガープリント："
     },
     {
       "type": 1,
@@ -18193,7 +18199,7 @@
   "web.admin.backups.table.otherKeyReason": [
     {
       "type": 0,
-      "value": "復元やファイルの復号ができるのは、作成時のSECRET_KEYを持つサーバーのみです。"
+      "value": "このバックアップを復元または復号できるのは、同じSECRET_KEYを使用するサーバーのみです。"
     }
   ],
   "web.admin.backups.table.restore": [
@@ -18863,7 +18869,7 @@
   "web.admin.backups.warning.keyNotConfirmed": [
     {
       "type": 0,
-      "value": "このサーバーのSECRET_KEYを確認するまで、このバケットへのバックアップは一時停止されます。"
+      "value": "このサーバーのSECRET_KEYのコピーを保存済みであることを確認するまで、このバケットへのバックアップは一時停止されます。"
     }
   ],
   "web.admin.backups.warnings.copied": [
@@ -22793,7 +22799,7 @@
   "web.admin.common.downloadAccess.conversionOff": [
     {
       "type": 0,
-      "value": "サーバーがデバイスに適したコピーを準備していないため、ダウンロードはすべて元のファイルになります。"
+      "value": "デバイスに適したコピーがオフになっているため、すべてのダウンロードで元のファイルが使用されます。"
     },
     {
       "type": 8,
@@ -22833,7 +22839,7 @@
   "web.admin.common.editorConflict.message": [
     {
       "type": 0,
-      "value": "別の管理者がこの項目を変更しました。編集内容は保持されています。再度保存する前に、再読み込みして最新のバージョンを確認してください。"
+      "value": "別の管理者が内容を変更しました。編集内容は画面上に残っていますが、再読み込みすると最新のバージョンに置き換わります。"
     }
   ],
   "web.admin.common.editorConflict.reload": [
@@ -22879,7 +22885,7 @@
   "web.admin.common.emailTest.saveFirst": [
     {
       "type": 0,
-      "value": "先に変更を保存してください。テストには保存済みの設定が使用されます。"
+      "value": "テストには保存済みの設定が使用されます。変更がある場合は先に保存してください。"
     }
   ],
   "web.admin.common.emailTest.selectProfile": [
@@ -51637,7 +51643,7 @@
   "web.admin.recommendations.jobs.cacheRefreshed": [
     {
       "type": 0,
-      "value": "最新のキャッシュ行の書き込み："
+      "value": "最終更新："
     },
     {
       "type": 1,
@@ -51647,7 +51653,7 @@
   "web.admin.recommendations.jobs.cowatch": [
     {
       "type": 0,
-      "value": "共視聴マトリックス"
+      "value": "共視聴データ"
     }
   ],
   "web.admin.recommendations.jobs.embeddings": [
@@ -51717,7 +51723,7 @@
   "web.admin.recommendations.jobs.noRun": [
     {
       "type": 0,
-      "value": "完了した実行の記録はありません"
+      "value": "完了した実行はまだありません"
     }
   ],
   "web.admin.recommendations.jobs.percent": [
@@ -51773,15 +51779,11 @@
           "value": [
             {
               "type": 0,
-              "value": "前回のキャッチアップ："
+              "value": "前回のキャッチアップ完了："
             },
             {
               "type": 1,
               "value": "when"
-            },
-            {
-              "type": 0,
-              "value": "に完了"
             }
           ]
         },
@@ -51789,15 +51791,11 @@
           "value": [
             {
               "type": 0,
-              "value": "前回の古いデータの整理："
+              "value": "前回のプロフィール更新完了："
             },
             {
               "type": 1,
               "value": "when"
-            },
-            {
-              "type": 0,
-              "value": "に完了"
             }
           ]
         },
@@ -51805,15 +51803,11 @@
           "value": [
             {
               "type": 0,
-              "value": "前回の起動時ビルド："
+              "value": "前回の起動時ビルド完了："
             },
             {
               "type": 1,
               "value": "when"
-            },
-            {
-              "type": 0,
-              "value": "に完了"
             }
           ]
         },
@@ -51821,15 +51815,11 @@
           "value": [
             {
               "type": 0,
-              "value": "前回の実行："
+              "value": "前回の実行完了："
             },
             {
               "type": 1,
               "value": "when"
-            },
-            {
-              "type": 0,
-              "value": "に完了"
             }
           ]
         }
@@ -51845,15 +51835,11 @@
           "value": [
             {
               "type": 0,
-              "value": "前回のキャッチアップ："
+              "value": "前回のキャッチアップ失敗："
             },
             {
               "type": 1,
               "value": "when"
-            },
-            {
-              "type": 0,
-              "value": "に失敗"
             }
           ]
         },
@@ -51861,15 +51847,11 @@
           "value": [
             {
               "type": 0,
-              "value": "前回の古いデータの整理："
+              "value": "前回のプロフィール更新失敗："
             },
             {
               "type": 1,
               "value": "when"
-            },
-            {
-              "type": 0,
-              "value": "に失敗"
             }
           ]
         },
@@ -51877,15 +51859,11 @@
           "value": [
             {
               "type": 0,
-              "value": "前回の起動時ビルド："
+              "value": "前回の起動時ビルド失敗："
             },
             {
               "type": 1,
               "value": "when"
-            },
-            {
-              "type": 0,
-              "value": "に失敗"
             }
           ]
         },
@@ -51893,15 +51871,11 @@
           "value": [
             {
               "type": 0,
-              "value": "前回の実行："
+              "value": "前回の実行失敗："
             },
             {
               "type": 1,
               "value": "when"
-            },
-            {
-              "type": 0,
-              "value": "に失敗"
             }
           ]
         }
@@ -51965,7 +51939,7 @@
   "web.admin.recommendations.lock.body": [
     {
       "type": 0,
-      "value": "このインストールは、最初に保存されたエンベディングのエンベディング空間にロックされています。"
+      "value": "Siloは、保存されたすべてのエンベディングの互換性を保つため、最初に使用したエンベディングモデルにロックされます。"
     }
   ],
   "web.admin.recommendations.lock.model": [
@@ -51995,13 +51969,13 @@
   "web.admin.recommendations.page.restartRequired": [
     {
       "type": 0,
-      "value": "1つ以上の設定が変更されました。変更を反映するにはサーバーの再起動が必要です。"
+      "value": "変更を反映するには、サーバーを再起動してください。"
     }
   ],
   "web.admin.recommendations.page.subtitle": [
     {
       "type": 0,
-      "value": "AIを活用したおすすめエンジンを設定します。pgvectorと、AIサービスで接続されたエンベディングプロバイダーが必要です。"
+      "value": "ライブラリ向けのパーソナライズされたおすすめです。pgvectorと、AIサービスで設定されたエンベディングプロバイダーが必要です。"
     }
   ],
   "web.admin.recommendations.page.title": [
@@ -52013,7 +51987,7 @@
   "web.admin.recommendations.reset.body": [
     {
       "type": 0,
-      "value": "エンベディングのロック、すべてのアイテムのエンベディング、個人向けおすすめの行を削除し、嗜好プロフィールをクリアして、エンベディングモデルを切り替えられるようにします。その後エンベディングジョブを実行してください。嗜好プロフィールは、タイトルが再びエンベディングされるにつれて再構築されます。"
+      "value": "モデルを切り替えられるように、モデルのロック、保存されたエンベディング、個人向けおすすめ、嗜好プロフィールをクリアします。その後、エンベディングジョブを実行してください。タイトルが再びエンベディングされるにつれて、嗜好プロフィールは自動的に再構築されます。"
     }
   ],
   "web.admin.recommendations.reset.button": [
@@ -52025,7 +51999,7 @@
   "web.admin.recommendations.reset.confirmBody": [
     {
       "type": 0,
-      "value": "すべてのアイテムのエンベディングと個人向けおすすめの行が削除され、嗜好プロフィールがクリアされます。エンベディングジョブが再度実行されるまで、個人向けおすすめとセマンティック検索は利用できません。"
+      "value": "保存されたすべてのエンベディングと個人向けおすすめを削除し、嗜好プロフィールをクリアします。エンベディングジョブが再度実行されるまで、個人向けおすすめと意味に基づく検索は利用できません。"
     }
   ],
   "web.admin.recommendations.reset.confirmButton": [
@@ -52229,7 +52203,7 @@
   "web.admin.recommendations.settings.confirmClear": [
     {
       "type": 0,
-      "value": "クリアを確定"
+      "value": "削除"
     }
   ],
   "web.admin.recommendations.settings.notConfigured": [
@@ -55578,13 +55552,13 @@
   "web.admin.settings.ai.chatgptConnection.browserUrl": [
     {
       "type": 0,
-      "value": "ブラウザーのURL"
+      "value": "最後に表示されたブラウザーのURL"
     }
   ],
   "web.admin.settings.ai.chatgptConnection.callbackInvalid": [
     {
       "type": 0,
-      "value": "ChatGPTのサインインが完了したら、アドレスバーのURLをすべて貼り付けてください。"
+      "value": "サインインURLが無効です。ChatGPTのサインインが完了したら、ブラウザーのアドレスバーからURLをすべて貼り付けてください。"
     }
   ],
   "web.admin.settings.ai.chatgptConnection.chooseAccount": [
@@ -55602,7 +55576,7 @@
   "web.admin.settings.ai.chatgptConnection.completeFailed": [
     {
       "type": 0,
-      "value": "サインインを完了できませんでした。貼り付けたURLを確認してください。この試行が期限切れの場合は、このダイアログを閉じてやり直してください。"
+      "value": "サインインを完了できませんでした。貼り付けたURLを確認するか、この試行の期限が切れている場合はキャンセルして最初からやり直してください。"
     }
   ],
   "web.admin.settings.ai.chatgptConnection.connect": [
@@ -55666,7 +55640,7 @@
   "web.admin.settings.ai.chatgptConnection.disconnectFailed": [
     {
       "type": 0,
-      "value": "ChatGPTの接続を解除できませんでした。接続状態を更新してから、もう一度お試しください。"
+      "value": "ChatGPTの接続を解除できませんでした。ページを再読み込みして、もう一度お試しください。"
     }
   ],
   "web.admin.settings.ai.chatgptConnection.disconnectNumbered": [
@@ -55692,7 +55666,7 @@
   "web.admin.settings.ai.chatgptConnection.disconnectedLocally": [
     {
       "type": 0,
-      "value": "ローカルで接続を解除しました。ChatGPTの利用設定を開き、アプリの接続が解除されていることを確認してください。"
+      "value": "Siloからは削除しましたが、ChatGPT側で接続解除を確認できませんでした。ChatGPTの利用設定を確認し、そちらでアクセスを取り消してください。"
     }
   ],
   "web.admin.settings.ai.chatgptConnection.gotIt": [
@@ -55776,13 +55750,13 @@
   "web.admin.settings.ai.chatgptConnection.signInIncomplete": [
     {
       "type": 0,
-      "value": "サインインが完了しませんでした。「ChatGPTで続行」からもう一度お試しください。"
+      "value": "ChatGPTのサインインが完了しませんでした。「ChatGPTで続行」を選択して、もう一度お試しください。"
     }
   ],
   "web.admin.settings.ai.chatgptConnection.startFailed": [
     {
       "type": 0,
-      "value": "ChatGPTのサインインを開始できませんでした。接続状態を更新して、もう一度お試しください。"
+      "value": "ChatGPTのサインインを開始できませんでした。ページを再読み込みして、もう一度お試しください。"
     }
   ],
   "web.admin.settings.ai.chatgptConnection.step1": [
@@ -55806,7 +55780,7 @@
   "web.admin.settings.ai.chatgptConnection.switchFailed": [
     {
       "type": 0,
-      "value": "ChatGPTアカウントを切り替えできませんでした。接続状態を更新してください。"
+      "value": "ChatGPTアカウントを切り替えられませんでした。ページを再読み込みして、もう一度お試しください。"
     }
   ],
   "web.admin.settings.ai.chatgptConnection.usagePaused": [
@@ -55840,7 +55814,7 @@
   "web.admin.settings.ai.chatgptRow.chatOnly": [
     {
       "type": 0,
-      "value": "プランはチャット専用で、音声や埋め込みには対応していません。"
+      "value": "チャットのみに対応しており、音声やエンベディングには対応していません。"
     }
   ],
   "web.admin.settings.ai.chatgptRow.signInNeeded": [
@@ -55862,7 +55836,7 @@
   "web.admin.settings.ai.chatgptRow.usedByText": [
     {
       "type": 0,
-      "value": "テキストモデルで使用中。プランはチャット専用で、音声や埋め込みには対応していません。"
+      "value": "テキストモデルで使用中。チャットのみに対応しており、音声やエンベディングには対応していません。"
     }
   ],
   "web.admin.settings.ai.embeddingProvider.connect": [
@@ -55874,7 +55848,7 @@
   "web.admin.settings.ai.embeddingProvider.description": [
     {
       "type": 0,
-      "value": "AIサービスで接続します。ChatGPTプランには埋め込みモデルが含まれていません。"
+      "value": "プロバイダーはAIサービスで管理します。ChatGPTプランにはエンベディングモデルが含まれていません。"
     }
   ],
   "web.admin.settings.ai.embeddingProvider.label": [
@@ -55896,7 +55870,7 @@
   "web.admin.settings.ai.embeddings.chooseOnRecommendations": [
     {
       "type": 0,
-      "value": "おすすめでプロバイダーとモデルを選択してください"
+      "value": "おすすめページでプロバイダーとモデルを選択"
     }
   ],
   "web.admin.settings.ai.embeddings.tagline": [
@@ -55938,7 +55912,7 @@
   "web.admin.settings.ai.features.translateDescriptionsDescription": [
     {
       "type": 0,
-      "value": "管理者または視聴者が求めた項目の概要とキャッチコピーを翻訳します。"
+      "value": "キューに追加されたとき、または下の設定が有効な場合は表示時に、項目の概要とキャッチコピーを翻訳します。"
     }
   ],
   "web.admin.settings.ai.features.translateSubtitles": [
@@ -56042,7 +56016,7 @@
           "value": [
             {
               "type": 0,
-              "value": "プロバイダーの候補："
+              "value": "プロバイダーが提案するモデル："
             },
             {
               "type": 1,
@@ -56062,7 +56036,7 @@
   "web.admin.settings.ai.page.batchSizeInvalid": [
     {
       "type": 0,
-      "value": "字幕のバッチサイズは正の整数で指定してください。"
+      "value": "リクエストあたりの字幕行数は1以上の整数で指定してください。"
     }
   ],
   "web.admin.settings.ai.page.chooseReasoning": [
@@ -56080,7 +56054,7 @@
   "web.admin.settings.ai.page.chunkInvalid": [
     {
       "type": 0,
-      "value": "文字起こしのチャンクの長さは60〜600秒の範囲で指定してください。"
+      "value": "リクエストあたりの音声は60〜600秒の整数で指定してください。"
     }
   ],
   "web.admin.settings.ai.page.connectChatgpt": [
@@ -56092,7 +56066,7 @@
   "web.admin.settings.ai.page.contextLinesInvalid": [
     {
       "type": 0,
-      "value": "字幕のコンテキスト行数は0または正の整数で指定してください。"
+      "value": "文脈として送信する前後の行数は0以上の整数で指定してください。"
     }
   ],
   "web.admin.settings.ai.page.features": [
@@ -56104,13 +56078,13 @@
   "web.admin.settings.ai.page.featuresIntro": [
     {
       "type": 0,
-      "value": "ここにある機能はスケジュールでは実行されません。字幕の処理は視聴者または管理者がトラックを求めたときに、説明の翻訳は管理者がキューに追加したときか視聴者が詳細ページを開いたときに開始されます。"
+      "value": "ここにある機能はスケジュールでは実行されません。字幕ジョブはリクエストがあったときにのみ開始され、説明は管理者がキューに追加したとき、またはタイトルページが開かれたときに翻訳されます。"
     }
   ],
   "web.admin.settings.ai.page.intro": [
     {
       "type": 0,
-      "value": "各AIプロバイダーは一度だけ接続します。テキスト、音声認識、おすすめの埋め込みは、それぞれこの一覧からプロバイダーとモデルを選択します。"
+      "value": "各AIプロバイダーを一度だけ接続し、下でテキスト、音声認識、エンベディング用のプロバイダーとモデルを割り当ててください。"
     }
   ],
   "web.admin.settings.ai.page.loading": [
@@ -56122,7 +56096,7 @@
   "web.admin.settings.ai.page.maxConcurrentInvalid": [
     {
       "type": 0,
-      "value": "最大同時ジョブ数は正の整数で指定してください。"
+      "value": "同時実行ジョブ数は1以上の整数で指定してください。"
     }
   ],
   "web.admin.settings.ai.page.models": [
@@ -56140,7 +56114,7 @@
   "web.admin.settings.ai.page.quotaInvalid": [
     {
       "type": 0,
-      "value": "文字起こしの上限は0または正の整数で指定してください。"
+      "value": "アカウントあたりの文字起こし数は0以上の整数で指定してください。"
     }
   ],
   "web.admin.settings.ai.page.speechCheckFailed": [
@@ -56188,7 +56162,7 @@
   "web.admin.settings.ai.providers.addDescription": [
     {
       "type": 0,
-      "value": "各プロバイダーは一度だけ接続します。そのキーは、プロバイダーを選択したすべてのジョブで使用されます。"
+      "value": "各プロバイダーを一度だけ接続すれば、対応するどのモデルでも再利用できます。"
     }
   ],
   "web.admin.settings.ai.providers.addSubmit": [
@@ -56212,7 +56186,7 @@
   "web.admin.settings.ai.providers.apiKeyOptional": [
     {
       "type": 0,
-      "value": "キーが不要なローカルエンドポイントの場合は空欄にします。"
+      "value": "ローカルエンドポイントでキーが不要な場合は空欄にしてください。"
     }
   ],
   "web.admin.settings.ai.providers.baseUrl": [
@@ -56224,13 +56198,13 @@
   "web.admin.settings.ai.providers.baseUrlCustom": [
     {
       "type": 0,
-      "value": "OpenAI APIに対応した任意のエンドポイント。"
+      "value": "OpenAI互換の任意のAPIエンドポイント。"
     }
   ],
   "web.admin.settings.ai.providers.baseUrlLocal": [
     {
       "type": 0,
-      "value": "Siloのコンテナから到達できるホストを使用してください。localhostはSilo自身を指します。"
+      "value": "Siloから到達できるURLを使用してください。Dockerでは、localhostはSiloコンテナー自身を指します。"
     }
   ],
   "web.admin.settings.ai.providers.baseUrlProxy": [
@@ -56242,7 +56216,7 @@
   "web.admin.settings.ai.providers.checkFailed": [
     {
       "type": 0,
-      "value": "チェックを実行できませんでした。"
+      "value": "接続テストに失敗しました。"
     }
   ],
   "web.admin.settings.ai.providers.connected": [
@@ -56262,7 +56236,7 @@
     },
     {
       "type": 0,
-      "value": "を接続しました。「モデル」でジョブに選択してください。"
+      "value": "を接続しました。使用を開始するには、「モデル」で割り当ててください。"
     }
   ],
   "web.admin.settings.ai.providers.continue": [
@@ -56292,7 +56266,7 @@
   "web.admin.settings.ai.providers.notUsed": [
     {
       "type": 0,
-      "value": "どのジョブにも使用されていません"
+      "value": "どのモデルにも割り当てられていません"
     }
   ],
   "web.admin.settings.ai.providers.remove": [
@@ -56308,7 +56282,7 @@
     },
     {
       "type": 0,
-      "value": "で使用中です。先にそこで別のプロバイダーを選択してください。"
+      "value": "で使用中です。先に別のプロバイダーを割り当ててください。"
     }
   ],
   "web.admin.settings.ai.providers.removeConfirm": [
@@ -56320,7 +56294,7 @@
   "web.admin.settings.ai.providers.removeDescription": [
     {
       "type": 0,
-      "value": "保存されたキーは破棄されます。使用するにはプロバイダーを再度接続してください。"
+      "value": "このプロバイダーと保存されているAPIキーを削除します。後から再度追加できます。"
     }
   ],
   "web.admin.settings.ai.providers.removeFailed": [
@@ -56352,7 +56326,7 @@
   "web.admin.settings.ai.providers.retypeKey": [
     {
       "type": 0,
-      "value": "新しいアドレス用にAPIキーを再入力するか、クリアしてください。"
+      "value": "保存済みのキーは新しいホストには送信されません。このURL用のAPIキーを再入力するか、クリアしてください。"
     }
   ],
   "web.admin.settings.ai.providers.saveFailed": [
@@ -56374,7 +56348,7 @@
   "web.admin.settings.ai.providers.selectedOnceAdded": [
     {
       "type": 0,
-      "value": "追加すると、ここで選択されます。"
+      "value": "追加すると、このプロバイダーが自動的に選択されます。"
     }
   ],
   "web.admin.settings.ai.providers.serves": [
@@ -56386,7 +56360,7 @@
   "web.admin.settings.ai.providers.servesDescription": [
     {
       "type": 0,
-      "value": "このエンドポイントが応答できる機能です。"
+      "value": "このエンドポイントが対応しているAI機能です。"
     }
   ],
   "web.admin.settings.ai.providers.setUpChatgpt": [
@@ -56458,7 +56432,7 @@
   "web.admin.settings.ai.providers.unusedUntilSelected": [
     {
       "type": 0,
-      "value": "「モデル」でジョブが選択するまで、このプロバイダーは使用されません。"
+      "value": "「モデル」で割り当てるまで、このプロバイダーは使用されません。"
     }
   ],
   "web.admin.settings.ai.providers.usedBy": [
@@ -56478,7 +56452,7 @@
     },
     {
       "type": 0,
-      "value": "で使用中です。新しいキーは保存するとすぐに適用されます。"
+      "value": "で使用中です。ここでの変更は保存するとすぐに適用されます。"
     }
   ],
   "web.admin.settings.ai.speech.modelPlaceholder": [
@@ -56490,7 +56464,7 @@
   "web.admin.settings.ai.speech.noProvider": [
     {
       "type": 0,
-      "value": "「プロバイダー」で音声に対応したプロバイダーを追加してください。ChatGPTプランには含まれません。"
+      "value": "「プロバイダー」で音声に対応したプロバイダーを追加してください。ChatGPTプランには音声認識が含まれていません。"
     }
   ],
   "web.admin.settings.ai.speech.providerDescription": [
@@ -56613,7 +56587,7 @@
   "web.admin.settings.ai.text.reasoningDescription": [
     {
       "type": 0,
-      "value": "レベルを上げると複雑な翻訳の品質が向上することがありますが、時間とトークンを多く消費します。"
+      "value": "レベルを高くすると複雑な翻訳の品質が向上することがありますが、処理に時間がかかり、より多くのトークンを消費します。"
     }
   ],
   "web.admin.settings.ai.text.reasoningLevel": [
@@ -56713,7 +56687,7 @@
   "web.admin.settings.ai.text.serviceTierDescription": [
     {
       "type": 0,
-      "value": "デフォルトはOpenAIプロジェクトの設定を使用します。高速と超高速は料金が高く、モデルの対応が必要です。"
+      "value": "「デフォルト」はOpenAIプロジェクトの設定を使用します。「高速/優先」と「超高速」は料金が高くなり、対応モデルが必要です。"
     }
   ],
   "web.admin.settings.ai.text.serviceTierOption": [
@@ -56759,7 +56733,7 @@
   "web.admin.settings.ai.text.tagline": [
     {
       "type": 0,
-      "value": "字幕テキスト、説明、キャッチコピー"
+      "value": "字幕、説明、キャッチコピーを翻訳"
     }
   ],
   "web.admin.settings.ai.text.test": [
@@ -56831,7 +56805,7 @@
   "web.admin.settings.ai.tuning.allowanceResets": [
     {
       "type": 0,
-      "value": "上限のリセット"
+      "value": "上限の適用期間"
     }
   ],
   "web.admin.settings.ai.tuning.audioPerRequest": [
@@ -56867,7 +56841,7 @@
   "web.admin.settings.ai.tuning.jobsAtOnceDescription": [
     {
       "type": 0,
-      "value": "1つのサーバープロセス内のすべてのAIジョブで共有されます。プロセスごとに個別の枠があります。"
+      "value": "サーバーインスタンス単位ですべてのAIジョブに共有されます。クラスター構成では、各インスタンスに個別の上限が適用されます。"
     }
   ],
   "web.admin.settings.ai.tuning.perAccount": [
@@ -56879,7 +56853,7 @@
   "web.admin.settings.ai.tuning.perAccountCaption": [
     {
       "type": 0,
-      "value": "ログインアカウントごとに集計され、そのアカウントのすべてのプロフィールで共有されます。"
+      "value": "アカウントごとに集計され、そのアカウントのすべてのプロフィールで共有されます。"
     }
   ],
   "web.admin.settings.ai.tuning.quotaPeriodOption": [
@@ -56967,7 +56941,7 @@
   "web.admin.settings.ai.tuning.serverWideCaption": [
     {
       "type": 0,
-      "value": "ジョブの所有者に関係なく、サーバー全体に適用される設定です。"
+      "value": "ジョブを開始したユーザーに関係なく、サーバー全体に適用されます。"
     }
   ],
   "web.admin.settings.ai.tuning.transcriptions": [
@@ -56979,7 +56953,7 @@
   "web.admin.settings.ai.tuning.transcriptionsHint": [
     {
       "type": 0,
-      "value": "アカウントのすべてのプロフィールがこの上限を共有します。"
+      "value": "音声からの字幕作成に適用されます（字幕の翻訳は対象外です）。"
     }
   ],
   "web.admin.settings.ai.unit.seconds": [
@@ -56991,7 +56965,7 @@
   "web.admin.settings.ai.unsavedNote": [
     {
       "type": 0,
-      "value": "未保存です。テストにはここに入力した内容が使用されます。"
+      "value": "未保存の変更があります。テストにはこれらの値が使用されます。適用するには下で保存してください。"
     }
   ],
   "web.admin.settings.appearance.badgeImages.group": [
@@ -57083,13 +57057,13 @@
   "web.admin.settings.appearance.logos.loginBackground.description": [
     {
       "type": 0,
-      "value": "ログインページとサインアップページに表示されます。"
+      "value": "サインインページとサインアップページに表示されます。"
     }
   ],
   "web.admin.settings.appearance.logos.loginBackground.label": [
     {
       "type": 0,
-      "value": "ログイン画面の背景"
+      "value": "サインイン画面の背景"
     }
   ],
   "web.admin.settings.appearance.logos.mark.description": [
@@ -57113,7 +57087,7 @@
   "web.admin.settings.appearance.logos.storageNeeded": [
     {
       "type": 0,
-      "value": "画像をアップロードするには、アートワークのストレージ（ローカルディスクまたはS3）が必要です。"
+      "value": "画像をアップロードするには、"
     },
     {
       "type": 8,
@@ -57127,7 +57101,7 @@
     },
     {
       "type": 0,
-      "value": "設定で設定してください。"
+      "value": "設定でローカルディスクまたはS3を設定してください。"
     }
   ],
   "web.admin.settings.appearance.logos.wordmark.description": [
@@ -57145,7 +57119,7 @@
   "web.admin.settings.appearance.overlays.enabled.description": [
     {
       "type": 0,
-      "value": "すべてのプロフィールのデフォルトです。バッジのオン/オフを自分で設定したプロフィールでは、その設定が維持されます。"
+      "value": "すべてのプロフィールのデフォルトです。独自に設定したプロフィールでは、その設定が維持されます。"
     }
   ],
   "web.admin.settings.appearance.overlays.enabled.label": [
@@ -57157,7 +57131,7 @@
   "web.admin.settings.appearance.overlays.group": [
     {
       "type": 0,
-      "value": "カードのオーバーレイ"
+      "value": "ポスターバッジ"
     }
   ],
   "web.admin.settings.appearance.overlays.images": [
@@ -57205,7 +57179,7 @@
   "web.admin.settings.appearance.overlays.style.description": [
     {
       "type": 0,
-      "value": "自分で選択していないユーザーのデフォルトです。"
+      "value": "独自に選択していないプロフィールのデフォルトです。"
     }
   ],
   "web.admin.settings.appearance.overlays.style.label": [
@@ -57223,7 +57197,7 @@
   "web.admin.settings.appearance.restoreDialog.description": [
     {
       "type": 0,
-      "value": "サーバー全体のバッジのデフォルトを、Silo標準の設定に置き換えます。バッジのオン/オフは変更されず、保存するまで何も書き込まれません。"
+      "value": "サーバー全体のバッジのデフォルトをSiloの標準設定にリセットします。バッジのメインスイッチは変更されず、保存するまで適用されません。"
     }
   ],
   "web.admin.settings.appearance.restoreDialog.title": [
@@ -57247,7 +57221,7 @@
   "web.admin.settings.appearance.titlePages.titleArt.description": [
     {
       "type": 0,
-      "value": "自分で選択していないユーザーのデフォルトです。各ユーザーは引き続き自分用に変更できます。"
+      "value": "すべてのプロフィールのデフォルトです。各プロフィールで引き続き個別に変更できます。"
     }
   ],
   "web.admin.settings.attention.hide": [
@@ -57295,13 +57269,13 @@
   "web.admin.settings.autoscan.polling.debounce.description": [
     {
       "type": 0,
-      "value": "この期間内に、変更のないファイルが繰り返し報告された場合はスキップします。変更または削除されたファイルはスキャンされます。"
+      "value": "この期間内に変更のないファイルが繰り返し報告された場合は無視します。変更または削除されたファイルは引き続きスキャンされます。"
     }
   ],
   "web.admin.settings.autoscan.polling.debounce.label": [
     {
       "type": 0,
-      "value": "デバウンス"
+      "value": "デバウンス期間"
     }
   ],
   "web.admin.settings.autoscan.polling.description": [
@@ -57337,13 +57311,13 @@
   "web.admin.settings.compatibilityProxies.advanced.addressStreamGrant": [
     {
       "type": 0,
-      "value": "同じアドレスからサインインなしで再生"
+      "value": "同じIPアドレスからサインインなしでの再生を許可"
     }
   ],
   "web.admin.settings.compatibilityProxies.advanced.addressStreamGrantDescription": [
     {
       "type": 0,
-      "value": "Findroidなど一部のJellyfinアプリは、サインインせずにダイレクト再生やダウンロードのリンクを開きます。オンにすると、同じネットワークアドレスでサインインしているアプリが過去2時間以内にそのファイルの再生をリクエストしていた場合、Siloはそのようなリクエストに応答します。その場合、同じ自宅のネットワーク、モバイル通信事業者、VPNを使う人など、そのアドレスを共有する人もそのファイルを再生できるようになります。これらのアプリを使用する場合にのみオンにしてください。"
+      "value": "Findroidなど、サインインせずにダイレクト再生やダウンロードのリンクを開くアプリ向けの設定です。同じIPアドレスのサインイン済みアプリがそのファイルの再生をリクエストしてから2時間、アクセスを許可します。そのIPを共有する人（同じ自宅ネットワーク、モバイル通信事業者、VPNなど）も再生できるようになるため、該当するアプリを使用する場合にのみオンにしてください。"
     }
   ],
   "web.admin.settings.compatibilityProxies.advanced.playbackTtl": [
@@ -57379,7 +57353,7 @@
   "web.admin.settings.compatibilityProxies.advanced.serverIdDescription": [
     {
       "type": 0,
-      "value": "読み取り専用です。変更すると、すべてのJellyfinアプリで新しいサーバーとして認識されます。"
+      "value": "変更するとすべてのJellyfinアプリで新しいサーバーとして認識されるため、読み取り専用です。"
     }
   ],
   "web.admin.settings.compatibilityProxies.advanced.serverIdPending": [
@@ -57397,7 +57371,7 @@
   "web.admin.settings.compatibilityProxies.advanced.serverNameDescription": [
     {
       "type": 0,
-      "value": "一般のサーバー名とは別のものです。"
+      "value": "一般設定のサーバー名とは別のものです。"
     }
   ],
   "web.admin.settings.compatibilityProxies.advanced.sessionTtl": [
@@ -57463,7 +57437,7 @@
   "web.admin.settings.compatibilityProxies.details.chosenVersion": [
     {
       "type": 0,
-      "value": "選択したバージョン"
+      "value": "設定済みのWebプレーヤーのバージョン"
     }
   ],
   "web.admin.settings.compatibilityProxies.details.currentJob": [
@@ -57487,7 +57461,7 @@
   "web.admin.settings.compatibilityProxies.details.installedAt": [
     {
       "type": 0,
-      "value": "インストール先"
+      "value": "インストールフォルダー"
     }
   ],
   "web.admin.settings.compatibilityProxies.details.licenseFile": [
@@ -57541,7 +57515,7 @@
   "web.admin.settings.compatibilityProxies.details.title": [
     {
       "type": 0,
-      "value": "ダウンロードの詳細"
+      "value": "ステータスとインストールの詳細"
     }
   ],
   "web.admin.settings.compatibilityProxies.details.yes": [
@@ -57553,7 +57527,7 @@
   "web.admin.settings.compatibilityProxies.jellyfin.address": [
     {
       "type": 0,
-      "value": "Jellyfinアプリが使用するアドレス"
+      "value": "Jellyfinアプリ用のサーバーURL"
     }
   ],
   "web.admin.settings.compatibilityProxies.jellyfin.enable": [
@@ -57565,7 +57539,7 @@
   "web.admin.settings.compatibilityProxies.jellyfin.loopbackWarning": [
     {
       "type": 0,
-      "value": "このアドレスにはこのサーバーからしか接続できません。他のデバイスから接続できるアドレスを使用してください。"
+      "value": "このURLはこのサーバー上でのみ機能します。他のデバイスから到達できるURLを入力してください。"
     }
   ],
   "web.admin.settings.compatibilityProxies.loading": [
@@ -57577,13 +57551,13 @@
   "web.admin.settings.compatibilityProxies.operation.installMessage": [
     {
       "type": 0,
-      "value": "Jellyfin Webプレーヤーをダウンロードしてビルドしています"
+      "value": "Jellyfin Webプレーヤーをダウンロードしてビルドしています。"
     }
   ],
   "web.admin.settings.compatibilityProxies.operation.installing": [
     {
       "type": 0,
-      "value": "Jellyfin Web UIをインストール中"
+      "value": "Jellyfin Webプレーヤーをインストール中"
     }
   ],
   "web.admin.settings.compatibilityProxies.operation.percent": [
@@ -57599,19 +57573,19 @@
   "web.admin.settings.compatibilityProxies.operation.progressLabel": [
     {
       "type": 0,
-      "value": "Jellyfin Webのインストールの進行状況"
+      "value": "Jellyfin Webプレーヤーの進行状況"
     }
   ],
   "web.admin.settings.compatibilityProxies.operation.removeMessage": [
     {
       "type": 0,
-      "value": "ダウンロードしたJellyfin Webプレーヤーを削除しています"
+      "value": "ダウンロードしたWebプレーヤーのファイルをサーバーから削除しています。"
     }
   ],
   "web.admin.settings.compatibilityProxies.operation.removing": [
     {
       "type": 0,
-      "value": "Jellyfin Web UIを削除中"
+      "value": "Jellyfin Webプレーヤーを削除中"
     }
   ],
   "web.admin.settings.compatibilityProxies.operation.started": [
@@ -57645,7 +57619,7 @@
   "web.admin.settings.compatibilityProxies.web.busy": [
     {
       "type": 0,
-      "value": "Web UI処理中"
+      "value": "処理中…"
     }
   ],
   "web.admin.settings.compatibilityProxies.web.description": [
@@ -57657,13 +57631,13 @@
   "web.admin.settings.compatibilityProxies.web.disable": [
     {
       "type": 0,
-      "value": "Web UIを無効化"
+      "value": "Webプレーヤーを無効化"
     }
   ],
   "web.admin.settings.compatibilityProxies.web.enable": [
     {
       "type": 0,
-      "value": "Web UIを有効化"
+      "value": "Webプレーヤーを有効化"
     }
   ],
   "web.admin.settings.compatibilityProxies.web.heading": [
@@ -57675,13 +57649,13 @@
   "web.admin.settings.compatibilityProxies.web.install": [
     {
       "type": 0,
-      "value": "Web UIをインストール"
+      "value": "Webプレーヤーをインストール"
     }
   ],
   "web.admin.settings.compatibilityProxies.web.installerMissingTools": [
     {
       "type": 0,
-      "value": "ダウンローダーに必要なツールがありません"
+      "value": "必要なサーバーツールが不足しています"
     }
   ],
   "web.admin.settings.compatibilityProxies.web.licensePresent": [
@@ -57693,7 +57667,7 @@
   "web.admin.settings.compatibilityProxies.web.missingCommands": [
     {
       "type": 0,
-      "value": "次のコマンドがサーバーにインストールされるまで、Siloはダウンロードできません："
+      "value": "Webプレーヤーをダウンロードするには、次のツールをサーバーにインストールしてください："
     },
     {
       "type": 1,
@@ -57715,7 +57689,7 @@
   "web.admin.settings.compatibilityProxies.web.remove": [
     {
       "type": 0,
-      "value": "Web UIを削除"
+      "value": "Webプレーヤーを削除"
     }
   ],
   "web.admin.settings.compatibilityProxies.web.saveFirst": [
@@ -57733,7 +57707,7 @@
   "web.admin.settings.compatibilityProxies.web.update": [
     {
       "type": 0,
-      "value": "Web UIを更新"
+      "value": "Webプレーヤーを更新"
     }
   ],
   "web.admin.settings.compatibilityProxies.web.versionInstalled": [
@@ -57789,7 +57763,7 @@
   "web.admin.settings.downloads.artifactDir.description": [
     {
       "type": 0,
-      "value": "空欄にすると、このサーバーのトランスコードディレクトリの隣にあるsilo-download-artifactsフォルダーを使用します。トランスコードノードは、ノード独自のディレクトリがない限り、それぞれのトランスコードディレクトリ内のdownload-artifactsを使用します。"
+      "value": "空欄にすると、このサーバーのトランスコードディレクトリの隣にあるsilo-download-artifactsフォルダーを使用します。別の設定がない限り、トランスコードノードはそれぞれのトランスコードディレクトリ内のdownload-artifactsを使用します。"
     }
   ],
   "web.admin.settings.downloads.artifactDir.label": [
@@ -57801,7 +57775,7 @@
   "web.admin.settings.downloads.budget.hint": [
     {
       "type": 0,
-      "value": "このサーバーと、独自の上限がないすべてのノードに適用されます。上限を超えると、キャッシュされたファイルから、最後に使用されたのが古い順に削除されます。デバイスがまだ待機しているファイルは残ります。"
+      "value": "このサーバーと、独自の上限がないノードに適用されます。上限を超えると、最後に使用されたのが最も古いキャッシュファイルから順に削除されます。待機中のダウンロードは残ります。"
     }
   ],
   "web.admin.settings.downloads.budget.label": [
@@ -57813,7 +57787,7 @@
   "web.admin.settings.downloads.diskCeiling.description": [
     {
       "type": 0,
-      "value": "ディスク使用率がこの値を超えると、ストレージ上限に関係なく、その場所のキャッシュファイルを早めに削除します。50～95。ダウンロードがトランスコード用ディスクを共有している場合、ノードは95%で再生の受け付けを停止します。"
+      "value": "ディスク使用率がこの値を超えると、上限内であってもキャッシュファイルを早めに削除します（50〜95%）。ダウンロードがトランスコード用ディスクを共有している場合、トランスコードノードは95%で再生の受け付けを停止します。"
     }
   ],
   "web.admin.settings.downloads.diskCeiling.label": [
@@ -57843,7 +57817,7 @@
   "web.admin.settings.downloads.loadError": [
     {
       "type": 0,
-      "value": "ダウンロードの設定を読み込めませんでした。制限を編集する前に再試行してください。"
+      "value": "ダウンロードの設定を読み込めませんでした。編集する前に再試行してください。"
     }
   ],
   "web.admin.settings.downloads.perUser.bandwidth.label": [
@@ -57855,7 +57829,7 @@
   "web.admin.settings.downloads.perUser.concurrent.hint": [
     {
       "type": 0,
-      "value": "ユーザーごとに数え、ユーザーごとの帯域幅の上限とあわせて適用されます。"
+      "value": "各ユーザーに許可される最大同時ダウンロード数です。"
     }
   ],
   "web.admin.settings.downloads.perUser.concurrent.label": [
@@ -57885,7 +57859,7 @@
   "web.admin.settings.downloads.perUser.period.description": [
     {
       "type": 0,
-      "value": "各ユーザーの件数を数える移動期間です（例：24h、168h）。"
+      "value": "上記の上限に適用される期間です（例：24h、168h）。"
     }
   ],
   "web.admin.settings.downloads.perUser.period.label": [
@@ -57909,7 +57883,7 @@
   "web.admin.settings.downloads.server.cacheHours.description": [
     {
       "type": 0,
-      "value": "待機中のものがない準備済みファイルを、最後に使用してから保持する時間です。保持中は別のダウンロードや再ダウンロードで再利用できます。0～720。0にすると、必要とするものがなくなり10分間使用されなかった時点で削除します。"
+      "value": "最後のダウンロード後、再利用のために準備済みファイルを保持する時間です（0〜720）。0の場合、不要になったファイルは最後の使用から10分後に削除されます。"
     }
   ],
   "web.admin.settings.downloads.server.cacheHours.label": [
@@ -57933,7 +57907,7 @@
   "web.admin.settings.downloads.server.localFallback.label": [
     {
       "type": 0,
-      "value": "ワーカーを利用できない場合はローカルで準備"
+      "value": "トランスコードノードを利用できない場合はこのサーバーで準備"
     }
   ],
   "web.admin.settings.downloads.serverBandwidth.hint": [
@@ -57951,7 +57925,7 @@
   "web.admin.settings.downloads.storageLink": [
     {
       "type": 0,
-      "value": "サーバーとノードのストレージを表示"
+      "value": "ダウンロードのストレージを表示"
     }
   ],
   "web.admin.settings.downloads.title": [
@@ -57963,7 +57937,7 @@
   "web.admin.settings.downloads.transcode.description": [
     {
       "type": 0,
-      "value": "デバイスで再生できない動画を変換し、低画質の選択肢も提供します。オフにすると、デバイスで再生できない場合でも、すべてのダウンロードが元の動画のままになります。"
+      "value": "非対応の動画を変換し、低画質の選択肢も提供します。オフにすると、デバイスで再生できない場合でも、ダウンロードには常に元のファイルが使用されます。"
     }
   ],
   "web.admin.settings.downloads.transcode.label": [
@@ -58179,7 +58153,7 @@
   "web.admin.settings.general.identity.loginSubtitle.label": [
     {
       "type": 0,
-      "value": "ログイン画面のサブタイトル"
+      "value": "サインイン画面のサブタイトル"
     }
   ],
   "web.admin.settings.general.identity.loginSubtitle.placeholder": [
@@ -58203,7 +58177,7 @@
   "web.admin.settings.general.network.lanDiscovery.description": [
     {
       "type": 0,
-      "value": "同じネットワーク上のSiloアプリで、サーバーを追加するときにこのサーバーが一覧に表示されるため、アドレスを入力する必要がありません。マルチキャストを通すネットワークが必要です（デフォルトのブリッジではなく、Dockerのホストネットワーク）。"
+      "value": "同じネットワーク上のSiloアプリがこのサーバーを自動で見つけられるようにします。マルチキャストネットワークが必要です（Dockerではデフォルトのブリッジではなくホストモードを使用してください）。"
     }
   ],
   "web.admin.settings.general.network.lanDiscovery.label": [
@@ -58215,7 +58189,7 @@
   "web.admin.settings.general.network.localUrl.description": [
     {
       "type": 0,
-      "value": "家庭内ネットワークのデバイスがSiloに直接アクセスするためのアドレスです。ホストのIPとSiloが待ち受けるポート、Dockerの場合は公開ポートを指定します。サインイン済みのアプリは、到達できる間は暗号化された接続で自動的にこのアドレスに切り替えます。アプリがすでにローカルネットワーク上でサーバーを見つけられる場合は空欄にしてください。"
+      "value": "直接接続用のローカルアドレスです（ホストのIPとポート、またはDockerの公開ポート）。サインイン済みのアプリは、到達できる場合に暗号化された接続で自動的に切り替えます。ローカル検出がすでに機能している場合は空欄にしてください。"
     }
   ],
   "web.admin.settings.general.network.localUrl.label": [
@@ -58227,19 +58201,19 @@
   "web.admin.settings.general.network.publicUrl.description": [
     {
       "type": 0,
-      "value": "ユーザーが開くHTTPSアドレスです。WebSocketのオリジンやメール通知内のリンクに使用されます。"
+      "value": "Siloへのアクセスに使用するHTTPSアドレスです。WebSocket接続、サインインのリダイレクト、メール内のリンクに必要です。"
     }
   ],
   "web.admin.settings.general.network.publicUrl.label": [
     {
       "type": 0,
-      "value": "Siloの公開URL"
+      "value": "公開URL"
     }
   ],
   "web.admin.settings.general.network.trustedProxies.description": [
     {
       "type": 0,
-      "value": "プロキシの範囲をカンマ区切りで指定します。空欄の場合はプライベートのデフォルトを使用します。"
+      "value": "クライアントIPの転送を信頼するCIDR範囲をカンマ区切りで指定します。空欄にすると、デフォルトのプライベート範囲を信頼します。"
     }
   ],
   "web.admin.settings.general.network.trustedProxies.label": [
@@ -58307,7 +58281,7 @@
   "web.admin.settings.health.email.notSetUp": [
     {
       "type": 0,
-      "value": "招待とリセットのメールを送信できません"
+      "value": "招待メールやパスワードリセットメールを送信できません"
     }
   ],
   "web.admin.settings.health.email.ready": [
@@ -58341,7 +58315,7 @@
   "web.admin.settings.health.publicUrl.notSet": [
     {
       "type": 0,
-      "value": "招待・リセットのリンクとサインインプロバイダーに必要です"
+      "value": "招待リンク、パスワードリセット、サインインプロバイダーに必要です"
     }
   ],
   "web.admin.settings.health.search.checking": [
@@ -58353,7 +58327,7 @@
   "web.admin.settings.health.search.degraded": [
     {
       "type": 0,
-      "value": "検索は機能制限モードで動作しています"
+      "value": "検索機能が低下しています"
     }
   ],
   "web.admin.settings.health.search.label": [
@@ -58453,7 +58427,7 @@
   "web.admin.settings.health.storage.notSetUp": [
     {
       "type": 0,
-      "value": "アートワークとアップロードの保存先がありません"
+      "value": "アートワークとアップロードを保存できません"
     }
   ],
   "web.admin.settings.health.storage.publicAndPrivate": [
@@ -58505,13 +58479,13 @@
   "web.admin.settings.hooks.invitations.authorityChanged": [
     {
       "type": 0,
-      "value": "招待の権限が変更されました。"
+      "value": "このリクエストの実行中にサインイン中のプロフィールが変更されました。"
     }
   ],
   "web.admin.settings.hooks.invitations.repeatedCursor": [
     {
       "type": 0,
-      "value": "招待のカーソルが重複しています。履歴を再読み込みしてください。"
+      "value": "招待リストの同期がずれています。履歴を再読み込みしてください。"
     }
   ],
   "web.admin.settings.hooks.inviteCodes.createFailed": [
@@ -58541,7 +58515,7 @@
   "web.admin.settings.hooks.inviteCodes.topUpFailed": [
     {
       "type": 0,
-      "value": "使用回数を追加し直す前に、コードの現在の最大使用回数を確認してください。"
+      "value": "もう一度試す前に、コードの現在の最大使用回数を確認してください。"
     },
     {
       "type": 1,
@@ -58551,7 +58525,7 @@
   "web.admin.settings.hooks.inviteCodes.topUpUnconfirmed": [
     {
       "type": 0,
-      "value": "結果を確認できませんでした。"
+      "value": "使用回数が追加されたか確認できませんでした。"
     }
   ],
   "web.admin.settings.hooks.inviteCodes.toppedUp": [
@@ -58593,7 +58567,7 @@
   "web.admin.settings.hooks.serverNotificationChannels.createInProgress": [
     {
       "type": 0,
-      "value": "送信先はすでに作成中です。"
+      "value": "チャンネルはすでに作成中です"
     }
   ],
   "web.admin.settings.hooks.serverNotificationChannels.deleteFailed": [
@@ -58659,7 +58633,7 @@
   "web.admin.settings.hooks.settings.jellyfinWeb.installFailed": [
     {
       "type": 0,
-      "value": "Jellyfin Webのアセットをインストールできませんでした"
+      "value": "Jellyfin Webプレーヤーのインストールに失敗しました"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinWeb.installStarted": [
@@ -58671,7 +58645,7 @@
   "web.admin.settings.hooks.settings.jellyfinWeb.removeFailed": [
     {
       "type": 0,
-      "value": "Jellyfin Webのアセットを削除できませんでした"
+      "value": "Jellyfin Webプレーヤーの削除に失敗しました"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinWeb.removeStarted": [
@@ -58701,7 +58675,7 @@
   "web.admin.settings.invitations.capabilitiesFailed": [
     {
       "type": 0,
-      "value": "招待機能の情報を読み込めませんでした。"
+      "value": "招待の設定を確認できませんでした。"
     },
     {
       "type": 8,
@@ -58709,7 +58683,7 @@
       "children": [
         {
           "type": 0,
-          "value": "再読み込み"
+          "value": "再試行"
         }
       ]
     }
@@ -58763,7 +58737,7 @@
   "web.admin.settings.invitations.create.emailHint": [
     {
       "type": 0,
-      "value": "送信先であり、サインイン用のユーザー名にもなります。"
+      "value": "招待の送信先であり、サインイン用のユーザー名としても使用されます。"
     }
   ],
   "web.admin.settings.invitations.create.emailLabel": [
@@ -58781,7 +58755,7 @@
   "web.admin.settings.invitations.create.emailOptionBody": [
     {
       "type": 0,
-      "value": "リンクをメールで送信します。コピーすることもできます。"
+      "value": "Siloがリンクをメールで送信します。コピーすることもできます。"
     }
   ],
   "web.admin.settings.invitations.create.emailOptionUnavailable": [
@@ -58825,13 +58799,13 @@
   "web.admin.settings.invitations.create.finePrintEmail": [
     {
       "type": 0,
-      "value": "リンクは1回だけ使用でき、7日で期限切れになります。後で再送信すると新しいリンクが発行され、このリンクは無効になります。"
+      "value": "このリンクは1回だけ使用でき、7日で期限切れになります。後で再送信すると新しいリンクが作成され、このリンクは無効になります。"
     }
   ],
   "web.admin.settings.invitations.create.finePrintLink": [
     {
       "type": 0,
-      "value": "リンクは1回だけ使用でき、7日で期限切れになります。リンクを知っている人は誰でも使用できます。意図しない相手に渡った場合は、履歴から取り消してください。"
+      "value": "このリンクは1回だけ使用でき、7日で期限切れになります。リンクを知っている人は誰でも使用できるため、誤った相手に共有した場合は履歴から取り消してください。"
     }
   ],
   "web.admin.settings.invitations.create.inheritGroup": [
@@ -58843,7 +58817,7 @@
   "web.admin.settings.invitations.create.libraryHint": [
     {
       "type": 0,
-      "value": "承諾時に作成されるアカウントは、選択したグループのライブラリ範囲に従います。"
+      "value": "選択したアクセスグループで許可されたライブラリを使用します。"
     }
   ],
   "web.admin.settings.invitations.create.linkOption": [
@@ -58861,7 +58835,7 @@
   "web.admin.settings.invitations.create.noDefaultProfile": [
     {
       "type": 0,
-      "value": "このサーバーではデフォルトのプロフィールを一括で作成できません。プロフィールのオプションをオフにして、プロフィールなしの招待を作成してください。"
+      "value": "このサーバーでは招待時に最初のプロフィールを作成できません。続行するには「最初のプロフィールを作成」をオフにしてください。"
     }
   ],
   "web.admin.settings.invitations.create.noteHintEmail": [
@@ -58921,7 +58895,7 @@
   "web.admin.settings.invitations.create.reloadBeforeRetry": [
     {
       "type": 0,
-      "value": "招待がすでに作成されている可能性があります。もう一度試す前に履歴を再読み込みしてください。"
+      "value": "招待がすでに作成されている可能性があります。もう一度試す前に履歴を再読み込みして確認してください。"
     }
   ],
   "web.admin.settings.invitations.create.reloadFailed": [
@@ -58987,7 +58961,7 @@
   "web.admin.settings.invitations.delivery.failed": [
     {
       "type": 0,
-      "value": "招待は作成されましたが、メールの送信に失敗したか、送信されたか不明です。このリンクは有効なので、ご自身で届けてください。"
+      "value": "招待は作成されましたが、メールの送信に失敗したか、送信を確認できませんでした。リンクは引き続き有効なので、ご自身で共有してください。"
     }
   ],
   "web.admin.settings.invitations.delivery.linkCreated": [
@@ -59009,7 +58983,7 @@
   "web.admin.settings.invitations.delivery.notConfigured": [
     {
       "type": 0,
-      "value": "メールが設定されていません。招待は作成されたので、このリンクをご自身で届けてください。"
+      "value": "このサーバーではメールが設定されていません。招待は作成されたので、このリンクをご自身で共有してください。"
     }
   ],
   "web.admin.settings.invitations.delivery.sent": [
@@ -59019,7 +58993,7 @@
     },
     {
       "type": 0,
-      "value": "にメールを送信しました。受信者に届くとは限りません。下のリンクをコピーすることもできます。"
+      "value": "にメールを送信しました。届かない場合に備えて、下のリンクをコピーすることもできます。"
     }
   ],
   "web.admin.settings.invitations.deliveryLabel.emailSent": [
@@ -59037,7 +59011,7 @@
   "web.admin.settings.invitations.deliveryLabel.emailUnconfirmedTitle": [
     {
       "type": 0,
-      "value": "メールの送信に失敗したか、届いたか不明です。リンクは引き続き使用できます。"
+      "value": "メールの送信に失敗したか、送信を確認できませんでしたが、リンクは引き続き有効です。"
     }
   ],
   "web.admin.settings.invitations.deliveryLabel.link": [
@@ -59107,7 +59081,7 @@
   "web.admin.settings.invitations.loadingCapabilities": [
     {
       "type": 0,
-      "value": "招待の機能を読み込み中…"
+      "value": "招待の設定を確認中…"
     }
   ],
   "web.admin.settings.invitations.notConfigured": [
@@ -59119,7 +59093,7 @@
   "web.admin.settings.invitations.publicUrlMissing": [
     {
       "type": 0,
-      "value": "招待リンクを作成するには、Siloの公開URLを設定してください。"
+      "value": "招待リンクを作成するには、"
     },
     {
       "type": 8,
@@ -59130,6 +59104,10 @@
           "value": "一般設定"
         }
       ]
+    },
+    {
+      "type": 0,
+      "value": "でサーバーの公開URLを設定してください。"
     }
   ],
   "web.admin.settings.invitations.reloadHistory": [
@@ -59141,7 +59119,7 @@
   "web.admin.settings.invitations.resend.creating": [
     {
       "type": 0,
-      "value": "新しい招待を作成中…"
+      "value": "新しいリンクを作成中…"
     }
   ],
   "web.admin.settings.invitations.resend.description": [
@@ -59165,13 +59143,13 @@
   "web.admin.settings.invitations.resend.uncertain": [
     {
       "type": 0,
-      "value": "結果が不確かな可能性があります。もう一度再送信する前に、履歴を再読み込みしてください。"
+      "value": "新しいリンクがすでに作成されている可能性があります。もう一度試す前に履歴を再読み込みして確認してください。"
     }
   ],
   "web.admin.settings.invitations.resendFailed": [
     {
       "type": 0,
-      "value": "招待を再送信できませんでした。続行する前に履歴を再読み込みしてください。"
+      "value": "新しい招待リンクを作成できませんでした。もう一度試す前に履歴を再読み込みしてください。"
     }
   ],
   "web.admin.settings.invitations.revoke.confirm": [
@@ -59211,7 +59189,7 @@
   "web.admin.settings.invitations.row.copyNewLink": [
     {
       "type": 0,
-      "value": "メールを送らずに新しいリンクをコピー"
+      "value": "メールを送信せずに新しいリンクを作成"
     }
   ],
   "web.admin.settings.invitations.row.emailNewLink": [
@@ -59275,7 +59253,7 @@
   "web.admin.settings.invitations.row.revokeLink": [
     {
       "type": 0,
-      "value": "このリンクを取り消す"
+      "value": "招待を取り消す"
     }
   ],
   "web.admin.settings.invitations.status.accepted": [
@@ -59491,7 +59469,7 @@
     },
     {
       "type": 0,
-      "value": "。オンにするまで、これらのコードは使用できません。"
+      "value": "。"
     },
     {
       "type": 8,
@@ -59499,15 +59477,19 @@
       "children": [
         {
           "type": 0,
-          "value": "公開登録の設定"
+          "value": "公開登録"
         }
       ]
+    },
+    {
+      "type": 0,
+      "value": "をオンにするまで、これらのコードは使用できません。"
     }
   ],
   "web.admin.settings.inviteCodes.signupsOn": [
     {
       "type": 0,
-      "value": "コードは公開登録がオンの間だけ使用できます。"
+      "value": "招待コードは"
     },
     {
       "type": 8,
@@ -59515,9 +59497,13 @@
       "children": [
         {
           "type": 0,
-          "value": "公開登録の設定"
+          "value": "公開登録"
         }
       ]
+    },
+    {
+      "type": 0,
+      "value": "がオンの間だけ使用できます。"
     }
   ],
   "web.admin.settings.inviteCodes.status.active": [
@@ -59687,7 +59673,7 @@
     },
     {
       "type": 0,
-      "value": "（この機能に非対応）"
+      "value": "（非対応）"
     }
   ],
   "web.admin.settings.lib.aiProviders.option.removed": [
@@ -59729,13 +59715,13 @@
   "web.admin.settings.lib.externalSignIn.checkStatus.unavailable": [
     {
       "type": 0,
-      "value": "プロバイダーに接続できませんでした。Siloは次回の更新時に再確認します"
+      "value": "プロバイダーに接続できませんでした。Siloは次回の更新時に再試行します"
     }
   ],
   "web.admin.settings.lib.externalSignIn.checkStatus.unsupported": [
     {
       "type": 0,
-      "value": "このプロバイダーではアカウントを再確認できません。セッションは一定期間で終了し、その期間プロバイダーでサインインしていない場合、APIキーとAudiobookshelfのセッションは削除されます"
+      "value": "このプロバイダーではこのアカウントを再確認できません。セッションは一定期間で期限切れとなり、それまでにプロバイダーで再度サインインしない場合、APIキーとAudiobookshelfのセッションは削除されます"
     }
   ],
   "web.admin.settings.lib.externalSignIn.error.accountChanged": [
@@ -59747,7 +59733,7 @@
   "web.admin.settings.lib.externalSignIn.error.ownerOnly": [
     {
       "type": 0,
-      "value": "他の管理者のサインインを変更できるのはサーバーの所有者だけです。"
+      "value": "他の管理者のサインイン設定を変更できるのはサーバーの所有者だけです。"
     }
   ],
   "web.admin.settings.lib.externalSignIn.error.selectProfile": [
@@ -59771,7 +59757,7 @@
   "web.admin.settings.lib.externalSignIn.problem.breakGlassRequired": [
     {
       "type": 0,
-      "value": "このサーバーではパスワードによるサインインがオフになっており、この変更を行うとパスワードでサインインできる緊急用管理者がいなくなります。先に「設定 → サインイン」でパスワードによるサインインをオンに戻すか、別の管理者を緊急用管理者にしてください。"
+      "value": "パスワードによるサインインがオフになっているため、パスワードでサインインできる緊急用管理者が少なくとも1人必要です。先に「設定 → サインイン」でパスワードによるサインインをオンに戻すか、別の管理者で「緊急用アカウント」をオンにしてください。"
     }
   ],
   "web.admin.settings.lib.externalSignIn.problem.identityLinkedElsewhere": [
@@ -59789,25 +59775,25 @@
   "web.admin.settings.lib.externalSignIn.problem.providerAlreadyEnabled": [
     {
       "type": 0,
-      "value": "別のサインインプロバイダーがすでにオンになっています。サーバーで同時に使用できるのは、サインインプロバイダー1つと、Tailscaleなどのネットワークサインイン1つです。先にもう一方をオフにしてください。"
+      "value": "別のサインインプロバイダーが有効になっています。先にオフにしてください。同時に有効にできるのは1つだけです（Tailscaleなどのネットワークサインインを除く）。"
     }
   ],
   "web.admin.settings.libraryMetadata.general.allVersions.description": [
     {
       "type": 0,
-      "value": "タイトルが複数のライブラリにある場合、詳細ページには、どこから開いたかにかかわらず、視聴者がアクセスできるすべてのバージョンが表示されます。オフにすると、開いたライブラリのファイルのみが表示されます。再生時は常にすべてのバージョンが対象になります。"
+      "value": "タイトルが複数のライブラリにある場合、タイトルページにアクセス可能なすべてのバージョンを表示します。オフにすると、現在のライブラリのバージョンのみを表示します。再生時は常にすべてのバージョンが対象になります。"
     }
   ],
   "web.admin.settings.libraryMetadata.general.allVersions.label": [
     {
       "type": 0,
-      "value": "詳細ページにすべてのライブラリのバージョンを表示"
+      "value": "すべてのライブラリのバージョンを表示"
     }
   ],
   "web.admin.settings.libraryMetadata.general.fallbackLanguage.description": [
     {
       "type": 0,
-      "value": "ライブラリのメタデータ言語にタイトル、説明、ポスターがない場合に、元の言語より先に使用されます。既存の項目は、次回手動で更新したときに変更されます。"
+      "value": "ライブラリの言語にタイトル、説明、ポスターがない場合、元の言語より先に代替として使用されます。既存の項目は次回手動で更新したときに反映されます。"
     }
   ],
   "web.admin.settings.libraryMetadata.general.fallbackLanguage.label": [
@@ -59831,7 +59817,7 @@
   "web.admin.settings.libraryMetadata.maturity.description": [
     {
       "type": 0,
-      "value": "最大年齢制限が設定されたプロフィールに適用されます。年齢制限は各プロフィールで設定します。"
+      "value": "年齢制限の上限が設定されたプロフィールに適用されます。上限は各プロフィールで設定します。"
     }
   ],
   "web.admin.settings.libraryMetadata.maturity.group": [
@@ -59849,7 +59835,7 @@
   "web.admin.settings.libraryMetadata.maturity.unrated.description": [
     {
       "type": 0,
-      "value": "年齢制限の上限があるプロフィールに適用され、年齢制限がないタイトルや「Not Rated」とされたタイトルを表示するかどうかを決めます。サーバーが読み取れない年齢制限のタイトルは、どちらの場合も表示されません。上限がないプロフィールには、これらのタイトルが常に表示されます。"
+      "value": "年齢制限の上限があるプロフィールに、年齢制限がないタイトルや「Not Rated」のタイトルを表示するかどうかを設定します。認識できない年齢制限のタイトルはどちらの場合も非表示になります。上限がないプロフィールには常に表示されます。"
     }
   ],
   "web.admin.settings.libraryMetadata.maturity.unrated.hide": [
@@ -59867,13 +59853,13 @@
   "web.admin.settings.libraryMetadata.ratings.description": [
     {
       "type": 0,
-      "value": "IMDbとTMDBのスコアにはスイッチがありません。対応するメタデータプラグインまたはタイトルの.nfoファイルが提供していれば、タイトルに表示されます。メタデータプロバイダーは他の評価を追加できます。オンにすると、すべてのアプリのタイトルページにそのスコアが表示されます。タイトルページには評価が以下の順で最大3つまで表示されるため、オンにした評価は、それより前に表示される評価が3つ未満の場合にのみ表示されます。Rotten Tomatoesのスコアはポスターのバッジにも表示されます。評価をオンにする前に、その利用規約を確認してください。Rotten Tomatoesなど一部のサービスは、第三者によるスコアの表示方法を制限しています。"
+      "value": "プラグインまたは.nfoファイルで提供されている場合、IMDbとTMDBは常に表示されます。下の追加ソースをオンにすると、すべてのアプリで表示されます（タイトルページあたりこの順で合計最大3件の評価）。Rotten Tomatoesはポスターのバッジにも表示されます。先に各ソースの利用規約を確認してください。Rotten Tomatoesなど一部のソースは、スコアの表示方法を制限しています。"
     }
   ],
   "web.admin.settings.libraryMetadata.ratings.empty": [
     {
       "type": 0,
-      "value": "他の評価を追加するメタデータプラグインはありません。"
+      "value": "追加の評価を提供する有効なメタデータプラグインはありません。"
     }
   ],
   "web.admin.settings.libraryMetadata.ratings.fromProvider": [
@@ -59901,13 +59887,13 @@
   "web.admin.settings.libraryMetadata.ratings.undeclared.description": [
     {
       "type": 0,
-      "value": "有効なプラグインが再び追加するまで、これらには何も表示されません。自動的に再表示されないよう、オフにしてください。"
+      "value": "有効なプラグインが再び提供するまで非表示になります。後から再表示されないようにするには、オフにしてください。"
     }
   ],
   "web.admin.settings.libraryMetadata.ratings.undeclared.heading": [
     {
       "type": 0,
-      "value": "有効なプラグインで追加されていない評価"
+      "value": "有効なプラグインで提供されなくなった評価"
     }
   ],
   "web.admin.settings.libraryMetadata.scanning.group": [
@@ -59943,7 +59929,7 @@
   "web.admin.settings.libraryMetadata.scanning.matcherWorkers.description": [
     {
       "type": 0,
-      "value": "Siloが同時に照合する項目の数です。"
+      "value": "Siloがメタデータプロバイダーと同時に照合する項目の数です。"
     }
   ],
   "web.admin.settings.libraryMetadata.scanning.matcherWorkers.label": [
@@ -59955,7 +59941,7 @@
   "web.admin.settings.libraryMetadata.scanning.personRefresh.description": [
     {
       "type": 0,
-      "value": "各サーバーがバックグラウンドで1分あたりに照合するキャストとスタッフの人数です。人物ページを開いた場合は制限されません。"
+      "value": "キャストとスタッフのメタデータに対するサーバーごとのバックグラウンド上限です。人物ページを開いた場合は制限されません。"
     }
   ],
   "web.admin.settings.libraryMetadata.scanning.personRefresh.label": [
@@ -59967,7 +59953,7 @@
   "web.admin.settings.libraryMetadata.scanning.realtime.description": [
     {
       "type": 0,
-      "value": "すべてのライブラリでオフです。オンにすると、各ライブラリのスイッチでフォルダーを監視するかどうかが決まります。"
+      "value": "オフにすると、すべてのライブラリでフォルダーの監視が無効になります。オンにすると、各ライブラリ独自の設定に従います。"
     }
   ],
   "web.admin.settings.libraryMetadata.scanning.realtime.label": [
@@ -59997,7 +59983,7 @@
   "web.admin.settings.libraryMetadata.subtitleSync.auto.description": [
     {
       "type": 0,
-      "value": "字幕を動画の音声に合わせます。ダウンロードやアップロードした字幕は追加時に、その他の字幕は初回再生時に同期します。別のリリース向けに作られた字幕のずれを修正します。"
+      "value": "ダウンロードまたはアップロードした字幕は追加時に、その他の字幕は初回再生時に同期します。別のリリース向けにタイミング調整された字幕のずれを修正します。"
     }
   ],
   "web.admin.settings.libraryMetadata.subtitleSync.auto.label": [
@@ -60027,7 +60013,7 @@
   "web.admin.settings.libraryMetadata.subtitleSync.execution.description": [
     {
       "type": 0,
-      "value": "同期ではファイルの音声を数分間デコードします。"
+      "value": "字幕の同期ではファイルごとに音声を数分間デコードするため、CPUを使用します。"
     }
   ],
   "web.admin.settings.libraryMetadata.subtitleSync.execution.label": [
@@ -60141,7 +60127,7 @@
   "web.admin.settings.logging.server.level.description": [
     {
       "type": 0,
-      "value": "コンテナログのレベルを設定します。Debugは出力が多いため、問題の調査時のみ使用してください。「サーバーログ」ページには、どちらの場合もInfo以上が記録されます。"
+      "value": "コンソールおよびコンテナーのログ出力を制御します。Debugは出力が多いため、トラブルシューティング時のみ使用してください。「サーバーログ」ページには常にInfo以上が記録されます。"
     }
   ],
   "web.admin.settings.logging.server.level.error": [
@@ -60171,7 +60157,7 @@
   "web.admin.settings.logging.server.quiet.description": [
     {
       "type": 0,
-      "value": "これらの語で始まるログ行を除外します。"
+      "value": "コンソールおよびコンテナーの出力から除外するログ行のプレフィックスをカンマ区切りで指定します。"
     }
   ],
   "web.admin.settings.logging.server.quiet.label": [
@@ -60195,7 +60181,7 @@
   "web.admin.settings.markers.provider.autoLocalDescription": [
     {
       "type": 0,
-      "value": "このサーバーで検出したイントロとクレジットのうち、「詳細設定」の最小信頼度を満たすものを共有します。"
+      "value": "ローカルで検出したマーカーのうち、「詳細設定」の自動共有の最小信頼度を満たすものを送信します。"
     }
   ],
   "web.admin.settings.markers.provider.close": [
@@ -60213,13 +60199,13 @@
   "web.admin.settings.markers.provider.connectedOff": [
     {
       "type": 0,
-      "value": "接続済み · オフ"
+      "value": "設定済み · オフ"
     }
   ],
   "web.admin.settings.markers.provider.contributeEnabled": [
     {
       "type": 0,
-      "value": "このプロバイダーとの共有を許可"
+      "value": "このプロバイダーへのマーカー共有を許可"
     }
   ],
   "web.admin.settings.markers.provider.contributeMinConfidence": [
@@ -60231,7 +60217,7 @@
   "web.admin.settings.markers.provider.contributeMinConfidenceDescription": [
     {
       "type": 0,
-      "value": "0%〜100%の値を選択してください。推奨：95%。"
+      "value": "ローカルで検出したマーカーのうち、この信頼度以上のものだけが自動的に共有されます。推奨：95%。"
     }
   ],
   "web.admin.settings.markers.provider.empty": [
@@ -60269,7 +60255,7 @@
   "web.admin.settings.markers.provider.fetchMinConfidenceDescription": [
     {
       "type": 0,
-      "value": "このプロバイダーの評価がこれより低いマーカーはスキップし、他のプロバイダーやローカル検出で補えるようにします。0%にするとすべてのマーカーを使用します。"
+      "value": "このしきい値未満のマーカーは無視し、別のプロバイダーやローカル検出が引き継げるようにします。0%にするとすべてのマーカーを使用します。"
     }
   ],
   "web.admin.settings.markers.provider.fix": [
@@ -60415,7 +60401,7 @@
   "web.admin.settings.markers.tasks.contributeDescription": [
     {
       "type": 0,
-      "value": "このサーバーで検出した対象のイントロとクレジットを自動共有が有効なプロバイダーに送信し、保存時に届けられなかった手動修正を修正を受け付けるプロバイダーに送信します。"
+      "value": "ローカルで検出した対象のイントロとクレジットを自動共有が有効なプロバイダーに送信し、未送信の手動修正を受け付け可能なプロバイダーへ再送信します。"
     }
   ],
   "web.admin.settings.markers.tasks.contributeName": [
@@ -60657,7 +60643,7 @@
   "web.admin.settings.network.direct.connected.connectedSince": [
     {
       "type": 0,
-      "value": "この経路での接続開始"
+      "value": "ダイレクト接続開始"
     }
   ],
   "web.admin.settings.network.direct.connected.device": [
@@ -60675,7 +60661,7 @@
   "web.admin.settings.network.direct.connected.peerEndpoint": [
     {
       "type": 0,
-      "value": "接続元エンドポイント"
+      "value": "リモートアドレス"
     }
   ],
   "web.admin.settings.network.direct.connected.title": [
@@ -60707,7 +60693,7 @@
   "web.admin.settings.network.direct.description": [
     {
       "type": 0,
-      "value": "このサーバーがダイレクト接続に対応できる状態か確認します。"
+      "value": "デバイスがUDP経由でこのサーバーへ直接接続できるようにし、ネットワークの準備状況を確認します。"
     }
   ],
   "web.admin.settings.network.direct.effective": [
@@ -60753,7 +60739,7 @@
   "web.admin.settings.network.direct.feature.pmtu_fallback": [
     {
       "type": 0,
-      "value": "PMTUフォールバック"
+      "value": "Path MTUフォールバック"
     }
   ],
   "web.admin.settings.network.direct.feature.reachability": [
@@ -60857,7 +60843,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "ルーターにUPnP、NAT-PMP、またはPCPのポートマッピングをリクエストします。"
+      "value": "UPnP、NAT-PMP、またはPCPを使用して、ルーターにポートの自動転送をリクエストします。"
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -60887,7 +60873,7 @@
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "オンにすると、ダイレクト接続エンジンが起動します。エンジンはUDPポートを開き、「ポートマッピング」がオンの場合はルーターにポートマッピングをリクエストします。「チェックを実行」はホストの状態を読み取るだけです。"
+      "value": "これをオンにするとダイレクト接続用のUDPポートが開き、「ポートマッピング」がオンの場合はルーターにポート転送をリクエストします。「チェックを実行」では現在の状態を確認するだけです。"
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
@@ -60941,7 +60927,7 @@
   "web.admin.settings.network.direct.reason.invalid": [
     {
       "type": 0,
-      "value": "無効な値のためオフを使用"
+      "value": "無効な値のためオフ"
     }
   ],
   "web.admin.settings.network.direct.reason.invalid_default": [
@@ -61207,7 +61193,7 @@
   "web.admin.settings.network.direct.stunServers.description": [
     {
       "type": 0,
-      "value": "host:port形式のエントリを最大8件までカンマ区切りで指定します。既定値を使用するには空欄のままにしてください。"
+      "value": "host:port形式のエントリーをカンマ区切りで最大8件まで指定します。デフォルトを使用する場合は空欄にしてください。"
     }
   ],
   "web.admin.settings.network.direct.stunServers.label": [
@@ -61225,7 +61211,7 @@
   "web.admin.settings.network.direct.udpDescription": [
     {
       "type": 0,
-      "value": "デバイスがUDPの直接経路でこのサーバーに接続できるようにします。UDPポートは"
+      "value": "デバイスがUDP経由でこのサーバーに直接接続できるようにします。UDPポートは"
     },
     {
       "type": 1,
@@ -61233,7 +61219,7 @@
     },
     {
       "type": 0,
-      "value": "で設定され、ここでは変更できません。"
+      "value": "で設定されており、ここでは変更できません。"
     }
   ],
   "web.admin.settings.network.host.apiServer": [
@@ -61259,7 +61245,7 @@
       "children": [
         {
           "type": 0,
-          "value": "、このホストの登録を完了してください。"
+          "value": "、このホストの接続を完了してください。"
         }
       ]
     }
@@ -61279,7 +61265,7 @@
   "web.admin.settings.network.host.lastHeard": [
     {
       "type": 0,
-      "value": "最終応答："
+      "value": "最終報告："
     },
     {
       "type": 1,
@@ -61363,13 +61349,13 @@
   "web.admin.settings.network.page.intro": [
     {
       "type": 0,
-      "value": "ネットワークアクセスプロバイダーは、Tailscaleなどのオーバーレイネットワーク上でこのサーバーにIDを付与します。これにより、ポート転送や公開リバースプロキシなしでクライアントからサーバーに接続できます。プロバイダーはプラグインです。プラグインページからインストールすると、ここに表示されます。"
+      "value": "このサーバーをTailscaleなどのオーバーレイネットワークに接続すると、ポート転送や公開リバースプロキシなしでクライアントから接続できるようになります。プロバイダーのプラグインはプラグインページからインストールしてください。"
     }
   ],
   "web.admin.settings.network.page.noProvidersBody": [
     {
       "type": 0,
-      "value": "ネットワークアクセスを提供するプラグインがインストールされていません。このサーバーをオーバーレイネットワークに接続するには、プラグインページからネットワークアクセスプロバイダーをインストールしてください。"
+      "value": "ここで管理するには、プラグインページからネットワークアクセスプロバイダーをインストールしてください。"
     }
   ],
   "web.admin.settings.network.page.noProvidersTitle": [
@@ -61455,7 +61441,7 @@
   "web.admin.settings.nodeRouting.description": [
     {
       "type": 0,
-      "value": "Remuxやトランスコードを実行するマシンと、プレーヤーにストリームを送出するマシンを指定します。「優先」のルートはAPIサーバーにフォールバックしますが、「のみ」のルートはフォールバックしません。"
+      "value": "Remuxやトランスコードを処理するサーバーと、プレーヤーにストリームを送信するサーバーを選択します。「優先」オプションは利用できない場合にフォールバックしますが、「のみ」オプションはフォールバックしません。"
     }
   ],
   "web.admin.settings.nodeRouting.egress.preferProxy": [
@@ -61485,13 +61471,13 @@
   "web.admin.settings.nodeRouting.execution.workerOnly": [
     {
       "type": 0,
-      "value": "任意のワーカーのみ"
+      "value": "ワーカーノードのみ"
     }
   ],
   "web.admin.settings.nodeRouting.fields.directPlayEgress.description": [
     {
       "type": 0,
-      "value": "元のデータをそのまま送るため、実行ノードは不要です。"
+      "value": "ダイレクト再生では元のファイルをそのまま送信するため、トランスコードやRemux用のサーバーは不要です。"
     }
   ],
   "web.admin.settings.nodeRouting.fields.directPlayEgress.label": [
@@ -61509,7 +61495,7 @@
   "web.admin.settings.nodeRouting.fields.remuxExecution.description": [
     {
       "type": 0,
-      "value": "ワーカーはプロキシノードまたはトランスコードノードです。「トランスコードノードを優先」では、対応している場合はHLSまたはプログレッシブのRemuxをトランスコードノードで実行します。プログレッシブ出力は選択したプロキシを経由して中継されます。"
+      "value": "ワーカーノードにはプロキシノードとトランスコードノードの両方が含まれます。「トランスコードノードを優先」では、対応している場合にHLSまたはプログレッシブのRemuxをトランスコードノードで実行し、プログレッシブストリームは選択したプロキシ経由で中継します。"
     }
   ],
   "web.admin.settings.nodeRouting.fields.remuxExecution.label": [
@@ -61527,7 +61513,7 @@
   "web.admin.settings.nodeRouting.fields.videoTranscodeExecution.description": [
     {
       "type": 0,
-      "value": "ビデオトランスコードのワーカーはトランスコードノードです。プロキシノードは送出のみを行います。"
+      "value": "ワーカーノードのうち、ビデオトランスコードを実行できるのはトランスコードノードのみです。プロキシノードはストリームの配信のみを行います。"
     }
   ],
   "web.admin.settings.nodeRouting.fields.videoTranscodeExecution.label": [
@@ -61557,7 +61543,7 @@
   "web.admin.settings.nodeRouting.paths.description": [
     {
       "type": 0,
-      "value": "矢印はフォールバックの順序を示します。「のみ」のモードはその範囲を越えません。"
+      "value": "矢印はサーバーが利用できない場合のフォールバック順を示します。「のみ」のルートはフォールバックしません。"
     }
   ],
   "web.admin.settings.nodeRouting.paths.directPlay": [
@@ -61599,7 +61585,7 @@
   "web.admin.settings.nodeRouting.presets.description": [
     {
       "type": 0,
-      "value": "「詳細」の5つのルートを一度に設定します。「カスタム」は保存されません。"
+      "value": "「詳細」にある5つのルートをすべて一括で適用します。"
     }
   ],
   "web.admin.settings.nodeRouting.presets.gpu": [
@@ -61665,7 +61651,7 @@
   "web.admin.settings.nodeRouting.preview.remux.workerOnly": [
     {
       "type": 0,
-      "value": "任意のワーカーのみ"
+      "value": "ワーカーノードのみ"
     }
   ],
   "web.admin.settings.nodeRouting.preview.route": [
@@ -61703,13 +61689,13 @@
   "web.admin.settings.nodeRouting.warnings.proxyOnlyClients": [
     {
       "type": 0,
-      "value": "プロキシのみの送出では、すべてのネイティブクライアントが認可済みメディアオリジンに対応している必要があります。古いクライアントではその処理を開始できない場合があります。"
+      "value": "プロキシのみの送出には、プロキシストリーミングに対応した最新のネイティブクライアントが必要です。古いクライアントでは再生を開始できない場合があります。"
     }
   ],
   "web.admin.settings.nodeRouting.warnings.stranded": [
     {
       "type": 0,
-      "value": "「のみ」のルートに、現在正常に動作している対応ノードがありません。後からノードを追加できるよう、保存は可能です。"
+      "value": "「のみ」のルートに現在正常なノードがありません。後からノードが参加する場合は、このまま保存できます。"
     }
   ],
   "web.admin.settings.notifications.delivery": [
@@ -61721,7 +61707,7 @@
   "web.admin.settings.notifications.deliveryDescription": [
     {
       "type": 0,
-      "value": "通知の送信先です。チャンネルの設定はオフの間も編集できるため、オンにする前に準備しておけます。"
+      "value": "Siloが通知を送信する先を選択します。どのチャンネルもオンにする前に設定できます。"
     }
   ],
   "web.admin.settings.notifications.digestHour": [
@@ -61739,13 +61725,13 @@
   "web.admin.settings.notifications.discord.appConnected": [
     {
       "type": 0,
-      "value": "Discordアプリ接続済み"
+      "value": "アプリ設定済み"
     }
   ],
   "web.admin.settings.notifications.discord.appNotConnected": [
     {
       "type": 0,
-      "value": "Discordアプリ未接続"
+      "value": "アプリ未設定"
     }
   ],
   "web.admin.settings.notifications.discord.application": [
@@ -61793,7 +61779,7 @@
   "web.admin.settings.notifications.discord.clearConfirm": [
     {
       "type": 0,
-      "value": "クリア"
+      "value": "認証情報をクリア"
     }
   ],
   "web.admin.settings.notifications.discord.clearCredentials": [
@@ -61870,8 +61856,18 @@
   ],
   "web.admin.settings.notifications.discord.guideBot": [
     {
+      "type": 8,
+      "value": "b",
+      "children": [
+        {
+          "type": 0,
+          "value": "Bot"
+        }
+      ]
+    },
+    {
       "type": 0,
-      "value": "Botページ："
+      "value": "ページで、"
     },
     {
       "type": 8,
@@ -61885,7 +61881,21 @@
     },
     {
       "type": 0,
-      "value": "をリセットしてコピーします。Privileged Gateway Intents（Presence、Server Members、Message Content）はすべて"
+      "value": "をリセットしてコピーします。"
+    },
+    {
+      "type": 8,
+      "value": "b",
+      "children": [
+        {
+          "type": 0,
+          "value": "Privileged Gateway Intents"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "（Presence、Server Members、Message Content）はすべて"
     },
     {
       "type": 8,
@@ -61899,7 +61909,7 @@
     },
     {
       "type": 0,
-      "value": "のままにしてください。SiloはGatewayに接続せず、DMを送信するだけです。"
+      "value": "のままにしてください。Siloはゲートウェイに接続せず、DMを送信するだけです。"
     }
   ],
   "web.admin.settings.notifications.discord.guideCreate": [
@@ -61940,6 +61950,10 @@
   ],
   "web.admin.settings.notifications.discord.guideIntro": [
     {
+      "type": 0,
+      "value": "Discord Developer Portal（"
+    },
+    {
       "type": 8,
       "value": "link",
       "children": [
@@ -61951,13 +61965,13 @@
     },
     {
       "type": 0,
-      "value": "で設定します："
+      "value": "）で設定します："
     }
   ],
   "web.admin.settings.notifications.discord.guideInvite": [
     {
       "type": 0,
-      "value": "下に3つの認証情報を貼り付けて保存し、招待ボタンでBotをDiscordサーバーに追加します。"
+      "value": "下に3つの認証情報を貼り付けて保存し、BotをDiscordサーバーに招待してください。"
     },
     {
       "type": 8,
@@ -61971,13 +61985,23 @@
     },
     {
       "type": 0,
-      "value": "です。メンバーであるだけでメンバーにDMを送信できます。DMを受け取るには、ユーザーがBotと同じサーバーに参加している必要があります。"
+      "value": "です。同じサーバーに参加していればユーザーにDMを送信できます。"
     }
   ],
   "web.admin.settings.notifications.discord.guideOAuth": [
     {
+      "type": 8,
+      "value": "b",
+      "children": [
+        {
+          "type": 0,
+          "value": "OAuth2"
+        }
+      ]
+    },
+    {
       "type": 0,
-      "value": "OAuth2ページ："
+      "value": "ページで"
     },
     {
       "type": 8,
@@ -61991,7 +62015,7 @@
     },
     {
       "type": 0,
-      "value": "をコピーし、"
+      "value": "をコピーし、次に"
     },
     {
       "type": 8,
@@ -62005,7 +62029,21 @@
     },
     {
       "type": 0,
-      "value": "をリセットしてコピーします。次に、このサーバーの公開URLを使って、Redirectsに"
+      "value": "をリセットしてコピーします。"
+    },
+    {
+      "type": 8,
+      "value": "b",
+      "children": [
+        {
+          "type": 0,
+          "value": "Redirects"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "で、サーバーの公開URLを使って"
     },
     {
       "type": 8,
@@ -62019,7 +62057,7 @@
     },
     {
       "type": 0,
-      "value": "を追加します。完全に一致している必要があります。"
+      "value": "を追加してください（完全一致が必要です）。"
     }
   ],
   "web.admin.settings.notifications.discord.guidePublicUrl": [
@@ -62043,7 +62081,7 @@
   "web.admin.settings.notifications.discord.inviteCopyFailed": [
     {
       "type": 0,
-      "value": "招待リンクをコピーできませんでした。リンクを選択して手動でコピーしてください"
+      "value": "招待リンクをコピーできませんでした。「Botをサーバーに招待」から直接開いてください。"
     }
   ],
   "web.admin.settings.notifications.discord.mustBeInServer": [
@@ -62055,7 +62093,7 @@
   "web.admin.settings.notifications.discord.perEpisode": [
     {
       "type": 0,
-      "value": "エピソードごとのDMを選択可能にする"
+      "value": "エピソードごとのDMを許可"
     }
   ],
   "web.admin.settings.notifications.discord.saveFirst": [
@@ -62191,7 +62229,7 @@
   "web.admin.settings.notifications.email.description": [
     {
       "type": 0,
-      "value": "希望したユーザーに、毎日のまとめまたはエピソードごとのメッセージを送信します。"
+      "value": "希望するユーザー向けの、毎日のまとめまたはエピソードごとのメール。"
     }
   ],
   "web.admin.settings.notifications.email.mailMissing": [
@@ -62203,7 +62241,7 @@
   "web.admin.settings.notifications.email.mailMissingStatus": [
     {
       "type": 0,
-      "value": "メールサーバーが設定されていません。設定するまでメールは送信されません。"
+      "value": "メールサーバーがまだ設定されていません。"
     },
     {
       "type": 8,
@@ -62211,13 +62249,13 @@
       "children": [
         {
           "type": 0,
-          "value": "メールページ"
+          "value": "メール設定"
         }
       ]
     },
     {
       "type": 0,
-      "value": "で設定してください。"
+      "value": "で設定するまで、Siloはメールを送信できません。"
     }
   ],
   "web.admin.settings.notifications.email.mailReady": [
@@ -62249,7 +62287,7 @@
   "web.admin.settings.notifications.email.perEpisode": [
     {
       "type": 0,
-      "value": "エピソードごとのメールを選択可能にする"
+      "value": "エピソードごとのメールを許可"
     }
   ],
   "web.admin.settings.notifications.email.summaryAt": [
@@ -62293,7 +62331,7 @@
   "web.admin.settings.notifications.loadFailedDescription": [
     {
       "type": 0,
-      "value": "ここに表示される値は、サーバーの実際の動作を反映していない可能性があります。再読み込みしてもう一度お試しください。"
+      "value": "サーバーの現在の設定を上書きしないよう、操作項目を非表示にしています。再読み込みして、もう一度お試しください。"
     }
   ],
   "web.admin.settings.notifications.loadFailedTitle": [
@@ -62305,19 +62343,19 @@
   "web.admin.settings.notifications.perEpisodeOffDescription": [
     {
       "type": 0,
-      "value": "オフの場合は、代わりに毎日のまとめを送信します。"
+      "value": "オフの場合、ユーザーには代わりに毎日のまとめが届きます。"
     }
   ],
   "web.admin.settings.notifications.relay.applyUrl": [
     {
       "type": 0,
-      "value": "新しいリレーURLを適用するには登録してください。"
+      "value": "新しいリレーURLを適用するには、上で認証情報を登録またはローテーションしてください。"
     }
   ],
   "web.admin.settings.notifications.relay.chipConfigured": [
     {
       "type": 0,
-      "value": "リレー設定済み"
+      "value": "登録済み"
     }
   ],
   "web.admin.settings.notifications.relay.chipFirstSend": [
@@ -62347,7 +62385,7 @@
   "web.admin.settings.notifications.relay.clearDescription": [
     {
       "type": 0,
-      "value": "リレーを再登録するまで、モバイルへのプッシュ通知は停止します。"
+      "value": "リレーを再登録するまで、モバイルプッシュ通知は直ちに停止します。"
     }
   ],
   "web.admin.settings.notifications.relay.clearFailed": [
@@ -62399,25 +62437,25 @@
   "web.admin.settings.notifications.relay.description": [
     {
       "type": 0,
-      "value": "Siloのリレーを経由し、APNsまたはFCMで配信されるモバイルプッシュ通知。"
+      "value": "Siloのリレー（APNsおよびFCM）を経由した、iOSおよびAndroidアプリへのプッシュ通知。"
     }
   ],
   "web.admin.settings.notifications.relay.expirationUnknown": [
     {
       "type": 0,
-      "value": "有効期限は不明です。Siloは次回の更新時に認証情報を更新します。"
+      "value": "認証情報の有効期限は不明です。Siloが自動的に更新します。"
     }
   ],
   "web.admin.settings.notifications.relay.expired": [
     {
       "type": 0,
-      "value": "期限切れです。Siloは次回の配信前に更新します。"
+      "value": "認証情報の有効期限が切れています。Siloが次回のプッシュ前に更新します。"
     }
   ],
   "web.admin.settings.notifications.relay.expires": [
     {
       "type": 0,
-      "value": "有効期限："
+      "value": "認証情報の有効期限："
     },
     {
       "type": 1,
@@ -62425,7 +62463,7 @@
     },
     {
       "type": 0,
-      "value": "。Siloが自動で更新します。"
+      "value": "。Siloが自動的に更新します。"
     }
   ],
   "web.admin.settings.notifications.relay.noCredential": [
@@ -62437,27 +62475,35 @@
   "web.admin.settings.notifications.relay.notRegistered": [
     {
       "type": 0,
-      "value": "まだ登録されていません。Siloは初回のプッシュ時に登録します。"
+      "value": "まだ登録されていません。Siloは初回のプッシュ時に自動で登録します。"
     }
   ],
   "web.admin.settings.notifications.relay.ready": [
     {
+      "type": 0,
+      "value": "リレーを登録しました（デプロイメント："
+    },
+    {
       "type": 1,
       "value": "deployment"
     },
     {
       "type": 0,
-      "value": "の認証情報の準備ができました"
+      "value": "）。"
     }
   ],
   "web.admin.settings.notifications.relay.readyKey": [
     {
+      "type": 0,
+      "value": "リレーを登録しました（デプロイメント："
+    },
+    {
       "type": 1,
       "value": "deployment"
     },
     {
       "type": 0,
-      "value": "の認証情報の準備ができました（キー"
+      "value": "、キー："
     },
     {
       "type": 1,
@@ -62465,17 +62511,21 @@
     },
     {
       "type": 0,
-      "value": "）"
+      "value": "）。"
     }
   ],
   "web.admin.settings.notifications.relay.readyKeyRelay": [
     {
+      "type": 0,
+      "value": "リレーを登録しました（デプロイメント："
+    },
+    {
       "type": 1,
       "value": "deployment"
     },
     {
       "type": 0,
-      "value": "の認証情報の準備ができました（キー"
+      "value": "、キー："
     },
     {
       "type": 1,
@@ -62483,7 +62533,7 @@
     },
     {
       "type": 0,
-      "value": "、リレー"
+      "value": "、リクエスト："
     },
     {
       "type": 1,
@@ -62491,17 +62541,21 @@
     },
     {
       "type": 0,
-      "value": "）"
+      "value": "）。"
     }
   ],
   "web.admin.settings.notifications.relay.readyRelay": [
+    {
+      "type": 0,
+      "value": "リレーを登録しました（デプロイメント："
+    },
     {
       "type": 1,
       "value": "deployment"
     },
     {
       "type": 0,
-      "value": "の認証情報の準備ができました（リレー"
+      "value": "、リクエスト："
     },
     {
       "type": 1,
@@ -62509,7 +62563,7 @@
     },
     {
       "type": 0,
-      "value": "）"
+      "value": "）。"
     }
   ],
   "web.admin.settings.notifications.relay.register": [
@@ -62539,7 +62593,7 @@
   "web.admin.settings.notifications.relay.reregistrationNote": [
     {
       "type": 0,
-      "value": "リレーの認証情報がクリアされたか、リレーがこのデプロイメントを無効にしました。再登録して新しいデプロイメントを作成してください。その他のリレーによる拒否は自動で回復します。"
+      "value": "リレーの認証情報がクリアされたか、リレーがこのデプロイメントを無効にしたため、プッシュ配信が一時停止しています。再登録して新しいデプロイメントを作成し、配信を再開してください。"
     }
   ],
   "web.admin.settings.notifications.relay.rotate": [
@@ -62557,7 +62611,7 @@
   "web.admin.settings.notifications.relay.urlDescription": [
     {
       "type": 0,
-      "value": "下で登録すると保存されます。"
+      "value": "下で認証情報を登録またはローテーションすると適用されます。"
     }
   ],
   "web.admin.settings.notifications.reload": [
@@ -62606,12 +62660,12 @@
   ],
   "web.admin.settings.notifications.serverChannels.currentHost": [
     {
-      "type": 0,
-      "value": "現在の送信先："
-    },
-    {
       "type": 1,
       "value": "host"
+    },
+    {
+      "type": 0,
+      "value": "を維持する場合は空欄"
     }
   ],
   "web.admin.settings.notifications.serverChannels.delete": [
@@ -62629,7 +62683,7 @@
   "web.admin.settings.notifications.serverChannels.deleteDescription": [
     {
       "type": 0,
-      "value": "サーバーのイベントはこの送信先に投稿されなくなります。この操作は元に戻せません。"
+      "value": "Siloはこのチャンネルへのサーバーイベントの投稿を停止します。この操作は元に戻せません。"
     }
   ],
   "web.admin.settings.notifications.serverChannels.deleteTitle": [
@@ -62649,7 +62703,7 @@
   "web.admin.settings.notifications.serverChannels.dialogDescription": [
     {
       "type": 0,
-      "value": "サーバーチャンネルはサーバー全体のイベントを配信します。すべてのプロフィールに同じ投稿が表示されます。DiscordのWebhook URLはネイティブの埋め込みとして表示され、その他のHTTPSエンドポイントには署名付きのJSONが送信されます。"
+      "value": "アカウントやライブラリのアクセス権でフィルタリングせず、サーバー全体のイベントを共有チャンネルに投稿します。DiscordのWebhook URLには埋め込みとして投稿され、その他のHTTPS URLには署名付きJSONが送信されます。"
     }
   ],
   "web.admin.settings.notifications.serverChannels.disabled": [
@@ -62669,7 +62723,7 @@
     },
     {
       "type": 0,
-      "value": " チャンネルを再度有効にすると、今後の投稿が再開されます。"
+      "value": "新しいイベントの投稿を再開するには、チャンネルを再度オンにしてください。"
     }
   ],
   "web.admin.settings.notifications.serverChannels.edit": [
@@ -62791,7 +62845,7 @@
     },
     {
       "type": 0,
-      "value": "。送信先のURLを確認してください。"
+      "value": "。Webhook URLを確認してください。"
     }
   ],
   "web.admin.settings.notifications.serverChannels.lastFailureWhen": [
@@ -62813,7 +62867,7 @@
     },
     {
       "type": 0,
-      "value": "。送信先のURLを確認してください。"
+      "value": "。Webhook URLを確認してください。"
     }
   ],
   "web.admin.settings.notifications.serverChannels.lastPost": [
@@ -62912,6 +62966,10 @@
                       "value": "status"
                     },
                     {
+                      "type": 0,
+                      "value": "、"
+                    },
+                    {
                       "type": 1,
                       "value": "duration_ms"
                     },
@@ -62956,6 +63014,10 @@
                     {
                       "type": 1,
                       "value": "status"
+                    },
+                    {
+                      "type": 0,
+                      "value": "、"
                     },
                     {
                       "type": 1,
@@ -63016,6 +63078,10 @@
                       "value": "status"
                     },
                     {
+                      "type": 0,
+                      "value": "、"
+                    },
+                    {
                       "type": 1,
                       "value": "duration_ms"
                     },
@@ -63070,6 +63136,10 @@
                       "value": "status"
                     },
                     {
+                      "type": 0,
+                      "value": "、"
+                    },
+                    {
                       "type": 1,
                       "value": "duration_ms"
                     },
@@ -63117,7 +63187,7 @@
   "web.admin.settings.notifications.serverChannelsCard.description": [
     {
       "type": 0,
-      "value": "共有の送信先に投稿される、サーバー全体のお知らせ。"
+      "value": "共有のDiscordまたはカスタムWebhookに投稿される、サーバー全体のお知らせ。"
     }
   ],
   "web.admin.settings.notifications.serverChannelsCard.destinations": [
@@ -63128,16 +63198,12 @@
         "other": {
           "value": [
             {
-              "type": 0,
-              "value": "送信先"
-            },
-            {
               "type": 1,
               "value": "count_text"
             },
             {
               "type": 0,
-              "value": "件"
+              "value": "チャンネル"
             }
           ]
         }
@@ -63219,7 +63285,7 @@
   "web.admin.settings.notifications.webhooks.allowPrivateDescription": [
     {
       "type": 0,
-      "value": "LANやlocalhostの送信先を許可します。開発専用です。"
+      "value": "localhostとLANアドレスを許可します。開発専用です。"
     }
   ],
   "web.admin.settings.notifications.webhooks.allowPrivateWarning": [
@@ -63237,13 +63303,13 @@
   "web.admin.settings.notifications.webhooks.deliveriesDescription": [
     {
       "type": 0,
-      "value": "サーバーのプロセスごとに個別にカウントされます。上限を超えた呼び出しは破棄されますが、受信トレイの通知は届きます。"
+      "value": "サーバーインスタンスごとに適用され、クラスター全体では共有されません。上限を超えたWebhook配信は破棄されますが、アプリ内通知は引き続き届きます。"
     }
   ],
   "web.admin.settings.notifications.webhooks.description": [
     {
       "type": 0,
-      "value": "各自が作成するWebhook（Discordまたは汎用）。"
+      "value": "ユーザーが各自で設定するDiscordまたはカスタムHTTPSのWebhook。"
     }
   ],
   "web.admin.settings.notifications.webhooks.perMinute": [
@@ -63261,7 +63327,7 @@
   "web.admin.settings.notifications.webhooks.privateAllowed": [
     {
       "type": 0,
-      "value": "プライベートな送信先を許可中"
+      "value": "プライベートアドレスを許可中"
     }
   ],
   "web.admin.settings.notifications.webhooks.title": [
@@ -63339,7 +63405,7 @@
   "web.admin.settings.playback.execution.localServer": [
     {
       "type": 0,
-      "value": "ローカルサーバー"
+      "value": "このサーバー"
     }
   ],
   "web.admin.settings.playback.execution.nodesOnly": [
@@ -63357,7 +63423,7 @@
   "web.admin.settings.playback.execution.preferNodes": [
     {
       "type": 0,
-      "value": "トランスコードノードを優先"
+      "value": "利用可能な場合はトランスコードノード"
     }
   ],
   "web.admin.settings.playback.execution.thisServer": [
@@ -63384,18 +63450,22 @@
   ],
   "web.admin.settings.playback.hwAccel.checkFailedNode": [
     {
+      "type": 0,
+      "value": "トランスコードノードで"
+    },
+    {
       "type": 1,
       "value": "backend"
     },
     {
       "type": 0,
-      "value": "はハードウェアチェックに失敗しました（トランスコードノード）"
+      "value": "のハードウェアチェックに失敗しました"
     }
   ],
   "web.admin.settings.playback.hwAccel.description": [
     {
       "type": 0,
-      "value": "「自動」は最適なデバイスを選びます。起動に失敗した場合は、ソフトウェアに切り替える前に、GPUエンコードとCPUデコードの組み合わせを試します。"
+      "value": "「自動」は最適なデバイスを選択します。GPUトランスコードの開始に失敗した場合、Siloはソフトウェアにフォールバックする前に、CPUデコードとGPUエンコードの組み合わせを試します。"
     }
   ],
   "web.admin.settings.playback.hwAccel.detected": [
@@ -63483,7 +63553,7 @@
     },
     {
       "type": 0,
-      "value": "を使用するには、SiloをDockerではなくmacOS上でネイティブに実行する必要があります（トランスコードノード）"
+      "value": "を使用するには、トランスコードノードをDockerではなくmacOS上でネイティブに実行する必要があります"
     }
   ],
   "web.admin.settings.playback.hwAccel.noneFound": [
@@ -63509,7 +63579,7 @@
   "web.admin.settings.playback.hwAccel.notAccessibleNode": [
     {
       "type": 0,
-      "value": "このサーバーは"
+      "value": "トランスコードノードで"
     },
     {
       "type": 1,
@@ -63517,7 +63587,7 @@
     },
     {
       "type": 0,
-      "value": "デバイスにアクセスできません（トランスコードノード）"
+      "value": "デバイスにアクセスできません"
     }
   ],
   "web.admin.settings.playback.hwAccel.notFound": [
@@ -63537,7 +63607,7 @@
   "web.admin.settings.playback.hwAccel.notFoundNode": [
     {
       "type": 0,
-      "value": "このサーバーに"
+      "value": "トランスコードノードに"
     },
     {
       "type": 1,
@@ -63545,7 +63615,7 @@
     },
     {
       "type": 0,
-      "value": "が見つかりません（トランスコードノード）"
+      "value": "が見つかりません"
     }
   ],
   "web.admin.settings.playback.hwAccel.nvencFirstDevice": [
@@ -63607,7 +63677,7 @@
   "web.admin.settings.playback.markers.detectionWorkersDescription": [
     {
       "type": 0,
-      "value": "Siloが同時に分析するシーズンまたは映画の数です。それぞれ個別のFFmpegプロセスを使用します。デフォルトは1です。ストレージとCPUに余裕があれば、値を上げると大きなライブラリの処理が早く終わります。"
+      "value": "同時に分析するシーズンまたは映画の数です（それぞれFFmpegプロセスを実行します）。デフォルトは1です。CPUとストレージに余裕があれば、値を上げると大規模なライブラリのスキャンが速くなります。"
     }
   ],
   "web.admin.settings.playback.markers.group": [
@@ -63631,7 +63701,7 @@
   "web.admin.settings.playback.markers.lazyPlaybackBoth": [
     {
       "type": 0,
-      "value": "再生開始時に、まずオンラインを確認します。オンラインのプロバイダーにないイントロやクレジットだけを、このサーバーのCPUを使ってSiloが検出します。"
+      "value": "再生開始時にまずオンラインを確認し、オンラインで見つからないイントロやクレジットのマーカーをこのサーバーのCPUで検出します。"
     }
   ],
   "web.admin.settings.playback.markers.lazyPlaybackLocal": [
@@ -63661,7 +63731,7 @@
   "web.admin.settings.playback.markers.modeDescription": [
     {
       "type": 0,
-      "value": "オンラインのマーカーが優先されます。オンラインのイントロやクレジットがライブラリに保存されている場合、Siloはローカルでの検出を省略します。ローカルでの検出にはCPUを使用します。"
+      "value": "オンラインのマーカーが優先されます。オンラインのイントロやクレジットのマーカーがすでに保存されている場合、Siloはローカル検出をスキップします。ローカル検出にはCPUを使用します。"
     }
   ],
   "web.admin.settings.playback.markers.modeLocal": [
@@ -63733,7 +63803,7 @@
   "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
     {
       "type": 0,
-      "value": "0〜1440。Siloアプリでこの時間一時停止した動画を終了し、そのストリームとトランスコードを解放します。もう一度再生すると同じ位置から続行します。「一緒に見る」、キャスト再生、オーディオブックは対象外です。0でオフになります。"
+      "value": "Siloアプリで一時停止中の動画セッションを終了し、ストリームとトランスコードを解放します。再生は同じ位置から再開します。「一緒に見る」、キャスト再生、オーディオブックには影響しません。0〜1440（0でオフ）。"
     }
   ],
   "web.admin.settings.playback.previews.chapterExecution": [
@@ -63751,7 +63821,7 @@
   "web.admin.settings.playback.previews.chapterWorkersDescription": [
     {
       "type": 0,
-      "value": "Siloが同時にチャプターサムネイルを抽出するファイルの数です。再生中のタイトルだけを扱うワーカーが1つ追加され、再生中のタイトルがキューの後ろで待たされないようにします。"
+      "value": "同時に処理するファイル数です。再生中のタイトルがキューで待たされないよう、追加のワーカーが1つ確保されます。"
     }
   ],
   "web.admin.settings.playback.previews.group": [
@@ -63817,7 +63887,7 @@
   "web.admin.settings.playback.previews.intervalDescription": [
     {
       "type": 0,
-      "value": "シークプレビューの間隔です（5〜60）。変更すると、すべてのライブラリのプレビューが再作成されます。"
+      "value": "シークプレビューの間隔です（5〜60秒）。変更すると、すべてのライブラリのシークプレビューが再生成されます。"
     }
   ],
   "web.admin.settings.playback.previews.librariesLink": [
@@ -63865,7 +63935,7 @@
   "web.admin.settings.playback.previews.trickplayNodeCapacityDescription": [
     {
       "type": 0,
-      "value": "1つのトランスコードノードが、すべてのサーバーを通じて同時にシークプレビューを作成するファイルの数です（1〜64）。それぞれがノードのジョブ上限に含まれるため、再生用の余裕を残してください。"
+      "value": "すべてのサーバーを通じた、トランスコードノードごとのシークプレビュー同時実行ジョブ数です（1〜64）。それぞれノードのジョブ上限に含まれるため、再生用の余裕を残してください。"
     }
   ],
   "web.admin.settings.playback.previews.trickplayWorkers": [
@@ -63877,7 +63947,7 @@
   "web.admin.settings.playback.previews.trickplayWorkersDescription": [
     {
       "type": 0,
-      "value": "各サーバーが同時にシークプレビューを作成するファイルの数です。低い優先度で実行されるため、再生が優先されます。"
+      "value": "サーバーごとに同時に処理するファイル数です。低い優先度で実行されるため、再生が優先されます。"
     }
   ],
   "web.admin.settings.playback.previews.width": [
@@ -63889,7 +63959,7 @@
   "web.admin.settings.playback.previews.widthDescription": [
     {
       "type": 0,
-      "value": "チャプターサムネイルと、シーク中にプレーヤーが表示するサムネイルの幅です（160〜640）。変更するとすべて再作成されます。プレーヤーは、それぞれが置き換えられるまで現在の画像を使用します。"
+      "value": "チャプターサムネイルとシークプレビューに適用されます（160〜640px）。変更すると既存の画像が再生成されます。プレーヤーは置き換えられるまで現在の画像を使用します。"
     }
   ],
   "web.admin.settings.playback.remake.intervalCount": [
@@ -63900,12 +63970,16 @@
         "other": {
           "value": [
             {
+              "type": 0,
+              "value": "新しい間隔で"
+            },
+            {
               "type": 1,
               "value": "count_text"
             },
             {
               "type": 0,
-              "value": "件のファイルのシークプレビューが新しい間隔で再作成されます。この処理はバックグラウンドで実行され、大きなライブラリでは時間がかかる場合があります。プレーヤーは、それぞれが置き換えられるまで現在の画像を使用します。"
+              "value": "件のファイルのシークプレビューをバックグラウンドで再生成します。大規模なライブラリでは時間がかかる場合があります。プレーヤーは置き換えられるまで現在の画像を使用します。"
             }
           ]
         }
@@ -63917,13 +63991,13 @@
   "web.admin.settings.playback.remake.intervalExisting": [
     {
       "type": 0,
-      "value": "既存のシークプレビューが新しい間隔で再作成されます。この処理はバックグラウンドで実行され、大きなライブラリでは時間がかかる場合があります。プレーヤーは、それぞれが置き換えられるまで現在の画像を使用します。"
+      "value": "新しい間隔で既存のシークプレビューをバックグラウンドで再生成します。大規模なライブラリでは時間がかかる場合があります。プレーヤーは置き換えられるまで現在の画像を使用します。"
     }
   ],
   "web.admin.settings.playback.remake.intervalTitle": [
     {
       "type": 0,
-      "value": "シークプレビューを再作成しますか？"
+      "value": "シークプレビューを再生成しますか？"
     }
   ],
   "web.admin.settings.playback.remake.widthCount": [
@@ -63935,7 +64009,7 @@
           "value": [
             {
               "type": 0,
-              "value": "すべてのチャプターサムネイルと"
+              "value": "新しい幅ですべてのチャプターサムネイルと"
             },
             {
               "type": 1,
@@ -63943,7 +64017,7 @@
             },
             {
               "type": 0,
-              "value": "件のファイルのシークプレビューが新しい幅で再作成されます。この処理はバックグラウンドで実行され、大きなライブラリでは時間がかかる場合があります。プレーヤーは、それぞれが置き換えられるまで現在の画像を使用します。"
+              "value": "件のファイルのシークプレビューをバックグラウンドで再生成します。大規模なライブラリでは時間がかかる場合があります。プレーヤーは置き換えられるまで現在の画像を使用します。"
             }
           ]
         }
@@ -63955,19 +64029,19 @@
   "web.admin.settings.playback.remake.widthExisting": [
     {
       "type": 0,
-      "value": "すべてのチャプターサムネイルと既存のシークプレビューが新しい幅で再作成されます。この処理はバックグラウンドで実行され、大きなライブラリでは時間がかかる場合があります。プレーヤーは、それぞれが置き換えられるまで現在の画像を使用します。"
+      "value": "新しい幅ですべてのチャプターサムネイルと既存のシークプレビューをバックグラウンドで再生成します。大規模なライブラリでは時間がかかる場合があります。プレーヤーは置き換えられるまで現在の画像を使用します。"
     }
   ],
   "web.admin.settings.playback.remake.widthNoPreviews": [
     {
       "type": 0,
-      "value": "すべてのチャプターサムネイルが新しい幅で再作成されます。この処理はバックグラウンドで実行され、大きなライブラリでは時間がかかる場合があります。プレーヤーは、それぞれが置き換えられるまで現在の画像を使用します。"
+      "value": "新しい幅ですべてのチャプターサムネイルをバックグラウンドで再生成します。大規模なライブラリでは時間がかかる場合があります。プレーヤーは置き換えられるまで現在の画像を使用します。"
     }
   ],
   "web.admin.settings.playback.remake.widthTitle": [
     {
       "type": 0,
-      "value": "プレビュー画像を再作成しますか？"
+      "value": "プレビュー画像を再生成しますか？"
     }
   ],
   "web.admin.settings.playback.speedTests.automatic": [
@@ -63979,7 +64053,7 @@
   "web.admin.settings.playback.speedTests.automaticDescription": [
     {
       "type": 0,
-      "value": "アプリは、サーバーにデバイスの現在の測定結果がない場合にのみ接続をテストします。オフの場合も、視聴者は設定の「速度をテスト」を実行できます。"
+      "value": "アプリは、現在の測定結果がない場合にのみ接続速度をテストします。オフの場合でも、視聴者は設定から「速度をテスト」を実行できます。"
     }
   ],
   "web.admin.settings.playback.speedTests.group": [
@@ -63997,7 +64071,7 @@
   "web.admin.settings.playback.speedTests.maxAgeDescription": [
     {
       "type": 0,
-      "value": "1〜30。測定結果がこれより古くなると、アプリが再度テストします。"
+      "value": "測定結果がこれより古くなると、アプリが再度テストします（1〜30日）。"
     }
   ],
   "web.admin.settings.playback.title": [
@@ -64039,7 +64113,7 @@
   "web.admin.settings.playback.transcoding.backBufferHint": [
     {
       "type": 0,
-      "value": "ダウンロード済みのメディアをこの長さだけ保持して即座に巻き戻しシークできるようにし、それより古いトランスコードセグメントを解放します。0にするとクリーンアップを無効にします。有効にする場合は120秒以上にしてください。トランスコードのスロットリングと組み合わせると、クライアントの前後両方のディスク使用量を制限できます。"
+      "value": "即座に後方シークできるよう、トランスコード済み動画をこの秒数だけ保持し、それより古いセグメントを削除します。0でクリーンアップをオフにします（オンにする場合の最小値：120）。トランスコードのスロットリングと組み合わせると、合計のディスク使用量を制限できます。"
     }
   ],
   "web.admin.settings.playback.transcoding.bufferAhead": [
@@ -64057,7 +64131,7 @@
   "web.admin.settings.playback.transcoding.copyKeyframePlaylistDescription": [
     {
       "type": 0,
-      "value": "試験運用。Siloがファイルの動画をコピーするとき、コピーに合わせて伸びるプレイリストではなく、ファイルのキーフレームを使って最初からすべてのセグメントを一覧にします。Safariが途中でフリーズするのを防ぎます。Siloがコピーした位置より大きく先にシークすると、その位置からコピーをやり直します。"
+      "value": "試験運用。再生中にプレイリストを拡張するのではなく、キーフレームから動画コピー用の完全なプレイリストを事前に生成します。Safariの再生中フリーズを防ぐのに役立ちます。大きく先にシークすると、その位置からコピーを再開します。"
     }
   ],
   "web.admin.settings.playback.transcoding.dir": [
@@ -64089,7 +64163,7 @@
   "web.admin.settings.playback.transcoding.enabledDescription": [
     {
       "type": 0,
-      "value": "オフにすると動画を再エンコードしません。Siloは引き続き、必要なデバイス向けにファイルの再パッケージと音声の変換を行います。"
+      "value": "オフにすると、Siloは動画を再エンコードしません。デバイスに必要な場合は、引き続きファイルの再パッケージと音声の変換を行います。"
     }
   ],
   "web.admin.settings.playback.transcoding.ffmpegPath": [
@@ -64121,13 +64195,13 @@
   "web.admin.settings.playback.transcoding.hardwareToneMap": [
     {
       "type": 0,
-      "value": "ハードウェアHDRトーンマッピングを有効にする"
+      "value": "ハードウェアHDRトーンマッピング"
     }
   ],
   "web.admin.settings.playback.transcoding.hardwareToneMapHint": [
     {
       "type": 0,
-      "value": "検証済みのローカルまたはリモートのGPU実行環境が、トランスコード時にHDR動画をSDRに変換できるようにします。"
+      "value": "このサーバーまたはトランスコードノードの対応GPUを使用して、トランスコード時にHDR動画をSDRに変換します。"
     }
   ],
   "web.admin.settings.playback.transcoding.preferLower": [
@@ -64145,7 +64219,7 @@
   "web.admin.settings.playback.transcoding.softwareToneMap": [
     {
       "type": 0,
-      "value": "ソフトウェアHDRトーンマッピングを有効にする"
+      "value": "ソフトウェアHDRトーンマッピング"
     }
   ],
   "web.admin.settings.playback.transcoding.softwareToneMapHint": [
@@ -64241,7 +64315,7 @@
   "web.admin.settings.providers.markerLookupDisabled": [
     {
       "type": 0,
-      "value": "オンラインマーカーの検索は無効です。"
+      "value": "オンラインマーカーの検索がオフのため、これらのプロバイダーは使用されません。"
     },
     {
       "type": 8,
@@ -64299,13 +64373,13 @@
   "web.admin.settings.providers.mdblist.clearTitle": [
     {
       "type": 0,
-      "value": "MDBListの認証情報をクリアしますか？"
+      "value": "MDBListのAPIキーをクリアしますか？"
     }
   ],
   "web.admin.settings.providers.mdblist.cleared": [
     {
       "type": 0,
-      "value": "MDBListの認証情報をクリアしました"
+      "value": "MDBListのAPIキーをクリアしました"
     }
   ],
   "web.admin.settings.providers.mdblist.close": [
@@ -64329,7 +64403,7 @@
   "web.admin.settings.providers.mdblist.intro": [
     {
       "type": 0,
-      "value": "キーがあると、コレクションのインポートでMDBListのリストを検索・閲覧できます。貼り付けたリストのURLはキーなしでインポートできます。キーは"
+      "value": "コレクションのインポート時にMDBListを検索・閲覧するために必要です。貼り付けたリストURLはキーなしで使用できます。キーは"
     },
     {
       "type": 8,
@@ -64355,13 +64429,13 @@
   "web.admin.settings.providers.mdblist.nothingToSave": [
     {
       "type": 0,
-      "value": "MDBListに保存する内容はありません。"
+      "value": "保存するAPIキーを入力してください。"
     }
   ],
   "web.admin.settings.providers.mdblist.saved": [
     {
       "type": 0,
-      "value": "MDBListの認証情報を保存しました"
+      "value": "MDBListのAPIキーを保存しました"
     }
   ],
   "web.admin.settings.providers.mdblist.saving": [
@@ -64373,7 +64447,7 @@
   "web.admin.settings.providers.mdblist.tagline": [
     {
       "type": 0,
-      "value": "リスト"
+      "value": "コレクションのインポート"
     }
   ],
   "web.admin.settings.providers.mdblist.testConnection": [
@@ -64403,7 +64477,7 @@
   "web.admin.settings.providers.metadataNote": [
     {
       "type": 0,
-      "value": "TMDB、TheTVDB、MDBListの評価などのメタデータプロバイダーは、"
+      "value": "メタデータプロバイダー（TMDB、TheTVDB、MDBListの評価）は、"
     },
     {
       "type": 8,
@@ -64417,7 +64491,7 @@
     },
     {
       "type": 0,
-      "value": "から接続します。"
+      "value": "で設定します。"
     }
   ],
   "web.admin.settings.providers.subtitles.apiKey": [
@@ -64439,7 +64513,7 @@
     },
     {
       "type": 0,
-      "value": "を無効として保存し、保存されている認証情報をクリアします。このサーバーへの変更の適用状況は別途表示されます。他のサーバーでは古い設定が使用される場合があります。"
+      "value": "をオフにし、保存されている認証情報を削除します。保存後、このサーバーに変更が適用されたかどうかがSiloに表示されます。他のサーバーでは古い設定が使用される場合があります。"
     }
   ],
   "web.admin.settings.providers.subtitles.clearTitle": [
@@ -64467,7 +64541,7 @@
   "web.admin.settings.providers.subtitles.connectedOff": [
     {
       "type": 0,
-      "value": "接続済み · オフ"
+      "value": "設定済み · オフ"
     }
   ],
   "web.admin.settings.providers.subtitles.enable": [
@@ -64513,13 +64587,13 @@
   "web.admin.settings.providers.subtitles.reload": [
     {
       "type": 0,
-      "value": "保存された設定を再読み込み（下書きを破棄）"
+      "value": "保存された設定を再読み込み（変更を破棄）"
     }
   ],
   "web.admin.settings.providers.subtitles.saveNotConfirmed": [
     {
       "type": 0,
-      "value": "保存を確認できませんでした。下書きは保持されています。別の変更を行う前に、「保存された設定を再読み込み」で内容を確認してください。"
+      "value": "保存を確認できませんでした。変更内容はそのまま表示されています。別の変更を行う前に、「保存された設定を再読み込み」を選択して保存済みの内容を確認してください。"
     }
   ],
   "web.admin.settings.providers.subtitles.saving": [
@@ -64531,7 +64605,7 @@
   "web.admin.settings.providers.subtitles.taglineApiKey": [
     {
       "type": 0,
-      "value": "APIキーで接続するプロバイダー"
+      "value": "APIキー経由の字幕"
     }
   ],
   "web.admin.settings.providers.subtitles.taglineCommunity": [
@@ -64615,25 +64689,25 @@
   "web.admin.settings.recommendations.advanced.diversity.hint": [
     {
       "type": 0,
-      "value": "0＝多様性を最大、1＝関連性を最大"
+      "value": "0＝より多様、1＝より一致度が高い"
     }
   ],
   "web.admin.settings.recommendations.advanced.diversity.label": [
     {
       "type": 0,
-      "value": "多様性ラムダ"
+      "value": "関連性と多様性（0〜1）"
     }
   ],
   "web.admin.settings.recommendations.advanced.halfLife.hint": [
     {
       "type": 0,
-      "value": "古いシグナルの重みが下がる速さ"
+      "value": "過去のアクティビティの重みが半分になるまでの日数です。"
     }
   ],
   "web.admin.settings.recommendations.advanced.halfLife.label": [
     {
       "type": 0,
-      "value": "時間減衰の半減期（日）"
+      "value": "好みの減衰半減期（日）"
     }
   ],
   "web.admin.settings.recommendations.advanced.title": [
@@ -64651,13 +64725,13 @@
   "web.admin.settings.recommendations.embedding.title": [
     {
       "type": 0,
-      "value": "埋め込みモデル"
+      "value": "エンベディングモデル"
     }
   ],
   "web.admin.settings.recommendations.embeddingLockNote": [
     {
       "type": 0,
-      "value": "別のモデルに切り替えるには埋め込みをリセットする必要があり、すべての埋め込みが削除されます。同じモデルを提供する別のプロバイダーへの変更は、再起動後に適用されます。"
+      "value": "モデルを切り替えるには、下でエンベディングをリセットしてください（保存済みのエンベディングはすべて削除されます）。同じモデルを使う別のプロバイダーへの切り替えは、再起動後に適用されます。"
     }
   ],
   "web.admin.settings.recommendations.external.addToDiscover": [
@@ -64681,37 +64755,37 @@
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
-      "value": "ディスカバーのおすすめを有効にする"
+      "value": "ディスカバーのおすすめを表示"
     }
   ],
   "web.admin.settings.recommendations.external.enabledHint": [
     {
       "type": 0,
-      "value": "ライブラリにまだないタイトルを含む個人用の行を、リクエストのディスカバーに追加します。エンベディングプロバイダーとTMDBを使用します。"
+      "value": "ライブラリにまだないタイトルについて、パーソナライズされた行をリクエストのディスカバーに追加します。エンベディングプロバイダーとTMDBを使用します。"
     }
   ],
   "web.admin.settings.recommendations.external.maxTitles": [
     {
       "type": 0,
-      "value": "おすすめ候補の最大タイトル数"
+      "value": "対象とする最大タイトル数"
     }
   ],
   "web.admin.settings.recommendations.external.maxTitlesHint": [
     {
       "type": 0,
-      "value": "ライブラリにないタイトルのうち、サーバーがおすすめ候補として保持する数です。各タイトルはTMDBで検索され、エンベディングされます。エンベディングは通常低コストですが、数を増やすとエンベディングプロバイダーによってはコストや時間が増え、ストレージも多く使用します。"
+      "value": "おすすめのためにTMDBから取得し、エンベディングを作成するライブラリ外のタイトル数です。上限を高くするとストレージの使用量が増え、エンベディングの処理時間やプロバイダーのコストが増える場合があります。"
     }
   ],
   "web.admin.settings.recommendations.external.missingFromDiscover": [
     {
       "type": 0,
-      "value": "ディスカバーページにはまだおすすめの行が表示されていません。"
+      "value": "ディスカバーページには、おすすめの行がまだ含まれていません。"
     }
   ],
   "web.admin.settings.recommendations.external.needsRecommendations": [
     {
       "type": 0,
-      "value": "ディスカバーのおすすめを実行するには、上の「おすすめを有効にする」をオンにしてサーバーを再起動してください。"
+      "value": "ディスカバーのおすすめを実行するには、上の「おすすめ」をオンにしてサーバーを再起動してください。"
     }
   ],
   "web.admin.settings.recommendations.external.needsRequests": [
@@ -64749,7 +64823,7 @@
   "web.admin.settings.recommendations.general.enabled": [
     {
       "type": 0,
-      "value": "おすすめを有効にする"
+      "value": "おすすめ"
     }
   ],
   "web.admin.settings.recommendations.general.title": [
@@ -64761,49 +64835,49 @@
   "web.admin.settings.recommendations.schedule.cowatchCron": [
     {
       "type": 0,
-      "value": "共視聴のCron"
+      "value": "共視聴データ"
     }
   ],
   "web.admin.settings.recommendations.schedule.cronHint": [
     {
       "type": 0,
-      "value": "Cron式"
+      "value": "Cron式（例：0 3 * * *）"
     }
   ],
   "web.admin.settings.recommendations.schedule.embeddingsCron": [
     {
       "type": 0,
-      "value": "埋め込みのCron"
+      "value": "エンベディング"
     }
   ],
   "web.admin.settings.recommendations.schedule.externalCron": [
     {
       "type": 0,
-      "value": "ディスカバーのおすすめのCron"
+      "value": "ディスカバーのおすすめ"
     }
   ],
   "web.admin.settings.recommendations.schedule.recommendationsCron": [
     {
       "type": 0,
-      "value": "おすすめのCron"
+      "value": "おすすめ"
     }
   ],
   "web.admin.settings.recommendations.schedule.tasteProfilesCron": [
     {
       "type": 0,
-      "value": "好みプロフィールのCron"
+      "value": "好みプロフィール"
     }
   ],
   "web.admin.settings.recommendations.schedule.title": [
     {
       "type": 0,
-      "value": "スケジュール"
+      "value": "スケジュール（cron）"
     }
   ],
   "web.admin.settings.redis.db.description": [
     {
       "type": 0,
-      "value": "URL内の番号を置き換えます。1つのRedisを共有する各インストールには、それぞれ別の番号が必要です。"
+      "value": "URLのデータベース番号を上書きします。Redisを共有する各Siloサーバーには、それぞれ別の番号が必要です。"
     }
   ],
   "web.admin.settings.redis.db.label": [
@@ -64827,7 +64901,7 @@
   "web.admin.settings.redis.unavailable.description": [
     {
       "type": 0,
-      "value": "保護された認証情報の状態を読み込めませんでした。Redisを編集するには、このページを再読み込みしてください。"
+      "value": "保存済みのRedis認証情報または環境変数で管理されている設定を確認できませんでした。Redis設定を編集するには、このページを再読み込みしてください。"
     }
   ],
   "web.admin.settings.redis.unavailable.title": [
@@ -64943,7 +65017,7 @@
   "web.admin.settings.requests.conditions.description": [
     {
       "type": 0,
-      "value": "リクエストはすべての条件に一致する必要があります。条件に複数の値がある場合は、いずれか1つに一致すれば十分です。"
+      "value": "リクエストは以下のすべての条件に一致する必要があります（「いずれかに一致」の場合は、指定した値のいずれかに一致すれば対象になります）。"
     }
   ],
   "web.admin.settings.requests.conditions.heading": [
@@ -65133,7 +65207,7 @@
           "value": [
             {
               "type": 0,
-              "value": "ステータスはリクエスト時に判定されるため、後で終了したシリーズも送信先は変わりません。TMDBのステータスがないシリーズは一致しません。"
+              "value": "リクエスト時に確認されるため、後から終了したシリーズも元のサーバーのままになります。TMDBのステータスがないシリーズは一致しません。"
             }
           ]
         },
@@ -65141,7 +65215,7 @@
           "value": [
             {
               "type": 0,
-              "value": "ステータスはリクエスト時に判定されるため、後で終了したシリーズも送信先は変わりません。TMDBのステータスがないシリーズは一致します。"
+              "value": "リクエスト時に確認されるため、後から終了したシリーズも元のサーバーのままになります。TMDBのステータスがないシリーズは一致します。"
             }
           ]
         }
@@ -65171,7 +65245,7 @@
       "children": [
         {
           "type": 0,
-          "value": "対象："
+          "value": "概要："
         }
       ]
     },
@@ -65241,7 +65315,7 @@
   "web.admin.settings.requests.destination.fourKCaptionForceDual": [
     {
       "type": 0,
-      "value": "すべてのリクエストでHD版と一緒に送信されます（一般）。"
+      "value": "すべてのリクエストでHD版と一緒に送信されます（「一般」で設定）。"
     }
   ],
   "web.admin.settings.requests.destination.hdVersion": [
@@ -65290,13 +65364,13 @@
   "web.admin.settings.requests.destination.noUhdServers": [
     {
       "type": 0,
-      "value": "4Kとしてマークされたサーバーがありません。4K版を送信するには、サーバーの「4Kサーバー」をオンにしてください。"
+      "value": "4Kサーバーが設定されていません。4K版を振り分けるには、サーバーの設定で「4Kサーバー」をオンにしてください。"
     }
   ],
   "web.admin.settings.requests.destination.noneChosen": [
     {
       "type": 0,
-      "value": "何も選択されていないため、"
+      "value": "何も選択しない場合、"
     },
     {
       "type": 1,
@@ -65304,7 +65378,7 @@
     },
     {
       "type": 0,
-      "value": "自体の"
+      "value": "のデフォルトの"
     },
     {
       "type": 1,
@@ -65312,7 +65386,7 @@
     },
     {
       "type": 0,
-      "value": "が適用されます。"
+      "value": "が使用されます。"
     }
   ],
   "web.admin.settings.requests.destination.optionsFailed": [
@@ -65404,7 +65478,7 @@
     },
     {
       "type": 0,
-      "value": "（オフ）"
+      "value": "（無効）"
     }
   ],
   "web.admin.settings.requests.destination.serverWrongType": [
@@ -65456,7 +65530,7 @@
           "value": [
             {
               "type": 0,
-              "value": "どのルールにも一致しないシリーズの送信先です。サーバー自体の設定を使うには、設定をサーバーのデフォルトのままにしてください。"
+              "value": "どのルールにも一致しないシリーズのリクエストの送信先です。サーバー自体の設定をそのまま使うには、各項目をサーバーのデフォルトのままにしてください。"
             }
           ]
         },
@@ -65464,7 +65538,7 @@
           "value": [
             {
               "type": 0,
-              "value": "どのルールにも一致しない映画の送信先です。サーバー自体の設定を使うには、設定をサーバーのデフォルトのままにしてください。"
+              "value": "どのルールにも一致しない映画のリクエストの送信先です。サーバー自体の設定をそのまま使うには、各項目をサーバーのデフォルトのままにしてください。"
             }
           ]
         }
@@ -65504,7 +65578,7 @@
   "web.admin.settings.requests.general.allowRequestsDescription": [
     {
       "type": 0,
-      "value": "サーバーにない映画やシリーズをリクエストできます。"
+      "value": "ライブラリにない映画やシリーズをリクエストできるようにします。"
     }
   ],
   "web.admin.settings.requests.general.approval": [
@@ -65516,7 +65590,7 @@
   "web.admin.settings.requests.general.approvalAdmin": [
     {
       "type": 0,
-      "value": "管理者が承認"
+      "value": "管理者の承認が必要"
     }
   ],
   "web.admin.settings.requests.general.approvalAuto": [
@@ -65534,7 +65608,7 @@
   "web.admin.settings.requests.general.forceDualDescription": [
     {
       "type": 0,
-      "value": "通常、4K版は再生上限で4Kが許可されているユーザーに対して、4Kを受け付けるサーバーがある場合にのみリクエストされます。これをオンにすると、すべてのリクエストで4Kもリクエストされます。"
+      "value": "デフォルトでは、リクエストしたユーザーの再生上限で許可されている場合にのみ4Kがリクエストされます。これをオンにすると、ルーティングに4Kサーバーが含まれる場合は全員に対して4Kがリクエストされます。"
     }
   ],
   "web.admin.settings.requests.general.label": [
@@ -65552,7 +65626,7 @@
   "web.admin.settings.requests.general.limitWindowInvalid": [
     {
       "type": 0,
-      "value": "1日以上を指定してください。"
+      "value": "1以上の整数を指定してください。"
     }
   ],
   "web.admin.settings.requests.general.limitWindowUnit": [
@@ -65569,10 +65643,6 @@
   ],
   "web.admin.settings.requests.general.overridableDefault": [
     {
-      "type": 0,
-      "value": "サーバー全体のデフォルトです。"
-    },
-    {
       "type": 8,
       "value": "link",
       "children": [
@@ -65584,7 +65654,7 @@
     },
     {
       "type": 0,
-      "value": "とアカウントでこの設定を上書きできます。"
+      "value": "や個別のアカウントで、このデフォルトを上書きできます。"
     }
   ],
   "web.admin.settings.requests.general.requestLimit": [
@@ -65596,7 +65666,7 @@
   "web.admin.settings.requests.general.requestLimitDescription": [
     {
       "type": 0,
-      "value": "1つのアカウントが下の期間内にリクエストできるタイトル数です。却下されたリクエストと失敗したリクエストは数えません。0の場合、グループまたはアカウント独自の上限があるアカウントのみリクエストできます。"
+      "value": "1つのアカウントが制限期間内にリクエストできる最大タイトル数です。却下されたリクエストと失敗したリクエストは数えません。0に設定すると、デフォルトではリクエストできなくなります。"
     }
   ],
   "web.admin.settings.requests.general.requestLimitInvalid": [
@@ -65620,7 +65690,7 @@
   "web.admin.settings.requests.general.watchlistDescription": [
     {
       "type": 0,
-      "value": "ライブラリにないタイトルがウォッチリストに追加されると、「リクエスト」を押した場合と同様に、そのユーザーのためにリクエストされます。各プロフィールで個別にオフにできます。"
+      "value": "ライブラリにないタイトルをウォッチリストに追加すると、自動的にリクエストを送信します。各プロフィールでオフにできます。"
     }
   ],
   "web.admin.settings.requests.list.addRule": [
@@ -65772,7 +65842,7 @@
           "value": [
             {
               "type": 0,
-              "value": "どのルールにも該当しないシリーズの送信先を選択してください。"
+              "value": "どのルールにも一致しないシリーズの送信先を選択してください。"
             }
           ]
         },
@@ -65780,7 +65850,7 @@
           "value": [
             {
               "type": 0,
-              "value": "どのルールにも該当しない映画の送信先を選択してください。"
+              "value": "どのルールにも一致しない映画の送信先を選択してください。"
             }
           ]
         }
@@ -65790,7 +65860,7 @@
   "web.admin.settings.requests.list.fallbackFirst": [
     {
       "type": 0,
-      "value": "先に「その他すべて」の送信先を選択してください。"
+      "value": "先に「その他すべて」のサーバーを選択してください。"
     }
   ],
   "web.admin.settings.requests.list.fallbackHd": [
@@ -65912,7 +65982,7 @@
           "value": [
             {
               "type": 0,
-              "value": "シリーズのリクエストを送信するには、上で"
+              "value": "シリーズのリクエストのルーティングを開始するには、上で"
             },
             {
               "type": 1,
@@ -65928,7 +65998,7 @@
           "value": [
             {
               "type": 0,
-              "value": "映画のリクエストを送信するには、上で"
+              "value": "映画のリクエストのルーティングを開始するには、上で"
             },
             {
               "type": 1,
@@ -66770,7 +66840,7 @@
   "web.admin.settings.requests.model.trace.decidesHdNone": [
     {
       "type": 0,
-      "value": "HDを決定：なし"
+      "value": "HDは送信しない"
     }
   ],
   "web.admin.settings.requests.model.trace.decidesUhd": [
@@ -66782,7 +66852,7 @@
   "web.admin.settings.requests.model.trace.decidesUhdNone": [
     {
       "type": 0,
-      "value": "4Kを決定：なし"
+      "value": "4Kは送信しない"
     }
   ],
   "web.admin.settings.requests.model.trace.fails": [
@@ -67290,7 +67360,7 @@
   "web.admin.settings.requests.presets.changeDescription": [
     {
       "type": 0,
-      "value": "このルールが受け付けるリクエストを変更してから、送信先を選択してください。"
+      "value": "このルールに一致するリクエストを調整してから、送信先を選択してください。"
     }
   ],
   "web.admin.settings.requests.presets.custom": [
@@ -67504,7 +67574,7 @@
   "web.admin.settings.requests.preview.caption": [
     {
       "type": 0,
-      "value": "保存済みのルールで、リクエストがどのルールに一致し、各バージョンがどこに送られるかを確認できます。"
+      "value": "保存済みのルールを使って、タイトルがどこにルーティングされるかをテストできます。"
     }
   ],
   "web.admin.settings.requests.preview.checking": [
@@ -67650,7 +67720,7 @@
   "web.admin.settings.requests.preview.requesterHint": [
     {
       "type": 0,
-      "value": "特定のユーザー向けのルールは、そのユーザーのリクエストにのみ一致します。"
+      "value": "リクエスト元で絞り込まれたルールをテストするには、アカウントを選択してください。"
     }
   ],
   "web.admin.settings.requests.preview.resultYear": [
@@ -67742,7 +67812,7 @@
   "web.admin.settings.requests.routing.advancedDescription": [
     {
       "type": 0,
-      "value": "Siloはルールを上から順に確認します。リクエストに最初に一致したルールが送信先を決定し、どのルールにも一致しないものは「その他すべて」に送られます。変更はすぐに保存されます。"
+      "value": "ルールは上から順に評価され、最初に一致したルールが各バージョンを処理します。どのルールにも一致しないものは「その他すべて」に送られます。変更は自動的に保存されます。"
     }
   ],
   "web.admin.settings.requests.routing.brandsFailed": [
@@ -67772,13 +67842,13 @@
   "web.admin.settings.requests.routing.brandsNeedRequests": [
     {
       "type": 0,
-      "value": "ネットワークやスタジオを名前で選択するには、リクエストをオンにしてください。"
+      "value": "ネットワークやスタジオを名前で選択するには、「一般」で「リクエストを許可」をオンにしてください。"
     }
   ],
   "web.admin.settings.requests.routing.label": [
     {
       "type": 0,
-      "value": "リクエストの送信先"
+      "value": "ルーティング"
     }
   ],
   "web.admin.settings.requests.routing.loadFailed": [
@@ -67826,7 +67896,7 @@
   "web.admin.settings.requests.routingMode.animeNote": [
     {
       "type": 0,
-      "value": "アニメのシリーズはシリーズの種類をアニメにしてSonarrに送られるため、エピソードはアニメのリリースと同じ方法で番号付けされます。"
+      "value": "アニメのシリーズは、アニメ用のエピソード番号付けを行うため、シリーズの種類を「アニメ」としてSonarrに送信されます。"
     }
   ],
   "web.admin.settings.requests.routingMode.label": [
@@ -67858,13 +67928,13 @@
   "web.admin.settings.requests.routingMode.noUhd": [
     {
       "type": 0,
-      "value": "4Kバージョンなし"
+      "value": "4K版は送信しない"
     }
   ],
   "web.admin.settings.requests.routingMode.onlyUhdServer": [
     {
       "type": 0,
-      "value": "— 4Kサーバーしかないため、HDバージョンの送信先がありません。4Kとして指定されていない"
+      "value": "— 4Kサーバーのみのため、HD版は送信されません。上で4K以外の"
     },
     {
       "type": 1,
@@ -67912,7 +67982,7 @@
   "web.admin.settings.requests.routingMode.standardBlocked": [
     {
       "type": 0,
-      "value": "現在、「標準」ではリクエストをルーティングできません。"
+      "value": "現在、標準ルーティングは使用できません。"
     },
     {
       "type": 1,
@@ -67920,13 +67990,13 @@
     },
     {
       "type": 0,
-      "value": "「詳細」に切り替えるかサーバーを削除するまでは、ルールが送信先を決定します。"
+      "value": "「詳細」に切り替えるかサーバーを削除するまで、Siloは詳細ルールを使用します。"
     }
   ],
   "web.admin.settings.requests.routingMode.standardDescription": [
     {
       "type": 0,
-      "value": "各リクエストは種類に応じたサーバーに、そのサーバー自体の設定で送られます。"
+      "value": "映画やシリーズを、それぞれのサーバー自体の設定で直接送信します。"
     }
   ],
   "web.admin.settings.requests.routingMode.standardUnavailable": [
@@ -67948,7 +68018,7 @@
   "web.admin.settings.requests.routingMode.uhdNote": [
     {
       "type": 0,
-      "value": "4Kバージョンを専用のサーバーに送るには、そのサーバーを追加して「4Kサーバー」をオンにしてください。同じ種類のサーバーを2台目として追加すると、「詳細」がオンになります。"
+      "value": "4Kを別にルーティングするには、サーバーを追加して「4Kサーバー」をオンにしてください。同じ種類のHDサーバーまたは4Kサーバーを2台目として追加すると、「詳細」に切り替わります。"
     }
   ],
   "web.admin.settings.requests.routingMode.uhdServer": [
@@ -67970,7 +68040,7 @@
   "web.admin.settings.requests.ruleEditor.deleteDescription": [
     {
       "type": 0,
-      "value": "このルールが受け付けていたリクエストは、下のルールか「その他すべて」に送られます。"
+      "value": "一致するリクエストは下のルール、または「その他すべて」に送られます。"
     }
   ],
   "web.admin.settings.requests.ruleEditor.deleteRule": [
@@ -67992,7 +68062,7 @@
   "web.admin.settings.requests.ruleEditor.description": [
     {
       "type": 0,
-      "value": "このルールが受け付けるリクエストと、その送信先を選択してください。"
+      "value": "このルールに一致するリクエストと、その送信先を選択してください。"
     }
   ],
   "web.admin.settings.requests.ruleEditor.editTitle": [
@@ -68014,7 +68084,7 @@
   "web.admin.settings.requests.ruleEditor.nameHint": [
     {
       "type": 0,
-      "value": "一覧に表示されます。空欄にすると、ルールの説明が自動で付けられます。"
+      "value": "ルール一覧に表示されます。空欄にすると、名前が自動で生成されます。"
     }
   ],
   "web.admin.settings.requests.ruleEditor.saveRule": [
@@ -68044,7 +68114,7 @@
   "web.admin.settings.requests.serverEditor.apiKeyHint": [
     {
       "type": 0,
-      "value": "サーバーの「Settings › General」で確認できます。"
+      "value": "Radarr、Sonarr、またはリクエストアプリの「設定 → 一般」で確認できます。"
     }
   ],
   "web.admin.settings.requests.serverEditor.apiKeyNotNeeded": [
@@ -68074,7 +68144,7 @@
   "web.admin.settings.requests.serverEditor.deleteBlocked": [
     {
       "type": 0,
-      "value": "ルーティングがまだここにリクエストを送っています（"
+      "value": "ルーティングで使用中です（"
     },
     {
       "type": 1,
@@ -68082,13 +68152,13 @@
     },
     {
       "type": 0,
-      "value": "）。先に別の送信先に変更してください。"
+      "value": "）。このサーバーを削除する前に、それらのルートを別のサーバーに割り当て直してください。"
     }
   ],
   "web.admin.settings.requests.serverEditor.deleteDescription": [
     {
       "type": 0,
-      "value": "Siloはこのサーバーへのリクエストの送信を停止し、このサーバーを再利用しているAutoscanの接続は接続情報を失います。"
+      "value": "Siloはこのサーバーへのリクエストの送信を停止し、このサーバーを共有しているAutoscanの接続は接続情報を失います。"
     }
   ],
   "web.admin.settings.requests.serverEditor.deleteDescriptionClearsFallback": [
@@ -68100,7 +68170,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Siloはこのサーバーへのリクエストの送信を停止し、このサーバーを再利用しているAutoscanの接続は接続情報を失います。シリーズの「その他すべて」も削除されるため、別のサーバーを追加するまで、該当するリクエストの送信先はなくなります。"
+              "value": "Siloはこのサーバーへのリクエストの送信を停止し、共有されているAutoscanの接続は接続情報を失います。シリーズの「その他すべて」もクリアされるため、別のサーバーを追加するまで一致しないリクエストはルーティングされません。"
             }
           ]
         },
@@ -68108,7 +68178,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Siloはこのサーバーへのリクエストの送信を停止し、このサーバーを再利用しているAutoscanの接続は接続情報を失います。映画の「その他すべて」も削除されるため、別のサーバーを追加するまで、該当するリクエストの送信先はなくなります。"
+              "value": "Siloはこのサーバーへのリクエストの送信を停止し、共有されているAutoscanの接続は接続情報を失います。映画の「その他すべて」もクリアされるため、別のサーバーを追加するまで一致しないリクエストはルーティングされません。"
             }
           ]
         }
@@ -68140,7 +68210,7 @@
   "web.admin.settings.requests.serverEditor.description": [
     {
       "type": 0,
-      "value": "承認されたリクエストはここに送られます。どのリクエストを送るかはルーティングで決まります。"
+      "value": "Siloはルーティング設定に基づいて、承認されたリクエストをここに送信します。"
     }
   ],
   "web.admin.settings.requests.serverEditor.detected": [
@@ -68178,7 +68248,7 @@
   "web.admin.settings.requests.serverEditor.kindMismatch": [
     {
       "type": 0,
-      "value": "このアドレスは"
+      "value": "このURLは"
     },
     {
       "type": 1,
@@ -68194,7 +68264,7 @@
     },
     {
       "type": 0,
-      "value": "として応答しています。"
+      "value": "として応答しました。"
     },
     {
       "type": 1,
@@ -68242,7 +68312,7 @@
           "value": [
             {
               "type": 0,
-              "value": "サーバーからルートフォルダーとプロファイルを読み込めませんでした。URLとAPIキーを確認してから、「テスト」を選択してください。"
+              "value": "このサーバーからルートフォルダーとプロファイルを読み込めませんでした。URLとAPIキーを確認してから、「テスト」を選択してください。"
             }
           ]
         },
@@ -68250,7 +68320,7 @@
           "value": [
             {
               "type": 0,
-              "value": "サーバーからルートフォルダーとプロファイルを読み込めませんでした。URLを確認してから、「テスト」を選択してください。"
+              "value": "このサーバーからルートフォルダーとプロファイルを読み込めませんでした。URLを確認してから、「テスト」を選択してください。"
             }
           ]
         },
@@ -68258,7 +68328,7 @@
           "value": [
             {
               "type": 0,
-              "value": "サーバーからルートフォルダーとプロファイルを読み込めませんでした。APIキーを確認してから、「テスト」を選択してください。"
+              "value": "このサーバーからルートフォルダーとプロファイルを読み込めませんでした。APIキーを確認してから、「テスト」を選択してください。"
             }
           ]
         },
@@ -68266,7 +68336,7 @@
           "value": [
             {
               "type": 0,
-              "value": "サーバーからルートフォルダーとプロファイルを読み込めませんでした。サーバーの設定を確認してから、「テスト」を選択してください。"
+              "value": "このサーバーからルートフォルダーとプロファイルを読み込めませんでした。サーバーの設定を確認してから、「テスト」を選択してください。"
             }
           ]
         }
@@ -68388,7 +68458,7 @@
   "web.admin.settings.requests.serverEditor.typeLocked": [
     {
       "type": 0,
-      "value": "ルーティングによりリクエストがここに送信されています（"
+      "value": "ルーティングで使用中です（"
     },
     {
       "type": 1,
@@ -68396,7 +68466,7 @@
     },
     {
       "type": 0,
-      "value": "）。種類を切り替えるには、先にそちらを変更してください。"
+      "value": "）。サーバーの種類を変更する前に、それらのルートを更新してください。"
     }
   ],
   "web.admin.settings.requests.serverEditor.typePlaceholder": [
@@ -68414,7 +68484,7 @@
   "web.admin.settings.requests.serverEditor.uhdServerDescription": [
     {
       "type": 0,
-      "value": "「標準」ルーティングでは、4K版はここに送られ、それ以外はこの種類のもう一方のサーバーに送られます。"
+      "value": "このサーバーをHDではなく4K版に使用します。標準ルーティングでは、4K版が自動的にここに送信されます。"
     }
   ],
   "web.admin.settings.requests.serverEditor.url": [
@@ -68474,7 +68544,7 @@
   "web.admin.settings.requests.servers.noPlugin": [
     {
       "type": 0,
-      "value": "リクエストは、プラグインを通じてSonarr、Radarr、またはその他のリクエストサーバーに送信されます。先に"
+      "value": "Sonarr、Radarr、またはその他のリクエストサーバーを接続するには、先に"
     },
     {
       "type": 8,
@@ -68488,7 +68558,7 @@
     },
     {
       "type": 0,
-      "value": "からインストールしてください。"
+      "value": "でプラグインをインストールしてください。"
     }
   ],
   "web.admin.settings.requests.servers.routeUsage": [
@@ -68662,13 +68732,13 @@
     },
     {
       "type": 0,
-      "value": "」がそのほとんどを先に処理します。"
+      "value": "」がそのほとんどに先に一致します。"
     }
   ],
   "web.admin.settings.requests.warnings.animeSeriesType": [
     {
       "type": 0,
-      "value": "Sonarrはこれらを標準のシリーズとして追加します。"
+      "value": "Sonarrのシリーズの種類が「アニメ」に設定されていないため、アニメのエピソード番号付けが正しく機能しない可能性があります。"
     }
   ],
   "web.admin.settings.requests.warnings.fixAnimeSeriesType": [
@@ -68692,13 +68762,13 @@
   "web.admin.settings.requests.warnings.forceDual": [
     {
       "type": 0,
-      "value": "「すべてのタイトルの4K版もリクエストする」がオンですが、「その他すべて」は4K版を送信しません。どのルールでも4Kサーバーに送られないタイトルはHDのみになります。"
+      "value": "「すべてのタイトルで4K版もリクエスト」がオンですが、「その他すべて」に4Kサーバーがありません。どのルールでも4KサーバーにルーティングされないタイトルはHDのみになります。"
     }
   ],
   "web.admin.settings.requests.warnings.neverUsed": [
     {
       "type": 0,
-      "value": "使用されません：このルールの対象となるリクエストはすべて、上の「"
+      "value": "使用されません：上の「"
     },
     {
       "type": 1,
@@ -68706,13 +68776,13 @@
     },
     {
       "type": 0,
-      "value": "」が先に処理します。"
+      "value": "」がすでにこれらのリクエストすべてに一致します。"
     }
   ],
   "web.admin.settings.requests.warnings.serverMissing": [
     {
       "type": 0,
-      "value": "送信先のサーバーの1つが存在しなくなりました。"
+      "value": "このルートで使用されているサーバーはもう存在しません。"
     }
   ],
   "web.admin.settings.requests.warnings.serverNeedsSetup": [
@@ -68722,7 +68792,7 @@
     },
     {
       "type": 0,
-      "value": "の設定が必要です。"
+      "value": "がリクエストを受信できるようにするには、設定が必要です。"
     }
   ],
   "web.admin.settings.requests.warnings.serverOffFallback": [
@@ -68732,7 +68802,7 @@
     },
     {
       "type": 0,
-      "value": "はオフになっています。オンに戻すまで、そこに送られたリクエストは処理されません。"
+      "value": "は無効になっています。再び有効にするまで、ここにルーティングされたリクエストは送信されません。"
     }
   ],
   "web.admin.settings.requests.warnings.serverOffRule": [
@@ -68742,7 +68812,7 @@
     },
     {
       "type": 0,
-      "value": "はオフになっています。オンに戻すまで、このルールでそこに送られたリクエストは処理されません。"
+      "value": "は無効になっています。再び有効にするまで、このルールに一致するリクエストは送信されません。"
     }
   ],
   "web.admin.settings.requests.warnings.serverWrongKind": [
@@ -68800,7 +68870,7 @@
   "web.admin.settings.search.ai.description": [
     {
       "type": 0,
-      "value": "AIプロバイダー、各AIジョブが使用するモデル、それらを利用する機能。"
+      "value": "AIプロバイダー、モデルの割り当て、それらを使用する機能。"
     }
   ],
   "web.admin.settings.search.ai.label": [
@@ -69064,7 +69134,7 @@
   "web.admin.settings.search.autoscan.description": [
     {
       "type": 0,
-      "value": "Autoscanがポーリング対象のソースを確認する頻度と、ソースの接続先サーバー。"
+      "value": "Autoscanソースのデフォルトのポーリング間隔と保存済みの接続。"
     }
   ],
   "web.admin.settings.search.autoscan.label": [
@@ -69202,7 +69272,7 @@
   "web.admin.settings.search.credentialStatusError": [
     {
       "type": 0,
-      "value": "保護された認証情報の状態を読み込めませんでした。検索エンジンとMeilisearchの接続を編集するには、このページを再読み込みしてください。"
+      "value": "保存済みのMeilisearchの認証情報や環境変数で管理されている設定を確認できませんでした。検索エンジンとMeilisearchの接続を編集するには、このページを再読み込みしてください。"
     }
   ],
   "web.admin.settings.search.degradedFallback": [
@@ -69328,7 +69398,7 @@
   "web.admin.settings.search.email.description": [
     {
       "type": 0,
-      "value": "Siloが招待、パスワードのリセット、通知のメールを送信するメールサーバー。"
+      "value": "招待、パスワードのリセット、通知用の送信メールサーバー。"
     }
   ],
   "web.admin.settings.search.email.label": [
@@ -69406,7 +69476,7 @@
   "web.admin.settings.search.general.description": [
     {
       "type": 0,
-      "value": "サーバーの名前と公開アドレス、前段のプロキシ、Redis。"
+      "value": "サーバー名、ネットワークアドレス、リバースプロキシ、データベース、Redis。"
     }
   ],
   "web.admin.settings.search.general.label": [
@@ -69508,13 +69578,13 @@
   "web.admin.settings.search.group": [
     {
       "type": 0,
-      "value": "検索"
+      "value": "カタログ検索"
     }
   ],
   "web.admin.settings.search.library.description": [
     {
       "type": 0,
-      "value": "タイトルに表示するバージョン、スキャン、年齢制限、評価、字幕の同期。"
+      "value": "タイトルのバージョン、フォールバック言語、スキャン、年齢制限、評価、字幕の同期。"
     }
   ],
   "web.admin.settings.search.library.label": [
@@ -69688,7 +69758,7 @@
   "web.admin.settings.search.meili.apiKey.hint": [
     {
       "type": 0,
-      "value": "マスターキー、またはインデックスの読み書きができるキーを入力してください。"
+      "value": "マスターキー、またはインデックスの読み書き権限があるキー（任意）。"
     }
   ],
   "web.admin.settings.search.meili.apiKey.label": [
@@ -69706,7 +69776,7 @@
   "web.admin.settings.search.meili.batch.label": [
     {
       "type": 0,
-      "value": "1バッチでインデックスに送信する項目数"
+      "value": "1バッチあたりにインデックス化する項目数"
     }
   ],
   "web.admin.settings.search.meili.index.description": [
@@ -69742,19 +69812,19 @@
   "web.admin.settings.search.meili.ratio.description": [
     {
       "type": 0,
-      "value": "0は単語で、1は意味で順位付けします。"
+      "value": "0〜1の値です。0は単語のみで、1は意味のみで順位付けします。"
     }
   ],
   "web.admin.settings.search.meili.ratio.label": [
     {
       "type": 0,
-      "value": "意味に基づく結果の割合"
+      "value": "意味に基づく順位付けの重み"
     }
   ],
   "web.admin.settings.search.meili.semantic.description": [
     {
       "type": 0,
-      "value": "説明の意味が似ている項目にも一致します。"
+      "value": "単語が完全に一致しなくても、説明が似ている項目を見つけます。「おすすめ」でエンベディングモデルを設定する必要があります。"
     }
   ],
   "web.admin.settings.search.meili.semantic.enablingWarning": [
@@ -69790,7 +69860,7 @@
   "web.admin.settings.search.networkAccess.description": [
     {
       "type": 0,
-      "value": "ポート転送なしでこのサーバーに接続できる、Tailscaleなどのオーバーレイネットワークのプロバイダー。"
+      "value": "ポート転送なしで、このサーバーをTailscaleなどのオーバーレイネットワークに接続します。"
     }
   ],
   "web.admin.settings.search.networkAccess.label": [
@@ -69802,7 +69872,7 @@
   "web.admin.settings.search.notifications.description": [
     {
       "type": 0,
-      "value": "配信チャンネルとサーバーチャンネル。"
+      "value": "プッシュ通知、メール、Discord、Webhook、サーバー全体のお知らせ。"
     }
   ],
   "web.admin.settings.search.notifications.label": [
@@ -70228,7 +70298,7 @@
   "web.admin.settings.search.providers.description": [
     {
       "type": 0,
-      "value": "Simklなどの視聴サービスプラグイン、字幕プロバイダーのアカウント、MDBListリストのキー、スキップマーカーのプロバイダー。"
+      "value": "Simklなどの視聴プロバイダー、MDBListコレクションのインポート、字幕アカウント、スキップマーカープロバイダー。"
     }
   ],
   "web.admin.settings.search.providers.label": [
@@ -70362,7 +70432,7 @@
   "web.admin.settings.search.requests.description": [
     {
       "type": 0,
-      "value": "リクエストの上限と承認、SonarrとRadarrのサーバー、リクエストの送信先。"
+      "value": "承認、リクエストの上限、SonarrとRadarrのサーバー、リクエストのルーティング。"
     }
   ],
   "web.admin.settings.search.requests.label": [
@@ -70482,7 +70552,7 @@
   "web.admin.settings.search.search.description": [
     {
       "type": 0,
-      "value": "検索エンジン：内蔵のPostgres、または入力ミスに強いMeilisearch。"
+      "value": "内蔵のPostgres検索、または入力ミスに強く意味ベースの検索ができるMeilisearch（任意）。"
     }
   ],
   "web.admin.settings.search.search.label": [
@@ -70566,7 +70636,7 @@
   "web.admin.settings.search.security.description": [
     {
       "type": 0,
-      "value": "Siloが接続できるローカルサーバーと、リクエストのレート制限。"
+      "value": "ローカルメディアサーバーへのアクセスとリクエストのレート制限。"
     }
   ],
   "web.admin.settings.search.security.label": [
@@ -70794,7 +70864,7 @@
   "web.admin.settings.search.status.answering": [
     {
       "type": 0,
-      "value": "検索に応答中"
+      "value": "使用中の検索エンジン"
     }
   ],
   "web.admin.settings.search.status.automaticMaintenance": [
@@ -70806,7 +70876,7 @@
   "web.admin.settings.search.status.compressedVectors": [
     {
       "type": 0,
-      "value": "圧縮ベクトル"
+      "value": "圧縮エンベディング"
     }
   ],
   "web.admin.settings.search.status.configured": [
@@ -70836,13 +70906,13 @@
   "web.admin.settings.search.status.documents": [
     {
       "type": 0,
-      "value": "ドキュメント数"
+      "value": "インデックス済みの項目"
     }
   ],
   "web.admin.settings.search.status.droppedEvents": [
     {
       "type": 0,
-      "value": "破棄されたイベント"
+      "value": "失敗した更新"
     }
   ],
   "web.admin.settings.search.status.embeddingModel": [
@@ -70866,7 +70936,7 @@
   "web.admin.settings.search.status.health": [
     {
       "type": 0,
-      "value": "ヘルス"
+      "value": "Meilisearchの状態"
     }
   ],
   "web.admin.settings.search.status.healthy": [
@@ -70884,13 +70954,13 @@
   "web.admin.settings.search.status.itemsWithVectors": [
     {
       "type": 0,
-      "value": "ベクトルのある項目"
+      "value": "エンベディングのある項目"
     }
   ],
   "web.admin.settings.search.status.lastFallback": [
     {
       "type": 0,
-      "value": "最終フォールバック"
+      "value": "Postgresへの最終フォールバック"
     }
   ],
   "web.admin.settings.search.status.lastSync": [
@@ -70954,7 +71024,7 @@
   "web.admin.settings.search.status.pendingEvents": [
     {
       "type": 0,
-      "value": "保留中のイベント"
+      "value": "保留中の更新"
     }
   ],
   "web.admin.settings.search.status.postgresFullText": [
@@ -71008,7 +71078,7 @@
   "web.admin.settings.search.status.semanticRatio": [
     {
       "type": 0,
-      "value": "意味ベースの結果の割合"
+      "value": "意味ベースのランキングの重み"
     }
   ],
   "web.admin.settings.search.status.semanticReadiness": [
@@ -71106,7 +71176,7 @@
   "web.admin.settings.search.status.vectorCoverage": [
     {
       "type": 0,
-      "value": "ベクトルのカバー率"
+      "value": "エンベディングのカバー率"
     }
   ],
   "web.admin.settings.search.storage.description": [
@@ -71256,19 +71326,19 @@
   "web.admin.settings.security.backend.description": [
     {
       "type": 0,
-      "value": "Redisを使うと、再起動後にサーバー間でカウンターを共有します。"
+      "value": "複数のサーバー間でレート制限のカウンターを共有するにはRedisを使用します。変更は再起動後に適用されます。"
     }
   ],
   "web.admin.settings.security.backend.descriptionNoRedis": [
     {
       "type": 0,
-      "value": "Redisを使うと、再起動後にサーバー間でカウンターを共有します。先に「一般」ページでRedisを設定してください。"
+      "value": "複数のサーバー間でレート制限のカウンターを共有するには、一般設定でRedisを設定してください。変更は再起動後に適用されます。"
     }
   ],
   "web.admin.settings.security.backend.drift": [
     {
       "type": 0,
-      "value": "実行中のリミッターは、保存済みの"
+      "value": "レート制限は、保存されているカウンターの保存先（"
     },
     {
       "type": 5,
@@ -71294,7 +71364,7 @@
     },
     {
       "type": 0,
-      "value": "バックエンドではなく、"
+      "value": "）ではなく、"
     },
     {
       "type": 5,
@@ -71320,7 +71390,7 @@
     },
     {
       "type": 0,
-      "value": "のカウンターを使用しています。再起動しても解決しない場合は、保存済みのバックエンドに到達できるか確認してください。"
+      "value": "のカウンターを使用しています。再起動しても解決しない場合は、保存されているカウンターの保存先に到達できるか確認してください。"
     }
   ],
   "web.admin.settings.security.backend.label": [
@@ -71410,7 +71480,7 @@
   "web.admin.settings.security.global.description": [
     {
       "type": 0,
-      "value": "レート制限の対象となるすべてのルートを合わせた上限です。"
+      "value": "レート制限の対象となるすべてのエンドポイントを合わせた上限です。"
     }
   ],
   "web.admin.settings.security.global.label": [
@@ -71434,7 +71504,7 @@
   "web.admin.settings.security.localNetwork.description": [
     {
       "type": 0,
-      "value": "192.168.x.xやlocalhostなどのローカルネットワークアドレスにあるPlex、Emby、Jellyfinのサーバーから、すべてのアカウントが履歴をインポートしたり同期したりできるようにします。管理者は常に可能です。"
+      "value": "すべてのアカウントがローカルのPlex、Emby、またはJellyfinサーバー（192.168.x.xやlocalhostなど）から視聴履歴をインポートし、同期できるようにします。管理者は常にアクセスできます。"
     }
   ],
   "web.admin.settings.security.localNetwork.group": [
@@ -71446,25 +71516,25 @@
   "web.admin.settings.security.localNetwork.label": [
     {
       "type": 0,
-      "value": "すべてのアカウントにローカルサーバーを許可"
+      "value": "すべてのアカウントにローカルメディアサーバーを許可"
     }
   ],
   "web.admin.settings.security.localNetwork.warning": [
     {
       "type": 0,
-      "value": "サインインできるユーザーは誰でも、このサーバーからローカルネットワーク上のデバイスにリクエストを送信させることができます。このサーバーのすべてのアカウントを信頼できる場合にのみオンにしてください。"
+      "value": "サインイン済みのアカウントはすべて、このサーバーからローカルネットワーク上のデバイスに接続させることができます。すべてのアカウントを信頼できる場合にのみ有効にしてください。"
     }
   ],
   "web.admin.settings.security.perAddress.description": [
     {
       "type": 0,
-      "value": "IPごとに上限があります。サインイン済みのリクエストは、さらにその4倍のアカウント単位の上限を、プロフィール、セッション、デバイス、APIキーの間で共有します。"
+      "value": "各IPアドレスに適用されます。サインイン済みのアカウントには、プロフィール、セッション、デバイス、APIキーの間で共有される上限（4倍）も適用されます。"
     }
   ],
   "web.admin.settings.security.perAddress.label": [
     {
       "type": 0,
-      "value": "アドレスとアカウントごと"
+      "value": "IPアドレスとアカウントごと"
     }
   ],
   "web.admin.settings.security.quotaMode.enforce": [
@@ -71524,7 +71594,7 @@
   "web.admin.settings.security.rateLimit.notRunning": [
     {
       "type": 0,
-      "value": "有効ですが、このプロセスで実行中のリミッターがありません。起動に失敗した可能性があります。サーバーのログを確認してください。"
+      "value": "レート制限は有効ですが、このサーバーでは実行されていません。起動に失敗した可能性があります。サーバーのログを確認してください。"
     }
   ],
   "web.admin.settings.security.session.heading": [
@@ -71536,7 +71606,7 @@
   "web.admin.settings.security.session.quotaDescription": [
     {
       "type": 0,
-      "value": "各サインインセッションには1時間かけて補充されるリクエストの枠が割り当てられ、上記の制限内に収まったまま一日中リクエストを続けるクライアントを止めます。再生、ダウンロード、管理者、APIキーは対象外です。「記録のみ」は枠を使い切ったセッションを記録し、「適用」は枠が補充されるまでそのセッションを拒否します。ダッシュボードの「API利用の多いクライアント」カードで、リクエストの多いセッションを確認できます。"
+      "value": "サインインセッションごとの継続的なAPIリクエストに上限を設けます（再生、ダウンロード、管理者、APIキーは対象外です）。「記録のみ」は上限に達したセッションを記録し、「適用」は枠が補充されるまでリクエストをブロックします。上位のセッションはダッシュボードの「API利用の多いクライアント」カードで確認できます。"
     }
   ],
   "web.admin.settings.security.session.quotaLabel": [
@@ -71548,7 +71618,7 @@
   "web.admin.settings.security.session.sizeDescription": [
     {
       "type": 0,
-      "value": "1時間あたりに補充されるリクエスト数と、満杯時に保持できる数です。満杯の枠は1週間以内に補充される必要があります。"
+      "value": "1時間あたりの補充数と最大バーストサイズです。バーストは1時間あたりのリクエスト数の1週間分を超えることはできません。"
     }
   ],
   "web.admin.settings.security.session.sizeLabel": [
@@ -71640,7 +71710,7 @@
   "web.admin.settings.signIn.network.autoProvisionDescription": [
     {
       "type": 0,
-      "value": "オフ："
+      "value": "オフの場合、すでに"
     },
     {
       "type": 1,
@@ -71648,7 +71718,7 @@
     },
     {
       "type": 0,
-      "value": "に接続済みのアカウントのみサインインできます。"
+      "value": "に接続されているアカウントのみサインインできます。"
     }
   ],
   "web.admin.settings.signIn.network.autoProvisionLabel": [
@@ -71694,7 +71764,7 @@
   "web.admin.settings.signIn.network.description": [
     {
       "type": 0,
-      "value": "ネットワーク経由でこのサーバーに到達できるデバイスの利用者は、パスワードなしでデバイスの所有者としてサインインします。上のプロバイダーと同時にオンにできます。"
+      "value": "ネットワークプロバイダー経由でこのサーバーにアクセスする人は、パスワードなしでデバイスの所有者としてサインインします。上のシングルサインオンプロバイダーと併用できます。"
     }
   ],
   "web.admin.settings.signIn.network.enableDescription": [
@@ -71704,7 +71774,7 @@
     },
     {
       "type": 0,
-      "value": "経由でこのサーバーに到達できるデバイスの利用者に「…として続行」ボタンを表示します。"
+      "value": "経由で接続している人に「…として続行」ボタンを表示します。"
     }
   ],
   "web.admin.settings.signIn.network.enableLabel": [
@@ -71726,21 +71796,7 @@
   "web.admin.settings.signIn.network.howRoles": [
     {
       "type": 0,
-      "value": "ロールはtailnetポリシーのグラントで決まります。"
-    },
-    {
-      "type": 8,
-      "value": "code",
-      "children": [
-        {
-          "type": 1,
-          "value": "admin_role"
-        }
-      ]
-    },
-    {
-      "type": 0,
-      "value": "を含む"
+      "value": "tailnetポリシーの"
     },
     {
       "type": 8,
@@ -71754,7 +71810,21 @@
     },
     {
       "type": 0,
-      "value": "グラントでSiloの管理者に、"
+      "value": "グラントでロールを割り当てます。Siloの管理者は"
+    },
+    {
+      "type": 8,
+      "value": "code",
+      "children": [
+        {
+          "type": 1,
+          "value": "admin_role"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "、一般ユーザーは"
     },
     {
       "type": 8,
@@ -71768,7 +71838,7 @@
     },
     {
       "type": 0,
-      "value": "で一般ユーザーになります。tailnetポリシーを編集できる人は誰でも自分をSiloの管理者にできます。グラントがない場合、ロールはそのまま維持されるため、管理者グラントを外しても降格されません。代わりに"
+      "value": "です。ポリシーを編集できる人は誰でも自分をSiloの管理者にできます。グラントを外してもロールは変更されません。管理者を降格するには"
     },
     {
       "type": 8,
@@ -71782,13 +71852,13 @@
     },
     {
       "type": 0,
-      "value": "をグラントしてください。ポリシーの変更は、次回のサインインまたはアクセスの再確認時に適用されます。メインのサインインプロバイダーでもサインインするアカウントは、そのプロバイダーのロールを使用します。"
+      "value": "をグラントしてください。変更は次回のサインインまたはアクセスの再確認時に適用されます。メインのサインインプロバイダーも使用しているアカウントは、そのプロバイダーのロールを引き継ぎます。"
     }
   ],
   "web.admin.settings.signIn.network.howSharedTv": [
     {
       "type": 0,
-      "value": "共有テレビを使う全員が、そのテレビを"
+      "value": "共有テレビでは、全員がそのテレビの"
     },
     {
       "type": 1,
@@ -71796,7 +71866,7 @@
     },
     {
       "type": 0,
-      "value": "にサインインさせた人として、その人のロールでサインインします。そのため、共有テレビには管理者グラントのない人でサインインしてください。視聴内容はプロフィールごとに分かれます。リバースプロキシなど、他の人の通信をこのサーバーに中継するデバイスにはタグを付けてください。付けないと、その背後にいる全員がデバイスの所有者としてサインインします。"
+      "value": "アカウントとロールでサインインします。管理者ではないアカウントを使用し、プロフィールで視聴者を分けてください。リバースプロキシなどの中継デバイスにはタグを付けてください。付けないと、その背後にいる全員がデバイスの所有者としてサインインします。"
     },
     {
       "type": 8,
@@ -71826,7 +71896,7 @@
     },
     {
       "type": 0,
-      "value": "経由でこのサーバーに到達できるデバイスの利用者は、サーバーを共有している人も含め誰でもサインインできます。タグ付きデバイスはサインインできません。制限するには、プラグインの「サインインできる人」を"
+      "value": "経由でこのサーバーにアクセスできる人は、サーバーを共有している人も含め誰でもサインインできます（タグ付きデバイスは不可）。アクセスを制限するには、プラグインの設定の「サインインできる人」で"
     },
     {
       "type": 8,
@@ -71840,7 +71910,7 @@
     },
     {
       "type": 0,
-      "value": "を付与された人に設定してください。"
+      "value": "を必須にしてください。"
     },
     {
       "type": 1,
@@ -71848,7 +71918,7 @@
     },
     {
       "type": 0,
-      "value": "のサインインが既存のアカウントとメールアドレスで照合されることはありません。アカウントの所有者が自分のサインイン設定から"
+      "value": "が既存のアカウントをメールアドレスで照合することはありません。既存のアカウントを持つ人は、自分のサインイン設定から"
     },
     {
       "type": 1,
@@ -71898,7 +71968,7 @@
   "web.admin.settings.signIn.page.allowPasswordDescription": [
     {
       "type": 0,
-      "value": "オフ：緊急用管理者を除き、全員がプロバイダーでサインインします。緊急用管理者が1人以上必要です。サーバーの所有者はデフォルトで緊急用管理者です。"
+      "value": "オフの場合、緊急用管理者を除き、全員がサインインプロバイダーを使用する必要があります。緊急用管理者が1人以上必要です（サーバーの所有者はデフォルトで緊急用管理者です）。"
     }
   ],
   "web.admin.settings.signIn.page.allowPasswordLabel": [
@@ -71935,10 +72005,42 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.settings.signIn.page.demoAccountDescription": [
+    {
+      "type": 0,
+      "value": "公開デモのすべての訪問者がサインインするアカウントです。デモモードがオンの間、このアカウントの名前とSiloのパスワードによるサインインの失敗は、名前ごとの上限に加算されません（この上限は、本来すべての訪問者で共有されます）。アドレスごとのリクエスト上限は変わりません。指定しない場合は空欄にします。"
+    }
+  ],
+  "web.admin.settings.signIn.page.demoAccountLabel": [
+    {
+      "type": 0,
+      "value": "デモアカウントID"
+    }
+  ],
+  "web.admin.settings.signIn.page.demoAccountNames": [
+    {
+      "type": 0,
+      "value": "アカウント「"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "」を指定しています。"
+    }
+  ],
+  "web.admin.settings.signIn.page.demoGroup": [
+    {
+      "type": 0,
+      "value": "デモモード"
+    }
+  ],
   "web.admin.settings.signIn.page.emailMatchDescription": [
     {
       "type": 0,
-      "value": "プロバイダーがメールアドレスを確認済みとしている場合、初回サインイン時に同じメールアドレスの一般Siloアカウントに接続します。管理者、所有者、緊急用のアカウントは照合されません。"
+      "value": "初回サインイン時、プロバイダーがメールアドレスを確認済みとしている場合は、同じメールアドレスの既存Siloアカウントに接続します。管理者、所有者、緊急用のアカウントは照合されません。"
     }
   ],
   "web.admin.settings.signIn.page.emailMatchLabel": [
@@ -71950,13 +72052,13 @@
   "web.admin.settings.signIn.page.emailMatchWarning": [
     {
       "type": 0,
-      "value": "プロバイダーでそのメールアドレスを管理している人がSiloアカウントを引き継ぎます。Siloはアカウントのメールアドレスを確認しないため、照合されるのはそのアドレスを最初に登録または設定したアカウントです。照合するとそのアカウントはすべての場所でサインアウトされ、APIキーが削除されます。プロバイダーがすべてのメールアドレスを確認し、利用者が自分で変更できない場合にのみオンにしてください。"
+      "value": "プロバイダー側でメールアドレスを管理できる人は誰でも、そのアドレスを最初に登録または設定したSiloアカウントを乗っ取ることができます（Siloはメールアドレスを確認しません）。照合されると、そのアカウントはすべての場所でサインアウトされ、APIキーが削除されます。プロバイダーがすべてのメールアドレスを確認し、利用者が自分で変更できない場合にのみオンにしてください。"
     }
   ],
   "web.admin.settings.signIn.page.externalUnavailable": [
     {
       "type": 0,
-      "value": "このサーバーでは外部サインインを利用できないため、Siloのパスワードでのみサインインできます。"
+      "value": "このサーバーでは外部サインインを利用できません。Siloのパスワードでのみサインインできます。"
     }
   ],
   "web.admin.settings.signIn.page.loading": [
@@ -71966,6 +72068,10 @@
     }
   ],
   "web.admin.settings.signIn.page.lockedOutNote": [
+    {
+      "type": 0,
+      "value": "緊急用管理者は"
+    },
     {
       "type": 8,
       "value": "code",
@@ -71978,7 +72084,7 @@
     },
     {
       "type": 0,
-      "value": "では緊急用管理者向けにパスワードフォームが表示されます。サーバーで"
+      "value": "からパスワードでサインインできます。サーバーからパスワードでのサインインを再びオンにするには、"
     },
     {
       "type": 8,
@@ -71992,7 +72098,7 @@
     },
     {
       "type": 0,
-      "value": "を実行すると、パスワードでのサインインが再びオンになります。"
+      "value": "を実行してください。"
     }
   ],
   "web.admin.settings.signIn.page.lockedOutTitle": [
@@ -72010,13 +72116,13 @@
   "web.admin.settings.signIn.page.noBreakGlassError": [
     {
       "type": 0,
-      "value": "緊急用アカウントの管理者がいないため、パスワードでのサインインはまだオフにできません。プロバイダーが停止してもサインインできるよう、先にユーザーページで管理者を開き、「緊急用アカウント」をオンにしてください。"
+      "value": "パスワードでのサインインはまだオフにできません。プロバイダーが停止しても管理者がサインインできるよう、先にユーザーページで1人以上の管理者の「緊急用アカウント」をオンにしてください。"
     }
   ],
   "web.admin.settings.signIn.page.noBreakGlassStatus": [
     {
       "type": 0,
-      "value": "緊急用管理者がまだいません。管理者の"
+      "value": "緊急用管理者がまだいません。"
     },
     {
       "type": 8,
@@ -72030,13 +72136,27 @@
     },
     {
       "type": 0,
-      "value": "で「緊急用アカウント」をオンにしてください。"
+      "value": "で管理者の「緊急用アカウント」をオンにしてください。"
     }
   ],
   "web.admin.settings.signIn.page.noProviderError": [
     {
       "type": 0,
       "value": "先にサインインプロバイダーをオンにしてください。パスワードでのサインインがオフでプロバイダーもオフの場合、緊急用管理者しかサインインできません。"
+    }
+  ],
+  "web.admin.settings.signIn.page.noPublicUrlError": [
+    {
+      "type": 0,
+      "value": "先にサーバーのパブリックURLを設定してください。URLがないと"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "ではサインインできないため、パスワードによるサインインがオフの場合、サインインできるのは緊急用の管理者だけになります。"
     }
   ],
   "web.admin.settings.signIn.page.passwordMinLengthDescription": [
@@ -72072,7 +72192,7 @@
   "web.admin.settings.signIn.page.passwordResetDescription": [
     {
       "type": 0,
-      "value": "サインインページに「パスワードをお忘れですか？」を追加し、メールでリセットリンクを受け取れるようにします。メールと公開URLが必要です。"
+      "value": "サインインページに「パスワードをお忘れですか？」を追加し、リセットリンクを自分宛てにメール送信できるようにします。メール配信と公開URLが必要です。"
     }
   ],
   "web.admin.settings.signIn.page.passwordResetLabel": [
@@ -72120,13 +72240,220 @@
   "web.admin.settings.signIn.page.userApiKeysDescription": [
     {
       "type": 0,
-      "value": "どのアカウントも、設定 → APIキーで自分のプロフィール用のキーを作成できます。これらのキーでは視聴履歴、リスト、リクエストの読み取りと変更ができますが、メディアの再生やダウンロードはできません。オフにすると新しいキーは作成できなくなりますが、既存のキーは無効化されるまで引き続き使用できます。"
+      "value": "アカウントは設定 → APIキーで自分のプロフィール用のキーを作成し、視聴履歴、リスト、リクエストを表示・編集できます（再生やダウンロードはできません）。オフにすると新しいキーは作成できなくなりますが、既存のキーは無効化されるまで使用できます。"
     }
   ],
   "web.admin.settings.signIn.page.userApiKeysLabel": [
     {
       "type": 0,
       "value": "ユーザーにAPIキーの作成を許可"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.confirm": [
+    {
+      "type": 0,
+      "value": "パスワードによるサインインをオフにする"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.description": [
+    {
+      "type": 0,
+      "value": "パスワードでサインインできるのは緊急用の管理者だけになります。それ以外のユーザーは"
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "でサインインします。"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkAutoCreate": [
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "は初回サインイン時にアカウントを作成します。リンクする前にこれらのユーザーが"
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "でサインインすると、別の新しいアカウントが作成されます。"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkExplain": [
+    {
+      "type": 0,
+      "value": "ユーザーで各アカウントのページを開き、それぞれを"
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "アカウントにリンクしてください。"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "件のアカウントは、管理者がリンクするまでサインインできません"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loadFailed": [
+    {
+      "type": 0,
+      "value": "影響を受けるアカウントを確認できませんでした。このままオフにすることもできます。"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loading": [
+    {
+      "type": 0,
+      "value": "パスワードでサインインしているユーザーを確認中"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchExplain": [
+    {
+      "type": 0,
+      "value": "サインイン時に"
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "がこれらのメールアドレスのいずれかを確認すると、Siloはそのユーザーを本人のアカウントに接続します。"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "件のアカウントはメールアドレスで接続されます"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.more": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "さらに"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "件を表示"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.moreFailed": [
+    {
+      "type": 0,
+      "value": "アカウントをさらに読み込めませんでした。もう一度お試しください。"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.nobodyAffected": [
+    {
+      "type": 0,
+      "value": "この変更後も、すべてのアカウントがサインインできます。"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.administrator": [
+    {
+      "type": 0,
+      "value": "管理者"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.emailMatchOff": [
+    {
+      "type": 0,
+      "value": "メールアドレスの照合がオフ"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.noEmail": [
+    {
+      "type": 0,
+      "value": "メールアドレスなし"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.sessions": [
+    {
+      "type": 0,
+      "value": "この操作では誰もサインアウトされません。すでにサインインしているユーザーはサインインしたままで、APIキーも引き続き使用でき、新しいデバイスの承認もできます。ユーザーをサインアウトさせるには、"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "ユーザー"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "でそのユーザーのページを開き、セッションを終了してください。"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.title": [
+    {
+      "type": 0,
+      "value": "パスワードによるサインインをオフにしますか？"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.usersLink": [
+    {
+      "type": 0,
+      "value": "ユーザーですべてのアカウントを表示"
     }
   ],
   "web.admin.settings.signIn.provider.accounts.title": [
@@ -72150,7 +72477,7 @@
   "web.admin.settings.signIn.provider.autoProvision.description": [
     {
       "type": 0,
-      "value": "プロバイダーが許可した人には、初回サインイン時にSiloアカウントが作成されます。オフ：Siloアカウントが接続済みの人のみサインインできます。"
+      "value": "プロバイダー経由で初めてサインインするときに、Siloアカウントを自動的に作成します。オフの場合、すでに接続されているSiloアカウントのみサインインできます。"
     }
   ],
   "web.admin.settings.signIn.provider.autoProvision.label": [
@@ -72169,6 +72496,28 @@
       "value": "を変更できませんでした。"
     }
   ],
+  "web.admin.settings.signIn.provider.binding.turnOffBlocked": [
+    {
+      "type": 0,
+      "value": "パスワードによるサインインがオフのため、緊急用の管理者以外は全員"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "でサインインします。先にパスワードによるサインインをオンに戻してから、"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "をオフにしてください。"
+    }
+  ],
   "web.admin.settings.signIn.provider.binding.turnOffConfirm": [
     {
       "type": 0,
@@ -72182,7 +72531,7 @@
     },
     {
       "type": 0,
-      "value": "でサインインする人は、再びオンになるまでサインインできません。Siloアカウントと"
+      "value": "を使用している人は、再びオンにするまでサインインできなくなります。Siloアカウントと"
     },
     {
       "type": 1,
@@ -72190,7 +72539,7 @@
     },
     {
       "type": 0,
-      "value": "への接続は維持されます。"
+      "value": "の接続はそのまま維持されます。"
     }
   ],
   "web.admin.settings.signIn.provider.binding.turnOffDescriptionBreakGlass": [
@@ -72204,7 +72553,7 @@
     },
     {
       "type": 0,
-      "value": "が再びオンになるまで緊急用管理者しかサインインできません。Siloアカウントと"
+      "value": "が再びオンになるまで緊急用管理者のみサインインできます。Siloアカウントと"
     },
     {
       "type": 1,
@@ -72212,7 +72561,7 @@
     },
     {
       "type": 0,
-      "value": "への接続は維持されます。"
+      "value": "の接続はそのまま維持されます。"
     }
   ],
   "web.admin.settings.signIn.provider.binding.turnOffTitle": [
@@ -72232,7 +72581,7 @@
     },
     {
       "type": 0,
-      "value": "をオフにしました。現在はSiloのパスワードでのみサインインできます。"
+      "value": "はオフになりました。Siloのパスワードでのみサインインできます。"
     }
   ],
   "web.admin.settings.signIn.provider.binding.turnedOffBreakGlass": [
@@ -72258,7 +72607,7 @@
   "web.admin.settings.signIn.provider.blocked.otherActive": [
     {
       "type": 0,
-      "value": "現在のサインインプロバイダーは"
+      "value": "現在"
     },
     {
       "type": 1,
@@ -72266,7 +72615,7 @@
     },
     {
       "type": 0,
-      "value": "です。サーバーで同時に使用できるのは1つのため、"
+      "value": "が有効です。同時にオンにできるプロバイダーは1つだけです。代わりに"
     },
     {
       "type": 1,
@@ -72274,7 +72623,7 @@
     },
     {
       "type": 0,
-      "value": "を使うには"
+      "value": "を使用するには、"
     },
     {
       "type": 1,
@@ -72326,13 +72675,13 @@
   "web.admin.settings.signIn.provider.copy.failed": [
     {
       "type": 0,
-      "value": "コピーできませんでした。アドレスを選択して手動でコピーしてください。"
+      "value": "コピーできませんでした。URIを選択して手動でコピーしてください。"
     }
   ],
   "web.admin.settings.signIn.provider.header.oauthShown": [
     {
       "type": 0,
-      "value": "ログインページに「"
+      "value": "サインインページに「"
     },
     {
       "type": 1,
@@ -72352,7 +72701,7 @@
   "web.admin.settings.signIn.provider.header.shownAs": [
     {
       "type": 0,
-      "value": "ログインページに「"
+      "value": "サインインページに「"
     },
     {
       "type": 1,
@@ -72378,7 +72727,7 @@
   "web.admin.settings.signIn.provider.loginName.description": [
     {
       "type": 0,
-      "value": "ログインページと、サインイン方法を選ぶアプリの画面に表示されます。"
+      "value": "サインインページや、アプリでサインイン方法を選ぶ画面に表示されます。"
     }
   ],
   "web.admin.settings.signIn.provider.loginName.directoryName": [
@@ -72390,7 +72739,7 @@
   "web.admin.settings.signIn.provider.loginName.oauthDescription": [
     {
       "type": 0,
-      "value": "ログインページとアプリに「…でサインイン」として表示されます。"
+      "value": "サインインページとアプリに「…でサインイン」として表示されます。"
     }
   ],
   "web.admin.settings.signIn.provider.loginName.preview": [
@@ -72412,7 +72761,7 @@
   "web.admin.settings.signIn.provider.loginName.previewSr": [
     {
       "type": 0,
-      "value": "ログインボタンの表示："
+      "value": "サインインボタンの表示："
     },
     {
       "type": 1,
@@ -72432,7 +72781,7 @@
   "web.admin.settings.signIn.provider.loginName.title": [
     {
       "type": 0,
-      "value": "ログインボタン"
+      "value": "サインイン表示名"
     }
   ],
   "web.admin.settings.signIn.provider.missing.disabled": [
@@ -72510,13 +72859,13 @@
   "web.admin.settings.signIn.provider.register.postLogoutUriDescription": [
     {
       "type": 0,
-      "value": "プロバイダーでのサインアウトをオンにする場合（詳細設定）にのみ必要です。"
+      "value": "詳細設定でプロバイダーのサインアウトをオンにする場合にのみ必要です。"
     }
   ],
   "web.admin.settings.signIn.provider.register.publicUrlMissing": [
     {
       "type": 0,
-      "value": "リダイレクトURIにはサーバーの公開URLが必要です。"
+      "value": "リダイレクトURIを生成するには、"
     },
     {
       "type": 8,
@@ -72530,7 +72879,7 @@
     },
     {
       "type": 0,
-      "value": "で設定してください。"
+      "value": "でサーバーの公開URLを設定してください。"
     }
   ],
   "web.admin.settings.signIn.provider.register.redirectUri": [
@@ -72626,7 +72975,7 @@
   "web.admin.settings.signIn.provider.slot.oneAtATime": [
     {
       "type": 0,
-      "value": "サーバーで同時に使用できるプロバイダーは1つです。切り替えるには、先に"
+      "value": "プロバイダーを切り替えるには、先に"
     },
     {
       "type": 1,
@@ -72706,19 +73055,19 @@
   "web.admin.settings.signIn.provider.test.descriptionSaved": [
     {
       "type": 0,
-      "value": "保存済みの構成をテストします。何も保存されません。"
+      "value": "設定を変更せずに、保存済みの構成をテストします。"
     }
   ],
   "web.admin.settings.signIn.provider.test.descriptionUnsaved": [
     {
       "type": 0,
-      "value": "保存済みの構成に未保存の変更を適用してテストします。何も保存されません。"
+      "value": "未保存の変更を含む現在の設定を、保存せずにテストします。"
     }
   ],
   "web.admin.settings.signIn.provider.test.didNotPass": [
     {
       "type": 0,
-      "value": "テストに合格しませんでした。"
+      "value": "接続テストに失敗しました。"
     }
   ],
   "web.admin.settings.signIn.provider.test.errorFallback": [
@@ -72736,7 +73085,7 @@
   "web.admin.settings.signIn.provider.test.lookUpNote": [
     {
       "type": 0,
-      "value": "ユーザー名を入力すると、テストでそのユーザーも検索し、所属グループと付与されるロールを表示します。パスワードは使用しません。"
+      "value": "ユーザー名を入力すると、その人のグループとSiloでのロールをプレビューできます。パスワードは不要です。"
     }
   ],
   "web.admin.settings.signIn.provider.test.run": [
@@ -72895,13 +73244,13 @@
   "web.admin.settings.storage.active.verifiedLabel": [
     {
       "type": 0,
-      "value": "検証済みのストレージオブジェクト"
+      "value": "検証済みのファイル"
     }
   ],
   "web.admin.settings.storage.backend": [
     {
       "type": 0,
-      "value": "バックエンド"
+      "value": "ストレージバックエンド"
     }
   ],
   "web.admin.settings.storage.backendAuto": [
@@ -72913,7 +73262,7 @@
   "web.admin.settings.storage.backendDescription": [
     {
       "type": 0,
-      "value": "Siloがアートワーク、字幕、その他のライブラリのアセットを保存する場所です。"
+      "value": "Siloがアートワーク、字幕、その他のライブラリファイルを保存する場所です。"
     }
   ],
   "web.admin.settings.storage.backendLocal": [
@@ -72925,13 +73274,13 @@
   "web.admin.settings.storage.backendLockedLocal": [
     {
       "type": 0,
-      "value": "ローカルパスを編集するか、S3を選択して「公開ストレージ」を入力してください。保存すると、管理された移行の確認画面が開きます。"
+      "value": "ローカルパスを編集するか、S3を選択して「公開ストレージ」を設定してください。保存すると、移行の確認画面が開きます。"
     }
   ],
   "web.admin.settings.storage.backendLockedS3": [
     {
       "type": 0,
-      "value": "S3からの管理された移行を確認するには、「自動」または「ローカルディスク」を選択してください。"
+      "value": "S3からのストレージ移行を確認するには、「自動」または「ローカルディスク」を選択してください。"
     }
   ],
   "web.admin.settings.storage.cacheImages": [
@@ -72943,13 +73292,13 @@
   "web.admin.settings.storage.cacheImagesDescription": [
     {
       "type": 0,
-      "value": "オフの場合、クライアントはプロバイダーから直接アートワークを読み込み、メディアと同じ場所に保存されたアートワークは使用されません。以前に保存したアートワークはプロバイダーの画像に戻ります。ただし、「メタデータを編集」でアートワークを選択したタイトルは除きます。"
+      "value": "オフの場合、アプリはプロバイダーからアートワークを読み込み、メディアのそばにあるアートワークは無視します。キャッシュされたアートワークはプロバイダーの画像に戻ります。ただし、「メタデータを編集」で設定したカスタムアートワークは除きます。"
     }
   ],
   "web.admin.settings.storage.credentialStatusUnavailable": [
     {
       "type": 0,
-      "value": "保護された認証情報の状態を取得できません"
+      "value": "保存済みの認証情報を確認できませんでした"
     }
   ],
   "web.admin.settings.storage.dialog.checking": [
@@ -72967,19 +73316,19 @@
   "web.admin.settings.storage.dialog.copyOptionsAvailable": [
     {
       "type": 0,
-      "value": "コピーによる移行オプションを利用できます。"
+      "value": "既存のファイルを新しい保存場所にコピーできます。"
     }
   ],
   "web.admin.settings.storage.dialog.description": [
     {
       "type": 0,
-      "value": "Siloは切り替える前に、選択したデータを検証してコピーします。公開場所が変わる場合、公開カタログの参照は再起動後にバックグラウンドで整合されます。古いストレージが自動的に削除されることはありません。"
+      "value": "Siloは切り替える前に、選択したファイルを検証してコピーします。公開ストレージが変更される場合、ライブラリのアートワークリンクは再起動後にバックグラウンドで更新されます。古いストレージが自動的に削除されることはありません。"
     }
   ],
   "web.admin.settings.storage.dialog.localPath": [
     {
       "type": 0,
-      "value": "ローカルのアートワークのパス"
+      "value": "ローカルストレージのパス"
     }
   ],
   "web.admin.settings.storage.dialog.privateEndpointMissing": [
@@ -72991,13 +73340,13 @@
   "web.admin.settings.storage.dialog.queue": [
     {
       "type": 0,
-      "value": "移行をキューに追加"
+      "value": "移行を開始"
     }
   ],
   "web.admin.settings.storage.dialog.queuing": [
     {
       "type": 0,
-      "value": "キューに追加中…"
+      "value": "開始中…"
     }
   ],
   "web.admin.settings.storage.dialog.retryCheck": [
@@ -73039,13 +73388,13 @@
   "web.admin.settings.storage.dialog.targetLocal": [
     {
       "type": 0,
-      "value": "ローカルディスク（Siloのデフォルト動作）"
+      "value": "ローカルディスク"
     }
   ],
   "web.admin.settings.storage.dialog.targetLocalSource": [
     {
       "type": 0,
-      "value": "「バックエンド」の設定で選択されています。"
+      "value": "「ストレージバックエンド」の設定で選択されています。"
     }
   ],
   "web.admin.settings.storage.dialog.targetPrivate": [
@@ -73085,7 +73434,7 @@
     },
     {
       "type": 0,
-      "value": "詳しくは管理者向けの診断を確認してください。"
+      "value": "詳しくはサーバーの診断を確認してください。"
     }
   ],
   "web.admin.settings.storage.failed.canceledReason": [
@@ -73097,7 +73446,7 @@
   "web.admin.settings.storage.failed.titleCancelled": [
     {
       "type": 0,
-      "value": "ストレージの移行をキャンセルしました"
+      "value": "ストレージの移行がキャンセルされました"
     }
   ],
   "web.admin.settings.storage.failed.titleFailed": [
@@ -73115,13 +73464,13 @@
   "web.admin.settings.storage.failure.copy": [
     {
       "type": 0,
-      "value": "ストレージオブジェクトのコピーに失敗しました。"
+      "value": "新しいストレージにファイルをコピーできませんでした。"
     }
   ],
   "web.admin.settings.storage.failure.preparation": [
     {
       "type": 0,
-      "value": "ストレージの移行の準備に失敗しました。"
+      "value": "ストレージの移行を準備できませんでした。"
     }
   ],
   "web.admin.settings.storage.failure.targetCheck": [
@@ -73139,13 +73488,13 @@
   "web.admin.settings.storage.failure.verification": [
     {
       "type": 0,
-      "value": "ストレージの検証に失敗しました。"
+      "value": "コピーしたファイルの検証に失敗しました。"
     }
   ],
   "web.admin.settings.storage.group": [
     {
       "type": 0,
-      "value": "ストレージ"
+      "value": "一般"
     }
   ],
   "web.admin.settings.storage.loading": [
@@ -73169,7 +73518,7 @@
   "web.admin.settings.storage.localPathLockedLocal": [
     {
       "type": 0,
-      "value": "このパスを変更すると、管理された移行が開きます。新しいパスをDockerのボリュームとしてマウントしてください。"
+      "value": "このパスを変更して保存すると、ストレージ移行の確認画面が開きます。新しいパスはDockerのボリュームとしてマウントしてください。"
     }
   ],
   "web.admin.settings.storage.localPathLockedS3": [
@@ -73187,25 +73536,25 @@
   "web.admin.settings.storage.lockStatusUnavailable": [
     {
       "type": 0,
-      "value": "ストレージのロック状態を取得できません"
+      "value": "ストレージの状態を取得できません"
     }
   ],
   "web.admin.settings.storage.lockUnknownMove": [
     {
       "type": 0,
-      "value": "ストレージのロック状態を取得できません。ストレージを移動する前に、状態の確認を再試行してください。"
+      "value": "ストレージの状態を取得できません。移行を開始する前に、状態の確認を再試行してください。"
     }
   ],
   "web.admin.settings.storage.lockUnknownSave": [
     {
       "type": 0,
-      "value": "ストレージのロック状態を取得できません。この場所を保存する前に、状態の確認を再試行してください。"
+      "value": "ストレージの状態を取得できません。この場所を保存する前に、状態の確認を再試行してください。"
     }
   ],
   "web.admin.settings.storage.manualRestart.body": [
     {
       "type": 0,
-      "value": "ストレージの切り替えは確定しましたが、このホストではSiloを自動で再起動できませんでした。新しいストレージを安全に有効にするには、サーバーを再起動してください。"
+      "value": "新しいストレージ設定は保存されましたが、Siloを自動で再起動できませんでした。新しいストレージを使用するには、サーバーを再起動してください。"
     }
   ],
   "web.admin.settings.storage.manualRestart.title": [
@@ -73217,37 +73566,37 @@
   "web.admin.settings.storage.notes.backfill": [
     {
       "type": 0,
-      "value": "「メタデータ画像のバックフィル」は、古いS3ではなく保存済みのプロバイダーのURLからダウンロードします。"
+      "value": "「メタデータ画像のバックフィル」タスクは、古いS3バケットではなく保存済みのプロバイダーURLからダウンロードします。"
     }
   ],
   "web.admin.settings.storage.notes.metadataRetained": [
     {
       "type": 0,
-      "value": "PostgreSQLのコアメタデータは保持されます。"
+      "value": "Postgres内のライブラリメタデータはそのまま保持されます。"
     }
   ],
   "web.admin.settings.storage.notes.privateChanging": [
     {
       "type": 0,
-      "value": "「すべてを移行」では診断バンドルとカタログのジョブの成果物が新しい場所にコピーされます。「個人のアップロードを保持」と「新規に開始」では古い場所に残ります。"
+      "value": "診断バンドルとカタログジョブのファイルがコピーされるのは「すべてを移行」のみです。他のオプションでは古い保存場所に残ります。"
     }
   ],
   "web.admin.settings.storage.notes.privateOnly": [
     {
       "type": 0,
-      "value": "「すべての非公開データを移行」では診断バンドルとカタログのジョブの成果物が新しい場所にコピーされます。「プロフィールのアバターを保持」と「新規に開始」では古い場所に残ります。"
+      "value": "診断バンドルとカタログジョブのファイルがコピーされるのは「非公開データをすべて移行」のみです。他のオプションでは古い保存場所に残ります。"
     }
   ],
   "web.admin.settings.storage.notes.privateUnchanged": [
     {
       "type": 0,
-      "value": "プロフィールのアバター、診断バンドル、カタログのジョブの成果物は現在のストレージに残ります。"
+      "value": "プロフィールのアバター、診断バンドル、カタログジョブのファイルは現在の保存場所に残ります。"
     }
   ],
   "web.admin.settings.storage.notes.restartRequired": [
     {
       "type": 0,
-      "value": "移行の完了後に再起動が必要です。"
+      "value": "移行が完了したら、サーバーを再起動してください。"
     }
   ],
   "web.admin.settings.storage.notes.sidecar": [
@@ -73265,25 +73614,25 @@
   "web.admin.settings.storage.notes.toLocalMigrateAll": [
     {
       "type": 0,
-      "value": "診断バンドルとカタログのジョブの成果物を含め、すべてがローカルディスクにコピーされます。"
+      "value": "診断バンドルとカタログジョブのファイルを含め、すべてがローカルディスクにコピーされます。"
     }
   ],
   "web.admin.settings.storage.notes.toLocalPreserve": [
     {
       "type": 0,
-      "value": "診断バンドルとカタログのジョブの成果物は古い非公開バケットに残り、切り替え後は利用できなくなります。"
+      "value": "診断バンドルとカタログジョブのファイルは古い非公開バケットに残り、切り替え後はアクセスできなくなります。"
     }
   ],
   "web.admin.settings.storage.notes.toLocalStartFresh": [
     {
       "type": 0,
-      "value": "「新規に開始」では何もコピーされません。アップロード、ダウンロードした字幕、プロフィールのアバター、診断バンドル、カタログのジョブの成果物はS3に残り、切り替え後は利用できなくなります。"
+      "value": "「新規に開始」では何もコピーされません。アップロード、ダウンロードした字幕、プロフィールのアバター、診断バンドル、カタログジョブのファイルはS3に残り、切り替え後はアクセスできなくなります。"
     }
   ],
   "web.admin.settings.storage.phase.canceled": [
     {
       "type": 0,
-      "value": "ストレージの移行をキャンセルしました"
+      "value": "ストレージの移行がキャンセルされました"
     }
   ],
   "web.admin.settings.storage.phase.checkingTarget": [
@@ -73307,7 +73656,7 @@
   "web.admin.settings.storage.phase.copying": [
     {
       "type": 0,
-      "value": "ストレージオブジェクトをコピー中"
+      "value": "ファイルをコピー中"
     }
   ],
   "web.admin.settings.storage.phase.failed": [
@@ -73331,13 +73680,13 @@
   "web.admin.settings.storage.phase.restartPending": [
     {
       "type": 0,
-      "value": "ストレージの有効化には再起動が必要"
+      "value": "新しいストレージを使用するにはサーバーを再起動してください"
     }
   ],
   "web.admin.settings.storage.phase.verifying": [
     {
       "type": 0,
-      "value": "コピーしたオブジェクトを検証中"
+      "value": "コピーしたファイルを検証中"
     }
   ],
   "web.admin.settings.storage.policy.legend": [
@@ -73355,7 +73704,7 @@
   "web.admin.settings.storage.policy.migrateAllDescription": [
     {
       "type": 0,
-      "value": "ダウンロードした字幕を含め、アートワークのツリー全体をコピーします。非公開データの保存場所が変わる場合は、アバター、診断バンドル、カタログのジョブ成果物もコピーされます。キャッシュが非常に大きい場合は時間がかかることがあります。"
+      "value": "保存されているすべてのアートワークとダウンロードした字幕をコピーします。非公開ストレージも移動する場合は、プロフィールのアバター、診断バンドル、カタログジョブのファイルもコピーされます。大規模なライブラリでは時間がかかることがあります。"
     }
   ],
   "web.admin.settings.storage.policy.preserve": [
@@ -73385,7 +73734,7 @@
   "web.admin.settings.storage.policy.privateMigrateAllDescription": [
     {
       "type": 0,
-      "value": "プロフィールのアバター、診断バンドル、カタログのジョブ成果物を新しい保存場所にコピーします。"
+      "value": "プロフィールのアバター、診断バンドル、カタログジョブのファイルを新しい保存場所にコピーします。"
     }
   ],
   "web.admin.settings.storage.policy.privatePreserve": [
@@ -73397,13 +73746,13 @@
   "web.admin.settings.storage.policy.privatePreserveDescription": [
     {
       "type": 0,
-      "value": "プロフィールのアバターを新しい保存場所にコピーします。診断バンドルとカタログの成果物は古い保存場所に残り、切り替え後は利用できなくなります。"
+      "value": "プロフィールのアバターをコピーします。診断バンドルとカタログジョブのファイルは古い保存場所に残り、切り替え後はアクセスできなくなります。"
     }
   ],
   "web.admin.settings.storage.policy.privateStartFreshDescription": [
     {
       "type": 0,
-      "value": "古い保存場所は読み込みません。既存のプロフィールのアバターは切り替え後に表示されなくなります。それらのファイル、診断バンドル、カタログの成果物は古い保存場所に残ります。"
+      "value": "古い保存場所をスキップします。既存のプロフィールのアバターは表示されなくなり、古いアバター、診断バンドル、カタログジョブのファイルはそのまま元の場所に残ります。"
     }
   ],
   "web.admin.settings.storage.policy.startFresh": [
@@ -73415,13 +73764,13 @@
   "web.admin.settings.storage.policy.startFreshDescription": [
     {
       "type": 0,
-      "value": "古いアートワークストアは読み込みません。プロバイダーのパスはTMDB/TVDBのURLに戻り、カスタム画像は再度アップロードする必要があります。ダウンロードした字幕は古いストアに残り、切り替え後は利用できなくなります。"
+      "value": "古いストレージをスキップします。プロバイダーのアートワークはTMDB/TVDBのURLに戻り、カスタム画像は再度アップロードする必要があります。ダウンロードした字幕は古い保存場所に残り、切り替え後はアクセスできなくなります。"
     }
   ],
   "web.admin.settings.storage.policy.startFreshWithAvatarsDescription": [
     {
       "type": 0,
-      "value": "古いアートワークストアは読み込みません。プロバイダーのパスはTMDB/TVDBのURLに戻り、カスタム画像は再度アップロードする必要があります。ダウンロードした字幕は古いストアに残り、切り替え後は利用できなくなります。プロフィールのアバターも古いストレージに残り、切り替え後は利用できなくなります。"
+      "value": "古いストレージをスキップします。プロバイダーのアートワークはTMDB/TVDBのURLに戻り、カスタム画像は再度アップロードする必要があります。ダウンロードした字幕とプロフィールのアバターは古い保存場所に残り、切り替え後はアクセスできなくなります。"
     }
   ],
   "web.admin.settings.storage.policy.unavailableNoPrivateBucket": [
@@ -73445,7 +73794,7 @@
   "web.admin.settings.storage.privateGroupDescription": [
     {
       "type": 0,
-      "value": "サーバーのみが読み込むファイル：プロフィールのアバター、診断バンドル、カタログのシード成果物。S3ストレージではここにバケットが必要です。ローカルディスクでは、バケットを設定しない限りローカルのストレージパスに保存されます。"
+      "value": "サーバー専用のファイル：プロフィールのアバター、診断バンドル、カタログジョブのファイル。S3を使用する場合はこれらのファイルに必要です。ローカルディスクでは、バケットを設定しない限りローカルストレージのパスに保存されます。"
     }
   ],
   "web.admin.settings.storage.publicGroup": [
@@ -73457,37 +73806,37 @@
   "web.admin.settings.storage.publicGroupDescription": [
     {
       "type": 0,
-      "value": "クライアントが直接ダウンロードするファイル：キャッシュされたアートワーク、アップロードしたポスター、ブランディング画像。「バックエンド」がS3の場合、または「自動」でここにバケットを設定した場合に使用されます。"
+      "value": "クライアントが直接ダウンロードするファイル：キャッシュされたアートワーク、アップロードしたポスター、ブランディング画像。「ストレージバックエンド」がS3の場合、または「自動」でバケットが設定されている場合に使用されます。"
     }
   ],
   "web.admin.settings.storage.recovery.messageBlocked": [
     {
       "type": 0,
-      "value": "復旧がブロックされています。詳細は管理者の診断を確認してください。"
+      "value": "ストレージの復旧がブロックされています。詳しくはサーバーの診断を確認してください。"
     }
   ],
   "web.admin.settings.storage.recovery.messagePending": [
     {
       "type": 0,
-      "value": "再起動後にアートワークの整合処理が保留されています。"
+      "value": "ライブラリのアートワーク参照は、サーバーの再起動後に更新されます。"
     }
   ],
   "web.admin.settings.storage.recovery.messageRunning": [
     {
       "type": 0,
-      "value": "確定済みのアートワークストレージを整合しています。"
+      "value": "新しい保存場所に合わせて、ライブラリのアートワーク参照を更新しています。"
     }
   ],
   "web.admin.settings.storage.recovery.messageWaitingRetry": [
     {
       "type": 0,
-      "value": "整合処理を一時停止しました。再試行を待っています。"
+      "value": "アートワーク参照の更新が一時停止されています。再試行を待っています。"
     }
   ],
   "web.admin.settings.storage.recovery.needsAttention": [
     {
       "type": 0,
-      "value": "復旧に対応が必要です。詳細は管理者の診断を確認してください。"
+      "value": "ストレージの復旧に対応が必要です。詳しくはサーバーの診断を確認してください。"
     }
   ],
   "web.admin.settings.storage.recovery.titleBlocked": [
@@ -73523,7 +73872,7 @@
   "web.admin.settings.storage.retryStatus": [
     {
       "type": 0,
-      "value": "状態を再確認"
+      "value": "確認を再試行"
     }
   ],
   "web.admin.settings.storage.reviewTransition": [
@@ -73577,31 +73926,31 @@
   "web.admin.settings.storage.s3.locationChangeFromLocal": [
     {
       "type": 0,
-      "value": "このバケットを保存すると、ローカルストレージからの管理された移行が開始されます。切り替える前にコピーする内容を選択してください。"
+      "value": "保存すると、ローカルディスクからのストレージ移行が開きます。切り替わる前にコピーする内容を選択できます。"
     }
   ],
   "web.admin.settings.storage.s3.locationChangePrivate": [
     {
       "type": 0,
-      "value": "この保存場所を保存すると、管理された移行が開始されます。新規に開始するか、アバター、診断、カタログの成果物を現在の保存場所からコピーできます。Siloは切り替える前に新旧の保存場所を検証します。"
+      "value": "保存するとストレージ移行が開きます。新規に開始するか、プロフィールのアバター、診断バンドル、カタログジョブのファイルをコピーできます。Siloは切り替える前に両方の保存場所を検証します。"
     }
   ],
   "web.admin.settings.storage.s3.locationChangeS3": [
     {
       "type": 0,
-      "value": "この保存場所を保存すると、管理された移行が開始されます。新規に開始するか、現在のS3ストレージからデータをコピーできます。Siloは切り替える前に新旧の保存場所を検証します。"
+      "value": "保存するとストレージ移行が開きます。新規に開始するか、現在のS3の保存場所からファイルをコピーできます。Siloは切り替える前に両方の保存場所を検証します。"
     }
   ],
   "web.admin.settings.storage.s3.locationUnlockedPrivate": [
     {
       "type": 0,
-      "value": "Siloは起動時に設定済みの非公開バケットを記録します。アバター、診断、カタログの成果物を保存する前に選択してください。後で変更するには管理された移行が必要です。"
+      "value": "Siloは起動時に、設定された非公開バケットをロックします。プロフィールのアバター、診断バンドル、カタログジョブのファイルを保存する前に選択してください。後で変更するにはストレージの移行が必要です。"
     }
   ],
   "web.admin.settings.storage.s3.locationUnlockedPublic": [
     {
       "type": 0,
-      "value": "最初にアートワークを書き込んだときにこの保存場所が記録されます。アップロードしたポスター、コレクションのアートワーク、ブランディングは再ダウンロードできないため、スキャンする前にバケットを選択してください。"
+      "value": "Siloが最初のアートワークを保存すると、この保存場所はロックされます。アップロードしたポスター、コレクションのアートワーク、ブランディングは再ダウンロードできないため、スキャンする前にバケットを選択してください。"
     }
   ],
   "web.admin.settings.storage.s3.pathStyle": [
@@ -73673,7 +74022,7 @@
   "web.admin.settings.storage.s3.urlAuth": [
     {
       "type": 0,
-      "value": "アセットリンクの認証方法"
+      "value": "ダウンロードリンクの認証方法"
     }
   ],
   "web.admin.settings.storage.s3.urlAuthCloudflare": [
@@ -73703,13 +74052,13 @@
   "web.admin.settings.storage.target.noPrivateBucketLocal": [
     {
       "type": 0,
-      "value": "非公開バケットなし：アバター、診断、カタログの成果物はローカルディスクに保存されます。"
+      "value": "非公開バケットなし：プロフィールのアバター、診断バンドル、カタログジョブのファイルはローカルディスクに残ります。"
     }
   ],
   "web.admin.settings.storage.target.noPrivateBucketS3": [
     {
       "type": 0,
-      "value": "非公開バケットなし：アバター、診断、カタログの成果物は利用できなくなります。"
+      "value": "非公開バケットなし：プロフィールのアバター、診断バンドル、カタログジョブのファイルは利用できなくなります。"
     }
   ],
   "web.admin.settings.storage.target.privateBucket": [
@@ -73801,7 +74150,7 @@
   "web.admin.settings.storage.transitionQueueFailed": [
     {
       "type": 0,
-      "value": "ストレージの移行をキューに追加できませんでした。ストレージの設定を確認して、もう一度お試しください。"
+      "value": "ストレージの移行を開始できませんでした。ストレージの設定を確認して、もう一度お試しください。"
     }
   ],
   "web.admin.settings.storage.transitionQueued": [
@@ -73835,7 +74184,7 @@
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
-      "value": "このサーバーでは管理されたストレージ移行を利用できません。"
+      "value": "このサーバーではストレージの移行を利用できません。"
     }
   ],
   "web.admin.settings.storage.unitSeconds": [
@@ -73857,7 +74206,7 @@
             },
             {
               "type": 0,
-              "value": "件のオブジェクトを検証済み"
+              "value": "件のファイルを検証済み"
             }
           ]
         }
@@ -73907,7 +74256,7 @@
     },
     {
       "type": 0,
-      "value": "からインストールします。プロバイダーのアプリ認証情報はそのプラグインのページにあり、視聴者はプロフィールの設定から自分のアカウントを連携します。"
+      "value": "からインストールします。各プロバイダーのアプリ認証情報はそれぞれのプラグインページで設定します。視聴者はプロフィール設定で自分のアカウントを連携します。"
     }
   ],
   "web.admin.settings.watchProviders.loadError": [
@@ -73931,7 +74280,7 @@
   "web.admin.settings.watchProviders.tagline": [
     {
       "type": 0,
-      "value": "視聴プロバイダーのプラグイン"
+      "value": "視聴履歴の同期"
     }
   ],
   "web.admin.shell.drawer.close": [
@@ -97998,7 +98347,7 @@
   "web.common.signingSecret.description": [
     {
       "type": 0,
-      "value": "Siloはすべての配信にこのシークレットで署名し、受信側で検証できるようにします。表示されるのは今回だけです。今すぐ受信側のサービスに保存してください。紛失した場合は、後でローテーションできます。"
+      "value": "SiloはWebhookにこのシークレットで署名し、サービス側で検証できるようにします。今すぐ保存してください。表示されるのは一度だけですが、紛失した場合はローテーションできます。"
     }
   ],
   "web.common.signingSecret.saved": [
@@ -113453,19 +113802,19 @@
   "web.notifications.pushPrivacy.generic": [
     {
       "type": 0,
-      "value": "プッシュ通知の内容は汎用的なものです。アプリはプッシュを受信した後、プライベートな内容をSiloサーバーから直接取得します。"
+      "value": "各プッシュにはプライベートな情報は含まれません。アプリは受信後、通知の内容をサーバーから直接取得します。"
     }
   ],
   "web.notifications.pushPrivacy.metadata": [
     {
       "type": 0,
-      "value": "リレーは、通知のタイトル、メッセージ本文、メディア名、ユーザー名、プロフィール名、サーバーのURLを受け取りません。ただし、サービスの配信と運用に必要な技術的メタデータは処理します。これには、不透明なデプロイ識別子、プッシュの配信タイミング、リクエストのステータス、アプリのトピック、セルフホストのSiloサーバーがリレーへの接続に使用するIPアドレス、ハッシュ化されたデバイスのプッシュトークンが含まれます。AppleまたはGoogleも、各プラットフォームの標準的なプッシュ配信メタデータを処理する場合があります。"
+      "value": "リレーは、通知のタイトル、メッセージ本文、メディア名、ユーザー名、プロフィール名、サーバーのURLを受け取りません。通知の配信とサービスの運用のため、不透明なデプロイID、プッシュの配信タイミング、リクエストのステータス、アプリのトピック、サーバーがリレーへの接続に使用するIPアドレス、ハッシュ化されたデバイスのプッシュトークンなどの技術的メタデータを処理します。AppleまたはGoogleも、各プラットフォームの標準的なプッシュ配信メタデータを処理する場合があります。"
     }
   ],
   "web.notifications.pushPrivacy.relay": [
     {
       "type": 0,
-      "value": "プッシュ通知が有効な場合、SiloサーバーはSiloのプッシュリレーに内容を含まないリクエストを送信し、SiloがApple Push Notification serviceまたはFirebase Cloud Messagingを通じて通知を配信できるようにします。リレーは"
+      "value": "プッシュ通知が有効な場合、サーバーはApple Push Notification serviceまたはFirebase Cloud Messagingを通じて配信するために、内容を含まないリクエストをSiloのプッシュリレーに送信します。リレーは"
     },
     {
       "type": 8,
@@ -118565,7 +118914,7 @@
   "web.profiles.userPolicy.audioTranscodingHint": [
     {
       "type": 0,
-      "value": "映像をエンコードせずに音声を変換します。"
+      "value": "映像を再エンコードせずに音声トラックを変換します。"
     }
   ],
   "web.profiles.userPolicy.downloadTranscodes": [
@@ -123916,6 +124265,12 @@
       "value": "メールアドレスまたはユーザー名"
     }
   ],
+  "web.settings.historyImport.embyDirectHelp": [
+    {
+      "type": 0,
+      "value": "インポート元のEmbyサーバーのベースURLを入力してください。"
+    }
+  ],
   "web.settings.historyImport.embyPassword": [
     {
       "type": 0,
@@ -123926,6 +124281,12 @@
     {
       "type": 0,
       "value": "アカウントにパスワードがない場合は空欄のまま"
+    }
+  ],
+  "web.settings.historyImport.embyServerUrl": [
+    {
+      "type": 0,
+      "value": "EmbyサーバーのURL"
     }
   ],
   "web.settings.historyImport.embyUsername": [
@@ -124076,6 +124437,12 @@
     {
       "type": 0,
       "value": "Plexアカウント"
+    }
+  ],
+  "web.settings.historyImport.mode.serverUrl": [
+    {
+      "type": 0,
+      "value": "サーバーURL"
     }
   ],
   "web.settings.historyImport.newImport.description": [
@@ -124377,7 +124744,7 @@
   "web.settings.historyImport.source.emby": [
     {
       "type": 0,
-      "value": "Emby Connectまたは保存済みのサーバー"
+      "value": "Emby Connect、サーバーURL、または保存済みのサーバー"
     }
   ],
   "web.settings.historyImport.source.jellyfin": [
@@ -127597,7 +127964,7 @@
   "web.settings.overlays.library.help": [
     {
       "type": 0,
-      "value": "4 MBまでのPNG、JPEG、WebPに対応しています。透過PNGがおすすめです。アップロード後、バッジの「調整」メニューから、アイコンとして、または2160pなど特定の値用に選択してください。"
+      "value": "4 MBまでのPNG、JPEG、またはWebPに対応しています（透過PNG推奨）。バッジの画像メニューから、アイコンとして、または2160pなどの特定の値に割り当ててください。"
     }
   ],
   "web.settings.overlays.library.name": [
@@ -127609,7 +127976,7 @@
   "web.settings.overlays.library.needsStorage": [
     {
       "type": 0,
-      "value": "画像をアップロードするにはアセットストレージが必要です。バッジ画像をアップロードするには、ストレージを設定してください。ライブラリにある画像は下に表示されたままで、削除できます。"
+      "value": "バッジ画像をアップロードするには、ストレージ設定でストレージを構成してください。既存の画像は下に表示されたままで、引き続き削除できます。"
     }
   ],
   "web.settings.overlays.library.pickAnother": [
@@ -127711,7 +128078,7 @@
   "web.settings.overlays.look.reset": [
     {
       "type": 0,
-      "value": "スタイルの既定値を使用"
+      "value": "スタイルのデフォルトにリセット"
     }
   ],
   "web.settings.overlays.look.shadow": [

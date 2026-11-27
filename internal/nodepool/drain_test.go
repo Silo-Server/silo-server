@@ -51,7 +51,7 @@ func TestDrainingNodeKeepsItsCurrentSession(t *testing.T) {
 func TestDrainingNodeTakesNoReservedWork(t *testing.T) {
 	f := newFixture(nil, []*Node{drainingNode(1, "http://tc-draining", 0)})
 
-	if node, release := f.planner.ReserveTranscodeWork("download"); node != nil {
+	if node, release := f.planner.ReserveTranscodeWork("download", JobKindVideoTranscode); node != nil {
 		release()
 		t.Fatalf("reserved work on a draining node: %+v", node)
 	}
@@ -60,7 +60,7 @@ func TestDrainingNodeTakesNoReservedWork(t *testing.T) {
 	}
 
 	f.transcodes.SetNodes([]*Node{drainingNode(1, "http://tc-draining", 0), transcodeNode(2, "http://tc-open", nil, 3)})
-	node, release := f.planner.ReserveTranscodeWork("download")
+	node, release := f.planner.ReserveTranscodeWork("download", JobKindVideoTranscode)
 	defer release()
 	if node == nil || node.URL != "http://tc-open" {
 		t.Fatalf("reserved %+v, want tc-open", node)

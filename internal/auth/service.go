@@ -395,7 +395,7 @@ func (s *Service) PasswordSignInFor(ctx context.Context, userID int) (PasswordSi
 	if hasDirectory {
 		directoryID = directory.Info.ID
 	}
-	if passwordRoute(user, directoryID) == LocalProviderID && user.LocalPasswordLoginEnabled && user.PasswordHash != "" {
+	if passwordRoute(user, directoryID) == LocalProviderID && user.HasLocalPassword() {
 		err = localPasswordPolicy(ctx, s.users.pool, user)
 		if err == nil {
 			return PasswordSignIn{Local: true}, nil
@@ -1525,7 +1525,7 @@ func (s *Service) PasswordChangeAvailable(ctx context.Context, userID int) (bool
 	if err != nil {
 		return false, fmt.Errorf("getting user: %w", err)
 	}
-	return user.LocalPasswordLoginEnabled && user.PasswordHash != "", nil
+	return user.HasLocalPassword(), nil
 }
 
 // ChangePassword verifies the existing local credential before replacing it.
@@ -1568,7 +1568,7 @@ func (s *Service) ChangePassword(ctx context.Context, userID int, sessionID, cur
 }
 
 func validatePasswordChange(ctx context.Context, user *models.User, policy PasswordPolicy, currentPassword, newPassword string) error {
-	if !user.LocalPasswordLoginEnabled || user.PasswordHash == "" {
+	if !user.HasLocalPassword() {
 		return ErrPasswordLoginDisabled
 	}
 	ok, err := CheckPassword(ctx, user, currentPassword)

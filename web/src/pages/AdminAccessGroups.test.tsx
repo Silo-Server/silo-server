@@ -229,7 +229,7 @@ describe("AdminAccessGroups", () => {
     expect(
       await screen.findByText(/The group was saved, but its request approval and limit were not/),
     ).toBeInTheDocument();
-    expect(screen.getByText(/changed by another administrator/)).toBeInTheDocument();
+    expect(screen.getByText(/Another admin changed this/)).toBeInTheDocument();
     expect(router.state.location.pathname).toBe("/admin/access-groups/1");
     expect(toastSuccess).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
