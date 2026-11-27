@@ -3,6 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { readableErrorText } from "@/api/v2/request";
 import { useT } from "@/i18n";
+import { reportOfflineSettingFailure } from "@/hooks/queries/settingWriteOffline";
 import { invalidateItemDetails } from "@/hooks/queries/trackPreferences";
 import { usePlayerConfig } from "../context/PlayerConfigContext";
 import type { SubtitleInventoryItemV3 } from "../protocol-v3";
@@ -73,8 +74,11 @@ export function useTrackChoicePersistence({
         Promise.allSettled(
           requests.map((request) => sendSubtitleChoiceRequest(ownerConfig, request)),
         ),
-      ).catch(() => {
-        // Best effort; a write for a profile no longer active is dropped.
+      ).catch((err: unknown) => {
+        // A pick made offline is refused unsent: say it wasn't saved, as a
+        // settings page does. Otherwise best effort; a write for a profile
+        // no longer active is dropped.
+        reportOfflineSettingFailure(err);
       });
     },
     [config, seriesId, subtitleTracks],
