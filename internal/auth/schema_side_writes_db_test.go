@@ -209,7 +209,13 @@ func triggerWrites(ctx context.Context, t *testing.T, pool *pgxpool.Pool, body s
 	add(body)
 	read := map[string]bool{}
 	next := schemaFunctionsCalled(ctx, t, pool, body)
-	for depth := 1; len(next) > 0; depth++ {
+	for depth := 1; ; depth++ {
+		// A function read already, at this level or an earlier one, is not
+		// new: only unread ones count against the limit.
+		next = slices.DeleteFunc(next, func(name string) bool { return read[name] })
+		if len(next) == 0 {
+			break
+		}
 		if depth > maxCallDepth {
 			return written, next
 		}
