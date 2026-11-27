@@ -7,7 +7,7 @@
 -- numbers every regular episode in one season, 'custom' is reserved for
 -- admin-arranged seasons.
 CREATE TABLE public.series_episode_orders (
-    series_id text PRIMARY KEY
+    series_id text COLLATE "C" PRIMARY KEY
         REFERENCES public.media_items (content_id) ON DELETE CASCADE ON UPDATE CASCADE,
     provider text NOT NULL DEFAULT '' CHECK (provider IN ('', 'tvdb', 'tmdb')),
     order_id text NOT NULL DEFAULT '',

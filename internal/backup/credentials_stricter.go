@@ -213,6 +213,7 @@ var restoredFlagColumns = map[string]string{
 	"ebook_enrichment_state.requeue_requested":                whyQueue,
 	"embedded_subtitle_tracks.has_override_tags":              whyFacts,
 	"episode_catalog_entries.has_dolby_vision":                whyFacts,
+	"episodes.unlisted":                                       whyFacts,
 	"episode_catalog_entries.has_hdr":                         whyFacts,
 	"episode_catalog_entries.has_non_dolby_vision":            whyFacts,
 	"episode_catalog_entries.has_non_hdr":                     whyFacts,

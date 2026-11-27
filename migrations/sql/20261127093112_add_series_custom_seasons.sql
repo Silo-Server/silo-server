@@ -3,7 +3,7 @@
 -- layout. number is the season's number; empty title and overview take the
 -- provider season with the same number's.
 CREATE TABLE public.series_custom_seasons (
-    series_id text NOT NULL
+    series_id text COLLATE "C" NOT NULL
         REFERENCES public.series_episode_orders (series_id) ON DELETE CASCADE ON UPDATE CASCADE,
     number integer NOT NULL CHECK (number >= 1),
     title text NOT NULL DEFAULT '',
@@ -20,7 +20,7 @@ CREATE TABLE public.series_custom_seasons (
 -- '<provider>:<provider episode id>' of the series' structure provider, the
 -- same in every order of that provider. season 0 is Specials.
 CREATE TABLE public.series_custom_episode_slots (
-    series_id text NOT NULL
+    series_id text COLLATE "C" NOT NULL
         REFERENCES public.series_episode_orders (series_id) ON DELETE CASCADE ON UPDATE CASCADE,
     episode_key text NOT NULL,
     season integer NOT NULL CHECK (season >= 0),
@@ -40,7 +40,7 @@ ALTER TABLE public.series_episode_orders
 -- its source; only these are accepted, and a season that drops one gets the
 -- provider's poster back.
 CREATE TABLE public.series_custom_season_uploads (
-    series_id text NOT NULL
+    series_id text COLLATE "C" NOT NULL
         REFERENCES public.media_items (content_id) ON DELETE CASCADE ON UPDATE CASCADE,
     source text NOT NULL,
     path text NOT NULL,
