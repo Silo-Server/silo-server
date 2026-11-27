@@ -628,7 +628,7 @@ const adminRoleLock = "silo:auth:admin-role"
 
 // syncManagedRole applies the provider's managed role to user in tx. It
 // returns the updated account when the role changed (its login sessions are
-// revoked in tx, as an administrator role change does) and the audit event
+// revoked in tx, as an administrator's promotion does) and the audit event
 // for any change or skipped demotion. ADMIN promotes, USER demotes, anything
 // else leaves the role alone. The Owner, break-glass accounts and the last
 // enabled admin are never demoted.

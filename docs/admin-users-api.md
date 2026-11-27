@@ -36,9 +36,9 @@ again before editing further. Deletion returns 204.
 
 An update signs the account out everywhere (its login, impersonation and
 Audiobookshelf-compatible sessions, approved device sign-ins not yet collected,
-and its Jellyfin-compatible sessions) only when it sets a password or changes
-`enabled`. Access-group, permission and playback-quality changes keep the
-account signed in: they advance `access_policy_revision`, each request resolves
+and its Jellyfin-compatible sessions) only when it sets a password, changes
+`enabled`, or promotes the account to admin. Access-group, permission and
+playback-quality changes keep the account signed in: they advance `access_policy_revision`, each request resolves
 the current policy, and connected events sockets receive `access_changed` (see
 [realtime-api.md](realtime-api.md#access-changes)). Profile verification tokens
 stay valid: they are bound to each profile's own PIN, not to the account's
@@ -47,7 +47,13 @@ policy (see
 Library, stream-limit and download overrides never signed the account out and
 still do not.
 
-A role change also keeps the account signed in, but admin checks trust the role
+A promotion signs the account out because its sessions were opened for an
+ordinary account, possibly by people the operator never meant to make
+administrators (every visitor on a [public demo](auth-api.md#demo-sign-in) holds
+one). Every session starts again under the new role, as it does when a sign-in
+provider's role mapping or owner recovery promotes an account.
+
+A demotion keeps the account signed in, but admin checks trust the role
 in the access token, so the token must be replaced. Every request that presents
 an access token minted before the change gets `401 token_refresh_required`. The login session and its refresh token stay valid, and a
 refresh issues a token with the new role, so a demoted administrator loses admin
