@@ -43,9 +43,9 @@ type remuxAudioFactsV3 struct {
 	progressiveCodecConverts, progressiveChannelLimited, progressiveConverts bool
 	hlsCodecConverts, hlsChannelLimited, hlsTranscode, hlsQuirkConverts      bool
 	// hlsConverts includes the device quirk that converts audio HLS could copy.
-	hlsConverts          bool
-	hlsAACChannels       int
-	firefoxAAC, hlsQuirk *AppliedQuirkV3
+	hlsConverts                            bool
+	progressiveAACChannels, hlsAACChannels int
+	firefoxAAC, hlsQuirk                   *AppliedQuirkV3
 }
 
 func (f *videoFactsV3) originalRangeOK() bool {
@@ -251,13 +251,24 @@ func (p *candidatePlannerV3) remuxAudioFacts() {
 	a.hlsQuirk, _ = hlsEAC3AudioCorrectionV3(source, request)
 	a.hlsQuirkConverts = a.hlsQuirk != nil && !a.hlsCodecConverts
 	a.hlsConverts = a.hlsTranscode || a.hlsQuirk != nil
+	// A conversion keeps surround within the delivery's ceiling, like the
+	// full transcode, and falls back to stereo when 5.1 alone would push the
+	// copy over the server's bitrate cap.
+	remuxAACChannels := func(deliveryClass string) int {
+		channels := aacOutputChannelsV3(request, deliveryClass, source.AudioChannels, true)
+		if channels > 2 && !audioRemuxFitsServerCapV3(p.input, p.file, channels) && audioRemuxFitsServerCapV3(p.input, p.file, 2) {
+			return 2
+		}
+		return channels
+	}
+	if a.progressiveConverts {
+		a.progressiveAACChannels = remuxAACChannels(DeliveryClassProgressiveV3)
+	}
 	switch {
 	case a.hlsQuirkConverts:
 		a.hlsAACChannels = aacOutputChannelsV3(request, DeliveryClassHLSV3, source.AudioChannels, false)
 	case a.hlsTranscode:
-		// Non-native codecs keep their surround, as many channels as a
-		// ceiling allows.
-		a.hlsAACChannels = aacOutputChannelsV3(request, DeliveryClassHLSV3, source.AudioChannels, a.hlsChannelLimited || !hlsNativeAudioCodecV3(source.AudioCodec))
+		a.hlsAACChannels = remuxAACChannels(DeliveryClassHLSV3)
 	}
 }
 
