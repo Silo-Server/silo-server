@@ -94196,6 +94196,24 @@
       "value": "Code"
     }
   ],
+  "web.auth.appCode.codeCopied": [
+    {
+      "type": 0,
+      "value": "Code copied"
+    }
+  ],
+  "web.auth.appCode.copyCode": [
+    {
+      "type": 0,
+      "value": "Copy code"
+    }
+  ],
+  "web.auth.appCode.copyFailed": [
+    {
+      "type": 0,
+      "value": "Couldn’t copy the code. Select it and copy it by hand."
+    }
+  ],
   "web.auth.appCode.expired": [
     {
       "type": 0,
@@ -94214,6 +94232,12 @@
       "value": "Press Open Silo to continue in the Silo app on this device. If the app isn’t installed, install it, come back to this tab and press Open Silo again."
     }
   ],
+  "web.auth.appCode.noScanCode": [
+    {
+      "type": 0,
+      "value": "This server’s address is too long for a scan code. Type the server address and code in the Silo app, or copy the code and paste it there."
+    }
+  ],
   "web.auth.appCode.open": [
     {
       "type": 0,
@@ -94224,6 +94248,24 @@
     {
       "type": 0,
       "value": "Get a new code"
+    }
+  ],
+  "web.auth.appCode.scanCodeLabel": [
+    {
+      "type": 0,
+      "value": "Scan code for the Silo app"
+    }
+  ],
+  "web.auth.appCode.scanCodeUnavailable": [
+    {
+      "type": 0,
+      "value": "A scan code can’t be shown for this server. Type the server address and code in the Silo app, or copy the code and paste it there."
+    }
+  ],
+  "web.auth.appCode.scanHint": [
+    {
+      "type": 0,
+      "value": "Scan this with the scanner in the Silo app, or type or copy the server address and code below."
     }
   ],
   "web.auth.appCode.serverAddress": [

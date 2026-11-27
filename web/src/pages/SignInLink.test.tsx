@@ -14,6 +14,9 @@ import redeemedAdministrator from "../../../contracts/api/v2/fixtures/redeem_sig
 
 vi.mock("@/hooks/useAuth", () => ({ useAuth: () => ({ user: null, loading: false }) }));
 vi.mock("@/components/auth/AuthBackground", () => ({ AuthBackground: () => null }));
+vi.mock("react-qr-code", async () =>
+  (await import("@/components/appKeys/codeLinkGuard.test-support")).qrCodeMock(),
+);
 
 const fetchMock = vi.fn<typeof fetch>();
 let redeem: () => Promise<Response>;
@@ -76,16 +79,37 @@ it("redeems only when Continue is pressed, once", async () => {
   expect(redeems()).toEqual([{ token: "link-secret" }]);
 });
 
-// The code is a session code for an existing account: shown to type, never
-// in a link, a scannable link or anything else a device could open. An app
-// that took such a link would redeem the code with its own keys.
+// The code is a session code for an existing account: shown to type or copy
+// and as a scan code, never in a link, a scannable link or anything else a
+// device could open. An app that took such a link would redeem the code with
+// its own keys.
 it("never puts the code in a link", async () => {
   const { container } = mount();
   fireEvent.click(await screen.findByRole("button", { name: "Continue" }));
   expect(await screen.findByText(redeemed.code)).toBeTruthy();
   expect(screen.getByText(redeemed.server_address)).toBeTruthy();
+  expect(screen.getByRole("img", { name: "Scan code for the Silo app" })).toBeTruthy();
   expectNoLinkCarrying(container, redeemed.code);
   expect(container.querySelector("a[href^='silo:'], img, canvas")).toBeNull();
+});
+
+// The page holds a spent link's code and blocks leaving: Copy code copies in
+// place, with no navigation for the leave dialog to catch.
+it("copies the code without leaving the page", async () => {
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+  try {
+    mount();
+    fireEvent.click(await screen.findByRole("button", { name: "Continue" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Copy code" }));
+    expect(await screen.findByText("Code copied")).toBeTruthy();
+    expect(writeText).toHaveBeenCalledWith(redeemed.code);
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(router.state.location.pathname).toBe("/sign-in-link");
+    expect(screen.getByText(redeemed.code)).toBeTruthy();
+  } finally {
+    Reflect.deleteProperty(navigator, "clipboard");
+  }
 });
 
 // "Set a password instead" sends the redeem's set-password token, not the

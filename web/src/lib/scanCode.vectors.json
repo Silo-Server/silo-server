@@ -1,0 +1,532 @@
+{
+  "description": "Scan code test vectors: the text a page draws as a QR code for the Silo app's own scanner, `SILOSCANA <app code> <server address>`, each byte written as two letters from A to P. Valid cases give the app code and server address that produce the text; invalid cases are texts the app's scanner refuses, with the reason.",
+  "cases": [
+    {
+      "type": "scan-code",
+      "name": "a public https address",
+      "valid": true,
+      "string": "SILOSCANA NKNOGIDHAOFDBPBNCNMICHDHEKHIFHNCEMPGDNICGOKHLDAIHGLNAMJLBPGJLDEK GIHEHEHAHDDKCPCPGNGFGEGJGBCOGFHIGBGNHAGMGFCOGDGPGN",
+      "length": 125,
+      "address": "https://media.example.com",
+      "app_code": "2t5oNw5THx0tyCc3SnhX0kz2PYJup7MIdr0Mmx9ps0o"
+    },
+    {
+      "type": "scan-code",
+      "name": "an address with a port",
+      "valid": true,
+      "string": "SILOSCANA NKNOGIDHAOFDBPBNCNMICHDHEKHIFHNCEMPGDNICGOKHLDAIHGLNAMJLBPGJLDEK GIHEHEHAHDDKCPCPGNGFGEGJGBCOGFHIGBGNHAGMGFCOGDGPGNDKDIDEDEDD",
+      "length": 135,
+      "address": "https://media.example.com:8443",
+      "app_code": "2t5oNw5THx0tyCc3SnhX0kz2PYJup7MIdr0Mmx9ps0o"
+    },
+    {
+      "type": "scan-code",
+      "name": "an address with a path",
+      "valid": true,
+      "string": "SILOSCANA NKNOGIDHAOFDBPBNCNMICHDHEKHIFHNCEMPGDNICGOKHLDAIHGLNAMJLBPGJLDEK GIHEHEHAHDDKCPCPGFHIGBGNHAGMGFCOGDGPGNCPHDGJGMGP",
+      "length": 123,
+      "address": "https://example.com/silo",
+      "app_code": "2t5oNw5THx0tyCc3SnhX0kz2PYJup7MIdr0Mmx9ps0o"
+    },
+    {
+      "type": "scan-code",
+      "name": "a LAN http address",
+      "valid": true,
+      "string": "SILOSCANA NKNOGIDHAOFDBPBNCNMICHDHEKHIFHNCEMPGDNICGOKHLDAIHGLNAMJLBPGJLDEK GIHEHEHADKCPCPDBDJDCCODBDGDICODBCODCDADKDIDADJDG",
+      "length": 123,
+      "address": "http://192.168.1.20:8096",
+      "app_code": "2t5oNw5THx0tyCc3SnhX0kz2PYJup7MIdr0Mmx9ps0o"
+    },
+    {
+      "type": "scan-code",
+      "name": "an IPv6 address",
+      "valid": true,
+      "string": "SILOSCANA NKNOGIDHAOFDBPBNCNMICHDHEKHIFHNCEMPGDNICGOKHLDAIHGLNAMJLBPGJLDEK GIHEHEHADKCPCPFLGGGEDBDCDKDDDEDFDGDKDHDIDJGBDKDKDCDAFNDKDIDADJDG",
+      "length": 139,
+      "address": "http://[fd12:3456:789a::20]:8096",
+      "app_code": "2t5oNw5THx0tyCc3SnhX0kz2PYJup7MIdr0Mmx9ps0o"
+    },
+    {
+      "type": "scan-code",
+      "name": "an internationalised host in its A-label spelling",
+      "valid": true,
+      "string": "SILOSCANA NKNOGIDHAOFDBPBNCNMICHDHEKHIFHNCEMPGDNICGOKHLDAIHGLNAMJLBPGJLDEK GIHEHEHAHDDKCPCPHIGOCNCNGDGBGGCNGEGNGBCOGFHIGBGNHAGMGF",
+      "length": 129,
+      "address": "https://xn--caf-dma.example",
+      "app_code": "2t5oNw5THx0tyCc3SnhX0kz2PYJup7MIdr0Mmx9ps0o"
+    },
+    {
+      "type": "scan-code",
+      "name": "the longest address, 128 bytes",
+      "valid": true,
+      "string": "SILOSCANA NKNOGIDHAOFDBPBNCNMICHDHEKHIFHNCEMPGDNICGOKHLDAIHGLNAMJLBPGJLDEK GIHEHEHAHDDKCPCPGFHIGBGNHAGMGFCOGDGPGNCPGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGB",
+      "length": 331,
+      "address": "https://example.com/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "app_code": "2t5oNw5THx0tyCc3SnhX0kz2PYJup7MIdr0Mmx9ps0o"
+    },
+    {
+      "type": "scan-code",
+      "name": "refuse a URL",
+      "valid": false,
+      "reason": "a URL",
+      "error": "link",
+      "string": "https://media.example.com"
+    },
+    {
+      "type": "scan-code",
+      "name": "refuse the https join link",
+      "valid": false,
+      "reason": "the https join link",
+      "error": "link",
+      "string": "https://siloserver.org/join#v1.aHR0cHM6Ly9tZWRpYS5leGFtcGxlLmNvbQ.2t5oNw5THx0tyCc3SnhX0kz2PYJup7MIdr0Mmx9ps0o"
+    },
+    {
+      "type": "scan-code",
+      "name": "refuse the silo join link",
+      "valid": false,
+      "reason": "the silo join link",
+      "error": "link",
+      "string": "silo://join#v1.aHR0cHM6Ly9tZWRpYS5leGFtcGxlLmNvbQ.2t5oNw5THx0tyCc3SnhX0kz2PYJup7MIdr0Mmx9ps0o"
+    },
+    {
+      "type": "scan-code",
+      "name": "refuse a scan code behind a scheme",
+      "valid": false,
+      "reason": "a scan code behind a scheme",
+      "error": "link",
+      "string": "silo:SILOSCANA NKNOGIDHAOFDBPBNCNMICHDHEKHIFHNCEMPGDNICGOKHLDAIHGLNAMJLBPGJLDEK GIHEHEHAHDDKCPCPGNGFGEGJGBCOGFHIGBGNHAGMGFCOGDGPGN"
+    },
+    {
+      "type": "scan-code",
+      "name": "refuse a wrong prefix",
+      "valid": false,
+      "reason": "a wrong prefix",
+      "error": "prefix",
+      "string": "SILOSCAMA NKNOGIDHAOFDBPBNCNMICHDHEKHIFHNCEMPGDNICGOKHLDAIHGLNAMJLBPGJLDEK GIHEHEHAHDDKCPCPGNGFGEGJGBCOGFHIGBGNHAGMGFCOGDGPGN"
+    },
+    {
+      "type": "scan-code",
+      "name": "refuse a lower-case prefix",
+      "valid": false,
+      "reason": "a lower-case prefix",
+      "error": "prefix",
+      "string": "siloscana NKNOGIDHAOFDBPBNCNMICHDHEKHIFHNCEMPGDNICGOKHLDAIHGLNAMJLBPGJLDEK GIHEHEHAHDDKCPCPGNGFGEGJGBCOGFHIGBGNHAGMGFCOGDGPGN"
+    },
+    {
+      "type": "scan-code",
+      "name": "refuse leading white space",
+      "valid": false,
+      "reason": "leading white space",
+      "error": "prefix",
+      "string": " SILOSCANA NKNOGIDHAOFDBPBNCNMICHDHEKHIFHNCEMPGDNICGOKHLDAIHGLNAMJLBPGJLDEK GIHEHEHAHDDKCPCPGNGFGEGJGBCOGFHIGBGNHAGMGFCOGDGPGN"
+    },
+    {
+      "type": "scan-code",
+      "name": "refuse a wrong version",
+      "valid": false,
+      "reason": "a wrong version",
+      "error": "version",
+      "string": "SILOSCANB NKNOGIDHAOFDBPBNCNMICHDHEKHIFHNCEMPGDNICGOKHLDAIHGLNAMJLBPGJLDEK GIHEHEHAHDDKCPCPGNGFGEGJGBCOGFHIGBGNHAGMGFCOGDGPGN"
+    },
+    {
+      "type": "scan-code",
+      "name": "refuse no version",
+      "valid": false,
+      "reason": "no version",
+      "error": "version",
+      "string": "SILOSCAN NKNOGIDHAOFDBPBNCNMICHDHEKHIFHNCEMPGDNICGOKHLDAIHGLNAMJLBPGJLDEK GIHEHEHAHDDKCPCPGNGFGEGJGBCOGFHIGBGNHAGMGFCOGDGPGN"
+    },
+    {
+      "type": "scan-code",
+      "name": "refuse a trailing space",
+      "valid": false,
+      "reason": "a trailing space",
+      "error": "parts",
+      "string": "SILOSCANA NKNOGIDHAOFDBPBNCNMICHDHEKHIFHNCEMPGDNICGOKHLDAIHGLNAMJLBPGJLDEK GIHEHEHAHDDKCPCPGNGFGEGJGBCOGFHIGBGNHAGMGFCOGDGPGN "
+    },
+    {
+      "type": "scan-code",
+      "name": "refuse an extra part",
+      "valid": false,
+      "reason": "an extra part",
+      "error": "parts",
+      "string": "SILOSCANA NKNOGIDHAOFDBPBNCNMICHDHEKHIFHNCEMPGDNICGOKHLDAIHGLNAMJLBPGJLDEK GIHEHEHAHDDKCPCPGNGFGEGJGBCOGFHIGBGNHAGMGFCOGDGPGN AA"
+    },
+    {
+      "type": "scan-code",
+      "name": "refuse two spaces between parts",
+      "valid": false,
+      "reason": "two spaces between parts",
+      "error": "parts",
+      "string": "SILOSCANA  NKNOGIDHAOFDBPBNCNMICHDHEKHIFHNCEMPGDNICGOKHLDAIHGLNAMJLBPGJLDEK GIHEHEHAHDDKCPCPGNGFGEGJGBCOGFHIGBGNHAGMGFCOGDGPGN"
+    },
+    {
+      "type": "scan-code",
+      "name": "refuse a trailing line feed",
+      "valid": false,
+      "reason": "a trailing line feed",
+      "error": "address",
+      "string": "SILOSCANA NKNOGIDHAOFDBPBNCNMICHDHEKHIFHNCEMPGDNICGOKHLDAIHGLNAMJLBPGJLDEK GIHEHEHAHDDKCPCPGNGFGEGJGBCOGFHIGBGNHAGMGFCOGDGPGN\n"
+    },
+    {
+      "type": "scan-code",
+      "name": "refuse an upper-case host",
+      "valid": false,
+      "reason": "an upper-case host",
+      "error": "address",
+      "string": "SILOSCANA NKNOGIDHAOFDBPBNCNMICHDHEKHIFHNCEMPGDNICGOKHLDAIHGLNAMJLBPGJLDEK GIHEHEHAHDDKCPCPENGFGEGJGBCOGFHIGBGNHAGMGFCOGDGPGN"
+    },
+    {
+      "type": "scan-code",
+      "name": "refuse the default port written out",
+      "valid": false,
+      "reason": "the default port written out",
+      "error": "address",
+      "string": "SILOSCANA NKNOGIDHAOFDBPBNCNMICHDHEKHIFHNCEMPGDNICGOKHLDAIHGLNAMJLBPGJLDEK GIHEHEHAHDDKCPCPGNGFGEGJGBCOGFHIGBGNHAGMGFCOGDGPGNDKDEDEDD"
+    },
+    {
+      "type": "scan-code",
+      "name": "refuse a trailing dot on the host",
+      "valid": false,
+      "reason": "a trailing dot on the host",
+      "error": "address",
+      "string": "SILOSCANA NKNOGIDHAOFDBPBNCNMICHDHEKHIFHNCEMPGDNICGOKHLDAIHGLNAMJLBPGJLDEK GIHEHEHAHDDKCPCPGNGFGEGJGBCOGFHIGBGNHAGMGFCOGDGPGNCO"
+    },
+    {
+      "type": "scan-code",
+      "name": "refuse user info",
+      "valid": false,
+      "reason": "user info",
+      "error": "address",
+      "string": "SILOSCANA NKNOGIDHAOFDBPBNCNMICHDHEKHIFHNCEMPGDNICGOKHLDAIHGLNAMJLBPGJLDEK GIHEHEHAHDDKCPCPHFHDGFHCEAGNGFGEGJGBCOGFHIGBGNHAGMGFCOGDGPGN"
+    },
+    {
+      "type": "scan-code",
+      "name": "refuse a trailing slash",
+      "valid": false,
+      "reason": "a trailing slash",
+      "error": "address",
+      "string": "SILOSCANA NKNOGIDHAOFDBPBNCNMICHDHEKHIFHNCEMPGDNICGOKHLDAIHGLNAMJLBPGJLDEK GIHEHEHAHDDKCPCPGNGFGEGJGBCOGFHIGBGNHAGMGFCOGDGPGNCP"
+    },
+    {
+      "type": "scan-code",
+      "name": "refuse an address in base64url",
+      "valid": false,
+      "reason": "an address in base64url",
+      "error": "address",
+      "string": "SILOSCANA NKNOGIDHAOFDBPBNCNMICHDHEKHIFHNCEMPGDNICGOKHLDAIHGLNAMJLBPGJLDEK aHR0cHM6Ly9tZWRpYS5leGFtcGxlLmNvbQ"
+    },
+    {
+      "type": "scan-code",
+      "name": "refuse an address with = padding",
+      "valid": false,
+      "reason": "an address with = padding",
+      "error": "address",
+      "string": "SILOSCANA NKNOGIDHAOFDBPBNCNMICHDHEKHIFHNCEMPGDNICGOKHLDAIHGLNAMJLBPGJLDEK GIHEHEHAHDDKCPCPGNGFGEGJGBCOGFHIGBGNHAGMGFCOGDGPGN=="
+    },
+    {
+      "type": "scan-code",
+      "name": "refuse an address with an odd number of letters",
+      "valid": false,
+      "reason": "an address with an odd number of letters",
+      "error": "address",
+      "string": "SILOSCANA NKNOGIDHAOFDBPBNCNMICHDHEKHIFHNCEMPGDNICGOKHLDAIHGLNAMJLBPGJLDEK GIHEHEHAHDDKCPCPGNGFGEGJGBCOGFHIGBGNHAGMGFCOGDGPGNA"
+    },
+    {
+      "type": "scan-code",
+      "name": "refuse an address in lower-case letters",
+      "valid": false,
+      "reason": "an address in lower-case letters",
+      "error": "address",
+      "string": "SILOSCANA NKNOGIDHAOFDBPBNCNMICHDHEKHIFHNCEMPGDNICGOKHLDAIHGLNAMJLBPGJLDEK gihehehahddkcpcpgngfgegjgbcogfhigbgnhagmgfcogdgpgn"
+    },
+    {
+      "type": "scan-code",
+      "name": "refuse an address with a letter past P",
+      "valid": false,
+      "reason": "an address with a letter past P",
+      "error": "address",
+      "string": "SILOSCANA NKNOGIDHAOFDBPBNCNMICHDHEKHIFHNCEMPGDNICGOKHLDAIHGLNAMJLBPGJLDEK GIHEHEHAHDDKCPCPGNGFGEGJGBCOGFHIGBGNHAGMGFCOGDGPGQ"
+    },
+    {
+      "type": "scan-code",
+      "name": "refuse an address that is not UTF-8",
+      "valid": false,
+      "reason": "an address that is not UTF-8",
+      "error": "address",
+      "string": "SILOSCANA NKNOGIDHAOFDBPBNCNMICHDHEKHIFHNCEMPGDNICGOKHLDAIHGLNAMJLBPGJLDEK GIHEHEHAHDDKCPCPGNGFGEGJGBCOGFHIGBGNHAGMGFCOGDGPGNFF"
+    },
+    {
+      "type": "scan-code",
+      "name": "refuse a short code",
+      "valid": false,
+      "reason": "a short code",
+      "error": "app_code",
+      "string": "SILOSCANA NKNOGIDHAOFDBPBNCNMICHDHEKHIFHNCEMPGDNICGOKHLDAIHGLNAMJLBPGJLD GIHEHEHAHDDKCPCPGNGFGEGJGBCOGFHIGBGNHAGMGFCOGDGPGN"
+    },
+    {
+      "type": "scan-code",
+      "name": "refuse a long code",
+      "valid": false,
+      "reason": "a long code",
+      "error": "app_code",
+      "string": "SILOSCANA NKNOGIDHAOFDBPBNCNMICHDHEKHIFHNCEMPGDNICGOKHLDAIHGLNAMJLBPGJLDEKAA GIHEHEHAHDDKCPCPGNGFGEGJGBCOGFHIGBGNHAGMGFCOGDGPGN"
+    },
+    {
+      "type": "scan-code",
+      "name": "refuse a code with a letter past P",
+      "valid": false,
+      "reason": "a code with a letter past P",
+      "error": "app_code",
+      "string": "SILOSCANA NKNOGIDHAOFDBPBNCNMICHDHEKHIFHNCEMPGDNICGOKHLDAIHGLNAMJLBPGJLDEZ GIHEHEHAHDDKCPCPGNGFGEGJGBCOGFHIGBGNHAGMGFCOGDGPGN"
+    },
+    {
+      "type": "scan-code",
+      "name": "refuse a code in lower-case letters",
+      "valid": false,
+      "reason": "a code in lower-case letters",
+      "error": "app_code",
+      "string": "SILOSCANA nknogidhaofdbpbncnmichdhekhifhncempgdnicgokhldaihglnamjlbpgjldek GIHEHEHAHDDKCPCPGNGFGEGJGBCOGFHIGBGNHAGMGFCOGDGPGN"
+    },
+    {
+      "type": "scan-code",
+      "name": "refuse a code in base64url",
+      "valid": false,
+      "reason": "a code in base64url",
+      "error": "app_code",
+      "string": "SILOSCANA 2t5oNw5THx0tyCc3SnhX0kz2PYJup7MIdr0Mmx9ps0o GIHEHEHAHDDKCPCPGNGFGEGJGBCOGFHIGBGNHAGMGFCOGDGPGN"
+    },
+    {
+      "type": "scan-code",
+      "name": "refuse an address over 128 bytes, over the maximum length",
+      "valid": false,
+      "reason": "an address over 128 bytes, over the maximum length",
+      "error": "too_long",
+      "string": "SILOSCANA NKNOGIDHAOFDBPBNCNMICHDHEKHIFHNCEMPGDNICGOKHLDAIHGLNAMJLBPGJLDEK GIHEHEHAHDDKCPCPGFHIGBGNHAGMGFCOGDGPGNCPGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGB"
+    },
+    {
+      "type": "scan-code",
+      "name": "refuse a mixed-case prefix",
+      "valid": false,
+      "reason": "a mixed-case prefix",
+      "error": "prefix",
+      "string": "SiloScanA NKNOGIDHAOFDBPBNCNMICHDHEKHIFHNCEMPGDNICGOKHLDAIHGLNAMJLBPGJLDEK GIHEHEHAHDDKCPCPGNGFGEGJGBCOGFHIGBGNHAGMGFCOGDGPGN"
+    },
+    {
+      "type": "scan-code",
+      "name": "refuse a space inside the prefix",
+      "valid": false,
+      "reason": "a space inside the prefix",
+      "error": "version",
+      "string": "SILOSCAN A NKNOGIDHAOFDBPBNCNMICHDHEKHIFHNCEMPGDNICGOKHLDAIHGLNAMJLBPGJLDEK GIHEHEHAHDDKCPCPGNGFGEGJGBCOGFHIGBGNHAGMGFCOGDGPGN"
+    },
+    {
+      "type": "scan-code",
+      "name": "refuse a tab between the prefix and the code",
+      "valid": false,
+      "reason": "a tab between the prefix and the code",
+      "error": "version",
+      "string": "SILOSCANA\tNKNOGIDHAOFDBPBNCNMICHDHEKHIFHNCEMPGDNICGOKHLDAIHGLNAMJLBPGJLDEK GIHEHEHAHDDKCPCPGNGFGEGJGBCOGFHIGBGNHAGMGFCOGDGPGN"
+    },
+    {
+      "type": "scan-code",
+      "name": "refuse a tab between the code and the address",
+      "valid": false,
+      "reason": "a tab between the code and the address",
+      "error": "parts",
+      "string": "SILOSCANA NKNOGIDHAOFDBPBNCNMICHDHEKHIFHNCEMPGDNICGOKHLDAIHGLNAMJLBPGJLDEK\tGIHEHEHAHDDKCPCPGNGFGEGJGBCOGFHIGBGNHAGMGFCOGDGPGN"
+    },
+    {
+      "type": "scan-code",
+      "name": "refuse a non-breaking space between the code and the address",
+      "valid": false,
+      "reason": "a non-breaking space between the code and the address",
+      "error": "parts",
+      "string": "SILOSCANA NKNOGIDHAOFDBPBNCNMICHDHEKHIFHNCEMPGDNICGOKHLDAIHGLNAMJLBPGJLDEK GIHEHEHAHDDKCPCPGNGFGEGJGBCOGFHIGBGNHAGMGFCOGDGPGN"
+    },
+    {
+      "type": "scan-code",
+      "name": "refuse CRLF at the end",
+      "valid": false,
+      "reason": "CRLF at the end",
+      "error": "address",
+      "string": "SILOSCANA NKNOGIDHAOFDBPBNCNMICHDHEKHIFHNCEMPGDNICGOKHLDAIHGLNAMJLBPGJLDEK GIHEHEHAHDDKCPCPGNGFGEGJGBCOGFHIGBGNHAGMGFCOGDGPGN\r\n"
+    },
+    {
+      "type": "scan-code",
+      "name": "refuse a leading line feed",
+      "valid": false,
+      "reason": "a leading line feed",
+      "error": "prefix",
+      "string": "\nSILOSCANA NKNOGIDHAOFDBPBNCNMICHDHEKHIFHNCEMPGDNICGOKHLDAIHGLNAMJLBPGJLDEK GIHEHEHAHDDKCPCPGNGFGEGJGBCOGFHIGBGNHAGMGFCOGDGPGN"
+    },
+    {
+      "type": "scan-code",
+      "name": "refuse a byte order mark first",
+      "valid": false,
+      "reason": "a byte order mark first",
+      "error": "prefix",
+      "string": "﻿SILOSCANA NKNOGIDHAOFDBPBNCNMICHDHEKHIFHNCEMPGDNICGOKHLDAIHGLNAMJLBPGJLDEK GIHEHEHAHDDKCPCPGNGFGEGJGBCOGFHIGBGNHAGMGFCOGDGPGN"
+    },
+    {
+      "type": "scan-code",
+      "name": "refuse 63 letters of code",
+      "valid": false,
+      "reason": "63 letters of code",
+      "error": "app_code",
+      "string": "SILOSCANA NKNOGIDHAOFDBPBNCNMICHDHEKHIFHNCEMPGDNICGOKHLDAIHGLNAMJLBPGJLDE GIHEHEHAHDDKCPCPGNGFGEGJGBCOGFHIGBGNHAGMGFCOGDGPGN"
+    },
+    {
+      "type": "scan-code",
+      "name": "refuse 65 letters of code",
+      "valid": false,
+      "reason": "65 letters of code",
+      "error": "app_code",
+      "string": "SILOSCANA NKNOGIDHAOFDBPBNCNMICHDHEKHIFHNCEMPGDNICGOKHLDAIHGLNAMJLBPGJLDEKA GIHEHEHAHDDKCPCPGNGFGEGJGBCOGFHIGBGNHAGMGFCOGDGPGN"
+    },
+    {
+      "type": "scan-code",
+      "name": "refuse an empty address part",
+      "valid": false,
+      "reason": "an empty address part",
+      "error": "address",
+      "string": "SILOSCANA NKNOGIDHAOFDBPBNCNMICHDHEKHIFHNCEMPGDNICGOKHLDAIHGLNAMJLBPGJLDEK "
+    },
+    {
+      "type": "scan-code",
+      "name": "refuse only two parts",
+      "valid": false,
+      "reason": "only two parts",
+      "error": "parts",
+      "string": "SILOSCANA NKNOGIDHAOFDBPBNCNMICHDHEKHIFHNCEMPGDNICGOKHLDAIHGLNAMJLBPGJLDEK"
+    },
+    {
+      "type": "scan-code",
+      "name": "refuse an address with a Unicode host",
+      "valid": false,
+      "reason": "an address with a Unicode host",
+      "error": "address",
+      "string": "SILOSCANA NKNOGIDHAOFDBPBNCNMICHDHEKHIFHNCEMPGDNICGOKHLDAIHGLNAMJLBPGJLDEK GIHEHEHAHDDKCPCPGDGBGGMDKJCOGFHIGBGNHAGMGF"
+    },
+    {
+      "type": "scan-code",
+      "name": "refuse an address with a query",
+      "valid": false,
+      "reason": "an address with a query",
+      "error": "address",
+      "string": "SILOSCANA NKNOGIDHAOFDBPBNCNMICHDHEKHIFHNCEMPGDNICGOKHLDAIHGLNAMJLBPGJLDEK GIHEHEHAHDDKCPCPGNGFGEGJGBCOGFHIGBGNHAGMGFCOGDGPGNCPDPHIDNDB"
+    },
+    {
+      "type": "scan-code",
+      "name": "refuse an address with a fragment",
+      "valid": false,
+      "reason": "an address with a fragment",
+      "error": "address",
+      "string": "SILOSCANA NKNOGIDHAOFDBPBNCNMICHDHEKHIFHNCEMPGDNICGOKHLDAIHGLNAMJLBPGJLDEK GIHEHEHAHDDKCPCPGNGFGEGJGBCOGFHIGBGNHAGMGFCOGDGPGNCPCDHI"
+    },
+    {
+      "type": "scan-code",
+      "name": "refuse an ftp address",
+      "valid": false,
+      "reason": "an ftp address",
+      "error": "address",
+      "string": "SILOSCANA NKNOGIDHAOFDBPBNCNMICHDHEKHIFHNCEMPGDNICGOKHLDAIHGLNAMJLBPGJLDEK GGHEHADKCPCPGNGFGEGJGBCOGFHIGBGNHAGMGFCOGDGPGN"
+    },
+    {
+      "type": "scan-code",
+      "name": "refuse a lone surrogate in UTF-8 form",
+      "valid": false,
+      "reason": "a lone surrogate in UTF-8 form",
+      "error": "address",
+      "string": "SILOSCANA NKNOGIDHAOFDBPBNCNMICHDHEKHIFHNCEMPGDNICGOKHLDAIHGLNAMJLBPGJLDEK GIHEHEHAHDDKCPCPGNGFGEGJGBCOGFHIGBGNHAGMGFCOGDGPGNCPGBONKAIA"
+    },
+    {
+      "type": "scan-code",
+      "name": "refuse an overlong UTF-8 encoding",
+      "valid": false,
+      "reason": "an overlong UTF-8 encoding",
+      "error": "address",
+      "string": "SILOSCANA NKNOGIDHAOFDBPBNCNMICHDHEKHIFHNCEMPGDNICGOKHLDAIHGLNAMJLBPGJLDEK GIHEHEHAHDDKCPCPGNGFGEGJGBCOGFHIGBGNHAGMGFCOGDGPGNMAKP"
+    },
+    {
+      "type": "scan-code",
+      "name": "refuse exactly 332 bytes",
+      "valid": false,
+      "reason": "exactly 332 bytes",
+      "error": "too_long",
+      "string": "SILOSCANA NKNOGIDHAOFDBPBNCNMICHDHEKHIFHNCEMPGDNICGOKHLDAIHGLNAMJLBPGJLDEK GIHEHEHAHDDKCPCPGFHIGBGNHAGMGFCOGDGPGNCPGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBA"
+    },
+    {
+      "type": "scan-code",
+      "name": "refuse 331 UTF-16 units and 332 bytes",
+      "valid": false,
+      "reason": "331 UTF-16 units and 332 bytes",
+      "error": "too_long",
+      "string": "SILOSCANA NKNOGIDHAOFDBPBNCNMICHDHEKHIFHNCEMPGDNICGOKHLDAIHGLNAMJLBPGJLDEK GIHEHEHAHDDKCPCPGFHIGBGNHAGMGFCOGDGPGNCPGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGBGé"
+    },
+    {
+      "type": "scan-code",
+      "name": "refuse SILOSCANA and a colon",
+      "valid": false,
+      "reason": "SILOSCANA and a colon",
+      "error": "link",
+      "string": "SILOSCANA:"
+    },
+    {
+      "type": "scan-code",
+      "name": "refuse siloscana, a colon and more",
+      "valid": false,
+      "reason": "siloscana, a colon and more",
+      "error": "link",
+      "string": "siloscana: x"
+    },
+    {
+      "type": "scan-code",
+      "name": "refuse too long and a scheme",
+      "valid": false,
+      "reason": "too long and a scheme",
+      "error": "too_long",
+      "string": "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "type": "scan-code",
+      "name": "refuse a scheme and a wrong prefix",
+      "valid": false,
+      "reason": "a scheme and a wrong prefix",
+      "error": "link",
+      "string": "silo:SILOSCAMA NKNOGIDHAOFDBPBNCNMICHDHEKHIFHNCEMPGDNICGOKHLDAIHGLNAMJLBPGJLDEK GIHEHEHAHDDKCPCPGNGFGEGJGBCOGFHIGBGNHAGMGFCOGDGPGN"
+    },
+    {
+      "type": "scan-code",
+      "name": "refuse a wrong prefix and a wrong version",
+      "valid": false,
+      "reason": "a wrong prefix and a wrong version",
+      "error": "prefix",
+      "string": "SILOSCAMB NKNOGIDHAOFDBPBNCNMICHDHEKHIFHNCEMPGDNICGOKHLDAIHGLNAMJLBPGJLDEK GIHEHEHAHDDKCPCPGNGFGEGJGBCOGFHIGBGNHAGMGFCOGDGPGN"
+    },
+    {
+      "type": "scan-code",
+      "name": "refuse a wrong version and an extra part",
+      "valid": false,
+      "reason": "a wrong version and an extra part",
+      "error": "version",
+      "string": "SILOSCANB NKNOGIDHAOFDBPBNCNMICHDHEKHIFHNCEMPGDNICGOKHLDAIHGLNAMJLBPGJLDEK GIHEHEHAHDDKCPCPGNGFGEGJGBCOGFHIGBGNHAGMGFCOGDGPGN AA"
+    },
+    {
+      "type": "scan-code",
+      "name": "refuse an extra part and a short code",
+      "valid": false,
+      "reason": "an extra part and a short code",
+      "error": "parts",
+      "string": "SILOSCANA NKNOGIDHAOFDBPBNCNMICHDHEKHIFHNCEMPGDNICGOKHLDAIHGLNAMJLBPGJLD GIHEHEHAHDDKCPCPGNGFGEGJGBCOGFHIGBGNHAGMGFCOGDGPGN AA"
+    },
+    {
+      "type": "scan-code",
+      "name": "refuse a short code and an address not in its one spelling",
+      "valid": false,
+      "reason": "a short code and an address not in its one spelling",
+      "error": "app_code",
+      "string": "SILOSCANA NKNOGIDHAOFDBPBNCNMICHDHEKHIFHNCEMPGDNICGOKHLDAIHGLNAMJLBPGJLD GIHEHEHAHDDKCPCPENGFGEGJGBCOGFHIGBGNHAGMGFCOGDGPGN"
+    }
+  ]
+}
