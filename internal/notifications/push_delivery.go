@@ -366,11 +366,21 @@ func (r *PushDeviceRepository) claimPushAttempts(ctx context.Context, query stri
 	return attempts, err
 }
 
+// pushDeviceFailure is a send failure recorded on the device with the
+// attempt's outcome (FinalizePushAttempt): its code, and whether the device
+// is disabled for a token the push service rejected.
+type pushDeviceFailure struct {
+	deviceID string
+	code     string
+	disable  bool
+}
+
 // FinalizePushAttempt records a send result. It applies only while the attempt
 // still holds the claim it was sent under, and returns nil otherwise: a send
 // that outlived its lease was reclaimed, and the worker holding the new
-// claim records the outcome.
-func (r *PushDeviceRepository) FinalizePushAttempt(ctx context.Context, claimed PushDeliveryAttempt, outcome string, attemptNumber int, relayRequestID string, upstreamStatus *int, upstreamReason, failureMessage string, nextRetryAt *time.Time) (*PushDeliveryAttempt, error) {
+// claim records the outcome. A non-nil failure is recorded on the device in
+// the same transaction, only when the outcome applies.
+func (r *PushDeviceRepository) FinalizePushAttempt(ctx context.Context, claimed PushDeliveryAttempt, outcome string, attemptNumber int, relayRequestID string, upstreamStatus *int, upstreamReason, failureMessage string, nextRetryAt *time.Time, failure *pushDeviceFailure) (*PushDeliveryAttempt, error) {
 	var relayRequestIDPtr *string
 	if relayRequestID != "" {
 		relayRequestIDPtr = &relayRequestID
@@ -383,7 +393,12 @@ func (r *PushDeviceRepository) FinalizePushAttempt(ctx context.Context, claimed 
 	if failureMessage != "" {
 		failureMessagePtr = &failureMessage
 	}
-	rows, err := r.pool.Query(ctx, `
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("finalize push attempt: %w", err)
+	}
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	rows, err := tx.Query(ctx, `
 		UPDATE push_delivery_attempts
 		SET outcome = $2,
 		    attempt_number = $3,
@@ -405,6 +420,14 @@ func (r *PushDeviceRepository) FinalizePushAttempt(ctx context.Context, claimed 
 	}
 	if len(attempts) == 0 {
 		return nil, nil
+	}
+	if failure != nil {
+		if _, err := tx.Exec(ctx, recordPushFailureSQL, failure.deviceID, failure.code, failure.disable); err != nil {
+			return nil, fmt.Errorf("record push failure: %w", err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("finalize push attempt: %w", err)
 	}
 	return &attempts[0], nil
 }
@@ -508,14 +531,18 @@ func (r *PushDeviceRepository) RecordPushSuccess(ctx context.Context, deviceID s
 	return err
 }
 
-func (r *PushDeviceRepository) RecordPushFailure(ctx context.Context, deviceID, code string, disable bool) error {
-	_, err := r.pool.Exec(ctx, `
+// recordPushFailureSQL records a device's failed send ($2 its code) and,
+// when $3, disables it.
+const recordPushFailureSQL = `
 		UPDATE push_devices
 		SET last_failure_at = now(),
 		    last_failure_code = left($2, 128),
 		    enabled = CASE WHEN $3 THEN false ELSE enabled END,
 		    updated_at = now()
-		WHERE id = $1`, deviceID, code, disable)
+		WHERE id = $1`
+
+func (r *PushDeviceRepository) RecordPushFailure(ctx context.Context, deviceID, code string, disable bool) error {
+	_, err := r.pool.Exec(ctx, recordPushFailureSQL, deviceID, code, disable)
 	return err
 }
 

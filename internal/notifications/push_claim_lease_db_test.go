@@ -153,3 +153,23 @@ func TestPushLateFinishAfterReclaimLeavesTheNewClaimDB(t *testing.T) {
 		t.Fatalf("device last_failure_code = %q after a send whose claim was reclaimed, want none", *failureCode)
 	}
 }
+
+// Every relay request a send makes, credential recovery and capability
+// retries included, runs under a deadline that ends inside the claim's lease
+// with time left to record the result (#4593 review).
+func TestPushSendRunsInsideTheClaimLeaseDB(t *testing.T) {
+	h := newPushLeaseHarness(t)
+	var deadline time.Time
+	h.relay = func(r *http.Request) (*http.Response, error) {
+		deadline, _ = r.Context().Deadline()
+		return relayResponse(http.StatusOK, `{"request_id":"relay-request","status":"accepted"}`), nil
+	}
+	attempt := h.claim(t, h.prefix+"-deadline")
+	h.sender.processAttempt(context.Background(), attempt)
+	if deadline.IsZero() {
+		t.Fatal("relay request had no deadline")
+	}
+	if latest := attempt.claimedAt.Add(webhookClaimLease - pushFinalizeMargin); deadline.After(latest.Add(time.Second)) {
+		t.Fatalf("relay request deadline %s, want no later than %s (the lease less the finalize margin)", deadline, latest)
+	}
+}
