@@ -38,6 +38,14 @@ func switchOff(ctx context.Context, pool *pgxpool.Pool) error {
 // lock: the observable state a race test holds before releasing a blocker.
 func waitForLockWaiters(t *testing.T, pool *pgxpool.Pool, n int) {
 	t.Helper()
+	waitForLockWaitersWhile(t, pool, n, nil)
+}
+
+// waitForLockWaitersWhile is waitForLockWaiters for parties that must all
+// wait: a party that answers on returned before n backends wait fails the
+// test at once with its answer, rather than when the wait times out.
+func waitForLockWaitersWhile(t *testing.T, pool *pgxpool.Pool, n int, returned <-chan error) {
+	t.Helper()
 	deadline := time.Now().Add(20 * time.Second)
 	for {
 		var waiting int
@@ -51,7 +59,11 @@ func waitForLockWaiters(t *testing.T, pool *pgxpool.Pool, n int) {
 		if time.Now().After(deadline) {
 			t.Fatalf("%d backends waiting on a lock, want %d", waiting, n)
 		}
-		time.Sleep(10 * time.Millisecond) //nolint:forbidigo // the poll interval; the wait is on pg_stat_activity, an observable lock wait
+		select {
+		case err := <-returned:
+			t.Fatalf("a party returned before %d backends waited on a lock: %v", n, err)
+		case <-time.After(10 * time.Millisecond):
+		}
 	}
 }
 

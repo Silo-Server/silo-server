@@ -114,20 +114,16 @@ func TestOwnershipTransferSignInAndSwitchOffDB(t *testing.T) {
 				done := make(chan error, 3)
 				for i, p := range order {
 					go func() {
-						if err := parties[p](); err != nil {
-							done <- fmt.Errorf("%s: %w", names[p], err)
-							return
-						}
-						done <- nil
+						done <- fmt.Errorf("%s: %w", names[p], parties[p]())
 					}()
-					waitForLockWaiters(t, env.pool, i+1)
+					waitForLockWaitersWhile(t, env.pool, i+1, done)
 				}
 				if err := hold.Rollback(ctx); err != nil {
 					t.Fatal(err)
 				}
 				var failed []string
 				for range 3 {
-					if err := <-done; err != nil {
+					if err := <-done; errors.Unwrap(err) != nil {
 						failed = append(failed, err.Error())
 					}
 				}

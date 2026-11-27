@@ -40,7 +40,15 @@ func newExternalSignInEnv(t *testing.T) *externalSignInEnv {
 		t.Skip("SILO_TEST_DATABASE_URL is not set")
 	}
 	ctx := t.Context()
-	pool, err := pgxpool.New(ctx, dsn)
+	poolConfig, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		t.Fatalf("parse test database URL: %v", err)
+	}
+	// Staged race tests hold a blocker, several parties and a poll at once;
+	// the default size (the larger of 4 and the CPU count) would park a party
+	// in the pool on a 4-CPU runner, where Postgres never sees it wait.
+	poolConfig.MaxConns = 16
+	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
 	if err != nil {
 		t.Fatalf("connect test database: %v", err)
 	}
