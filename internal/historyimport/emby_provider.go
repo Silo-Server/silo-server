@@ -191,7 +191,13 @@ func mergeWatchedRecords(played, progress []Record) []Record {
 	for _, update := range progress {
 		for i := range played {
 			if played[i].ExternalID == update.ExternalID {
-				played[i] = mergeRecords(played[i], update)
+				merged := mergeRecords(played[i], update)
+				// An expanded file's episodes own a share of its runtime; the
+				// unexpanded progress copy carries the whole file's.
+				if len(played) > 1 {
+					merged.DurationSeconds = played[i].DurationSeconds
+				}
+				played[i] = merged
 			}
 		}
 	}
@@ -274,6 +280,9 @@ func episodeRangeRecords(record Record, itemID string, first, last int) []Record
 		next.ExternalID = fmt.Sprintf("%s#E%d", itemID, episode)
 		next.EpisodeNumber = episode
 		next.IMDbID, next.TMDBID, next.TVDBID = "", "", ""
+		// The file's favorite is the first episode's, as the favorites stream
+		// reports it; the others are not favorites of their own.
+		next.Favorite, next.FavoriteOnly = false, false
 		records = append(records, next)
 	}
 	return records
