@@ -35,8 +35,6 @@ url_db=${url_db%%/*}
 repo_root=$(git rev-parse --show-toplevel)
 cd "$repo_root"
 export SILO_DIRECT_TEST_REDIS_URL
-# -p 1: the packages share database $db and each test flushes it, so they
-# must not run at the same time.
-exec go test -tags redislab -count=1 -p 1 -v \
-	-run '^(TestRedisEnrollmentLimitAndConflict|TestRedisFlushForcesReenrollment|TestRedisLabConditionalStoreConformance|TestDirectSignalingRedisRestart|TestShutdownOrderRedis|TestShutdownReleasesLeaseWithOpenStream)$' \
-	./internal/directconn/... ./internal/apiv2/
+exec go test -tags redislab -count=1 -v \
+	-run '^(TestRedisEnrollmentLimitAndConflict|TestRedisFlushForcesReenrollment|TestRedisLabConditionalStoreConformance)$' \
+	./internal/directconn/

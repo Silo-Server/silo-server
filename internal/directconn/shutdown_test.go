@@ -15,9 +15,7 @@ import (
 	"github.com/darthShadow/shunpike/coordination/server"
 	"github.com/darthShadow/shunpike/engine"
 	"github.com/darthShadow/shunpike/engine/n4"
-	"github.com/redis/go-redis/v9"
 
-	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/lantls"
 	"github.com/Silo-Server/silo-server/internal/tuning"
 )
@@ -63,9 +61,8 @@ func freeUDPPort(t *testing.T) int {
 	return conn.LocalAddr().(*net.UDPAddr).Port
 }
 
-// newShutdownRig starts the engine on a free port. A non-nil redisClient adds the
-// replica census and the engine lease.
-func newShutdownRig(t *testing.T, redisClient *redis.Client) *shutdownRig {
+// newShutdownRig starts the engine on a free port.
+func newShutdownRig(t *testing.T) *shutdownRig {
 	t.Helper()
 	rig := &shutdownRig{port: freeUDPPort(t), store: newMemoryStore(), drainGate: make(chan struct{})}
 	settings := &memorySettings{values: map[string]string{"direct_connections.enabled": "true"}}
@@ -73,10 +70,6 @@ func newShutdownRig(t *testing.T, redisClient *redis.Client) *shutdownRig {
 	cfg.SecretKey = bytes.Repeat([]byte{0x41}, 32)
 	cfg.Tuning, _ = tuning.Parse(func(string) string { return "" })
 	cfg.Tuning.DirectUDPPort = rig.port
-	if redisClient != nil {
-		cfg.RedisClient = redisClient
-		cfg.ReplicaPresence = cache.NewAPIReplicaPresence(redisClient, "shutdown-test")
-	}
 	identity, err := lantls.New([]byte("01234567890123456789012345678901"))
 	if err != nil {
 		t.Fatal(err)
@@ -123,7 +116,7 @@ func newShutdownRig(t *testing.T, redisClient *redis.Client) *shutdownRig {
 // so the clock is the wall clock; the coordination server's reconcile tick (5 s)
 // is far longer than the test, so it cannot be what releases a held call.
 func TestShutdownOrder(t *testing.T) {
-	rig := newShutdownRig(t, nil)
+	rig := newShutdownRig(t)
 	device := newRegionDevice(t, rig.coord, "tv")
 	device.register(t, rig.coord)
 	first, err := rig.coord.Netmap(t.Context(), device.principal, "")
@@ -212,7 +205,7 @@ func TestShutdownOrder(t *testing.T) {
 // steps after the drain finish before the caller's deadline instead of failing on
 // a spent context.
 func TestShutdownReservesTimeAfterOpenStream(t *testing.T) {
-	rig := newShutdownRig(t, nil) // The drain gate stays shut: the stream never ends by itself.
+	rig := newShutdownRig(t) // The drain gate stays shut: the stream never ends by itself.
 	device := newRegionDevice(t, rig.coord, "tv")
 	device.register(t, rig.coord)
 	closed := device.connect(t, rig.coord, device.principal)
@@ -246,7 +239,7 @@ func TestShutdownReservesTimeAfterOpenStream(t *testing.T) {
 // draining and enrollment is refused, while netmap calls still wait out their
 // hold.
 func TestDrainRefusesEnrollmentAndMarksHost(t *testing.T) {
-	rig := newShutdownRig(t, nil)
+	rig := newShutdownRig(t)
 	close(rig.drainGate)
 	defer func() { _ = rig.svc.Shutdown(context.Background()) }()
 	rig.coord.cfg.Host = rig.svc

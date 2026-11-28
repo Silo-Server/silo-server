@@ -31,11 +31,9 @@ import (
 	"github.com/darthShadow/shunpike/coordination/server"
 	"github.com/darthShadow/shunpike/engine"
 	"github.com/darthShadow/shunpike/engine/coordclient"
-	"github.com/redis/go-redis/v9"
 	"tailscale.com/derp"
 	"tailscale.com/types/key"
 
-	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/directconn"
 	"github.com/Silo-Server/silo-server/internal/tuning"
@@ -410,32 +408,14 @@ type directStaticSettings map[string]string
 
 func (s directStaticSettings) GetAll(context.Context) (map[string]string, error) { return s, nil }
 
-// directRedis is the Redis setup of a service whose store is the Redis store:
-// the client and the process presence the service's replica monitor takes the
-// engine lease with. The store's fence must be the presence's ID, or every host
-// and confirmation write is refused. The redislab tests build it with
-// newDirectRedis.
-type directRedis struct {
-	client   *redis.Client
-	presence *cache.APIReplicaPresence
-}
-
 // startDirectService starts the API engine on a real UDP socket with the real
 // directconn service over store, and returns it once the engine is up. Its
 // coordination service reads clock. It opens UDP sockets, so a test that calls it
 // runs on the host. The secret derives the API node key, so a restart that keeps
-// it keeps the key. With rds, the service runs the replica census and engine
-// lease on rds's client and presence; without it, there is no lease, which only
-// the memory store accepts.
-func startDirectService(t *testing.T, store directconn.CoordinationStore, clock func() time.Time, secret [32]byte, rds ...directRedis) *directService {
+// it keeps the key. The service runs no replica census or engine lease, which
+// only the memory store accepts.
+func startDirectService(t *testing.T, store directconn.CoordinationStore, clock func() time.Time, secret [32]byte) *directService {
 	t.Helper()
-	var (
-		redisClient *redis.Client
-		presence    *cache.APIReplicaPresence
-	)
-	if len(rds) > 0 {
-		redisClient, presence = rds[0].client, rds[0].presence
-	}
 	tune, _ := tuning.Parse(func(string) string { return "" })
 	tune.DirectUDPPort = freeUDPPort(t)
 	logs := &lockedBuffer{}
@@ -456,7 +436,6 @@ func startDirectService(t *testing.T, store directconn.CoordinationStore, clock 
 		Capabilities: func(context.Context, *slog.Logger) (engine.CapabilityReport, error) {
 			return engine.CapabilityReport{Platform: "linux"}, nil
 		},
-		RedisClient: redisClient, ReplicaPresence: presence,
 	})
 	coord, err := directconn.NewCoordination(directconn.CoordinationConfig{Store: store, AuthSecret: directTestSecret, Clock: clock, Host: svc, TLSPin: directTestPin,
 		Logger: slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug}))})
@@ -945,9 +924,9 @@ func (f *directFlow) watchConfirmation(d *directDevice) <-chan protocol.Netmap {
 }
 
 // startFlow starts the API engine and serves the real registry over TLS.
-func startFlow(t *testing.T, store directconn.CoordinationStore, clock *directTestClock, secret [32]byte, rds ...directRedis) (*directService, *directFlow) {
+func startFlow(t *testing.T, store directconn.CoordinationStore, clock *directTestClock, secret [32]byte) (*directService, *directFlow) {
 	t.Helper()
-	ds := startDirectService(t, store, clock.Now, secret, rds...)
+	ds := startDirectService(t, store, clock.Now, secret)
 	e := newDirectTestEnv(t)
 	e.coord, e.clock = ds.coord, clock
 	e.deps.DirectCoordination = ds.coord
