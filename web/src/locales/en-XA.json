@@ -134818,35 +134818,13 @@
   "web.item.arrangeSeasons.startOver": [
     {
       "type": 0,
-      "value": "⟦Šţåŕţ öṽéŕ ƒŕöɱ…~~~~~~~⟧"
+      "value": "⟦Šţåŕţ öṽéŕ~~~~⟧"
     }
   ],
   "web.item.arrangeSeasons.startOverBody": [
     {
       "type": 0,
-      "value": "⟦Ýöûŕ çĥåñĝéš åŕé ļöšţ, åñđ ţĥé šéåšöñš šţåŕţ åĝåîñ ƒŕöɱ ţĥé öŕđéŕ ýöû þîçķéđ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
-    }
-  ],
-  "web.item.arrangeSeasons.startOverOption": [
-    {
-      "type": 0,
-      "value": "⟦"
-    },
-    {
-      "type": 1,
-      "value": "provider"
-    },
-    {
-      "type": 0,
-      "value": " · "
-    },
-    {
-      "type": 1,
-      "value": "order"
-    },
-    {
-      "type": 0,
-      "value": "~~⟧"
+      "value": "⟦Ýöûŕ çĥåñĝéš åŕé ļöšţ, åñđ ţĥé šéåšöñš šţåŕţ åĝåîñ ƒŕöɱ ţĥé öŕđéŕ.~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.item.arrangeSeasons.title": [
@@ -135575,6 +135553,12 @@
       "value": "⟦Åŕŕåñĝé šéåšöñš~~~~~~⟧"
     }
   ],
+  "web.item.episodeOrder.basedOn": [
+    {
+      "type": 0,
+      "value": "⟦Ɓåšéđ öñ~~~~⟧"
+    }
+  ],
   "web.item.episodeOrder.change": [
     {
       "type": 0,
@@ -135766,7 +135750,7 @@
   "web.item.episodeOrder.layout.custom": [
     {
       "type": 0,
-      "value": "⟦Çûšţöɱ šéåšöñš~~~~~~⟧"
+      "value": "⟦Çûšţöɱ~~~⟧"
     }
   ],
   "web.item.episodeOrder.layout.customBody": [
@@ -135784,7 +135768,7 @@
   "web.item.episodeOrder.layout.seasons": [
     {
       "type": 0,
-      "value": "⟦Šéåšöñš ƒŕöɱ ţĥé öŕđéŕ~~~~~~~~~⟧"
+      "value": "⟦Šéåšöñš~~~⟧"
     }
   ],
   "web.item.episodeOrder.layout.seasonsBody": [
@@ -136079,20 +136063,6 @@
       "value": " þļåçéđ~~~~~~⟧"
     }
   ],
-  "web.item.episodeOrder.preview.help": [
-    {
-      "type": 0,
-      "value": "⟦Ĥöŵ "
-    },
-    {
-      "type": 1,
-      "value": "title"
-    },
-    {
-      "type": 0,
-      "value": " ŵîļļ ļööķ åƒţéŕ ýöû åþþļý. Éåçĥ ŕöŵ îš åñ éþîšöđé îñ îţš ñéŵ þļåçé, ŵîţĥ ţĥé ƒîļé Šîļö ļîñķš ţö îţ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
-    }
-  ],
   "web.item.episodeOrder.preview.loading": [
     {
       "type": 0,
@@ -136221,12 +136191,6 @@
       "value": "~~~~~~⟧"
     }
   ],
-  "web.item.episodeOrder.preview.seasonPicker": [
-    {
-      "type": 0,
-      "value": "⟦Šéåšöñ ţö þŕéṽîéŵ~~~~~~~⟧"
-    }
-  ],
   "web.item.episodeOrder.preview.seasons": [
     {
       "type": 6,
@@ -136265,12 +136229,6 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
-    }
-  ],
-  "web.item.episodeOrder.preview.title": [
-    {
-      "type": 0,
-      "value": "⟦Þŕéṽîéŵ~~~⟧"
     }
   ],
   "web.item.episodeOrder.preview.unmatchedBody": [
@@ -136375,6 +136333,12 @@
     {
       "type": 0,
       "value": "~⟧"
+    }
+  ],
+  "web.item.episodeOrder.readOnlyHint": [
+    {
+      "type": 0,
+      "value": "⟦Ţö ɱöṽé éþîšöđéš, šþļîţ šéåšöñš öŕ ŕéñåɱé ţĥéɱ, åŕŕåñĝé ţĥé šéåšöñš ýöûŕšéļƒ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.item.episodeOrder.saveFailed": [

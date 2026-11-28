@@ -1,3 +1,4 @@
+import type { EpisodeOrderPreview } from "@/hooks/queries/episodeOrder";
 import type { Translate } from "@/i18n";
 
 /** A provider that numbers a series' episodes. */
@@ -43,4 +44,34 @@ export function fileOrderLabel(t: Translate, provider: Provider): string {
   return t(
     provider === "tvdb" ? "web.item.episodeOrder.files.tvdb" : "web.item.episodeOrder.files.tmdb",
   );
+}
+
+/** The provider whose numbering a file fit reads file names in. */
+const fitProvider = (fileOrder: string, structure: Provider): Provider =>
+  fileOrder ? asProvider(fileOrder) : structure;
+
+/** How many files the preview places when file names follow provider. */
+export function filesPlacedBy(
+  preview: EpisodeOrderPreview | undefined,
+  provider: Provider,
+  structure: Provider,
+) {
+  return preview?.file_order_fits.find((fit) => fitProvider(fit.file_order, structure) === provider)
+    ?.matched_files;
+}
+
+/** The file order that places the most files, when it beats the chosen one. */
+export function suggestedFiles(
+  preview: EpisodeOrderPreview | undefined,
+  files: Provider,
+  structure: Provider,
+): Provider | undefined {
+  if (!preview || preview.file_count === 0) return undefined;
+  let best: { provider: Provider; matched: number } | undefined;
+  for (const fit of preview.file_order_fits) {
+    if (!best || fit.matched_files > best.matched)
+      best = { provider: fitProvider(fit.file_order, structure), matched: fit.matched_files };
+  }
+  if (!best || best.provider === files || best.matched <= preview.matched_files) return undefined;
+  return best.provider;
 }

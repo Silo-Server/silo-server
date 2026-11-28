@@ -130298,31 +130298,13 @@
   "web.item.arrangeSeasons.startOver": [
     {
       "type": 0,
-      "value": "\u200F\u202EStart over from…\u202C"
+      "value": "\u200F\u202EStart over\u202C"
     }
   ],
   "web.item.arrangeSeasons.startOverBody": [
     {
       "type": 0,
-      "value": "\u200F\u202EYour changes are lost, and the seasons start again from the order you picked.\u202C"
-    }
-  ],
-  "web.item.arrangeSeasons.startOverOption": [
-    {
-      "type": 0,
-      "value": "\u200F"
-    },
-    {
-      "type": 1,
-      "value": "provider"
-    },
-    {
-      "type": 0,
-      "value": "\u202E · \u202C"
-    },
-    {
-      "type": 1,
-      "value": "order"
+      "value": "\u200F\u202EYour changes are lost, and the seasons start again from the order.\u202C"
     }
   ],
   "web.item.arrangeSeasons.title": [
@@ -131027,6 +131009,12 @@
       "value": "\u200F\u202EArrange seasons\u202C"
     }
   ],
+  "web.item.episodeOrder.basedOn": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EBased on\u202C"
+    }
+  ],
   "web.item.episodeOrder.change": [
     {
       "type": 0,
@@ -131210,7 +131198,7 @@
   "web.item.episodeOrder.layout.custom": [
     {
       "type": 0,
-      "value": "\u200F\u202ECustom seasons\u202C"
+      "value": "\u200F\u202ECustom\u202C"
     }
   ],
   "web.item.episodeOrder.layout.customBody": [
@@ -131228,7 +131216,7 @@
   "web.item.episodeOrder.layout.seasons": [
     {
       "type": 0,
-      "value": "\u200F\u202ESeasons from the order\u202C"
+      "value": "\u200F\u202ESeasons\u202C"
     }
   ],
   "web.item.episodeOrder.layout.seasonsBody": [
@@ -131523,20 +131511,6 @@
       "value": "\u202E placed\u202C"
     }
   ],
-  "web.item.episodeOrder.preview.help": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EHow \u202C"
-    },
-    {
-      "type": 1,
-      "value": "title"
-    },
-    {
-      "type": 0,
-      "value": "\u202E will look after you apply. Each row is an episode in its new place, with the file Silo links to it.\u202C"
-    }
-  ],
   "web.item.episodeOrder.preview.loading": [
     {
       "type": 0,
@@ -131653,12 +131627,6 @@
       "value": "order"
     }
   ],
-  "web.item.episodeOrder.preview.seasonPicker": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESeason to preview\u202C"
-    }
-  ],
   "web.item.episodeOrder.preview.seasons": [
     {
       "type": 6,
@@ -131697,12 +131665,6 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
-    }
-  ],
-  "web.item.episodeOrder.preview.title": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EPreview\u202C"
     }
   ],
   "web.item.episodeOrder.preview.unmatchedBody": [
@@ -131803,6 +131765,12 @@
     {
       "type": 1,
       "value": "order"
+    }
+  ],
+  "web.item.episodeOrder.readOnlyHint": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ETo move episodes, split seasons or rename them, arrange the seasons yourself.\u202C"
     }
   ],
   "web.item.episodeOrder.saveFailed": [
