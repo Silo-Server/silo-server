@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { combinedEpisodeTitle } from "@/lib/episodeRange";
 import { episodeSubtitle } from "@/lib/episodeCardLabels";
 import { useNavigate } from "react-router";
 import type { ItemDetail } from "@/api/types";
@@ -93,7 +92,7 @@ export default function SeasonContent({
     target: firstUnwatched
       ? {
           content_id: firstUnwatched.content_id,
-          title: combinedEpisodeTitle(firstUnwatched) || firstUnwatched.title,
+          title: firstUnwatched.title,
           subtitle: episodeSubtitle(
             item.episode_labels,
             firstUnwatched.air_date,

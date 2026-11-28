@@ -62,32 +62,6 @@ export function indexOfEpisodeRow(
   );
 }
 
-// A trailing part number: "Name (2)", "Name, Part 2", "Name: Part 2",
-// "Name - Part 2". Metadata providers title the halves of a two-parter this way.
-const PART_SUFFIX = /^(.*?)(?:\s*\(\d+\)|[\s,:–-]+Part\s+\d+)\s*$/i;
-
-/**
- * The title a multi-episode row shows. Parts named "Name (1)", "Name (2)" (or
- * "Name, Part 1") show their shared name once; numbered parts with other
- * names drop their numbers and are joined with " / ", as are parts without
- * numbers. Untitled parts are left out.
- */
-export function combinedEpisodeTitle(
-  episode: Pick<EpisodeListItem, "title"> & { spanned_episodes?: Pick<SpannedEpisode, "title">[] },
-): string {
-  const titles = [episode.title, ...(episode.spanned_episodes ?? []).map((part) => part.title)]
-    .map((title) => title?.trim() ?? "")
-    .filter(Boolean);
-  if (titles.length <= 1) {
-    return titles[0] ?? "";
-  }
-  const bases = titles.map((title) => PART_SUFFIX.exec(title)?.[1]?.trim() ?? "");
-  if (bases.some((base) => !base)) {
-    return titles.join(" / ");
-  }
-  return bases.every((base) => base === bases[0]) ? (bases[0] ?? "") : bases.join(" / ");
-}
-
 /**
  * Whether a multi-episode row's episodes have different descriptions, so its
  * page offers a tab per episode. When they all share one description, or none

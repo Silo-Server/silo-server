@@ -8,11 +8,7 @@ import { overlayDataFromEpisodeListItem } from "@/lib/overlays";
 import { useT } from "@/i18n";
 import WatchProgressBar from "@/components/WatchProgressBar";
 import EpisodeRangeBadge from "@/components/EpisodeRangeBadge";
-import {
-  combinedEpisodeTitle,
-  episodeRangeCount,
-  formatEpisodeNumberRange,
-} from "@/lib/episodeRange";
+import { episodeRangeCount, formatEpisodeNumberRange } from "@/lib/episodeRange";
 
 interface EpisodeRowProps {
   episode: EpisodeListItem;
@@ -28,7 +24,7 @@ export default function EpisodeRow({ episode, rating, watched, progress }: Episo
   });
   const { prefs: overlayPrefs } = useOverlayPrefs();
   const isRange = episodeRangeCount(episode) > 1;
-  const title = combinedEpisodeTitle(episode) || fallbackTitle;
+  const title = episode.title || fallbackTitle;
   const watchedState = watched ?? episode.user_data?.played ?? false;
   const derivedProgress =
     progress ??

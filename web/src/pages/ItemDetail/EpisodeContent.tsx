@@ -30,7 +30,6 @@ import EpisodeParts from "./components/EpisodeParts";
 import EpisodeRangeBadge from "@/components/EpisodeRangeBadge";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import {
-  combinedEpisodeTitle,
   episodeRangeCount,
   episodePartsDiffer,
   episodeRangeEnd,
@@ -293,7 +292,6 @@ export default function EpisodeContent({
     : siblingEpisodes.find((ep) =>
         ep.spanned_episodes?.some((part) => part.content_id === item.content_id),
       );
-  const heroTitle = (rangeRow && combinedEpisodeTitle(rangeRow)) || title;
   // Episodes described differently get a tab each; otherwise the page shows
   // the one description as for any episode.
   const partTabsRow = rangeRow && episodePartsDiffer(rangeRow) ? rangeRow : undefined;
@@ -343,7 +341,7 @@ export default function EpisodeContent({
       <div className="episode-detail-viewport">
         <DetailHero
           variant="episode"
-          title={heroTitle}
+          title={title}
           subtitle={
             containingRow && seasonNum != null ? (
               <ViewTransitionLink
@@ -354,7 +352,7 @@ export default function EpisodeContent({
                 <EpisodeRangeBadge episode={containingRow} />
                 {t("web.detail.episodes.partOf", {
                   code: formatEpisodeRangeCode(seasonNum, containingRow),
-                  title: combinedEpisodeTitle(containingRow),
+                  title: containingRow.title,
                 })}
               </ViewTransitionLink>
             ) : undefined

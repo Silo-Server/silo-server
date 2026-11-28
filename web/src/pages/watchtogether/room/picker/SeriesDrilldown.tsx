@@ -10,7 +10,7 @@ import { hasMachineTranslation } from "@/pages/ItemDetail/components/machineTran
 import { useEpisodeSpoilerPrefs } from "@/hooks/useEpisodeSpoilerPrefs";
 import { useT, type Translate } from "@/i18n";
 import EpisodeRangeBadge from "@/components/EpisodeRangeBadge";
-import { combinedEpisodeTitle, formatEpisodeNumberRange } from "@/lib/episodeRange";
+import { formatEpisodeNumberRange } from "@/lib/episodeRange";
 import { isEpisodeStill, isEpisodeUnwatched, SPOILER_IMAGE_CLASS } from "@/lib/episodeSpoilers";
 import { decodeThumbhash } from "@/lib/thumbhash";
 import { cn } from "@/lib/utils";
@@ -424,9 +424,7 @@ export function SeriesDrilldown({
                                   number: formatEpisodeNumberRange(episode),
                                 })}
                             </span>
-                            <span className="truncate text-sm font-medium">
-                              {combinedEpisodeTitle(episode) || episode.title}
-                            </span>
+                            <span className="truncate text-sm font-medium">{episode.title}</span>
                             <EpisodeRangeBadge episode={episode} />
                             <span className="text-muted-foreground shrink-0 text-xs">
                               {episode.runtime

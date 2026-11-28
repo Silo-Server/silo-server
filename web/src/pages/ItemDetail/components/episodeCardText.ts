@@ -1,7 +1,7 @@
 import type { EpisodeListItem } from "@/api/types";
 import { formatEpisodeLabel, labelsEpisodesByAirDate } from "@/lib/episodeCardLabels";
 import { formatDate } from "@/lib/datetime";
-import { combinedEpisodeTitle, episodeRangeEnd, formatEpisodeRangeCode } from "@/lib/episodeRange";
+import { episodeRangeEnd, formatEpisodeRangeCode } from "@/lib/episodeRange";
 import { formatRuntimeMinutes } from "@/lib/mediaFormat";
 import { t } from "@/i18n";
 
@@ -22,8 +22,8 @@ export function episodeCardTitleParts(
   prefix: string;
   title?: string;
 } {
-  // A multi-episode row shows its parts' shared name and its range code.
-  const title = combinedEpisodeTitle(episode);
+  // A multi-episode row shows its first episode's title and its range code.
+  const title = episode.title?.trim();
   if (labelsEpisodesByAirDate(episodeLabels)) {
     // The air date is on the line below, so the title leads on its own; an
     // untitled episode shows the date (or its code when undated).
@@ -42,7 +42,7 @@ export function episodeCardTitleParts(
  */
 export function episodeCardSpokenTitle(episode: EpisodeIdentity, episodeLabels?: string): string {
   const episodeNumber = episode.episode_number;
-  const title = combinedEpisodeTitle(episode);
+  const title = episode.title?.trim();
   if (labelsEpisodesByAirDate(episodeLabels)) {
     return title || formatEpisodeLabel({ ...episode, episode_labels: episodeLabels });
   }

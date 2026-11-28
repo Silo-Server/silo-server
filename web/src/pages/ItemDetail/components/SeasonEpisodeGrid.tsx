@@ -1,5 +1,4 @@
 import { useMemo, useRef } from "react";
-import { combinedEpisodeTitle } from "@/lib/episodeRange";
 import { Play } from "lucide-react";
 import type { EpisodeListItem } from "@/api/types";
 import CardPlayOverlay from "@/components/CardPlayOverlay";
@@ -130,7 +129,7 @@ function SeasonEpisodeCard({
     (episode.user_data?.position_seconds ?? 0) > 0 &&
     (episode.user_data?.duration_seconds ?? 0) > 0;
   const episodeTitle =
-    combinedEpisodeTitle(episode) ||
+    episode.title ||
     episodeAirDateLabel(episodeLabels, episode.air_date) ||
     t("web.detail.episodes.numbered", { episode: episode.episode_number });
   const unwatched = isEpisodeUnwatched(episode.user_data);

@@ -20,7 +20,7 @@ import { useViewTransitionNavigate } from "@/hooks/useViewTransition";
 import { useSeasonEpisodes, useSeasons } from "@/hooks/queries/episodes";
 import { useT, type MessageKey } from "@/i18n";
 import EpisodeRangeBadge from "@/components/EpisodeRangeBadge";
-import { combinedEpisodeTitle, formatEpisodeNumberRange } from "@/lib/episodeRange";
+import { formatEpisodeNumberRange } from "@/lib/episodeRange";
 import { createWatchTogetherRoom, type WatchTogetherSelectionMode } from "@/lib/watchTogether";
 import { copyWatchTogetherInvite } from "@/lib/watchTogetherActions";
 import { decodeThumbhash } from "@/lib/thumbhash";
@@ -138,9 +138,7 @@ function EpisodeChooser({
                       number: formatEpisodeNumberRange(episode),
                     })}
                 </span>
-                <span className="min-w-0 flex-1 truncate text-sm">
-                  {combinedEpisodeTitle(episode) || episode.title}
-                </span>
+                <span className="min-w-0 flex-1 truncate text-sm">{episode.title}</span>
                 <EpisodeRangeBadge episode={episode} />
                 {episode.user_data?.played ? (
                   <span className="text-muted-foreground text-[0.6875rem]">
@@ -383,7 +381,7 @@ export function StartPartySheet({
               onPick={(episode, seasonNumber) => {
                 setTarget({
                   content_id: episode.content_id,
-                  title: combinedEpisodeTitle(episode) || episode.title,
+                  title: episode.title,
                   subtitle: episodeSubtitle(
                     item.episode_labels,
                     episode.air_date,
