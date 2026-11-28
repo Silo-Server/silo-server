@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/ctxerr"
 	"github.com/Silo-Server/silo-server/internal/telemetry"
 	"github.com/Silo-Server/silo-server/internal/workmetrics"
 )
@@ -277,6 +278,11 @@ func (w *taskWorker) executeReserved(execCtx context.Context, cancel context.Can
 	var err error
 	workmetrics.Do(execCtx, func(ctx context.Context) { err = w.task.Execute(ctx, reporter) })
 	completedAt := time.Now()
+	// A run that ends only on the server stopping is interrupted, not a failure
+	// of the task; a task that returns its own error keeps it. Read before the
+	// cancel below, which would make every run look canceled. shuttingDown
+	// takes the manager's lock, so it is checked before w.mu.
+	interrupted := ctxerr.Abandoned(execCtx, err) && w.manager.shuttingDown()
 	// Stop the max runtime timer now, so it can't relabel a run that already
 	// returned while this goroutine waits for the worker lock.
 	cancel()
@@ -306,6 +312,10 @@ func (w *taskWorker) executeReserved(execCtx context.Context, cancel context.Can
 		metricOutcome = "canceled"
 	case w.state == TaskStateCancelling:
 		result.Status = "cancelled"
+		metricOutcome = "canceled"
+	case interrupted:
+		result.Status = ExecutionStatusFailed
+		result.ErrorMessage = InterruptedExecutionMessage
 		metricOutcome = "canceled"
 	case err != nil:
 		result.Status = "failed"

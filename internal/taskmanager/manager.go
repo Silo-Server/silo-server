@@ -635,11 +635,6 @@ func (m *TaskManager) executeAndRecord(w *taskWorker, execCtx context.Context, c
 	stopRenewing := m.renewRunLease(writeCtx, key, leaseID)
 	result := *w.executeReserved(execCtx, cancel)
 	stopRenewing()
-
-	if result.Status == ExecutionStatusFailed && m.shuttingDown() {
-		// Shutdown canceled the run; the task didn't fail on its own.
-		result.ErrorMessage = InterruptedExecutionMessage
-	}
 	m.recordRun(writeCtx, leaseID, result)
 }
 

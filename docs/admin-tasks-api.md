@@ -127,12 +127,15 @@ expand into a whole-history read. Live last-execution summaries have no saved ID
 persisted history entries have opaque string IDs.
 
 History holds finished runs only. While a run is in progress its server holds
-a lease on it in `task_execution_leases` and renews it every 30 seconds. When a
-lease goes three minutes without renewal by the database clock (the server
-crashed or was killed), any API server records the run as `failed` with the
-message `Interrupted: the server stopped before the task finished`, ending at
-its last renewal. A graceful shutdown cancels runs in progress, records them
-the same way, and waits up to five seconds for those writes. The admin API
+a lease on it in `task_execution_leases` and renews it every 30 seconds. When no
+renewal reaches the database for three minutes by its clock, usually because
+the server crashed or was killed, any API server records the run as `failed`
+with the message `Interrupted: the server stopped before the task finished`,
+ending at its last renewal. A server that only lost database access keeps
+running the task, and its real outcome is recorded too when it finishes, so
+that run has two entries. A graceful shutdown cancels runs in progress and
+records each one that stops on the cancellation the same way; a task that
+returns its own error keeps it. It waits up to five seconds for those writes. The admin API
 reports these as ordinary failures. A task's interval counts from its last run
 that wasn't interrupted, so a run cut off by a restart runs again once due.
 

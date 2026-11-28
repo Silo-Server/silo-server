@@ -3,12 +3,16 @@ package taskmanager_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"slices"
 	"sync"
 	"testing"
 	"testing/synctest"
 	"time"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/Silo-Server/silo-server/internal/taskmanager"
 	taskdefs "github.com/Silo-Server/silo-server/internal/taskmanager/tasks"
@@ -797,5 +801,58 @@ func TestStartSchedulesFromTheOldestInterruptedRunWhenNoneFinished(t *testing.T)
 	}
 	if want := older.StartedAt.Add(time.Hour); !tasks[0].NextRunAt.Equal(want) {
 		t.Fatalf("next run = %v, want %v (an hour after the oldest interrupted run started)", tasks[0].NextRunAt, want)
+	}
+}
+
+// errorOnCancelTask returns cancelErr once its context is canceled.
+type errorOnCancelTask struct {
+	stubTask
+	entered   chan struct{}
+	cancelErr func(ctx context.Context) error
+}
+
+func (t errorOnCancelTask) Execute(ctx context.Context, _ taskmanager.ProgressReporter) error {
+	t.entered <- struct{}{}
+	<-ctx.Done()
+	return t.cancelErr(ctx)
+}
+
+// A run that ends only on the shutdown's cancellation is interrupted, however
+// the cancellation reaches the task; a task that fails with its own error
+// while the server stops keeps that error.
+func TestStopLabelsOnlyACanceledRunInterrupted(t *testing.T) {
+	ownErr := errors.New("flushing the index failed")
+	tests := []struct {
+		name      string
+		cancelErr func(ctx context.Context) error
+		want      string
+	}{
+		{"own error", func(context.Context) error { return ownErr }, ownErr.Error()},
+		{"own error joined with the cancellation", func(ctx context.Context) error { return errors.Join(ownErr, ctx.Err()) }, ownErr.Error() + "\ncontext canceled"},
+		{"wrapped cancellation", func(ctx context.Context) error { return fmt.Errorf("scan: %w", ctx.Err()) }, interruptedMessage},
+		{"plugin call canceled", func(context.Context) error {
+			return fmt.Errorf("run plugin task index: %w", status.Error(codes.Canceled, "context canceled"))
+		}, interruptedMessage},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			history := &recordingExecutionRepository{}
+			manager := taskmanager.New(&fakeTriggerRepository{}, history, newFakeTrigger, slog.New(slog.DiscardHandler))
+			task := errorOnCancelTask{stubTask: stubTask{key: "index"}, entered: make(chan struct{}, 1), cancelErr: tt.cancelErr}
+			manager.Register(task)
+			manager.Start(context.Background())
+			if _, err := manager.StartTask(task.Key()); err != nil {
+				t.Fatalf("StartTask() error = %v", err)
+			}
+			<-task.entered
+
+			manager.Stop()
+
+			history.mu.Lock()
+			defer history.mu.Unlock()
+			if len(history.inserts) != 1 || history.inserts[0].Status != "failed" || history.inserts[0].ErrorMessage != tt.want {
+				t.Fatalf("recorded runs = %#v, want one failed with %q", history.inserts, tt.want)
+			}
+		})
 	}
 }
