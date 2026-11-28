@@ -36,8 +36,8 @@ var ErrInstallationChanged = errors.New("plugin installation changed since it wa
 var ErrPluginAlreadyInstalled = errors.New("plugin is already installed")
 
 // ErrNoUpdateAvailable refuses to apply a recorded update when the
-// installation records none, or records a version that isn't newer than the
-// installed one.
+// installation records none, records a version that isn't newer than the
+// installed one, or has no repository left to install it from.
 var ErrNoUpdateAvailable = errors.New("no update available for plugin")
 
 // ErrBuiltinInstallationImmutable is returned when a caller tries to mutate
@@ -606,6 +606,12 @@ func updateInstallationRow(ctx context.Context, tx pgx.Tx, id int, input UpdateI
 	query := fmt.Sprintf("UPDATE plugin_installations SET %s WHERE %s", strings.Join(setClauses, ", "), where)
 	tag, err := tx.Exec(ctx, query, args...)
 	if err != nil {
+		// A repository deleted after the caller resolved it, as while an
+		// update downloaded its package, can't be set on the row.
+		if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && pgErr.Code == "23503" &&
+			pgErr.ConstraintName == "plugin_installations_repository_id_fkey" {
+			return ErrRepositoryNotFound
+		}
 		return fmt.Errorf("updating plugin installation: %w", err)
 	}
 	if tag.RowsAffected() == 0 {

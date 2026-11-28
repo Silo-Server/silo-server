@@ -534,8 +534,9 @@ func (s *AutoUpdateService) handleExistingPlugin(ctx context.Context, existing *
 		return autoUpdateOutcomeUpdated, err
 	case "notify":
 		err := s.notifyPluginUpdate(ctx, existing, entry)
-		// A dropped stale offer recorded nothing, so it is no update found.
-		if isVersionManaged(err) || errors.Is(err, errProvisionRestoreHeld) || errors.Is(err, ErrInstallationChanged) {
+		// A dropped stale offer recorded nothing, so it is no update found. So
+		// is an offer for a plugin uninstalled since the check listed it (#5237).
+		if isVersionManaged(err) || errors.Is(err, errProvisionRestoreHeld) || errors.Is(err, ErrInstallationChanged) || errors.Is(err, ErrInstallationNotFound) {
 			return autoUpdateOutcomeNone, nil
 		}
 		return autoUpdateOutcomeNotified, err
@@ -601,6 +602,11 @@ func (s *AutoUpdateService) notifyPluginUpdate(ctx context.Context, existing *In
 	})
 	if errors.Is(err, ErrInstallationChanged) {
 		s.logger.InfoContext(ctx, "dropped stale plugin update offer: the plugin was replaced meanwhile",
+			"plugin_id", existing.PluginID, "available_version", newVersion)
+		return err
+	}
+	if errors.Is(err, ErrInstallationNotFound) {
+		s.logger.InfoContext(ctx, "dropped plugin update offer: the plugin was uninstalled meanwhile",
 			"plugin_id", existing.PluginID, "available_version", newVersion)
 		return err
 	}
