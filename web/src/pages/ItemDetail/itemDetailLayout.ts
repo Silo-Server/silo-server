@@ -93,6 +93,19 @@ export function seasonDisplayName(seasonNumber: number, title?: string): string 
     : t("web.detail.seasons.numbered", { season: seasonNumber });
 }
 
+/**
+ * An episode's own title, or undefined when it has none or only the English
+ * default the server stores for an untitled episode ("Episode N"). Callers
+ * then show the episode code or a translated label instead.
+ */
+export function episodeOwnTitle(episodeNumber: number, title?: string): string | undefined {
+  const trimmed = title?.trim();
+  if (!trimmed || trimmed === `Episode ${episodeNumber}`) {
+    return undefined;
+  }
+  return trimmed;
+}
+
 export function formatEpisodeCount(count: number): string {
   return t("web.detail.seasons.episodeCount", { count, count_text: count });
 }
