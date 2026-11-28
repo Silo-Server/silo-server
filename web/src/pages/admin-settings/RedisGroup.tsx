@@ -10,7 +10,13 @@ import { useT } from "@/i18n";
 
 import { FieldGroup } from "./FieldGroup";
 import { SettingField } from "./SettingField";
-import { REDIS_KEYS, keepSavedRedisUrl, stageRedisUrl } from "./redisDraft";
+import {
+  REDIS_KEYS,
+  keepSavedRedisUrl,
+  stageRedisDb,
+  stageRedisUrl,
+  type StagedRedisDb,
+} from "./redisDraft";
 
 /**
  * How the page stages the connection URL. The page freezes both while a save
@@ -31,12 +37,18 @@ export function RedisGroup({
   restartKeys,
   secrets,
   savesAndDiscards,
+  stagedDb,
 }: {
   form: ReturnType<typeof useSettingsForm>;
   restartKeys: RestartKeyMatcher;
   secrets: RedisUrlEditors;
   /** Counts the page's completed saves and its discards. */
   savesAndDiscards: number;
+  /**
+   * The number a URL edit staged. The page owns it, like the draft, so it
+   * outlives this group being swapped out while credential status is down.
+   */
+  stagedDb: StagedRedisDb;
 }) {
   const t = useT();
   const checkConnection = useCheckAdminSettingsConnection();
@@ -122,7 +134,7 @@ export function RedisGroup({
             return;
           }
           setEnabledOverride(false);
-          stageRedisUrl(form, "");
+          stageRedisUrl(form, "", stagedDb);
         }}
         disabled={secrets.disabled}
         restartRequired={restartKeys.has("redis.url")}
@@ -138,8 +150,8 @@ export function RedisGroup({
             label={t("web.admin.settings.redis.url.label")}
             value={redisUrl}
             configured={configured}
-            onKeep={() => keepSavedRedisUrl(urlDraft)}
-            onChange={(v) => stageRedisUrl(urlDraft, v)}
+            onKeep={() => keepSavedRedisUrl(urlDraft, stagedDb)}
+            onChange={(v) => stageRedisUrl(urlDraft, v, stagedDb)}
             hint={REDIS_URL_EXAMPLE}
             disabled={secrets.disabled}
             restartRequired={restartKeys.has("redis.url")}
@@ -156,7 +168,7 @@ export function RedisGroup({
             description={t("web.admin.settings.redis.db.description")}
             value={form.getValue("redis.db")}
             onChange={(v) => {
-              if (!secrets.disabled) form.setValue("redis.db", v);
+              if (!secrets.disabled) stageRedisDb(form, v, stagedDb);
             }}
             disabled={secrets.disabled}
             restartRequired={restartKeys.has("redis.db")}
