@@ -3,6 +3,7 @@ package backup
 import (
 	"testing"
 	"time"
+	_ "time/tzdata"
 )
 
 // Every night gets one scheduled backup, also on the nights the clocks
@@ -26,8 +27,10 @@ func TestNightlySlotBacksUpEveryNightAcrossDaylightSaving(t *testing.T) {
 			var last *time.Time
 			for _, span := range nights {
 				for day := span[0]; day.Before(span[1]); day = day.AddDate(0, 0, 1) {
-					// The daily trigger fires just after backup.time; on the
-					// spring-forward night time.Date moves a skipped time.
+					// A run just after time.Date's instant for backup.time. On
+					// the spring-forward night that instant is moved; the real
+					// trigger (triggers.wallClock) fires at it or at the clock
+					// jump, and both give the same slot.
 					fire := time.Date(day.Year(), day.Month(), day.Day(), hour, minute, 30, 0, loc)
 					slot, done := nightlySlotDone(fire, at, loc, last)
 					if done {
