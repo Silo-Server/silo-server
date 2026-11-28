@@ -226,6 +226,7 @@ export default function AudiobookGroupsView({
     isFetching,
     isFetchingNextPage,
     isLoading,
+    isPaused,
     refetch,
   } = useAudiobookGroups(libraryId, groupBy, sort, debouncedFilter);
 
@@ -234,9 +235,11 @@ export default function AudiobookGroupsView({
   const total = firstPage?.total ?? 0;
   const totalExact = firstPage?.total_exact ?? false;
   const isInitialLoading = isLoading && groups.length === 0;
-  // A failed read with nothing loaded is not an empty library. Groups that
-  // did load stay on screen when a later refetch fails.
-  const failedWithNothingLoaded = isError && groups.length === 0;
+  // A failed read with nothing loaded is not an empty library, and neither is
+  // a first read paused while the browser is offline; it loads by itself on
+  // reconnect. Groups that did load stay on screen when a later refetch fails.
+  const failedWithNothingLoaded =
+    (isError || (isPaused && data === undefined)) && groups.length === 0;
   const loadNextPage = useCallback(() => {
     if (hasNextPage && !isFetchingNextPage) {
       void fetchNextPage();

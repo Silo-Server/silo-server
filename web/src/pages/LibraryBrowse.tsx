@@ -458,7 +458,9 @@ export default function LibraryBrowse({
           title={t("web.library.browse.loadFailed")}
           description={loadErrorDescription(catalogQuery.error)}
           onRetry={retryBrowse}
-          retrying={retrying}
+          // A retry while offline pauses with the first page and settles only
+          // on reconnect, so keep the button usable until a fetch really runs.
+          retrying={retrying && !catalogQuery.isPaused}
         />
       ) : (
         <div
