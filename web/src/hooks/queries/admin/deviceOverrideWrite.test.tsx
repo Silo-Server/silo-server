@@ -315,3 +315,66 @@ it("drops the mirrored intro skip row a reset clears with it", async () => {
     ]),
   );
 });
+
+// Each delete of a mirrored key clears both halves, so a second delete for the
+// pair would erase an intro skip save that landed after the first one.
+it("sends one delete for the mirrored intro skip pair in a reset-all", async () => {
+  const introRow = (key: string, value: unknown) => ({
+    ...row("medium", 1, "2026-11-23T00:00:00Z"),
+    key,
+    value,
+  });
+  const deleted: string[] = [];
+  let gets = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input instanceof Request ? input.url : input);
+      const method = init?.method ?? (input instanceof Request ? input.method : "GET");
+      if (method === "DELETE") {
+        deleted.push(
+          decodeURIComponent(new URL(url, "http://silo.test").pathname.split("/").pop()!),
+        );
+        return new Response(null, { status: 204 });
+      }
+      if (url.includes("/settings/values")) {
+        gets += 1;
+        return gets === 1
+          ? valuesPage([
+              introRow("playback.intro_skip_mode", "always"),
+              introRow("playback.auto_skip_intro", true),
+              row("medium", 2, "2026-11-23T00:00:00Z"),
+            ])
+          : new Promise<Response>(() => undefined);
+      }
+      return json({ items: [], page: { has_more: false } });
+    }),
+  );
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const wrapper = ({ children }: { children: ReactNode }) =>
+    createElement(QueryClientProvider, { client }, children);
+  const { result } = renderHook(
+    () => ({
+      stored: useAdminUserSettings(1),
+      reset: useDeleteAllAdminUserDeviceSettingsForDevice(),
+    }),
+    { wrapper },
+  );
+  await waitFor(() => expect(result.current.stored.data).toHaveLength(3));
+
+  await act(async () => {
+    await result.current.reset.mutateAsync({
+      userId: 1,
+      profileId: "profile-a",
+      deviceId: "device-a",
+      keys: [
+        "playback.intro_skip_mode",
+        "playback.auto_skip_intro",
+        "playback.subtitle_appearance",
+      ],
+    });
+  });
+
+  expect(deleted).toEqual(["playback.intro_skip_mode", "playback.subtitle_appearance"]);
+  await waitFor(() => expect(result.current.stored.data).toEqual([]));
+});

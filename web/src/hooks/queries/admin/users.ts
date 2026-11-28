@@ -650,8 +650,17 @@ export function useDeleteAllAdminUserDeviceSettingsForDevice() {
       deviceId: string;
       keys: readonly string[];
     }) => {
+      // One delete clears both halves of a mirrored pair, so send it once: a
+      // second delete would erase a save made after the first one landed.
+      const sent = new Set<string>();
+      const deletes = keys.filter((key) => {
+        const mirror = MIRRORED_SETTING_KEYS[key];
+        if (sent.has(key) || (mirror !== undefined && sent.has(mirror))) return false;
+        sent.add(key);
+        return true;
+      });
       let completed = 0;
-      for (const key of keys) {
+      for (const key of deletes) {
         try {
           await deleteAdminSettingValue(
             userId,
@@ -665,8 +674,8 @@ export function useDeleteAllAdminUserDeviceSettingsForDevice() {
             // count already says how far the reset got.
             throw new Error(
               t("web.admin.common.users.resetAllStopped", {
-                count: keys.length,
-                count_text: keys.length,
+                count: deletes.length,
+                count_text: deletes.length,
                 completed: completed,
                 reason: readableErrorText(err, ""),
               }).trimEnd(),
