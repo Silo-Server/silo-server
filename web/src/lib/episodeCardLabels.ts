@@ -84,10 +84,14 @@ export function episodeSubtitle(
   airDate: string | null | undefined,
   seasonNumber: number,
   episodeNumber: number,
+  episodeNumberEnd?: number,
 ): string {
   const date = labelsEpisodesByAirDate(episodeLabels) ? parseCalendarDate(airDate) : null;
-  return date
-    ? date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+  if (date) {
+    return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  }
+  return episodeNumberEnd != null && episodeNumberEnd > episodeNumber
+    ? `S${seasonNumber} E${episodeNumber}–E${episodeNumberEnd}`
     : `S${seasonNumber} E${episodeNumber}`;
 }
 

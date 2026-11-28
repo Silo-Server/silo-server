@@ -43,4 +43,9 @@ describe("episodeSubtitle", () => {
     setDateTimeFormatPreferences({ ...preferences, dateFormat: "DD/MM/YYYY" });
     expect(episodeSubtitle("air_date", "2026-11-20", 2026, 296)).toBe("Nov 20, 2026");
   });
+
+  it("names the whole range of a multi-episode file", () => {
+    expect(episodeSubtitle(undefined, null, 1, 4, 5)).toBe("S1 E4–E5");
+    expect(episodeSubtitle(undefined, null, 1, 4)).toBe("S1 E4");
+  });
 });

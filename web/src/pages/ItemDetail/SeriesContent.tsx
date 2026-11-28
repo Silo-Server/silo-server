@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { combinedEpisodeTitle } from "@/lib/episodeRange";
 import { episodeSubtitle } from "@/lib/episodeCardLabels";
 import { useLocation, useNavigate } from "react-router";
 import type { ItemDetail } from "@/api/types";
@@ -155,12 +156,13 @@ export default function SeriesContent({
     target: nextUpEpisode
       ? {
           content_id: nextUpEpisode.content_id,
-          title: nextUpEpisode.title,
+          title: combinedEpisodeTitle(nextUpEpisode) || nextUpEpisode.title,
           subtitle: episodeSubtitle(
             item.episode_labels,
             nextUpEpisode.air_date,
             nextUpEpisode.season_number,
             nextUpEpisode.episode_number,
+            nextUpEpisode.episode_number_end,
           ),
           poster_url: item.poster_url,
           poster_thumbhash: item.poster_thumbhash,

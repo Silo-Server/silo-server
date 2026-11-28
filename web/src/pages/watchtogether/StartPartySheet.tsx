@@ -383,12 +383,13 @@ export function StartPartySheet({
               onPick={(episode, seasonNumber) => {
                 setTarget({
                   content_id: episode.content_id,
-                  title: episode.title,
+                  title: combinedEpisodeTitle(episode) || episode.title,
                   subtitle: episodeSubtitle(
                     item.episode_labels,
                     episode.air_date,
                     seasonNumber,
                     episode.episode_number,
+                    episode.episode_number_end,
                   ),
                   poster_url: item.poster_url,
                   poster_thumbhash: item.poster_thumbhash,

@@ -124,7 +124,7 @@ export default function EpisodeParts({
           );
         })}
       </div>
-      <div id={panelId} role="tabpanel">
+      <div id={panelId} role="tabpanel" tabIndex={0} aria-labelledby={tabId(selected)}>
         <p dir="auto" className="bidi-text text-foreground mb-1 text-sm font-semibold sm:hidden">
           {titleOf(selected)}
         </p>
