@@ -10,6 +10,7 @@ import {
   parseHighContrast,
   parseTextScale,
   parseTextWeight,
+  TEXT_SCALE_FACTOR,
   useAppearanceCacheOwner,
 } from "@/hooks/themePreferences";
 import type { TextScale, TextWeight } from "@/hooks/themePreferences";
@@ -310,6 +311,15 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       {children}
     </ThemeContext>
   );
+}
+
+/**
+ * The active text scale's factor (TEXT_SCALE_FACTOR), or 1 outside the
+ * provider, as in component tests.
+ */
+export function useTextScaleFactor(): number {
+  const ctx = useContext(ThemeContext);
+  return TEXT_SCALE_FACTOR[ctx?.textScale ?? "default"];
 }
 
 export function useTheme(): ThemeContextValue {

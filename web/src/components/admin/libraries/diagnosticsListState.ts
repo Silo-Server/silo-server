@@ -1,18 +1,28 @@
 import { useCallback, useMemo, useState } from "react";
 
 import { useMediaQuery } from "@/hooks/useMediaQuery";
+import { useTextScaleFactor } from "@/hooks/useTheme";
 
 /** Rows per page of a diagnostics list. */
 export const PAGE_SIZE = 10;
 
-// Tailwind's lg breakpoint: tables from here up, cards below.
-const DESKTOP_QUERY = "(min-width: 64rem)";
+// Tailwind's lg breakpoint, in rem: tables from here up, cards below.
+const DESKTOP_REM = 64;
 
 // Tailwind's xl breakpoint. Below it, with the admin sidebar open, the wide
 // admin tables (the Ambiguous Roots, Troubleshooting and Stale External IDs
 // diagnostics, and the Users list) are wider than their section and would hide
 // their last columns behind a sideways scroll.
-const WIDE_TABLE_QUERY = "(min-width: 80rem)";
+const WIDE_TABLE_REM = 80;
+
+/**
+ * A min-width query for a breakpoint measured in the app's rem. The tables
+ * grow with the app's text size, but a media query's rem is the browser's
+ * default size, so the breakpoint grows by the same factor.
+ */
+function useTextScaledMinWidth(rem: number): string {
+  return `(min-width: ${rem * useTextScaleFactor()}rem)`;
+}
 
 /**
  * Whether the admin libraries page shows its tables, for the library list and
@@ -20,7 +30,7 @@ const WIDE_TABLE_QUERY = "(min-width: 80rem)";
  * matchMedia and get the tables.
  */
 export function useLibrariesTableLayout(): boolean {
-  return useMediaQuery(DESKTOP_QUERY, true);
+  return useMediaQuery(useTextScaledMinWidth(DESKTOP_REM), true);
 }
 
 /**
@@ -28,7 +38,7 @@ export function useLibrariesTableLayout(): boolean {
  * cards. Tests have no matchMedia and get the tables.
  */
 export function useWideTableLayout(): boolean {
-  return useMediaQuery(WIDE_TABLE_QUERY, true);
+  return useMediaQuery(useTextScaledMinWidth(WIDE_TABLE_REM), true);
 }
 
 export type SortDir = "asc" | "desc";
