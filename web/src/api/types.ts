@@ -1437,6 +1437,18 @@ export interface EpisodeListItem {
   machine_translated_fields?: string[];
   /** This profile's language when the episode's description is not in it yet. */
   pending_translation_language?: string;
+  /** The last episode number a multi-episode file's row plays (S01E02-E03 gives 3). */
+  episode_number_end?: number;
+  /** The later episodes a multi-episode row plays, listed here instead of as rows. */
+  spanned_episodes?: SpannedEpisode[];
+}
+
+/** An episode a multi-episode row plays after its first one. */
+export interface SpannedEpisode {
+  content_id: string;
+  episode_number: number;
+  title: string;
+  overview?: string;
 }
 
 export interface EpisodesResponse {

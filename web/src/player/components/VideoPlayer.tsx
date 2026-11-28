@@ -1,4 +1,5 @@
 import { ChevronDown, X } from "lucide-react";
+import { indexOfEpisodeRow } from "@/lib/episodeRange";
 import { airDateWithTitle, episodeAirDateLabel } from "@/lib/episodeCardLabels";
 import "@/styles/player-hud.css";
 import { useMediaSkipHandlers } from "../hooks/useMediaSkipHandlers";
@@ -2718,10 +2719,10 @@ export function VideoPlayer({
   // is the post-roll screen, timed from the end of the file by the host. A
   // Watch Together room decides what plays next, so it offers no next episode.
   const episodeIndex = seriesContext
-    ? seriesContext.episodes.findIndex(
-        (ep) =>
-          ep.seasonNumber === seriesContext.currentSeason &&
-          ep.episodeNumber === seriesContext.currentEpisode,
+    ? indexOfEpisodeRow(
+        seriesContext.episodes,
+        seriesContext.currentSeason,
+        seriesContext.currentEpisode,
       )
     : -1;
   const prevEpisodeRef =

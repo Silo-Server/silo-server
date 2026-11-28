@@ -29834,6 +29834,11 @@ export interface components {
       content_id: string;
       /** Format: int64 */
       episode_number: number;
+      /**
+       * Format: int64
+       * @description The last episode number this row plays when its video holds several episodes (a multi-episode file such as S01E02-E03). Absent for a single episode.
+       */
+      episode_number_end?: number;
       files?: components["schemas"]["EpisodeFile"][];
       imdb_id?: string;
       /** @description Localized fields whose text was machine-translated by AI; absent when none were */
@@ -29851,6 +29856,8 @@ export interface components {
       runtime: number;
       /** Format: int64 */
       season_number: number;
+      /** @description The later episodes this row's video also plays, in episode order. They are listed here instead of as rows of their own, and marking this row watched or unwatched marks them too. Absent for a single episode. */
+      spanned_episodes?: components["schemas"]["SpannedEpisode"][];
       /** @description Whether still_url is an episode still. False when series artwork is used as a fallback; absent when provenance is unavailable. */
       still_is_episode_still?: boolean;
       still_thumbhash?: string;
@@ -37733,6 +37740,14 @@ export interface components {
     SkipShuffleItemRequest: {
       /** @description The content ID of the next item to skip. The shuffle picks another only while this item is still next, so a retry after a lost response changes nothing */
       next_content_id: string;
+    };
+    SpannedEpisode: {
+      /** @example episode:severance-s01e03 */
+      content_id: string;
+      /** Format: int64 */
+      episode_number: number;
+      overview?: string;
+      title: string;
     };
     StaleMediaID: {
       /** @example movie:heat-1995 */

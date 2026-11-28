@@ -570,6 +570,16 @@ type Episode struct {
 	OverlaySummary             *CatalogItemOverlay `json:"overlay_summary,omitempty"`
 	MachineTranslatedFields    []string            `json:"machine_translated_fields,omitempty" enum:"overview" doc:"Localized fields whose text was machine-translated by AI; absent when none were"`
 	PendingTranslationLanguage string              `json:"pending_translation_language,omitempty" doc:"The language (BCP 47 tag, such as en or pt-BR) this profile reads here (its metadata language, or the library's when it sets none) when the episode's description is not available in it yet; translating the episode's season fills it"`
+	EpisodeNumberEnd           int                 `json:"episode_number_end,omitempty" doc:"The last episode number this row plays when its video holds several episodes (a multi-episode file such as S01E02-E03). Absent for a single episode."`
+	SpannedEpisodes            []SpannedEpisode    `json:"spanned_episodes,omitempty" doc:"The later episodes this row's video also plays, in episode order. They are listed here instead of as rows of their own, and marking this row watched or unwatched marks them too. Absent for a single episode."`
+}
+
+// SpannedEpisode is an episode a multi-episode row plays after its first one.
+type SpannedEpisode struct {
+	ContentID     string `json:"content_id" example:"episode:severance-s01e03"`
+	EpisodeNumber int    `json:"episode_number"`
+	Title         string `json:"title"`
+	Overview      string `json:"overview,omitempty"`
 }
 
 // EpisodeCollection is the episodes of one season.
@@ -1510,6 +1520,10 @@ func episodesOf(views []handlers.EpisodeView) []Episode {
 			AirDate: datePtr(e.AirDate), Runtime: e.Runtime, ImdbID: e.ImdbID, TmdbID: e.TmdbID, TvdbID: e.TvdbID, StillIsEpisodeStill: e.StillIsEpisodeStill, StillURL: e.StillURL, StillThumbhash: e.StillThumbhash,
 			Ratings:  builtRatingsOf(ratingsources.Item{IMDB: e.RatingIMDB, TMDB: e.RatingTMDB}, ratingsources.Selection{}),
 			UserData: watchRollupOf(e.UserData), OverlaySummary: catalogOverlayOf(e.OverlaySummary), MachineTranslatedFields: e.MachineTranslatedFields, PendingTranslationLanguage: e.PendingTranslationLanguage}
+		ep.EpisodeNumberEnd = e.EpisodeNumberEnd
+		for _, part := range e.SpannedEpisodes {
+			ep.SpannedEpisodes = append(ep.SpannedEpisodes, SpannedEpisode{ContentID: part.ContentID, EpisodeNumber: part.EpisodeNumber, Title: part.Title, Overview: part.Overview})
+		}
 		for _, f := range e.Files {
 			ep.Files = append(ep.Files, EpisodeFile{FileID: IDFromInt(int64(f.FileID)), Resolution: f.Resolution, CodecVideo: f.CodecVideo, HDR: f.HDR,
 				AudioChannels: f.AudioChannels, Container: f.Container, FileSize: f.FileSize, Unreadable: f.Unreadable})

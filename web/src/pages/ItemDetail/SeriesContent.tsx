@@ -161,6 +161,7 @@ export default function SeriesContent({
             nextUpEpisode.air_date,
             nextUpEpisode.season_number,
             nextUpEpisode.episode_number,
+            nextUpEpisode.episode_number_end,
           ),
           poster_url: item.poster_url,
           poster_thumbhash: item.poster_thumbhash,

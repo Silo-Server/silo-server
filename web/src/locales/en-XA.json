@@ -122723,6 +122723,36 @@
       "value": "~⟧"
     }
   ],
+  "web.detail.episodeRangeCode": [
+    {
+      "type": 0,
+      "value": "⟦Š"
+    },
+    {
+      "type": 1,
+      "value": "season"
+    },
+    {
+      "type": 0,
+      "value": "É"
+    },
+    {
+      "type": 1,
+      "value": "start"
+    },
+    {
+      "type": 0,
+      "value": "–É"
+    },
+    {
+      "type": 1,
+      "value": "end"
+    },
+    {
+      "type": 0,
+      "value": "~~⟧"
+    }
+  ],
   "web.detail.episodes.heading": [
     {
       "type": 0,
@@ -122747,6 +122777,28 @@
       "value": "⟦Ñöŵ Ṽîéŵîñĝ~~~~~⟧"
     }
   ],
+  "web.detail.episodes.numberRange": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "start"
+    },
+    {
+      "type": 0,
+      "value": "–"
+    },
+    {
+      "type": 1,
+      "value": "end"
+    },
+    {
+      "type": 0,
+      "value": "~⟧"
+    }
+  ],
   "web.detail.episodes.numbered": [
     {
       "type": 0,
@@ -122759,6 +122811,112 @@
     {
       "type": 0,
       "value": "~~~~⟧"
+    }
+  ],
+  "web.detail.episodes.numberedRange": [
+    {
+      "type": 0,
+      "value": "⟦Éþîšöđéš "
+    },
+    {
+      "type": 1,
+      "value": "start"
+    },
+    {
+      "type": 0,
+      "value": "–"
+    },
+    {
+      "type": 1,
+      "value": "end"
+    },
+    {
+      "type": 0,
+      "value": "~~~~⟧"
+    }
+  ],
+  "web.detail.episodes.partCode": [
+    {
+      "type": 0,
+      "value": "⟦É"
+    },
+    {
+      "type": 1,
+      "value": "episode"
+    },
+    {
+      "type": 0,
+      "value": "~⟧"
+    }
+  ],
+  "web.detail.episodes.partOf": [
+    {
+      "type": 0,
+      "value": "⟦Þåŕţ öƒ "
+    },
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~⟧"
+    }
+  ],
+  "web.detail.episodes.partsHeading": [
+    {
+      "type": 0,
+      "value": "⟦Îñ ţĥîš ṽîđéö~~~~~~⟧"
+    }
+  ],
+  "web.detail.episodes.rangeBadge": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " éþîšöđé~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " éþîšöđéš~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.detail.episodes.runtimeMinutes": [
@@ -122795,6 +122953,74 @@
     {
       "type": 0,
       "value": "~~~~~~~⟧"
+    }
+  ],
+  "web.detail.episodes.spokenRange": [
+    {
+      "type": 0,
+      "value": "⟦Šéåšöñ "
+    },
+    {
+      "type": 1,
+      "value": "season"
+    },
+    {
+      "type": 0,
+      "value": ", Éþîšöđéš "
+    },
+    {
+      "type": 1,
+      "value": "start"
+    },
+    {
+      "type": 0,
+      "value": " ţö "
+    },
+    {
+      "type": 1,
+      "value": "end"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~~~~⟧"
+    }
+  ],
+  "web.detail.episodes.spokenRangeTitled": [
+    {
+      "type": 0,
+      "value": "⟦Šéåšöñ "
+    },
+    {
+      "type": 1,
+      "value": "season"
+    },
+    {
+      "type": 0,
+      "value": ", Éþîšöđéš "
+    },
+    {
+      "type": 1,
+      "value": "start"
+    },
+    {
+      "type": 0,
+      "value": " ţö "
+    },
+    {
+      "type": 1,
+      "value": "end"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~~~~~⟧"
     }
   ],
   "web.detail.episodes.spokenSpecial": [

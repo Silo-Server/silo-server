@@ -1,4 +1,5 @@
 import { useRootHeightProperty } from "@/hooks/useRootHeightProperty";
+import { indexOfEpisodeRow } from "@/lib/episodeRange";
 import { airDateWithTitle, episodeAirDateLabel } from "@/lib/episodeCardLabels";
 import {
   consumeAutomaticStart,
@@ -967,10 +968,10 @@ function WatchPlaybackHostContent() {
   // Find the next episode from the populated list.
   const nextEpisodeRef = useMemo<EpisodeRef | null>(() => {
     if (!activeItem || !episodeSeriesId || !seriesEpisodes.length) return null;
-    const idx = seriesEpisodes.findIndex(
-      (ep) =>
-        ep.seasonNumber === (activeItem.season_number ?? 0) &&
-        ep.episodeNumber === (activeItem.episode_number ?? 0),
+    const idx = indexOfEpisodeRow(
+      seriesEpisodes,
+      activeItem.season_number ?? 0,
+      activeItem.episode_number ?? 0,
     );
     if (idx < 0 || idx >= seriesEpisodes.length - 1) return null;
     return seriesEpisodes[idx + 1] ?? null;

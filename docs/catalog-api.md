@@ -607,6 +607,31 @@ replaced and a scan or playback attempt probes it successfully. The web client
 marks an episode only when every one of its files is unreadable, since any
 readable version still plays.
 
+## Multi-episode files
+
+A file that holds several consecutive episodes (named like `S01E04-E05`) links
+to its first episode, and every episode in its range plays it. In
+`listSeasonEpisodes` and `listCatalogItemEpisodes` that file's first episode
+carries `episode_number_end` (the last episode the file plays) and
+`spanned_episodes` (the later episodes, each with `content_id`,
+`episode_number`, `title`, and `overview`), and those later episodes are not
+listed as rows of their own. Both fields are absent on a single episode, so
+their presence is the feature check.
+
+An episode folds into the earlier row only when the two always play the same
+video: every present file serving it is a multi-episode file linked to that
+first episode, and every file of the first episode spans it. Folding stops at
+the first episode in the range that keeps its row, for example one with a file
+of its own, so `episode_number_end` is always the last entry of
+`spanned_episodes`. The folding rule lives in `catalog.FoldSpannedEpisodes`.
+
+Marking the first episode watched or unwatched also marks the episodes folded
+into its row, and finishing playback of the file marks them all watched. The
+folded episodes keep their own detail pages (`GET /api/v2/catalog/items/{id}`),
+which carry no range fields; a client finds the row that plays one by looking
+for its `content_id` in a row's `spanned_episodes`. jellycompat lists every
+episode separately.
+
 ## Episode ratings
 
 Each episode in `listSeasonEpisodes` and `listCatalogItemEpisodes` carries

@@ -61,6 +61,7 @@ export function useSeriesEpisodes(
     contentId: ep.content_id,
     seasonNumber: ep.season_number,
     episodeNumber: ep.episode_number,
+    episodeNumberEnd: ep.episode_number_end,
     title: ep.title,
     runtime: ep.runtime,
     overview: ep.overview,

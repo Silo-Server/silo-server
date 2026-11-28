@@ -98,6 +98,7 @@ export default function SeasonContent({
             firstUnwatched.air_date,
             firstUnwatched.season_number,
             firstUnwatched.episode_number,
+            firstUnwatched.episode_number_end,
           ),
           poster_url: item.poster_url,
           poster_thumbhash: item.poster_thumbhash,

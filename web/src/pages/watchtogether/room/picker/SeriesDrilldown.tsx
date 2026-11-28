@@ -8,7 +8,9 @@ import { useCatalogItemDetail } from "@/hooks/queries/catalogRead";
 import MachineTranslatedLabel from "@/pages/ItemDetail/components/MachineTranslatedLabel";
 import { hasMachineTranslation } from "@/pages/ItemDetail/components/machineTranslation";
 import { useEpisodeSpoilerPrefs } from "@/hooks/useEpisodeSpoilerPrefs";
-import { codeNumber, useT, type Translate } from "@/i18n";
+import { useT, type Translate } from "@/i18n";
+import EpisodeRangeBadge from "@/components/EpisodeRangeBadge";
+import { formatEpisodeNumberRange } from "@/lib/episodeRange";
 import { isEpisodeStill, isEpisodeUnwatched, SPOILER_IMAGE_CLASS } from "@/lib/episodeSpoilers";
 import { decodeThumbhash } from "@/lib/thumbhash";
 import { cn } from "@/lib/utils";
@@ -419,10 +421,11 @@ export function SeriesDrilldown({
                               {/* A date-labeled series (sports) names the game by its date. */}
                               {episodeAirDateLabel(episodeLabels, episode.air_date) ??
                                 t("web.watchTogether.common.episodeNumber", {
-                                  number: codeNumber(episode.episode_number),
+                                  number: formatEpisodeNumberRange(episode),
                                 })}
                             </span>
                             <span className="truncate text-sm font-medium">{episode.title}</span>
+                            <EpisodeRangeBadge episode={episode} />
                             <span className="text-muted-foreground shrink-0 text-xs">
                               {episode.runtime
                                 ? t("web.watchTogether.series.runtime", {

@@ -314,6 +314,7 @@
 ./internal/api/handlers TestRemoveHistoryHidesEpisodesWithoutLibraryFilePostgres
 ./internal/api/handlers TestHistoryImportProfileAuthorizationDB
 ./internal/api/handlers TestParentUnwatchClearsEpisodesWithoutLibraryFilePostgres
+./internal/api/handlers TestMarkingMultiEpisodeRowCoversItsFoldedEpisodesPostgres
 ./internal/api/handlers TestAudiobookMarkListenedPostgres
 ./internal/api/handlers TestAudiobookMarkListenedBoundariesPostgres
 ./internal/auth TestUserRepositoryUpdateAccessGroupIDDB

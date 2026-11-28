@@ -51,6 +51,8 @@ interface DetailHeroProps {
   tagline?: string;
   scoreRow?: ReactNode;
   crewLine?: ReactNode;
+  /** Shown where the overview goes, such as the episodes a multi-episode video plays. */
+  parts?: ReactNode;
   variant?: "full" | "compact" | "episode" | "series" | "season";
   /**
    * Shortens the full hero so the first row of the content below it starts
@@ -88,6 +90,7 @@ export default function DetailHero({
   tagline,
   scoreRow,
   crewLine,
+  parts,
   variant = "full",
   shortHero = false,
   topNav,
@@ -327,6 +330,8 @@ export default function DetailHero({
                     onReveal={onRevealOverview}
                   />
                 )}
+
+                {parts}
 
                 {/* Crew line and genre chips render independently: pages that
                   fold genres into their crew line simply omit the genres prop. */}

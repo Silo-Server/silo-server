@@ -146,6 +146,7 @@ function CandidateBody({
             pick.episode.air_date,
             pick.seasonNumber,
             pick.episode.episode_number,
+            pick.episode.episode_number_end,
           )}`,
           poster_url: pick.series.poster_url ?? "",
           library_id: pick.series.library_id,

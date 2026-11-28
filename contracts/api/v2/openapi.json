@@ -39498,6 +39498,11 @@
             "format": "int64",
             "type": "integer"
           },
+          "episode_number_end": {
+            "description": "The last episode number this row plays when its video holds several episodes (a multi-episode file such as S01E02-E03). Absent for a single episode.",
+            "format": "int64",
+            "type": "integer"
+          },
           "files": {
             "items": {
               "$ref": "#/components/schemas/EpisodeFile"
@@ -39542,6 +39547,13 @@
           "season_number": {
             "format": "int64",
             "type": "integer"
+          },
+          "spanned_episodes": {
+            "description": "The later episodes this row's video also plays, in episode order. They are listed here instead of as rows of their own, and marking this row watched or unwatched marks them too. Absent for a single episode.",
+            "items": {
+              "$ref": "#/components/schemas/SpannedEpisode"
+            },
+            "type": "array"
           },
           "still_is_episode_still": {
             "description": "Whether still_url is an episode still. False when series artwork is used as a fallback; absent when provenance is unavailable.",
@@ -57535,6 +57547,33 @@
         "required": [
           "total",
           "items"
+        ],
+        "type": "object"
+      },
+      "SpannedEpisode": {
+        "additionalProperties": false,
+        "properties": {
+          "content_id": {
+            "examples": [
+              "episode:severance-s01e03"
+            ],
+            "type": "string"
+          },
+          "episode_number": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "overview": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "content_id",
+          "episode_number",
+          "title"
         ],
         "type": "object"
       },
