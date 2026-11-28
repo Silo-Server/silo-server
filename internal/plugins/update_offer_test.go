@@ -132,6 +132,46 @@ func TestUpdateToAvailableVersionRefusesAnOfferWithNoRepository(t *testing.T) {
 	}
 }
 
+// A repository deleted after UpdateToAvailableVersion read the installation,
+// while the catalog resolves the release, also leaves nowhere to install
+// from: ErrNoUpdateAvailable, before any download or stop (#5237).
+func TestUpdateToAvailableVersionRefusesAnOfferWhoseRepositoryGoesMeanwhileDB(t *testing.T) {
+	pool := builtinGuardTestPool(t)
+	ctx := t.Context()
+	repositories := NewRepositoryStore(pool)
+	repository, err := repositories.Create(ctx, CreateRepositoryInput{
+		URL:         "https://example.invalid/update-offer-repository-gone" + time.Now().UTC().Format("-20060102150405.000000000") + "/index.json",
+		DisplayName: "Removed catalog",
+	})
+	if err != nil {
+		t.Fatalf("create repository: %v", err)
+	}
+	if err := repositories.Delete(ctx, repository.ID); err != nil {
+		t.Fatalf("delete repository: %v", err)
+	}
+
+	events := []string{}
+	// The fake store still holds the repository_id the service read.
+	store := newFakeServiceInstallationStore(&Installation{
+		ID: 7, PluginID: "test.plugin", Version: "1.0.0", InstallPath: t.TempDir() + "/plugin", Enabled: true,
+		AvailableVersion: new("2.0.0"), RepositoryID: &repository.ID,
+	})
+	store.events = &events
+	service := &Service{
+		installations: store,
+		catalog:       NewCatalogService(repositories, CatalogServiceOptions{}),
+		host:          &fakeServiceHost{events: &events},
+	}
+
+	_, err = service.UpdateToAvailableVersion(ctx, 7)
+	if !errors.Is(err, ErrNoUpdateAvailable) {
+		t.Fatalf("UpdateToAvailableVersion() = %v, want ErrNoUpdateAvailable", err)
+	}
+	if len(events) != 0 {
+		t.Fatalf("events = %v, want none", events)
+	}
+}
+
 // Applying a recorded update refuses a version that isn't newer than the
 // installed one with ErrNoUpdateAvailable, before any download or stop, so a
 // stale offer never downgrades the plugin (#4518).

@@ -157,8 +157,9 @@ func (h *PluginHandler) ApplyAdminPluginUpdate(ctx context.Context, id int) (Plu
 	}
 	installation, err := h.service.UpdateToAvailableVersion(ctx, id)
 	if errors.Is(err, plugins.ErrNoUpdateAvailable) {
-		// Another install cleared the offer, or made it stale, after the read
-		// above: a conflict, not a server error (#4518).
+		// Another install cleared the offer or made it stale, or its
+		// repository was deleted, after the read above: a conflict, not a
+		// server error (#4518, #5237).
 		return PluginInstallationView{}, ErrPluginUpdateUnavailable
 	}
 	if err != nil {

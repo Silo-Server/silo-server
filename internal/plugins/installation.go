@@ -36,8 +36,8 @@ var ErrInstallationChanged = errors.New("plugin installation changed since it wa
 var ErrPluginAlreadyInstalled = errors.New("plugin is already installed")
 
 // ErrNoUpdateAvailable refuses to apply a recorded update when the
-// installation records none, or records a version that isn't newer than the
-// installed one.
+// installation records none, records a version that isn't newer than the
+// installed one, or has no repository left to install it from.
 var ErrNoUpdateAvailable = errors.New("no update available for plugin")
 
 // ErrBuiltinInstallationImmutable is returned when a caller tries to mutate

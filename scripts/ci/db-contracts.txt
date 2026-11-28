@@ -951,6 +951,10 @@
 ./internal/plugins TestNotifyPluginUpdateDropsAnOfferForAReplacedReleaseDB
 ./internal/plugins TestNotifyPluginUpdateSkipsAPluginUninstalledMeanwhileDB
 
+# Applying a recorded update whose repository was deleted while the catalog
+# resolved it is a conflict, not a server error.
+./internal/plugins TestUpdateToAvailableVersionRefusesAnOfferWhoseRepositoryGoesMeanwhileDB
+
 # A plugin build stored for another platform is served only for the package it
 # was fetched for, and a fetch that an update overtook stores nothing.
 ./internal/plugins TestPlatformArchiveFollowsTheInstalledPackageDB
