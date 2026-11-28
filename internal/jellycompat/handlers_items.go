@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
+	"math/rand/v2"
 	"net/http"
 	"net/url"
 	"runtime/debug"
@@ -2948,6 +2950,53 @@ func (h *ItemsHandler) otherTypesTotal(ctx context.Context, session *Session, qu
 	return counted.Total, nil
 }
 
+// browseAllItems serves a browse that omitted Limit. Jellyfin returns every
+// matching item then, and library sync clients such as Seerr read a whole
+// library in one request that way (#5312). The catalog caps a page at
+// compatBrowseMaxLimit, so pages are read until the browse reports no more. A
+// played filter's overlay can end a page short and page by catalog rows, so an
+// item a later page repeats is kept once. A random order is shuffled once over
+// every match, then StartIndex is applied: pages shuffled on their own would
+// skip items, and so would skipping StartIndex items in title order first.
+func (h *ItemsHandler) browseAllItems(ctx context.Context, session *Session, query itemsQuery) (*upstreamBrowseResponse, error) {
+	query.limit = compatBrowseMaxLimit
+	shuffle := query.sort == compatBrowseRandomSort
+	skip := 0
+	if shuffle {
+		query.sort = catalog.BrowseSortTitle
+		skip, query.startIndex = query.startIndex, 0
+	}
+	var all *upstreamBrowseResponse
+	seen := make(map[string]struct{})
+	for {
+		page, err := h.content.BrowseItems(ctx, session, buildBrowseParams(query))
+		if err != nil {
+			return nil, err
+		}
+		if all == nil {
+			all = &upstreamBrowseResponse{Total: page.Total, Items: make([]upstreamListItem, 0, len(page.Items))}
+			// The first page carries the total; the later ones skip the count.
+			query.enableTotalRecordCount = false
+		}
+		for _, item := range page.Items {
+			if _, dup := seen[item.ContentID]; dup {
+				continue
+			}
+			seen[item.ContentID] = struct{}{}
+			all.Items = append(all.Items, item)
+		}
+		if len(page.Items) == 0 || !page.HasMore || query.startIndex > math.MaxInt-len(page.Items) {
+			if shuffle {
+				//nolint:gosec // a display order, not a secret
+				rand.Shuffle(len(all.Items), func(i, j int) { all.Items[i], all.Items[j] = all.Items[j], all.Items[i] })
+				all.Items = all.Items[min(skip, len(all.Items)):]
+			}
+			return all, nil
+		}
+		query.startIndex += len(page.Items)
+	}
+}
+
 func (h *ItemsHandler) handleBrowseItems(w http.ResponseWriter, r *http.Request, session *Session, query itemsQuery) {
 	if repo, ok := h.episodeOnlyBrowser(query); ok {
 		h.handleEpisodeBrowse(w, r, session, query, repo)
@@ -2970,7 +3019,13 @@ func (h *ItemsHandler) handleBrowseItems(w http.ResponseWriter, r *http.Request,
 	if countOnly {
 		browseQuery.limit = 1
 	}
-	result, err := h.content.BrowseItems(r.Context(), session, buildBrowseParams(browseQuery))
+	var result *upstreamBrowseResponse
+	var err error
+	if query.limitDefaulted && !mixed && !countOnly {
+		result, err = h.browseAllItems(r.Context(), session, browseQuery)
+	} else {
+		result, err = h.content.BrowseItems(r.Context(), session, buildBrowseParams(browseQuery))
+	}
 	if err != nil {
 		writeCompatUpstreamError(w, err)
 		return
@@ -3303,6 +3358,7 @@ func (h *ItemsHandler) handleSpecificItems(w http.ResponseWriter, r *http.Reques
 	if len(query.specificCollectionIDs) == 0 && !idsRequestCollectionsView(r) && (query.hasIntersectingFilters() || query.hasItemTypeFilter || query.isFavorite || query.isPlayed != nil || query.isResumable || query.searchTerm != "" || query.sortExplicit) {
 		if query.limitDefaulted {
 			query.limit = len(query.specificIDs)
+			query.limitDefaulted = false
 		}
 		h.handleBrowseItems(w, r, session, query)
 		return

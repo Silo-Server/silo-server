@@ -273,8 +273,12 @@ requested page size, subject to the 1,000-row cap; `Limit=0` requests only the
 count. Longer lists still require paging using `TotalRecordCount` and
 `StartIndex`. An `/Items?Ids=` request without `Limit` returns every named
 item the viewer can see, as in Jellyfin. When it names no collection and also
-filters, searches, or sorts, that list is capped at 1,000 rows. Other `/Items`
-browsing retains the 24-row default.
+filters, searches, or sorts, that list is capped at 1,000 rows. A movie and
+series browse without `Limit`, such as a library's
+`/Items?ParentId={libraryId}&Recursive=true`, returns every matching item, as in
+Jellyfin, so library sync clients such as Seerr see the whole library. Other
+`/Items` browsing, including a browse whose `IncludeItemTypes` names `Episode`,
+retains the 24-row default.
 
 `/Items?ParentId={boxSetId}` lists a collection's members (movies, series, and
 the episodes of episode-scoped smart collections) in collection order unless
