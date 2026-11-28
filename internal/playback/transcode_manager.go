@@ -81,13 +81,6 @@ type TranscodeManager struct {
 	// unless the recipe names another node. Nil, or a nil result, deletes
 	// nothing.
 	NodeRecipesFn func() NodeRecipeDeleter
-	// OnFFmpegCrash is invoked when a reconstructed/local ffmpeg exits with an
-	// error so the embedding handler can tear down the playback session (keeping
-	// the card, so a resume can respawn). dead is the exact session that crashed;
-	// the handler passes it back through CloseTranscodeSessionIf so a successor
-	// reconstructed under the same id between the exit and teardown is not killed.
-	// No-op when nil.
-	OnFFmpegCrash func(ctx context.Context, sessionID string, dead *TranscodeSession)
 	// StartThrottler optionally starts the segment throttler for a (re)started
 	// transcode, reading the embedding handler's settings. No-op when nil.
 	StartThrottler func(ctx context.Context, ts *TranscodeSession)
@@ -1237,7 +1230,9 @@ func reconstructionOutputDir(root, sessionID, signedSubdir string) string {
 }
 
 // MonitorLocalTranscodeExit watches a local ffmpeg process and, on an error exit,
-// invokes OnFFmpegCrash so the embedding handler tears down the playback session.
+// drops the dead transcode (see closeCrashedTranscode). The playback session
+// stays: the client's next segment request or replan rebuilds the transcode at
+// its position, and a client that never returns lets the session expire.
 // A clean exit (no error) leaves the segments servable until the client stops.
 // A failure the session answers by restarting on CPU decode is restarted here
 // instead (see restartCrashedOnCPUDecode).
@@ -1277,14 +1272,29 @@ func (m *TranscodeManager) MonitorLocalTranscodeExit(sessionID string, session *
 			return
 		}
 
-		// ffmpeg crash — tear the session down; a client holding a valid token can
-		// reconstruct it on the next request. Pass the dead session so teardown is a
-		// compare-and-delete: a reconstruct that registered a successor under this id
-		// between the current!=session check above and teardown must not be killed.
-		if m.OnFFmpegCrash != nil {
-			m.OnFFmpegCrash(context.Background(), sessionID, session)
-		}
+		m.closeCrashedTranscode(sessionID, session, restartsOnCPU)
 	}()
+}
+
+// closeCrashedTranscode frees what a crashed local transcode holds (its output
+// directory, device reservation and transcode map entry) and leaves its
+// playback session to the client (#5336). It runs under the session lifecycle
+// lock that restarts and rebuilds hold, and only while session is still the
+// registered transcode and still crashed (a failed restart counts): a segment
+// request that restarted it, even one whose FFmpeg has since finished cleanly,
+// or registered a successor in the meantime keeps what it started.
+// sawCPUFallback reports whether the crash this monitor saw qualified for the
+// CPU-decode fallback. When it did not and the session's crash now does, a
+// restart crashed in the meantime; its own monitor answers that crash with
+// the fallback, so this cleanup leaves it.
+func (m *TranscodeManager) closeCrashedTranscode(sessionID string, session *TranscodeSession, sawCPUFallback bool) {
+	unlock := m.LockSessionLifecycle(sessionID)
+	defer unlock()
+	crashed, restartsOnCPU := session.crashState()
+	if !crashed || (restartsOnCPU && !sawCPUFallback) {
+		return
+	}
+	m.CloseTranscodeSessionIf(sessionID, session, "")
 }
 
 // restartCrashedOnCPUDecode restarts a crashed session whose restart moves it

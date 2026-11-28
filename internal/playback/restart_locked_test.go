@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -268,20 +267,19 @@ func TestRestartSessionLocked_SupersededWhenReplaced(t *testing.T) {
 	}
 }
 
-// The API server tears a crashed local transcode down so the client can
-// reconstruct it. A reconstruct starts on GPU decode again and dies at the same
-// frame, so the exit monitor restarts this failure on CPU decode itself, and
-// tears the session down as before when that restart cannot start.
+// The exit monitor drops a crashed local transcode so the client can rebuild
+// it. A rebuild starts on GPU decode again and dies at the same frame, so the
+// monitor restarts this failure on CPU decode itself, and drops the transcode
+// as before when that restart cannot start.
 func TestLocalExitMonitorRestartsFilterReinitFailureOnCPUDecode(t *testing.T) {
 	for _, tc := range []struct {
 		name           string
 		stderr         string
 		ffmpegMissing  bool
-		wantTornDown   bool
 		wantRegistered bool
 	}{
 		{name: "restart starts", wantRegistered: true},
-		{name: "restart cannot start", ffmpegMissing: true, wantTornDown: true},
+		{name: "restart cannot start", ffmpegMissing: true},
 		// FFmpeg was stopped at its AV1 decoder's first rejection (#4279).
 		{name: "AV1 decoder without a GPU", wantRegistered: true,
 			stderr: "[av1 @ 0x1] Your platform doesn't support hardware accelerated AV1 decoding.\n"},
@@ -320,23 +318,14 @@ func TestLocalExitMonitorRestartsFilterReinitFailureOnCPUDecode(t *testing.T) {
 				}
 				m := NewTranscodeManager()
 				m.RegisterTranscodeSession(sessionID, s)
-				var tornDown atomic.Bool
-				m.OnFFmpegCrash = func(_ context.Context, id string, dead *TranscodeSession) {
-					tornDown.Store(true)
-					m.CloseTranscodeSessionIf(id, dead, "")
-				}
-
 				m.MonitorLocalTranscodeExit(sessionID, s)
 				time.Sleep(3 * time.Second) //nolint:forbidigo // synctest advances virtual time past the monitor's two-second delay
 				synctest.Wait()
 
-				if got := tornDown.Load(); got != tc.wantTornDown {
-					t.Fatalf("session torn down = %v, want %v", got, tc.wantTornDown)
-				}
 				if got := m.GetTranscodeSession(sessionID) == s; got != tc.wantRegistered {
 					t.Fatalf("session still registered = %v, want %v", got, tc.wantRegistered)
 				}
-				if tc.wantTornDown {
+				if !tc.wantRegistered {
 					return
 				}
 				args, err := os.ReadFile(argsPath)
@@ -393,3 +382,37 @@ func (s *lineSignalingFFmpegLogSink) WriteLine(_ context.Context, _ string, _ FF
 }
 
 func (s *lineSignalingFFmpegLogSink) WriteEvent(context.Context, string, FFmpegLogAttrs, string) {}
+
+// The exit monitor's cleanup waits for the lifecycle lock. A segment request
+// can restart the session meanwhile, and the restart can crash on a failure
+// the CPU-decode fallback answers although the first crash did not. That
+// crash belongs to the restart's own monitor, so the cleanup leaves it.
+func TestCrashCleanupLeavesARestartsCPUFallbackToItsMonitor(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		sawCPUFallback bool
+		wantRegistered bool
+	}{
+		{name: "restart crashed on a CPU-fallback failure", wantRegistered: true},
+		{name: "fallback already tried for this crash", sawCPUFallback: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			const sessionID = "crash-cleanup"
+			dir := t.TempDir()
+			exited := make(chan struct{})
+			close(exited)
+			stderr := newBoundedTailBuffer(0)
+			_, _ = stderr.Write([]byte("[vf#0:0 @ 0x5ad071e0c0c0] Error reinitializing filters!\n"))
+			s := &TranscodeSession{
+				outputDir: dir, done: exited, waitErr: errors.New("exit status 187"), stderr: stderr,
+				opts: TranscodeOpts{OutputDir: dir, SessionID: sessionID, HWAccel: transcodeHWQSV},
+			}
+			m := NewTranscodeManager()
+			m.RegisterTranscodeSession(sessionID, s)
+			m.closeCrashedTranscode(sessionID, s, tc.sawCPUFallback)
+			if got := m.GetTranscodeSession(sessionID) == s; got != tc.wantRegistered {
+				t.Fatalf("session still registered = %v, want %v", got, tc.wantRegistered)
+			}
+		})
+	}
+}

@@ -428,6 +428,14 @@ func NewTranscodeSessionForTest(outputDir string) *TranscodeSession {
 	return &TranscodeSession{outputDir: outputDir}
 }
 
+// NewExitedTranscodeSessionForTest returns a session whose FFmpeg has already
+// exited with exitErr, so tests in other packages can drive the exit monitor.
+func NewExitedTranscodeSessionForTest(outputDir string, exitErr error) *TranscodeSession {
+	done := make(chan struct{})
+	close(done)
+	return &TranscodeSession{outputDir: outputDir, done: done, waitErr: exitErr}
+}
+
 // SetRestartHook registers a callback fired after every successful Restart.
 // The owning handler uses it to re-arm the transcode throttler and the exit
 // monitor; firing it from Restart itself keeps every restart caller (web

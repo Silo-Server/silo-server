@@ -340,14 +340,6 @@ func TestLoadOrReconstructTranscode_FailedAttemptPreservesConcurrentSession(t *t
 	}
 }
 
-// The crash closures use the matched return of CloseTranscodeSessionIf as the
-// authoritative gate for tearing down the upstream playback session. This test
-// proves that contract end-to-end for the successor case: when a successor is
-// present, the call returns false (so the closure returns early and never stops
-// the successor's session), and a second call with the successor as expected
-// returns true. The closures (handlers.OnFFmpegCrash / jellycompat
-// OnFFmpegCrash) wire `matched` directly to the StopSession/stopPlaybackSessionByID
-// decision, so a false gate guarantees the live session is left intact.
 // TestCloseTranscodeSessionIfSessionGoneFencesTheOutputDirectory: the close
 // removes the session's output directory. A retry that started in between
 // would write its playlist and segments into the directory being removed, so
@@ -381,6 +373,9 @@ func TestCloseTranscodeSessionIfSessionGoneFencesTheOutputDirectory(t *testing.T
 	}
 }
 
+// CloseTranscodeSessionIf is a compare-and-delete: while a successor holds the
+// id it returns false and leaves the successor alone; with the successor as
+// expected it returns true.
 func TestCloseTranscodeSessionIf_GateContract(t *testing.T) {
 	m := NewTranscodeManager()
 	dead := &TranscodeSession{}
