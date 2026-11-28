@@ -207,7 +207,7 @@ from IP, rates from bytes and timestamps) can wait.
 |---|---|
 | `ClientName`, `ClientVersion`, `ClientBuild`, `ClientChannel`, `ClientUserAgent` | Separates a real player from `curl` or a scraper. Client-side anomalies are usually meaningless until grouped by user agent. |
 | `DeviceID` | One account across forty devices is a strong sharing signal. |
-| `Outcome` (`completed` / `stalled_reap` / `client_gone`) | A ripper **completes**; a browser **aborts**. Already classified by the rolling deadline writer — free to record. |
+| `Outcome` (`completed` / `stalled_reap` / `peer_timeout` / `client_gone`) | A ripper **completes**; a browser **aborts**. Already classified by the rolling deadline writer — free to record. |
 | `TokenIssuedAt` | Enables "how many distinct sessions is one token driving" — the cheap probe for token hoard/replay. |
 | `RequestCount` (per session, per window) | Low-byte, high-work abuse (manifest/seek/replan storms) is invisible to a byte counter. |
 

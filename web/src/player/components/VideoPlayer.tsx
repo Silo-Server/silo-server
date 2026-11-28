@@ -4000,7 +4000,7 @@ export function VideoPlayer({
     coverCrop,
     videoAspect,
   } = useSubtitleLayout(containerRef, videoRef, subtitleSettings.position, videoFit);
-  // Scale cue text with the rendered video so subtitles stay proportionally
+  // Scale cue text with the player window so subtitles stay proportionally
   // the same size as the window grows or shrinks.
   const scaledCueStyle = useMemo(
     () => ({

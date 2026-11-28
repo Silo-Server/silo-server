@@ -227,7 +227,7 @@ type TranscodeOpts struct {
 	// keeps. A prepared download reads its progress from the frames encoded
 	// at this rate (see prepareProgressWriter). Zero when unknown.
 	SourceFrameRate float64
-	FastStart       bool // use superfast preset for faster first-segment production
+	FastStart       bool // fresh start: superfast without restartX264Params, shorter hardware manifest lead
 	// ThrottleSeconds is the resolved forward-buffer policy for this session.
 	// Zero disables throttling. It is durable so a remote executor can preserve
 	// the API server's policy across node reconstruction without reading settings.
@@ -1484,14 +1484,29 @@ func appendHWAccelArgs(args []string, opts TranscodeOpts) []string {
 	return args
 }
 
-// videoPreset returns an encoder-compatible preset. CPU encoders use a faster
-// fast-start preset for initial playback, while QSV stays on the fastest
-// preset family it supports.
+// restartX264Params tune software H.264 for an encode that continues a
+// session rather than starting it: the restart after a seek and a rebuilt
+// session. FFmpeg starts encoding at the new position, so the encoder's speed
+// decides how soon the player has video again. These encodes run superfast,
+// as a fresh start does, with x264's macroblock tree, which superfast leaves
+// off, back on over a 10-frame lookahead. Measured with Silo's arguments on a
+// 16-thread CPU at 1080p, against the veryfast they used before: 10 s of video
+// after a seek was ready about 22% sooner with about a third less CPU, for
+// about 5% more bits at the same VMAF. Plain superfast needs about 18% more
+// bits than veryfast; a fresh start keeps it because the lookahead would
+// delay its first segments by about 5%.
+const restartX264Params = "mbtree=1:rc-lookahead=10"
+
+// videoPreset returns an encoder-compatible preset. CPU encoders use superfast
+// for a fresh start, and software H.264 for its restarts too (see
+// restartX264Params); software HEVC restarts use veryfast. QSV stays on the
+// fastest preset family it supports.
 func videoPreset(opts TranscodeOpts, hwAccel string) string {
+	isHEVC := strings.EqualFold(opts.TargetCodecVideo, transcodeCodecHEVC)
 	if opts.preparedFileEncode {
 		// Software HEVC at "medium" takes hours for a 4K film; "fast" keeps a
 		// download's preparation practical while still beating veryfast.
-		if hwAccel != "qsv" && strings.EqualFold(opts.TargetCodecVideo, transcodeCodecHEVC) {
+		if hwAccel != "qsv" && isHEVC {
 			return "fast"
 		}
 		return "medium"
@@ -1499,7 +1514,7 @@ func videoPreset(opts TranscodeOpts, hwAccel string) string {
 	if hwAccel == "qsv" {
 		return "veryfast"
 	}
-	if opts.FastStart {
+	if opts.FastStart || !isHEVC {
 		return "superfast"
 	}
 	return "veryfast"
@@ -1599,6 +1614,9 @@ func appendVideoArgs(args []string, opts TranscodeOpts) []string {
 			// so libx264 picks the level from the actual output instead.
 			if !opts.preparedFileEncode {
 				args = append(args, "-level", "4.1")
+				if !opts.FastStart {
+					args = append(args, "-x264-params", restartX264Params)
+				}
 			}
 		}
 		if hasBitrateCap {
@@ -4361,7 +4379,7 @@ func (s *TranscodeSession) restart(
 		opts.StreamOriginSeconds = streamOriginSeconds
 		opts.CopySeekAnchorResolved = copySeekAnchorResolved
 	}
-	opts.FastStart = false // seek-restarts use veryfast for better quality
+	opts.FastStart = false // a seek restart is not a fresh start (see restartX264Params)
 	if subtitleRenditionActive(opts) {
 		s.mu.Lock()
 		opts.subtitleCueFile = subtitleCueFileName(s.subtitleCueBase + s.segmentGeneration)

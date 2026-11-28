@@ -162,6 +162,9 @@ export function AccountSignInSection() {
   // accepts (the server switch, or break-glass). The server answers its own
   // rule (last_sign_in_method) as can_unlink.
   const canDisconnect = identities.data?.can_unlink === true;
+  // False in demo mode, where how the shared account signs in is fixed. A
+  // server that doesn't send it yet (mid-upgrade) still offers linking.
+  const canLink = identities.data?.can_link !== false;
   const connectable = externalProviders.filter(
     (entry) => !linkedInstallations.has(entry.installation_id ?? ""),
   );
@@ -202,7 +205,7 @@ export function AccountSignInSection() {
                 key={identity.id}
                 identity={identity}
                 canDisconnect={!isImpersonating && canDisconnect}
-                onlyWayIn={!canDisconnect}
+                onlyWayIn={!canDisconnect && canLink}
                 onDisconnect={() => setDisconnecting(identity)}
               />
             ))}
@@ -212,6 +215,7 @@ export function AccountSignInSection() {
                 {t("web.settings.accountSignIn.impersonating")}
               </p>
             ) : (
+              canLink &&
               connectable.map((provider) =>
                 connecting === provider.installation_id ? (
                   <ConnectForm

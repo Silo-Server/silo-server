@@ -7,43 +7,68 @@ import (
 	"time"
 )
 
-// fencedPacketConn is the packet connection handed to HTTP/3. Once the engine's
-// lease grant ends or its local deadline passes it drops every packet in both
-// directions, before teardown starts, and never opens again. A packet is dropped
-// as a lost packet would be, so the transport sees loss and not an error that
-// would end its server. The check cannot cover a process paused between the
-// check and the send; the lease's TTL margin bounds that case.
-//
-// It keeps the optional methods the pinned quic-go reads from the engine's
-// connection: DF support, and GSO with segmented writes.
-type fencedPacketConn struct {
-	net.PacketConn
+// grantFence is the lease window of one engine: the grant it starts under and
+// that grant's local deadline. It closes once the grant ends or the deadline
+// passes, and never opens again. The HTTP/3 packet path, the engine's discovery
+// (engine.Config.Window) and the coordination writes share one fence, so they
+// close together. The check cannot cover a process paused between the check and
+// the act it guards; the lease's TTL margin bounds that case.
+type grantFence struct {
 	// window returns the monitor's current grant and its local deadline.
 	window func() (grant uint64, until time.Time)
 	grant  uint64
 	closed atomic.Bool
 }
 
-// fenceFor wraps conn with the fence of the grant the engine starts under. A
-// nil conn or monitor leaves conn as it is.
-func fenceFor(conn net.PacketConn, m *replicaMonitor, grant uint64) net.PacketConn {
-	if conn == nil || m == nil {
-		return conn
+// newGrantFence returns the fence of grant on m. A nil monitor, as without
+// Redis, has no lease and returns a nil fence, which is always open.
+func newGrantFence(m *replicaMonitor, grant uint64) *grantFence {
+	if m == nil {
+		return nil
 	}
-	return &fencedPacketConn{PacketConn: conn, window: m.window, grant: grant}
+	return &grantFence{window: m.window, grant: grant}
 }
 
-func (c *fencedPacketConn) open() bool {
-	if c.closed.Load() {
-		return false
+// until returns the grant's local deadline while the fence is open, and the
+// zero time once it has closed.
+func (f *grantFence) until() time.Time {
+	if f.closed.Load() {
+		return time.Time{}
 	}
-	grant, until := c.window()
-	if grant != c.grant || !time.Now().Before(until) {
-		c.closed.Store(true)
-		return false
+	grant, until := f.window()
+	if grant != f.grant || !time.Now().Before(until) {
+		f.closed.Store(true)
+		return time.Time{}
 	}
-	return true
+	return until
 }
+
+// open reports whether the fence still admits packets and writes.
+func (f *grantFence) open() bool {
+	return f == nil || !f.until().IsZero()
+}
+
+// fencedPacketConn is the packet connection handed to HTTP/3. Once its fence
+// closes it drops every packet in both directions, before teardown starts. A
+// packet is dropped as a lost packet would be, so the transport sees loss and
+// not an error that would end its server.
+//
+// It keeps the optional methods the pinned quic-go reads from the engine's
+// connection: DF support, and GSO with segmented writes.
+type fencedPacketConn struct {
+	net.PacketConn
+	fence *grantFence
+}
+
+// fenceFor wraps conn with fence. A nil conn or fence leaves conn as it is.
+func fenceFor(conn net.PacketConn, fence *grantFence) net.PacketConn {
+	if conn == nil || fence == nil {
+		return conn
+	}
+	return &fencedPacketConn{PacketConn: conn, fence: fence}
+}
+
+func (c *fencedPacketConn) open() bool { return c.fence.open() }
 
 // ReadFrom checks after the read returns, so a packet that arrived while the
 // caller waited is judged by the time it is handed on.

@@ -42,6 +42,12 @@ type RecipeCard struct {
 	RoutingEgress          string  `json:"routing_egress,omitempty"`
 	RoutingEgressNodeID    int     `json:"routing_egress_node_id,omitempty"`
 
+	// MediaTransport and PathGeneration mirror Session's connection
+	// attribution so a rebuilt session keeps it. Stored cards carry them;
+	// stream-token claims never do.
+	MediaTransport string `json:"media_transport,omitempty"`
+	PathGeneration uint64 `json:"path_generation,omitempty"`
+
 	// PlayMethod discriminates which serve path reconstructs this session
 	// (direct / remux / transcode). Empty decodes as PlayTranscode for
 	// back-compat with cards written before direct/remux were reconstructable.

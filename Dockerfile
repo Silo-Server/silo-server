@@ -162,7 +162,7 @@ LABEL io.silo.intel-qsv-runtime="${INTEL_QSV_RUNTIME}"
 COPY --from=build /silo /usr/local/bin/silo
 # Not run here: a Mac copies it out to run a transcode node with VideoToolbox.
 COPY --from=node_darwin /silo-darwin-arm64 /usr/share/silo/nodes/silo-darwin-arm64
-EXPOSE 8080 8096 13378
+EXPOSE 8080 8096 13378 8094/udp
 # Silo runs database migrations before its HTTP listener starts, and an
 # upgrade on a large library can migrate for many minutes. The start period
 # covers the default 20-minute migration budget (SILO_MIGRATE_TIMEOUT) so a

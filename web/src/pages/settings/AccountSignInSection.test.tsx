@@ -63,6 +63,8 @@ const IDENTITY = {
 
 let identities: Array<typeof IDENTITY>;
 let passwordAllowed: boolean;
+// False in demo mode: the server refuses linking and unlinking.
+let linkAllowed: boolean | undefined;
 let failures: Record<string, unknown>;
 const calls: Array<{ op: string; options?: unknown }> = [];
 
@@ -81,6 +83,7 @@ beforeEach(() => {
   auth.isImpersonating = false;
   identities = [];
   passwordAllowed = true;
+  linkAllowed = true;
   failures = {};
   calls.length = 0;
   vi.mocked(v2).mockImplementation(((op: string, options?: unknown) => {
@@ -91,7 +94,11 @@ beforeEach(() => {
         // The server's rule: another identity, or a password it still accepts.
         return Promise.resolve({
           items: identities,
-          can_unlink: identities.length > 0 && (identities.length > 1 || passwordAllowed),
+          can_unlink:
+            linkAllowed !== false &&
+            identities.length > 0 &&
+            (identities.length > 1 || passwordAllowed),
+          ...(linkAllowed === undefined ? {} : { can_link: linkAllowed }),
         });
       case "GET /api/v2/account/password/capability":
         return Promise.resolve({
@@ -157,6 +164,28 @@ it("shows the linked identity and keeps it when it is the only way in", async ()
   expect(screen.queryByRole("button", { name: "Disconnect" })).toBeNull();
   // One provider, already linked: nothing to connect.
   expect(screen.queryByRole("button", { name: /Connect/ })).toBeNull();
+});
+
+// Demo mode: the shared account's sign-in methods are fixed, so nothing is
+// offered, and the linked identity is not called the only way in.
+it("offers neither connect nor disconnect when the server refuses linking", async () => {
+  identities = [IDENTITY];
+  auth.providers = [LOCAL, OIDC, LDAP];
+  linkAllowed = false;
+  mount();
+  await screen.findByText("alice · alice@example.test");
+  expect(screen.queryByRole("button", { name: "Disconnect" })).toBeNull();
+  expect(screen.queryByRole("button", { name: /Connect/ })).toBeNull();
+  expect(
+    screen.queryByText("This is how you sign in to this account, so it stays connected."),
+  ).toBeNull();
+});
+
+// A server that doesn't send can_link yet (mid-upgrade) keeps linking.
+it("offers connect when the server does not say whether linking is allowed", async () => {
+  linkAllowed = undefined;
+  mount();
+  await screen.findByRole("button", { name: "Connect Company SSO" });
 });
 
 it("disconnects while the local password still signs in", async () => {

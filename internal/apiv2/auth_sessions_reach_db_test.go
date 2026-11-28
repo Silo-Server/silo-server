@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -31,10 +32,23 @@ type reachDB struct {
 	suffix  string
 	users   map[int]*models.User
 	claims  map[string]*auth.Claims
+	keys    map[string]*models.APIKey
 	handler http.Handler
 }
 
 func newReachDB(t *testing.T) *reachDB {
+	t.Helper()
+	return newReachDBIn(t, false)
+}
+
+// newReachDBIn is newReachDB on a server with demo mode on or off.
+func newReachDBIn(t *testing.T, demo bool) *reachDB {
+	t.Helper()
+	return newReachDBWith(t, fakeSettings{demo: demo})
+}
+
+// newReachDBWith is newReachDB reading demo mode from settings.
+func newReachDBWith(t *testing.T, settings apimw.DemoSettingsReader) *reachDB {
 	t.Helper()
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
@@ -45,7 +59,7 @@ func newReachDB(t *testing.T) *reachDB {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	d := &reachDB{pool: pool, suffix: strconv.FormatInt(time.Now().UnixNano(), 10), users: map[int]*models.User{}, claims: map[string]*auth.Claims{}}
+	d := &reachDB{pool: pool, suffix: strconv.FormatInt(time.Now().UnixNano(), 10), users: map[int]*models.User{}, claims: map[string]*auth.Claims{}, keys: map[string]*models.APIKey{}}
 	t.Cleanup(func() {
 		ctx := context.WithoutCancel(t.Context())
 		_, _ = pool.Exec(ctx, `DELETE FROM auth_sessions WHERE user_id IN (SELECT id FROM users WHERE username LIKE $1)`, "reach-"+d.suffix+"%")
@@ -55,7 +69,8 @@ func newReachDB(t *testing.T) *reachDB {
 	jwt := auth.NewJWTService("synthetic-session-reach-secret", time.Minute, time.Hour)
 	svc := auth.NewService(auth.NewLocalProvider(users, sessions), jwt, sessions, users, nil, nil, nil)
 	deps := parityDeps(false)
-	deps.Auth = apimw.NewAuthMiddleware(fakeTokens{d.claims}, sessions, fakeAPIKeys{}, fakeUsers{d.users})
+	deps.DemoSettings = settings
+	deps.Auth = apimw.NewAuthMiddleware(fakeTokens{d.claims}, sessions, fakeAPIKeys{d.keys}, fakeUsers{d.users})
 	deps.Sessions = handlers.NewAuthHandler(svc, jwt, nil)
 	d.handler = newTestHandler(t, deps)
 	return d
@@ -63,13 +78,18 @@ func newReachDB(t *testing.T) *reachDB {
 
 func (d *reachDB) account(t *testing.T) int {
 	t.Helper()
+	return d.accountWithRole(t, models.RoleUser)
+}
+
+func (d *reachDB) accountWithRole(t *testing.T, role string) int {
+	t.Helper()
 	name := fmt.Sprintf("reach-%s-%d", d.suffix, len(d.users))
 	var id int
 	if err := d.pool.QueryRow(t.Context(), `INSERT INTO users (username, email, password_hash, role, enabled)
-		VALUES ($1, $2, 'synthetic-hash', 'user', true) RETURNING id`, name, name+"@example.test").Scan(&id); err != nil {
+		VALUES ($1, $2, 'synthetic-hash', $3, true) RETURNING id`, name, name+"@example.test", role).Scan(&id); err != nil {
 		t.Fatal(err)
 	}
-	d.users[id] = &models.User{ID: id, Role: models.RoleUser, Enabled: true}
+	d.users[id] = &models.User{ID: id, Role: role, Enabled: true}
 	return id
 }
 
@@ -98,7 +118,7 @@ func (d *reachDB) store(t *testing.T, userID int, s reachSession) string {
 		t.Fatal(err)
 	}
 	token := "reach-token-" + s.id
-	d.claims[token] = &auth.Claims{UserID: userID, Role: models.RoleUser, SessionID: s.id, TokenType: auth.TokenTypeAccess}
+	d.claims[token] = &auth.Claims{UserID: userID, Role: d.users[userID].Role, SessionID: s.id, TokenType: auth.TokenTypeAccess}
 	return token
 }
 
@@ -270,9 +290,67 @@ func TestLimitedSessionDeleteDB(t *testing.T) {
 	if !d.live(t, foreign) {
 		t.Fatal("another account's session ended")
 	}
+	// The capability a client reads before offering the action agrees.
+	if d.mayRevokeOthers(t, limited) || !d.mayRevokeOthers(t, ordinary) {
+		t.Fatal("revoke_other_sessions: want false for the limited session and true for the ordinary one")
+	}
 	own := d.claims[limited].SessionID
 	if rec := do(t, d.handler, http.MethodDelete, Prefix+"/auth/sessions/"+own, "", bearer(limited)); rec.Code != http.StatusNoContent || d.live(t, own) {
 		t.Fatalf("ending its own session = %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// mayRevokeOthers reads revoke_other_sessions from the login-session
+// capability as the token's caller.
+func (d *reachDB) mayRevokeOthers(t *testing.T, token string) bool {
+	t.Helper()
+	rec := do(t, d.handler, http.MethodGet, Prefix+"/auth/sessions/capabilities", "", bearer(token))
+	var capability struct {
+		RevokeOtherSessions *bool `json:"revoke_other_sessions"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &capability); err != nil || rec.Code != http.StatusOK || capability.RevokeOtherSessions == nil {
+		t.Fatalf("capability = %d %s", rec.Code, rec.Body.String())
+	}
+	return *capability.RevokeOtherSessions
+}
+
+// TestDemoVisitorOnALimitedSessionDB: on a demo server, where visitors share
+// one account, a session opened by device sign-in and an ordinary one are
+// each refused another session of the account, an unknown session is still
+// not found for both, each may end itself, and the capability says no to
+// both. The ordinary caller gets the demo refusal and the limited caller a
+// different one (the device sign-in rule answers first), so the test fails
+// when either rule stops applying where they meet.
+func TestDemoVisitorOnALimitedSessionDB(t *testing.T) {
+	d := newReachDBIn(t, true)
+	yes := true
+	account := d.account(t)
+	limited := d.store(t, account, reachSession{via: &yes, platform: "tvOS"})
+	ordinary := d.store(t, account, reachSession{platform: "web"})
+	bystander := uuid.NewString()
+	d.store(t, account, reachSession{id: bystander, platform: "web"})
+	for name, caller := range map[string]struct {
+		token string
+		demo  bool
+	}{"limited": {limited, false}, "ordinary": {ordinary, true}} {
+		refusal := requireProblem(t, do(t, d.handler, http.MethodDelete, Prefix+"/auth/sessions/"+bystander, "", bearer(caller.token)), TypePermissionDenied)
+		if !d.live(t, bystander) || (refusal.Detail == demoRefusalDetail) != caller.demo {
+			t.Fatalf("%s: refusal %q (other session live: %v), want the demo refusal: %v", name, refusal.Detail, d.live(t, bystander), caller.demo)
+		}
+		requireProblem(t, do(t, d.handler, http.MethodDelete, Prefix+"/auth/sessions/"+uuid.NewString(), "", bearer(caller.token)), TypeNotFound)
+		if d.mayRevokeOthers(t, caller.token) {
+			t.Fatalf("%s: revoke_other_sessions is true", name)
+		}
+	}
+	// The limited caller still sees the others redacted, and each may sign
+	// itself out.
+	page := d.list(t, limited, "")
+	requireRedactedItem(t, itemByID(t, page, bystander), bystander, page.CurrentSession)
+	for name, token := range map[string]string{"limited": limited, "ordinary": ordinary} {
+		own := d.claims[token].SessionID
+		if rec := do(t, d.handler, http.MethodDelete, Prefix+"/auth/sessions/"+own, "", bearer(token)); rec.Code != http.StatusNoContent || d.live(t, own) {
+			t.Fatalf("%s: ending its own session = %d %s", name, rec.Code, rec.Body.String())
+		}
 	}
 }
 
@@ -343,4 +421,93 @@ func requireIDOnlyCursor(t *testing.T, cursor, lastID string) {
 	if len(envelope.Pos) != 1 || envelope.Pos["i"] != lastID {
 		t.Fatalf("cursor position = %s, want only the id %s", body, lastID)
 	}
+}
+
+// demoSwitch is a demo.enabled setting a test turns on and off, or makes
+// unreadable, between requests.
+type demoSwitch struct {
+	on  bool
+	err error
+}
+
+func (s *demoSwitch) Get(_ context.Context, key string) (string, error) {
+	if s.err != nil {
+		return "", s.err
+	}
+	if key == "demo.enabled" && s.on {
+		return "true", nil
+	}
+	return "", nil
+}
+
+// TestDemoVisitorSessionListDB: on a demo server, where visitors share one
+// non-administrator account, each visitor's listSessions shows another
+// session as a session limited to itself sees it, by id only, while its own
+// item and current_session stay complete. Regression: every visitor read
+// every other visitor's device name, platform, address and activity. The
+// subtests pin that the rule follows demo mode (off is the full page), spares
+// an administrator, refuses rather than serve the full page when demo mode
+// can't be read, and that a cursor does not cross a switch of demo mode.
+func TestDemoVisitorSessionListDB(t *testing.T) {
+	demo := &demoSwitch{on: true}
+	d := newReachDBWith(t, demo)
+	visitors := d.account(t)
+	first, second := uuid.NewString(), uuid.NewString()
+	firstToken := d.store(t, visitors, reachSession{id: first, platform: "web", createdAt: time.Now().Add(-2 * time.Hour)})
+	secondToken := d.store(t, visitors, reachSession{id: second, platform: "iOS"})
+	t.Cleanup(func() { demo.on, demo.err = true, nil })
+
+	t.Run("demo visitor", func(t *testing.T) {
+		for _, tc := range []struct{ token, own, other string }{{firstToken, first, second}, {secondToken, second, first}} {
+			page := d.list(t, tc.token, "")
+			if len(page.Items) != 2 {
+				t.Fatalf("items = %d, want both sessions", len(page.Items))
+			}
+			requireCompleteItem(t, "own item", itemByID(t, page, tc.own), tc.own, true)
+			requireCompleteItem(t, "current_session", page.CurrentSession, tc.own, true)
+			requireRedactedItem(t, itemByID(t, page, tc.other), tc.other, page.CurrentSession)
+		}
+	})
+
+	t.Run("demo off", func(t *testing.T) {
+		demo.on = false
+		defer func() { demo.on = true }()
+		requireCompleteItem(t, "other item", itemByID(t, d.list(t, firstToken, ""), second), second, false)
+	})
+
+	t.Run("administrator on the demo server", func(t *testing.T) {
+		admin := d.accountWithRole(t, models.RoleAdmin)
+		own, other := uuid.NewString(), uuid.NewString()
+		token := d.store(t, admin, reachSession{id: own, platform: "web"})
+		d.store(t, admin, reachSession{id: other, platform: "web"})
+		requireCompleteItem(t, "other item", itemByID(t, d.list(t, token, ""), other), other, false)
+	})
+
+	t.Run("demo mode unreadable", func(t *testing.T) {
+		demo.err = errors.New("settings store unreachable")
+		defer func() { demo.err = nil }()
+		rec := do(t, d.handler, http.MethodGet, Prefix+"/auth/sessions", "", bearer(firstToken))
+		requireProblem(t, rec, TypeInternalError)
+		if strings.Contains(rec.Body.String(), second) {
+			t.Fatalf("the refusal names the other session: %s", rec.Body.String())
+		}
+	})
+
+	t.Run("API key of a demo visitor", func(t *testing.T) {
+		d.keys["sa_reach_demo"] = &models.APIKey{ID: 1, UserID: visitors}
+		requireProblem(t, do(t, d.handler, http.MethodGet, Prefix+"/auth/sessions", "", bearer("sa_reach_demo")), TypePermissionDenied)
+	})
+
+	t.Run("cursor across a switch of demo mode", func(t *testing.T) {
+		demo.on = false
+		ordinaryCursor := d.list(t, firstToken, "?limit=1").Page.NextCursor
+		demo.on = true
+		demoCursor := d.list(t, firstToken, "?limit=1").Page.NextCursor
+		if ordinaryCursor == "" || demoCursor == "" {
+			t.Fatalf("cursors %q and %q, want both pages to continue", ordinaryCursor, demoCursor)
+		}
+		requireProblem(t, do(t, d.handler, http.MethodGet, Prefix+"/auth/sessions?limit=1&cursor="+url.QueryEscape(ordinaryCursor), "", bearer(firstToken)), TypeInvalidCursor)
+		demo.on = false
+		requireProblem(t, do(t, d.handler, http.MethodGet, Prefix+"/auth/sessions?limit=1&cursor="+url.QueryEscape(demoCursor), "", bearer(firstToken)), TypeInvalidCursor)
+	})
 }

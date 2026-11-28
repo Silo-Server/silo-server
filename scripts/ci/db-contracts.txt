@@ -136,8 +136,11 @@
 # available episode air date counts only episodes with a file in a library:
 # files the bulk episode link attaches count, also when an air-date correction
 # holds the series row meanwhile, and deleting a library drops its episodes.
+# Specials do not extend a series' last aired date, and the upgrade repairs
+# values that counted them.
 ./internal/catalog TestSeriesAirDatesFollowEpisodesAndCalendarDB
 ./internal/scanner TestBulkLinkEpisodesAdvancesSeriesAvailableAirDateDB
+./migrations TestSeriesLastAirDateSkipSpecialsMigrationPostgres
 
 # Poster availability counts only files the viewer can play, and stays blank
 # when a regular season has no episode rows.
@@ -325,8 +328,25 @@
 ./internal/auth TestExpiredSessionCleanupSkipsHeldRequestDB
 ./internal/auth TestAPIKeyCreationRefusesRevokedCredentialDB
 ./internal/auth TestPasswordSignInForRoutesDB
+./internal/auth TestDemoLoginDB
+./internal/auth TestExternalSignInDemoModeDB
 ./internal/auth TestExternalAccountCannotPreemptInitialSetupDB
 ./internal/auth TestPluginAuthBindingCallbackModeDB
+./internal/auth TestLocalPasswordOffAccountsDB
+./internal/auth TestLocalPasswordOffCountsOpenIDConnectLinkOnlyWithPublicURLDB
+./internal/auth TestEnableAccountLocalLoginDB
+./internal/auth TestBreakGlassWithoutPasswordIsNotCountedDB
+./internal/auth TestUninstallAddsNoLockCycleDB
+./internal/auth TestUnlinkNeedsAPasswordThatSignsInDB
+./internal/auth TestLocalPasswordOffKeepsOpenSessionsDB
+./internal/auth TestSignInProviderGuardDB
+./internal/auth TestSignInProviderGuardSerializesWithSettingsSaveDB
+./internal/auth TestServerWithoutUsableProviderCanStillBeRepairedAndManagedDB
+./internal/plugins TestProvisionAppliesDeclarationThatLeavesNoSignInProviderDB
+./internal/plugins TestSignInWarningOnlyOnPluginsThatCanBeTheProviderDB
+./internal/plugins TestStoredSignInWarningIsWorkedOutAgainDB
+./internal/api/handlers TestLocalLoginSettingRequiresBreakGlassDB
+./internal/api/handlers TestPluginDisableAndUninstallRefusedBeforeStopDB
 ./internal/auth TestLoginSessionActivityAndAdminRevocationDB
 ./internal/auth TestChangePasswordSignOutOtherSessionsDB
 ./internal/auth TestSignupPolicySerializationDB
@@ -713,6 +733,7 @@
 ./internal/userstore/pgstore TestPostgresMarkWatchedBatch
 ./internal/userstore/pgstore TestPostgresProgressHints
 ./internal/userstore/pgstore TestPostgresUnmarkKeepsHistory
+./internal/userstore/pgstore TestPostgresImportedCompletionAfterSameSecondPartial
 ./internal/userstore/pgstore TestPostgresAtomicJellycompatProgress
 ./internal/userstore/pgstore TestPostgresJellycompatPlayedByDate
 ./internal/userstore/pgstore TestPostgresPersonalListPage
@@ -1168,6 +1189,11 @@
 ./internal/api/handlers TestLearnedLimitMarksOnlyAStartItLoweredDB
 ./internal/api/handlers TestLearnedLimitMarksOnlyAReplanItLoweredDB
 ./internal/api/handlers TestConnectionReadingsDB
+./internal/api/handlers TestDirectStartPassesUseMediaHostKeyDB
+./internal/api/handlers TestDirectStartClearRemovesTheServingConnectionsLimitDB
+./internal/api/handlers TestSourceRefusedRecoveryPlansUnderTheServingHostsKeyDB
+./internal/api/handlers TestProbeReceiptRecordsUnderReceiptKeyDB
+./internal/api/handlers TestPairedProbeOnOneAccount
 ./internal/playback/planstore TestSummaryResolvesReplacedPlanDelivery
 ./internal/playback/planstore TestAttemptDesiredTracksRoundTrip
 ./internal/playback/planstore TestProgressCommitsLifecycleStateDB
@@ -1298,6 +1324,11 @@
 ./internal/scanner TestAudiobookRegroupKeepsContentIDsDB
 ./internal/scanner TestAudiobookUnreadableDiscKeepsIndexedBookDB
 
+# An audiobook library scan reports, in files, what it added, rewrote and newly
+# marked missing, and nothing for a scan that changed nothing, so library
+# ingest refreshes Home rows only after a real change.
+./internal/scanner TestScanFolderAudiobookReportsCatalogChangesDB
+
 # A provider match owns an audiobook's year, genres and credits: a rescan only
 # fills what is empty, and the match keeps the tag narrator and the book's own
 # cover, and a renamed folder of a matched book keeps its item. Audiobooks
@@ -1387,10 +1418,15 @@
 ./internal/backup TestCarryMovesAnswerSequencePastCarriedLinksDB
 ./internal/backup TestEncryptedS3RoundTripDB
 ./internal/backup TestFullRestoresAreSerializedDB
+./internal/backup TestOtherConnectionsCountsOnlyOtherClientsDB
 ./internal/backup TestServerSpecificSettingsComeFromTheLiveServerDB
 ./internal/backup TestControlConnectionIsNeverOnTheLiveDatabaseDB
 ./internal/backup TestCustomPoliciesComeFromTheLiveServerDB
 ./internal/backup TestCarryMatchesAProfileWithinItsAccountDB
+./internal/backup TestFullRestoreCarriesCredentialsOnlyOntoTheSameAccountDB
+./internal/backup TestFullRestoreKeepsTheLiveAccountIDSequenceDB
+./internal/backup TestFullRestoreLeavingOutCredentialsKeepsTheLiveAccountIDSequenceDB
+./internal/backup TestFullRestoreOfAnotherDeploymentKeepsItsAccountIDSequenceDB
 ./internal/backup TestCarrySwapsDestinationNamesDB
 ./internal/backup TestBackupWritesManifestLastDB
 ./internal/backup TestSubsystemLockSerializesBackupsAndDeletesDB
@@ -1479,6 +1515,7 @@
 ./internal/backup TestImportsReadInBatchesDB
 ./internal/historyimport TestMatchAllAgreesWithMatchDB
 ./internal/historyimport TestEnqueuePersonalRunAllowsOneActiveRunPerAccount
+./internal/historyimport TestEnqueuePersonalRunAcceptsCustomEmby
 ./internal/backup TestCollectionImportKeepsTheProfileQuotaDB
 ./internal/backup TestNewAccountNeedsItsPrimaryProfileDB
 
@@ -1626,4 +1663,14 @@
 ./internal/auth TestDeviceSignInMigrationMarksKeptRequestsDB
 ./internal/apiv2 TestSessionReachRuleDB
 ./internal/apiv2 TestLimitedSessionDeleteDB
+./internal/apiv2 TestDemoVisitorOnALimitedSessionDB
 ./internal/apiv2 TestLimitedSessionPagesByIDDB
+./internal/apiv2 TestDemoVisitorSessionListDB
+# Signing out, or ending a View as user, ends the direct-connection enrollment of the session's device.
+./internal/apiv2 TestDirectRevocationSignOutDB
+./internal/apiv2 TestDirectRevocationEndImpersonationDB
+./internal/apiv2 TestDirectRevocationPasswordChangeKeepsCallerDB
+
+# The first enrollment of a node key for a device records one audit row; a renewal
+# records none; a failed audit write withdraws the new entry.
+./internal/apiv2 TestDirectConnectionEnrollmentAuditDB

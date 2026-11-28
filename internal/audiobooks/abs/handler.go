@@ -390,6 +390,10 @@ type Dependencies struct {
 	// NativeSessionSyncer flushes native session-manager state into the shared
 	// admin live-session table after ABS play/sync/close events.
 	NativeSessionSyncer PlaybackSessionSyncer
+	// DemoSettings and AccountIsAdmin decide sign-out in demo mode
+	// (demoRestricted); a nil DemoSettings means demo mode cannot be on.
+	DemoSettings   DemoSettingsReader
+	AccountIsAdmin func(ctx context.Context, userID string) (bool, error)
 	// CoverResolver translates a raw silo poster path (e.g.
 	// "local/audiobooks/.../original.webp") into a fully-qualified URL
 	// the ABS client can fetch. Optional; when nil, /api/items/{id}/cover

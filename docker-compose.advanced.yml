@@ -96,6 +96,7 @@ services:
       PORT: "8080"
       JF_PORT: "8096"
       ABS_PORT: "13378"
+      SILO_NET_DIRECT_UDP_PORT: ${SILO_NET_DIRECT_UDP_PORT:-8094}
       # The account that runs Silo and owns its directories. It needs read
       # access to the media. To start without root instead, see
       # https://siloserver.org/docs/docker#run-silo-without-root
@@ -114,6 +115,9 @@ services:
       - "${PORT:-8090}:8080"
       - "${JF_PORT:-8096}:8096"
       - "${ABS_PORT:-13378}:13378"
+      # Direct connections. The engine advertises the UDP port it binds, so the
+      # host and container ports must be equal; one variable sets both.
+      - "${SILO_NET_DIRECT_UDP_PORT:-8094}:${SILO_NET_DIRECT_UDP_PORT:-8094}/udp"
     volumes:
       - ${MEDIA_ROOT:?Set MEDIA_ROOT in .env to the host media path}:${MEDIA_CONTAINER_ROOT:-/mnt/media}:ro
       - ${SILO_DATA_ROOT:-/opt/silo}/plugins:/var/lib/silo/plugins

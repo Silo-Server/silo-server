@@ -363,7 +363,7 @@ func TestScanAudiobookFolderKeepsBookRestoredUnchangedDB(t *testing.T) {
 		t.Fatal(err)
 	}
 	other := NewScanner(NewFileRepository(f.pool), f.ffprobe, nil, 2, false, time.Hour)
-	if err := other.ScanAudiobookFolder(t.Context(), f.folder, true); err != nil {
+	if _, err := other.ScanAudiobookFolder(t.Context(), f.folder, true); err != nil {
 		t.Fatalf("initial scan: %v", err)
 	}
 	info, err := os.Stat(restored)
@@ -385,7 +385,7 @@ func TestScanAudiobookFolderKeepsBookRestoredUnchangedDB(t *testing.T) {
 		}
 	})
 
-	if err := s.ScanAudiobookFolder(t.Context(), f.folder, true); err != nil {
+	if _, err := s.ScanAudiobookFolder(t.Context(), f.folder, true); err != nil {
 		t.Fatalf("library scan: %v", err)
 	}
 	if !ran {

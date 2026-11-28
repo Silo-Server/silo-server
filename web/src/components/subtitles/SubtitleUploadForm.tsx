@@ -139,7 +139,9 @@ export function SubtitleUploadForm({
 
   const selectFile = useCallback(
     (file: File | null | undefined) => {
-      if (!file) {
+      // The running upload sends the file chosen before it started, so a new
+      // choice now would name a file that never reaches the server.
+      if (!file || uploading) {
         return;
       }
       if (!isAcceptedSubtitleFile(file)) {
@@ -167,7 +169,7 @@ export function SubtitleUploadForm({
       setError(null);
       void runLanguageDetection(file, language);
     },
-    [defaultLanguage, detectionSource, language, reportError, runLanguageDetection, t],
+    [defaultLanguage, detectionSource, language, reportError, runLanguageDetection, t, uploading],
   );
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -175,6 +177,7 @@ export function SubtitleUploadForm({
   };
 
   const handleBrowseClick = () => {
+    if (uploading) return;
     fileInputRef.current?.click();
   };
 
@@ -182,13 +185,13 @@ export function SubtitleUploadForm({
     event.preventDefault();
     event.stopPropagation();
     dragDepthRef.current += 1;
-    setIsDragging(true);
+    if (!uploading) setIsDragging(true);
   };
 
   const handleDragOver = (event: React.DragEvent<HTMLDivElement>) => {
     event.preventDefault();
     event.stopPropagation();
-    event.dataTransfer.dropEffect = "copy";
+    event.dataTransfer.dropEffect = uploading ? "none" : "copy";
   };
 
   const handleDragLeave = (event: React.DragEvent<HTMLDivElement>) => {
@@ -272,11 +275,13 @@ export function SubtitleUploadForm({
         accept={ACCEPTED_SUBTITLE_EXTENSIONS}
         className="sr-only"
         onChange={handleFileChange}
+        disabled={uploading}
       />
 
       <div
         role="button"
-        tabIndex={0}
+        tabIndex={uploading ? -1 : 0}
+        aria-disabled={uploading || undefined}
         aria-label={t("web.subtitles.upload.dropZoneLabel")}
         onClick={handleBrowseClick}
         onKeyDown={(event) => {
@@ -290,7 +295,7 @@ export function SubtitleUploadForm({
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
         className={cn(
-          "flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border border-dashed px-4 py-6 text-center transition-colors",
+          "flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border border-dashed px-4 py-6 text-center transition-colors aria-disabled:cursor-not-allowed aria-disabled:opacity-50",
           isPlayer
             ? isDragging
               ? "border-white/50 bg-white/10"

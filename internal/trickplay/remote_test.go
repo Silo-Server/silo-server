@@ -18,8 +18,8 @@ import (
 
 type fixedNodes []*nodepool.Node
 
-func (n fixedNodes) ReserveTranscodeWorkWith(workID string, eligible func(*nodepool.Node) bool) (*nodepool.Node, func()) {
-	return plannerForNodes(n...).ReserveTranscodeWorkWith(workID, eligible)
+func (n fixedNodes) ReserveTranscodeWorkWith(workID string, kind nodepool.JobKind, eligible func(*nodepool.Node) bool) (*nodepool.Node, func()) {
+	return plannerForNodes(n...).ReserveTranscodeWorkWith(workID, kind, eligible)
 }
 
 func (n fixedNodes) TranscodeNodeWith(eligible func(*nodepool.Node) bool) bool {

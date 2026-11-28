@@ -120,6 +120,14 @@
         "ignore",
         "clear"
       ]
+    },
+    "media_transport": {
+      "type": "string",
+      "enum": [
+        "regular",
+        "direct"
+      ],
+      "description": "The transport the client asks the media to use. Omitted means regular."
     }
   },
   "$defs": {

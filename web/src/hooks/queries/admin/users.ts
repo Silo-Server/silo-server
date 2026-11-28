@@ -4,6 +4,7 @@ import {
   deleteAdminSettingValue,
   captureAdminSettingAuthority,
 } from "@/api/v2/adminAccountSettings";
+import { requireAdminAuthority } from "@/api/v2/adminAuthority";
 import {
   listAdminDevices,
   getAdminDevice,
@@ -189,36 +190,59 @@ const MIRRORED_SETTING_KEYS: Partial<Record<string, string>> = {
 };
 
 /**
- * Takes reset device overrides out of the cached settings list before the
- * reset settles. A reopened subtitle appearance editor reads its row and
- * override flag from that list, so it can't wait on a refetch that may be
- * slow, skipped or fail: it would offer the deleted values back.
+ * Takes removed setting rows out of the cached settings list before the
+ * removal settles. The Preferences tab and a reopened subtitle appearance
+ * editor read their rows and override flags from that list, so they can't
+ * wait on a refetch that may be slow, skipped or fail: they would offer the
+ * deleted values back.
  */
-async function dropAdminDeviceOverrideRows(
+async function dropAdminSettingRows(
   queryClient: ReturnType<typeof useQueryClient>,
   authority: ReturnType<typeof captureAdminSettingAuthority>,
-  target: { userId: number; profileId: string; deviceId: string; keys: readonly string[] },
+  userId: number,
+  identity: AdminSettingIdentity,
+  removedKeys: readonly string[],
 ) {
-  if (target.keys.length === 0) return;
+  if (removedKeys.length === 0) return;
   const keys = new Set(
-    target.keys.flatMap((key) => {
+    removedKeys.flatMap((key) => {
       const mirror = MIRRORED_SETTING_KEYS[key];
       return mirror ? [key, mirror] : [key];
     }),
   );
-  const settingsKey = adminUserSettingValuesKey(authority, target.userId);
+  // useAdminUserDeviceSettings reports a missing id as "".
+  const same = (a: string | number | null | undefined, b: string | number | undefined) =>
+    String(a ?? "") === String(b ?? "");
+  const settingsKey = adminUserSettingValuesKey(authority, userId);
   await queryClient.cancelQueries({ queryKey: settingsKey });
   queryClient.setQueryData<AdminSettingValueRow[]>(settingsKey, (rows) =>
     rows?.filter(
       (row) =>
         !(
-          row.scope === "profile_device" &&
-          // useAdminUserDeviceSettings reports a missing id as "".
-          (row.profile_id ?? "") === target.profileId &&
-          (row.device_id ?? "") === target.deviceId &&
+          row.scope === identity.scope &&
+          same(row.profile_id, identity.profileId) &&
+          same(row.client_family, identity.clientFamily) &&
+          same(row.device_id, identity.deviceId) &&
+          same(row.library_id, identity.libraryId) &&
+          same(row.series_id, identity.seriesId) &&
           keys.has(row.key)
         ),
     ),
+  );
+}
+
+/** Takes reset device overrides out of the cached settings list. */
+function dropAdminDeviceOverrideRows(
+  queryClient: ReturnType<typeof useQueryClient>,
+  authority: ReturnType<typeof captureAdminSettingAuthority>,
+  target: { userId: number; profileId: string; deviceId: string; keys: readonly string[] },
+) {
+  return dropAdminSettingRows(
+    queryClient,
+    authority,
+    target.userId,
+    { scope: "profile_device", profileId: target.profileId, deviceId: target.deviceId },
+    target.keys,
   );
 }
 
@@ -415,8 +439,15 @@ export function useDeleteAdminUserSetting() {
       }
       await deleteAdminSettingValue(userId, key, identity, authority);
     },
-    onSuccess: (_data, variables) => {
+    onSuccess: async (_data, variables) => {
       toast.success(t("web.admin.common.users.settingReset"));
+      // A shortcut reset stores an empty document rather than deleting the
+      // row, so that row stays until the refetch brings the stored value.
+      if (variables.key !== SETTING_KEYS.NAV_SHORTCUTS) {
+        await dropAdminSettingRows(queryClient, authority, variables.userId, variables.identity, [
+          variables.key,
+        ]);
+      }
       queryClient.invalidateQueries({
         queryKey: adminUserSettingValuesKey(authority, variables.userId),
       });
@@ -553,7 +584,7 @@ export function useDeleteAdminUserDeviceSetting() {
   return useMutation({
     ...settingWriteOptions,
     retry: false,
-    mutationFn: ({
+    mutationFn: async ({
       userId,
       profileId,
       deviceId,
@@ -563,13 +594,22 @@ export function useDeleteAdminUserDeviceSetting() {
       profileId: string;
       deviceId: string;
       key: string;
-    }) =>
-      deleteAdminSettingValue(
-        userId,
-        key,
-        { scope: "profile_device", profileId, deviceId },
-        authority,
-      ),
+    }) => {
+      try {
+        await deleteAdminSettingValue(
+          userId,
+          key,
+          { scope: "profile_device", profileId, deviceId },
+          authority,
+        );
+      } catch (err) {
+        // 404: another admin or tab reset it first. That is the state this
+        // reset asked for, so it succeeds and drops the row like any other.
+        if (!(err instanceof V2ProblemError && err.status === 404)) throw err;
+        // Like a 204, it counts only while the profile that sent it is active.
+        requireAdminAuthority(authority);
+      }
+    },
     onSuccess: async (_data, variables) => {
       toast.success(t("web.admin.common.users.deviceOverrideReset"));
       await dropAdminDeviceOverrideRows(queryClient, authority, {
@@ -610,8 +650,17 @@ export function useDeleteAllAdminUserDeviceSettingsForDevice() {
       deviceId: string;
       keys: readonly string[];
     }) => {
+      // One delete clears both halves of a mirrored pair, so send it once: a
+      // second delete would erase a save made after the first one landed.
+      const sent = new Set<string>();
+      const deletes = keys.filter((key) => {
+        const mirror = MIRRORED_SETTING_KEYS[key];
+        if (sent.has(key) || (mirror !== undefined && sent.has(mirror))) return false;
+        sent.add(key);
+        return true;
+      });
       let completed = 0;
-      for (const key of keys) {
+      for (const key of deletes) {
         try {
           await deleteAdminSettingValue(
             userId,
@@ -625,8 +674,8 @@ export function useDeleteAllAdminUserDeviceSettingsForDevice() {
             // count already says how far the reset got.
             throw new Error(
               t("web.admin.common.users.resetAllStopped", {
-                count: keys.length,
-                count_text: keys.length,
+                count: deletes.length,
+                count_text: deletes.length,
                 completed: completed,
                 reason: readableErrorText(err, ""),
               }).trimEnd(),

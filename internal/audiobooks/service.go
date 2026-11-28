@@ -47,6 +47,9 @@ type ABSHandlerDeps struct {
 	Items    *catalog.ItemRepository
 	Files    *scanner.FileRepository
 	Settings serversettings.SettingsStore // encrypting decorator in production
+	// DemoSettings reads demo.enabled for sign-out (the shared
+	// demomode.Setting in production); nil reads Settings directly.
+	DemoSettings abs.DemoSettingsReader
 	// Auth signs ABS clients in and rechecks each token's profile. Nil
 	// leaves standalone login unavailable.
 	Auth           *SiloCredValidator
@@ -150,10 +153,19 @@ func (s *Service) BuildABSHandler(deps ABSHandlerDeps) *abs.Handler {
 	var credValidator abs.ProfileCredentialValidator
 	var profileVerifier abs.ProfileVerifier
 	var usernameResolver func(ctx context.Context, userID, profileID string) string
+	var accountIsAdmin func(ctx context.Context, userID string) (bool, error)
 	if deps.Auth != nil {
 		credValidator = deps.Auth
 		profileVerifier = deps.Auth
 		usernameResolver = deps.Auth.ResolveUsername
+		accountIsAdmin = deps.Auth.IsAdmin
+	}
+	var demoSettings abs.DemoSettingsReader
+	switch {
+	case deps.DemoSettings != nil:
+		demoSettings = deps.DemoSettings
+	case deps.Settings != nil:
+		demoSettings = deps.Settings
 	}
 
 	// Socket.io server: secretFn reads the JWT secret at connection time so
@@ -187,6 +199,8 @@ func (s *Service) BuildABSHandler(deps ABSHandlerDeps) *abs.Handler {
 		SocketIO:             socketServer,
 		NativeSessions:       deps.SessionMgr,
 		NativeSessionSyncer:  deps.SessionSyncer,
+		DemoSettings:         demoSettings,
+		AccountIsAdmin:       accountIsAdmin,
 		CoverResolver: func(ctx context.Context, path, variant string) string {
 			if deps.Detail == nil {
 				return ""

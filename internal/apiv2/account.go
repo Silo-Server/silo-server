@@ -100,6 +100,8 @@ func registerAccount(reg *Registry) {
 		Class:       ClassProfileScoped, ProfileOptional: true, ServiceBacked: true,
 		RateLimitBucket: bucketPasswordChange,
 		Audited:         true,
+		// Demo visitors share one account: a new password locks the others out.
+		DemoRestricted: true,
 	}, reg.changePassword)
 }
 
@@ -119,7 +121,7 @@ func (reg *Registry) getAccountPasswordCapability(ctx context.Context, _ *Capabi
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
-	allowed := view.ChangePassword
+	allowed := view.ChangePassword && demoAllows(ctx, reg.deps.DemoSettings)
 	out := &AccountPasswordCapabilityOutput{CacheControl: cachePrivateNoCache, Body: AccountPasswordCapability{
 		Capability:              Capability{State: StateAvailable, Allowed: &allowed},
 		RequiresCurrentPassword: view.RequiresCurrentPassword,
@@ -163,6 +165,9 @@ func (reg *Registry) changePassword(ctx context.Context, in *ChangePasswordInput
 // dependency_unavailable (v1 503 password_change_unavailable); everything
 // else follows the v1 status (403 permission_denied, 409 conflict).
 func passwordProblem(err error) *Problem {
+	if p, ok := passwordRuleProblem(err, "new_password"); ok {
+		return p
+	}
 	var apiErr *handlers.APIError
 	if errors.As(err, &apiErr) {
 		if apiErr.Field != "" {

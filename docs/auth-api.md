@@ -26,9 +26,9 @@ devices and playback sessions. All paths below use `/api/v2`.
 
 | Operation | Authorization and behavior |
 | --- | --- |
-| `GET /auth/sessions/capabilities` (`getLoginSessionCapabilities`) | Authenticated account. Reports `available`, `last_seen`, and `admin_management`, with the standard capability state, permission answer and revision. |
-| `GET /auth/sessions` (`listSessions`) | Lists the caller's live, unrevoked login sessions, newest first, with cursor pagination. Account-level access does not require profile selection. |
-| `DELETE /auth/sessions/{id}` (`deleteSession`) | Revokes a session owned by the caller. Unknown or another account's session returns 404. |
+| `GET /auth/sessions/capabilities` (`getLoginSessionCapabilities`) | Authenticated account. Reports `available`, `last_seen`, `admin_management` and `revoke_other_sessions`, with the standard capability state, permission answer and revision. `revoke_other_sessions` is false in [demo mode](#demo-mode) for a caller that is not an administrator, and for a session opened by device sign-in, which may end only itself. |
+| `GET /auth/sessions` (`listSessions`) | Lists the caller's live, unrevoked login sessions, newest first, with cursor pagination. A caller that gets the reduced page, a session limited to itself or a [demo](#demo-mode) visitor, is listed by id instead (see [sessions opened by device sign-in](#sessions-opened-by-device-sign-in)). Account-level access does not require profile selection. |
+| `DELETE /auth/sessions/{id}` (`deleteSession`) | Revokes a session owned by the caller. Unknown or another account's session returns 404. Ending another session of the same account is 403 `permission_denied` for a session opened by device sign-in, which may end only itself, and in [demo mode](#demo-mode) for a caller that is not an administrator. |
 | `GET /admin/users/{user_id}/login-sessions` (`listAdminUserLoginSessions`) | Acting admin. Lists a selected account's live login sessions. The cursor is bound to the operation, administrator and target account. |
 | `DELETE /admin/users/{user_id}/login-sessions/{session_id}` (`deleteAdminUserLoginSession`) | Acting admin. Revokes one session of the selected account; 204 on success, 404 for an unknown or mismatched session. |
 | `DELETE /admin/users/{user_id}/login-sessions` (`deleteAdminUserLoginSessions`) | Acting admin. Revokes all live sessions of the selected account and returns `{ "revoked": N }`. Repeating an account-wide request returns zero when no live sessions remain. |
@@ -104,8 +104,27 @@ Every new password is also at most 72 UTF-8 bytes, the bcrypt input limit. The p
 every check, so a change applies at once on every node. It applies only when a password is chosen;
 passwords already stored keep working. The recovery command
 `silo auth local-login enable -user <name> -temporary-password` sets a temporary password without
-it, and the account then chooses a new one under the policy. A backup
+it, and the account then chooses a new one under the policy. While that account's password
+sign-in is off, `-temporary-password` is required: its stored password may be one nobody knows. A backup
 restore never weakens the live policy.
+
+A refused password returns `422 validation_failed` with one field error at the password member
+(`body.password`, or `body.new_password` for a password change). Its `code` names a rule the
+password breaks, and its `detail` is the English sentence for it, such as "Use at least 12
+characters." When a password breaks several rules, the code names one of them, so a client should
+not rely on which. A translated client shows `error.field.<code>` instead. That text is generic, so
+`password_too_short` doesn't name the minimum; a client that wants to show it reads
+[`getPasswordPolicy`](#get-authpassword-policy-getpasswordpolicy) again. Every operation that sets a password
+except `changePassword` limits it to 8 to 72 characters in its schema, so a password outside that
+range gets `out_of_range` there before the policy runs. `changePassword` accepts 1 to 1024
+characters, so the policy codes cover every length in that range.
+
+| Code | Rule broken |
+| --- | --- |
+| `password_too_short` | Fewer characters than `auth.password_min_length`. |
+| `password_too_long` | More than 72 UTF-8 bytes. |
+| `password_needs_uppercase` | No capital letter while `auth.password_require_uppercase` is on. |
+| `password_needs_special` | No punctuation mark or symbol while `auth.password_require_special` is on. |
 
 To change a password, the caller must prove knowledge of the current
 password. By default, changing the password does not revoke existing login sessions; users can
@@ -153,7 +172,9 @@ version. It supports ETag revalidation and uses `Cache-Control: private, no-cach
 `allowed` is true only when the caller may change the password: an access-token
 session, not an API key or "View as user", acting as the account's primary profile,
 or as an administrator with no profile selected. A session holding a temporary
-password is always allowed. The policy fields describe the server contract even when
+password is exempt from the profile rule, since it cannot select a profile.
+[Demo mode](#demo-mode) comes first: there `allowed` is false for every caller that is not an
+administrator, a temporary-password session included. The policy fields describe the server contract even when
 `allowed` is false. A server without a password service reports `state`
 `not_configured`, with `allowed` and `sign_out_other_sessions` false.
 `sign_out_other_sessions` says whether the change accepts that member; a server that
@@ -226,6 +247,11 @@ After `POST /account/password` succeeds, refresh the tokens: the access token ke
 the restriction until it is replaced, and the refreshed pair no longer carries it.
 The change revokes every other session of the account, since each was opened with
 the temporary password.
+In [demo mode](#demo-mode) an account that is not an administrator cannot change its
+password, a temporary one included, so such an account can only read `GET /account/me` and
+`GET /account/password/capability` (which answers `allowed: false`), refresh its tokens, and
+sign out until an administrator sets it a regular password or turns demo mode off. Don't give
+a demo's shared account a temporary password.
 An administrator impersonating the account is not restricted. Jellyfin and
 Audiobookshelf compatible sign-ins refuse an account holding a temporary password,
 because those clients cannot run the change; the account signs in to Silo first.
@@ -252,7 +278,8 @@ They send the `Deprecation` and `Link` headers; no `Sunset` is declared. A link 
 Every unusable link returns the same `404 not_found`, whether it is unknown, expired,
 used, replaced, or outdated by a password or recovery email change, or its account
 is disabled. Changing only the email's letter case preserves the link.
-Invalid passwords return `422 validation_failed` at `body.password` and leave the link
+Invalid passwords return `422 validation_failed` at `body.password`, with a
+[code that names the rule](#account-passwords), and leave the link
 unspent. While password resets are not configured, every link operation returns `409`. Both operations spend the `password_reset` rate-limit budget, 20 requests per
 minute per client IP by default.
 
@@ -340,6 +367,10 @@ nothing authorizes on them.
 
 `DELETE /api/v2/auth/sessions/{id}` revokes a session owned by the caller's account and returns
 `204 No Content`. A missing session or one owned by another account returns `404 not_found`.
+In [demo mode](#demo-mode) a caller that is not an administrator may revoke only the session
+making the request; another session of the same account is `403 permission_denied`. A missing
+session or another account's is still `404 not_found`: ownership is checked first, in the
+revocation's transaction.
 
 The login-session step of the `database_maintenance` scheduled task deletes expired
 login-session rows daily at 05:00 by default. Revoked sessions remain stored until their
@@ -377,6 +408,8 @@ the caller's own values, since they have no null form. The page is ordered by `i
 cursor holds only the last id, so neither tells which sessions are newer. A cursor minted for
 one kind of caller is `400 invalid_cursor` for the other. `limit` and `page.has_more` behave as
 for any caller.
+In [demo mode](#demo-mode) a caller that is not an administrator gets this same page, since
+the account's other sessions are other visitors'.
 
 `deleteSession` from a limited caller ends its own session as for any caller. Another session
 of the account is `403 permission_denied`, with a detail saying a device signed in with a code
@@ -777,7 +810,7 @@ linking rule whether or not `network_sign_in` is served.
 | `GET /auth/providers` (`listAuthProviders`) | none | Leaves `local` out while `auth.local_password_login` is off. `password_login` says whether any listed provider takes a password; apps and TVs hide the password form when it is false. An `oauth` provider carries `native_start_path`, the native start's path below the server base, while OAuth sign-in is served (a public URL is configured). Apps append `native_start_path` to their own saved server base URL and never open another origin; an `oauth` provider without it offers no native sign-in. A `network` provider is listed only to a request that came through its own overlay from a device it vouches for, with `network_sign_in_path` and `network_identity` (`display_name`, `username`: who owns the device, for a "Continue as" label); it is never `default`. Clients ignore modes they do not know. |
 | `POST /auth/network/{id}/sign-in` (`signInWithNetworkIdentity`) | none; the request must come through the network provider's own overlay listener | Signs in the owner of the requesting device through network provider installation `{id}` (`mode: network`, such as the Tailscale plugin). Body: `{}` with `Content-Type: application/json`. Answers the same token pair as `login`. Refusals: 403 `network_identity_required` (the request did not come through that provider's overlay), 403 `not_permitted` (the provider refuses the device: unknown, tagged, or left out by its policy; or the account's OIDC or LDAP provider refuses the account), 403 `account_required`, 403 `permission_denied` (the account is disabled), 409 `email_in_use` or `identity_linked_elsewhere`, 404 `not_found` (not an enabled network provider), 503 `provider_unavailable`, 415 without a JSON body, 429. Spends the `login` rate-limit budget. |
 | `POST /auth/login` (`login`) | none | Without `provider`, the name is routed: an account with local password sign-in signs in locally (and is refused with `local_login_disabled` while the server switch is off, never sent to the directory), any other name goes to the enabled LDAP plugin. A name that has used its attempt budget, or a client over the `login` rate-limit budget, is 429 `rate_limited` ([Sign-in attempts per name](#sign-in-attempts-per-name)). |
-| `GET /account/identities` (`listAccountIdentities`) | signed-in account; `X-Profile-Id` optional | The caller's linked identities: provider, username, email, `linked_at`, `last_sign_in_at`, and `last_checked_at` (the provider's latest answer about the identity, from a sign-in or a re-check). Every profile on the account may read the list. `can_unlink` says whether `deleteAccountIdentity` would disconnect an identity now for the profile `X-Profile-Id` names, or for a request that names none: it is false for a profile that is not the household manager, and when the identity is the account's last way to sign in. Clients show the disconnect control only while it is true. A named profile passes the usual viewer gate, so a PIN-protected profile without `X-Profile-Token` is 403 `profile_verification_required`. |
+| `GET /account/identities` (`listAccountIdentities`) | signed-in account; `X-Profile-Id` optional | The caller's linked identities: provider, username, email, `linked_at`, `last_sign_in_at`, and `last_checked_at` (the provider's latest answer about the identity, from a sign-in or a re-check). Every profile on the account may read the list. `can_unlink` says whether `deleteAccountIdentity` would disconnect an identity now for the profile `X-Profile-Id` names, or for a request that names none: it is false for a profile that is not the household manager, and when the identity is the account's last way to sign in. Clients show the disconnect control only while it is true. `can_link` says whether the caller may link another identity: false for an API key or a "View as user" session. In [demo mode](#demo-mode) both are false for a caller that is not an administrator. A named profile passes the usual viewer gate, so a PIN-protected profile without `X-Profile-Token` is 403 `profile_verification_required`. |
 | `POST /account/identities/link-credentials` (`linkAccountIdentityWithCredentials`) | the account's own login session | Links the directory (LDAP) identity. Body, all required and non-null: `installation_id` (the credentials provider from `listAuthProviders`), `password` (the account's local password, 1 to 1024 characters), `username` (directory username, 1 to 256) and `directory_password` (1 to 1024). Answers 201, `Location: /api/v2/account/identities`, and the linked identity as `listAccountIdentities` shows it. Refusals: 422 `validation_failed` at `body.password` (wrong local password) or `body.directory_password` (the directory refused the credentials); 409 `local_password_required`; 403 `not_permitted`, `account_disabled` (the directory account is disabled, locked or expired) or `password_expired`; 403 `permission_denied` (the Silo account is disabled, or an API key or impersonation session); 409 `identity_linked_elsewhere` or `already_linked`; 404 `not_found` (not an enabled credentials provider); 503 `provider_unavailable`; 429. Spends the `login` rate-limit budget. Linking turns local password sign-in off unless the account is break-glass. |
 | `POST /account/identities/link-network` (`linkAccountIdentityWithNetwork`) | the account's own login session, through the network provider's overlay | Links the network identity of the requesting device. Body, required and non-null: `installation_id` (the network provider from `listAuthProviders`) and `password` (the account's local password). Answers 201 like `linkAccountIdentityWithCredentials`. Refusals: 403 `network_identity_required`, 422 `validation_failed` at `body.password`, 409 `local_password_required`, 403 `not_permitted`, 403 `permission_denied`, 409 `identity_linked_elsewhere` or `already_linked`, 404 `not_found`, 503 `provider_unavailable`, 429. Spends the `login` rate-limit budget. Unlike other linking, the account keeps its local password sign-in, which answers 403 `not_permitted` while the provider refuses the person (break-glass accounts excepted). |
 | `DELETE /account/identities/{id}` (`deleteAccountIdentity`) | the account's own login session, acting as the household manager | How the account signs in belongs to the whole household, and the account cannot always link a disconnected identity again by itself (self-service linking needs the local password), so only the household manager may disconnect one: `X-Profile-Id` names the account's primary profile, with `X-Profile-Token` from `verifyProfilePIN` when that profile has a PIN. A named profile passes the usual viewer gate first: an unknown profile ID gets 404 `not_found`, and a PIN-protected profile without its token, primary or not, gets 403 `profile_verification_required`. A profile that passes the gate and is not the primary one gets 403 `permission_denied`, on an admin account too. A request without `X-Profile-Id` is accepted only from an admin account while no profile on the account has a PIN, a maturity limit, or library restrictions; otherwise it gets 403 `permission_denied`. Refused with 409 `last_sign_in_method` unless the account can still sign in with its local password or another identity. API keys and impersonation sessions get 403 `permission_denied`. |
@@ -786,6 +819,7 @@ linking rule whether or not `network_sign_in` is served.
 | `POST /admin/users/{id}/identities` (`createAdminUserIdentity`) | acting admin | Links by `installation_id` and the exact `external_subject`. Turns local password sign-in off unless the account is break-glass or the installation is a network identity provider. |
 | `DELETE /admin/users/{id}/identities/{identity_id}` (`deleteAdminUserIdentity`) | acting admin | May leave the account without a sign-in method; setting a password with `updateAdminUser` turns its local password sign-in back on. |
 | `PUT /admin/users/{id}` (`updateAdminUser`) | acting admin | `break_glass` sets or clears the flag: admin accounts only, and only the server Owner may change it (403 `permission_denied`). The Owner has it by default (set at first-run setup and on every ownership move) and may clear it on its own account. A `password` also turns the account's local password sign-in back on, so an admin other than the Owner may not set its own while its local sign-in is off (403 `permission_denied`). Demoting, disabling or clearing the last usable break-glass admin while local sign-in is off is 409 `break_glass_required`; so is deleting it (`deleteAdminUser`) or turning `auth.local_password_login` off without one (`updateAdminSettings`, `updateAdminSetting`). |
+| `GET /admin/sign-in/local-password-off/accounts` (`listAdminLocalPasswordOffAccounts`) | acting admin | Who loses their way in if `auth.local_password_login` is turned off: enabled accounts whose local password signs in today (password sign-in on and a password set), that are not break-glass and have no linked identity at an enabled OIDC or LDAP provider. A link counts only to a provider that can sign people in, as the switch-off check judges it: not to a network provider (once passwords are off it signs the account in only from that network), and not to an OpenID Connect provider while `server.public_url` is unset. Disabled and break-glass accounts are not listed. `group` (required) picks one group: `email_match`, the ordinary accounts with an email that email auto-match can link at their first provider sign-in (the provider must assert that email as verified), or `admin_link`, everyone else, whom nothing links until an administrator does. Each account carries `reason`: `email_match`, `email_match_off` (it would match, but `auth.email_auto_match` is off), `administrator` (an admin or the Owner, which auto-match never links) or `no_email`. `email_auto_match` (`true` or `false`, optional) answers as if the setting had that value, for an edit that changes both; the response's `email_auto_match` is the value used. `totals` counts both groups on every page. Ordered by username (an account without one sorts first), then ID, and paginated with `limit` and `cursor`; pages are live, not a snapshot. Advertised by `local_password_off_accounts` in `getExternalSignInCapabilities`. |
 | `POST /admin/plugins/installations/{id}/auth-binding/test` (`testAdminPluginAuthBinding`) | acting admin | Sends staged `config` entries (blank secrets keep the stored value only while the rest of that entry is unchanged and no secret in it is typed) to the plugin's `TestConnection`; answers `ok`, the plugin's `steps` and `callback_url`, the redirect URI to register at an OAuth provider. If the public URL is unset or the binding mode cannot be read, the response keeps the test results and leaves the URL empty. A plugin without a connection test, or a disabled installation, is 409. Not retried automatically. |
 | `PUT /admin/plugins/installations/{id}/auth-binding` (`updateAdminPluginAuthBinding`) | acting admin | Applies without a restart (`X-Silo-Restart-Required: false`). `auto_provision` defaults to true. Enabling a second binding of the same kind is 409 `provider_already_enabled`; one network identity binding may be enabled beside the one OIDC or LDAP binding. |
 | `GET /admin/plugins/installations` (`listAdminPluginInstallations`) | acting admin | Each OAuth auth binding carries `callback_url` (the callback to register at the provider) and `post_logout_redirect_url` (`/login`, to register for provider logout), both on `server.public_url`; empty without a public URL and for a password provider. The other operations that answer an installation carry them too. |
@@ -807,7 +841,10 @@ admitted the person but the server has no account for them and account
 creation is off), `local_login_disabled`
 (403), `password_expired` (403), `email_in_use` (409),
 `identity_linked_elsewhere` (409), `provider_already_enabled` (409),
-`break_glass_required` (409), `last_sign_in_method` (409),
+`break_glass_required` (409), `sign_in_provider_required` (409: a change
+that would leave `auth.local_password_login` off with no OIDC or LDAP
+provider people can sign in with; see below),
+`last_sign_in_method` (409),
 `provider_unavailable` (503; also a sign-in the provider answered before a
 re-check of the same account recorded a later answer, which succeeds when
 repeated), `network_identity_required` (403, a network
@@ -936,15 +973,59 @@ end-session URL is the plugin's own setting (the OIDC plugin's
 and logs out of Silo without the provider when it does not answer in time.
 
 Server settings: `auth.local_password_login` (default `true`; turning it off
-needs a break-glass admin; while it is off, `signup` and `acceptInvitation`
+needs a break-glass admin and an OIDC or LDAP provider people can sign in
+with, and is otherwise applied at once: the settings write takes no
+acknowledgement, so a client that wants to show who is affected reads
+`listAdminLocalPasswordOffAccounts` first. Turning it off signs nobody out:
+nothing but password sign-in, signup and invitations reads the switch, so
+every session ends as it would anyway. A session opened with a password
+slides forward at each refresh, so it lasts until the person signs out, an
+administrator ends it, or it goes unrefreshed past `auth.refresh_token_expiry`.
+A session opened through a provider is re-checked as described under
+provider re-check below: a refusal ends it, and once its identity is
+unlinked it stops sliding and ends `auth.refresh_token_expiry` after the
+provider last vouched for it. Personal API keys keep working, and a
+signed-in session can still approve new devices. While it is
+off, `signup` and `acceptInvitation`
 are refused with 403 `local_login_disabled` and `getSignupStatus` reports
 signup off), `auth.email_auto_match` (default `false`; matches ordinary
-accounts only, never an admin, the Owner or a break-glass account),
+accounts only, never an admin, the Owner or a break-glass account; in
+[demo mode](#demo-mode) it matches no account on the server, not only the
+shared demo account),
 `auth.provider_recheck_interval` (default `12h`, 5m to 30d: how old the
 provider's last answer about an identity may be before a refresh asks again)
 and `auth.provider_recheck_outage_policy` (`fail_open`, the default, keeps a
 session whose provider cannot be reached; `fail_closed` refuses its refresh
 until the provider answers).
+
+A provider people can sign in with is an enabled installation with an
+enabled OIDC or LDAP binding (a network binding does not count). An OpenID
+Connect provider counts only while `server.public_url` is set, since every
+OAuth start needs it; a directory (LDAP) provider needs none. While
+`auth.local_password_login` is off, a change that takes away the last such
+provider is refused with 409 `sign_in_provider_required`: turning off its
+binding (`updateAdminPluginAuthBinding`), disabling its installation
+(`updateAdminPluginInstallation`), uninstalling it
+(`deleteAdminPluginInstallation`), or clearing `server.public_url` when it is
+the only provider and uses OpenID Connect. Disable and uninstall save the
+change first and stop the plugin only after it commits, so a refused one never
+stops it. Turn password sign-in back on first; break-glass
+admins can sign in with a password either way. Only a change that takes the
+last provider away is refused: a server already without one (after
+provisioning, a restore, or a switch-off from before this check) can still
+enable, disable, update and uninstall plugins, and any change that makes a
+provider usable is allowed. Deployment provisioning
+(`SILO_CONFIG`, `SILO_PLUGINS`) is the exception: it applies the operator's
+declared configuration at startup and is never refused for this, so a
+declaration that leaves no such provider is applied and logged as a
+warning, and the provisioning status of its sign-in plugins
+(`listAdminPluginProvisioningStatus`) carries the warning for as long as it
+is true, worked out when the status is read. Break-glass admins can still
+sign in then. The warning names the ways back, in this order: put the provider back
+in the declaration and restart; have a break-glass admin sign in with a
+password at `/login?local=1` and turn password sign-in back on; or run
+`silo auth local-login enable` with the server's `DATABASE_URL`. A full
+restore likewise applies the backup's state without the check.
 
 Provider re-check: a login session opened through the provider (an OAuth or
 LDAP sign-in, a device sign-in approved from such a session, or a session of
@@ -1029,6 +1110,114 @@ Native clients must distinguish failed credential exchanges from an expired
 bearer on an authenticated read, retain refresh concurrency protection, and
 preserve the selected account and profile during device handoff.
 
+
+## Demo mode
+
+With the `demo.enabled` server setting on, every visitor signs in to one shared account that
+is not an administrator. Demo mode refuses that account any change one visitor could use to
+lock out, sign out or take over the others. An operation marked demo-restricted
+(`DemoRestricted` in `internal/apiv2`, `x-silo-demo-restricted` in the OpenAPI document)
+answers a caller that is not an administrator `403 permission_denied` with the detail "This
+action is not available in demo mode." Reads are not restricted, except that `listSessions`
+shows a visitor less (see below), and administrators are never restricted.
+
+Every request reads `demo.enabled` (one setting read, no time-based cache), through one
+`demomode.Setting` per process shared by every surface that enforces demo mode. Only the
+stored value `true`, compared untrimmed, turns demo mode on. When a read fails, the error is
+logged and the last value this process read is used: a server that is not a demo keeps
+working, and a demo server keeps its demo refusal. Each API replica remembers its own value.
+Only a process that has never read the setting can't tell whether it is a demo, and then it
+fails closed without claiming to be one: a non-administrator's demo-restricted change is
+`500 internal_error`, `deleteSession` on another session is `500 internal_error` (the caller's
+own session still ends, and a session opened by device sign-in gets its usual `403`, because
+that rule is judged first), and the capability answers below say no. An administrator's request
+does not read the setting.
+
+A visitor can:
+
+- browse, play, and sign out (`logout`, or `deleteSession` on the session making the request);
+- approve or deny a device sign-in (`approveDeviceLogin`, `approveDeviceHandoff`,
+  `denyDeviceLogin`, and Jellyfin Quick Connect `POST /QuickConnect/Authorize`), which is how a
+  visitor tries a TV app.
+
+A visitor cannot:
+
+- change the account password (`changePassword`), and so cannot sign the account out
+  everywhere either;
+- see another session of the account in `listSessions` beyond its `id` and `current`: the
+  page is the reduced one a session limited to itself gets (see
+  [sessions opened by device sign-in](#sessions-opened-by-device-sign-in)), ordered by id. A
+  session that already gets that page is unaffected by demo mode: the setting is not read for
+  it, and its cursor stays valid when demo mode is switched on or off. For any other visitor,
+  a cursor from before the switch is `400 invalid_cursor`, and when the process has never read
+  the setting, `listSessions` is `500 internal_error` rather than the full page. A personal
+  API key of the account, which has no session of its own, gets that `500` too, and
+  `403 permission_denied` once the setting has been read and demo mode is on;
+- link or unlink an external sign-in (`createAccountIdentityLinkTicket`,
+  `startAccountIdentityLink`, `completeAccountIdentityLink`,
+  `linkAccountIdentityWithCredentials`, `linkAccountIdentityWithNetwork`,
+  `deleteAccountIdentity`);
+- end another session of the account (`deleteSession` on any other session);
+- create or revoke personal API keys, or create, change or delete profiles.
+
+External sign-in enforces the same rule where every linking flow attaches its identity, in
+account resolution: a linking flow that ends on an account that is not an administrator while
+demo mode is on, including one started before demo mode was turned on, is refused with
+`not_permitted` and attaches nothing. Email auto-match (`auth.email_auto_match`) does not apply
+in demo mode, as when it is off, so a provider sign-in whose verified email equals the demo
+account's goes on as an unmatched one: account creation refuses the taken email where the
+binding's `auto_provision` is on (`409 email_in_use` on the JSON sign-ins, `login` through a
+directory provider and `signInWithNetworkIdentity`; the browser redirect flow carries no status
+and reports `reason=email_in_use` on `/login?error=oauth_failed`, or `error=email_in_use` on a
+native app's redirect), and the sign-in is
+`account_required` where it is off. Matching applies to no account in demo mode, not only the
+shared demo account. Demo mode is read before resolution's transaction; a process that has
+never read it fails the link and matches nothing.
+
+The capability answers clients read before offering these actions say no to a visitor:
+`getAccountPasswordCapability` `allowed`, `getLoginSessionCapabilities`
+`revoke_other_sessions`, and `listAccountIdentities` `can_link` and `can_unlink`.
+
+The Jellyfin-compatible listener serves no password change, identity linking, or revocation of
+another session; its `POST /Sessions/Logout` ends only the calling session. On the
+Audiobookshelf-compatible listener (beta), signing out normally revokes every token of the
+account and profile and closes their playback sessions; in demo mode, for an account that is
+not an administrator, it revokes only the caller's own credentials: the presented access token,
+and the refresh token the request carries (the `x-refresh-token` header or the `refresh_token`
+cookie) when it verifies as one of the same account and profile. It closes no playback session
+(none records which token opened it). A refresh token the request does not carry stays live
+until it expires. When the account's role can't be read, or the process has never read the
+setting, sign-out takes the demo path. An expired access token revokes nothing.
+
+`TestDemoModeCoversAccountOperations` in `internal/apiv2` fails when an operation tagged
+`account`, `api-keys`, `auth`, `device-login`, `notifications` or `profiles` that a
+non-administrator can call is neither demo-restricted nor listed, with its reason, as allowed.
+
+### Demo sign-in
+
+A public demo can also let a visitor in without typing the shared account's password, which
+is how a TV app offers "Try the demo". Only the operator of a public demo sets this up: the
+`demo.username` server setting names the shared account, which must exist, be enabled, not
+be an administrator and hold no temporary password. Neither setting is in the admin
+settings, so no other server offers demo sign-in.
+
+- `GET /api/v2/auth/demo/capability` (`getDemoLoginCapability`, public) answers `available`
+  only while `demo.enabled` is on and `demo.username` is set, `not_configured` while demo
+  mode is on without a demo account, and `disabled` otherwise, including when the settings
+  can't be read. It does not check the named account; sign-in does.
+- `POST /api/v2/auth/demo` (`demoLogin`, public, empty JSON object body) answers the login
+  token pair. The session it opens is the one the account's password opens: demo mode
+  restricts it exactly as described above, and turning demo mode off does not end it. A server that
+  is not a public demo answers `409 capability_disabled`, and a demo whose account can't
+  be signed in to answers `409 capability_not_configured`. It has its own per-address rate
+  limit (`demo_login`), so demo visitors do not spend the address's password sign-in
+  attempts.
+
+Like a password visitor's session, a demo sign-in session outlives turning demo mode off.
+Promoting the account to admin or disabling it ends it, as it ends every session of the
+account, so no visitor's session becomes an administrator's. Before turning demo mode off on
+a public demo, or giving the demo account any other use, sign the account out everywhere
+(`deleteAdminUserLoginSessions`): a permission or access-group change keeps its sessions.
 
 ## Policy discovery
 

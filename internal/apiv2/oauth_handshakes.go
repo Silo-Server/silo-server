@@ -304,7 +304,7 @@ func registerOAuthAccountOperations(reg *Registry) {
 		"Confirm the account password and get a ticket that starts a provider linking flow.")
 	ticket.Description = "A signed-in account re-enters its local password here for a single-use ticket (valid 5 minutes) that starts one linking flow: the web passes it to startAccountIdentityLink; an app passes it as link_ticket to startNativeOAuthLogin and confirms the result with completeAccountIdentityLink. The flow links the provider identity to this account instead of signing in; an identity linked to another account ends in identity_linked_elsewhere. An account without local password sign-in is 409 local_password_required; a wrong password is 422 at body.password; an API key or impersonation session is 403; an installation that is not an enabled OAuth provider is 404."
 	ticket.Errors = []int{http.StatusForbidden, http.StatusNotFound, http.StatusConflict}
-	Register(reg, Operation{Operation: ticket, Class: ClassAuthenticated, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable, RateLimitBucket: bucketPasswordChange},
+	Register(reg, Operation{Operation: ticket, Class: ClassAuthenticated, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable, RateLimitBucket: bucketPasswordChange, DemoRestricted: true},
 		func(ctx context.Context, in *AccountIdentityLinkTicketInput) (*AccountIdentityLinkTicketOutput, error) {
 			svc := reg.deps.OAuth
 			if svc == nil || !svc.LinkingAvailable() {
@@ -343,7 +343,7 @@ func registerOAuthAccountOperations(reg *Registry) {
 		"Start a web linking flow with a link ticket and get the provider sign-in URL.")
 	start.Description = "Consumes a ticket from createAccountIdentityLinkTicket issued to the caller's account, sets the flow's browser-binding cookie on this response and answers the provider URL for the same browser to open. Only the browser that made this request can finish the flow, so a ticket opened by anyone else links nothing. Call it on the public URL's origin (409 otherwise, or when no public URL is configured). The provider is asked for a fresh sign-in. The flow returns to next with linked=1, or error=oauth_link_failed&reason=<reason>. An unknown, used, expired or foreign ticket is 404; an API key or impersonation session is 403; a provider that cannot start the flow is 503 provider_unavailable."
 	start.Errors = []int{http.StatusForbidden, http.StatusNotFound, http.StatusConflict}
-	Register(reg, Operation{Operation: start, Class: ClassAuthenticated, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable},
+	Register(reg, Operation{Operation: start, Class: ClassAuthenticated, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable, DemoRestricted: true},
 		func(ctx context.Context, in *AccountIdentityLinkStartInput) (*AccountIdentityLinkStartOutput, error) {
 			svc := reg.deps.OAuth
 			if svc == nil || !svc.LinkingAvailable() {
@@ -381,7 +381,7 @@ func registerOAuthAccountOperations(reg *Registry) {
 	complete.Description = "An app's linking flow (startNativeOAuthLogin with link_ticket) ends on the app redirect with link=1 and a code. The app redeems it here within 60 seconds with its code_verifier, signed in as the account the ticket was issued to; nothing is linked before. A verifier that does not fit is 400 invalid_grant and leaves the code redeemable; an unknown, used or expired code, or another account, is 401 invalid_token. An identity linked to another account is 409 identity_linked_elsewhere; an account already linked to the provider is 409 already_linked; a refusal by the provider is 403 not_permitted, or 403 account_disabled when the provider's account is disabled, locked or expired. An API key or impersonation session is 403."
 	complete.DefaultStatus = http.StatusNoContent
 	complete.Errors = []int{http.StatusBadRequest, http.StatusUnauthorized, http.StatusForbidden, http.StatusConflict}
-	Register(reg, Operation{Operation: complete, Class: ClassAuthenticated, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable},
+	Register(reg, Operation{Operation: complete, Class: ClassAuthenticated, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable, DemoRestricted: true},
 		func(ctx context.Context, in *AccountIdentityLinkCompleteInput) (*struct{}, error) {
 			svc := reg.deps.OAuth
 			if svc == nil || !svc.LinkingAvailable() {

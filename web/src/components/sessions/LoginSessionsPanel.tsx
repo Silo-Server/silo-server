@@ -27,12 +27,17 @@ type Selection = { kind: "one"; session: LoginSession } | { kind: "all" };
 export function LoginSessionsPanel({
   adminUser,
   manageable = true,
+  manageOthers = true,
 }: {
   adminUser?: { id: number; username: string };
   manageable?: boolean;
+  /** False when the server refuses signing out sessions but this one (demo mode). */
+  manageOthers?: boolean;
 }) {
   const t = useT();
-  const { query, sessions, currentSession, revoke, revokeAll } = useLoginSessions(adminUser?.id);
+  const { query, sessions, reducedIds, currentSession, revoke, revokeAll } = useLoginSessions(
+    adminUser?.id,
+  );
   const { clearLoginSession } = useAuth();
   const navigate = useNavigate();
   const [selection, setSelection] = useState<Selection | null>(null);
@@ -85,10 +90,15 @@ export function LoginSessionsPanel({
   const signOut = manageable
     ? (session: LoginSession) => open({ kind: "one", session })
     : undefined;
-  const list = (rows: LoginSession[]) => (
+  const list = (rows: LoginSession[], canSignOut = true) => (
     <ul className="mt-3 space-y-2">
       {rows.map((session) => (
-        <LoginSessionRow key={session.id} session={session} onSignOut={signOut} />
+        <LoginSessionRow
+          key={session.id}
+          session={session}
+          onSignOut={canSignOut ? signOut : undefined}
+          reduced={reducedIds.has(session.id)}
+        />
       ))}
     </ul>
   );
@@ -203,7 +213,7 @@ export function LoginSessionsPanel({
             flush
           >
             {others.length ? (
-              list(others)
+              list(others, manageOthers)
             ) : (
               <div className="text-muted-foreground flex items-center gap-3 py-5 text-sm">
                 <ShieldCheck className="size-5" aria-hidden="true" />

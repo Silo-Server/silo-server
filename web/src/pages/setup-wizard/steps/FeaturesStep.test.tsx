@@ -152,6 +152,44 @@ describe("FeaturesStep keeps unsaved edits in view", () => {
     expect(saved.current).toEqual({ "markers.online_storage": "on_demand" });
   });
 
+  it("turns online markers on with Fetch when needed without turning lazy playback on", async () => {
+    // Under server detection, lazy playback would start local detection at
+    // playback; on-demand online lookups run there without it.
+    settings.current = {
+      ...settings.current,
+      "markers.mode": "local",
+      "markers.lazy_playback": "false",
+      "markers.online_storage": "on_demand",
+    };
+    render(<FeaturesStep />);
+    await userEvent.click(
+      screen.getByRole("switch", { name: "Skip markers from TheIntroDB and Silo" }),
+    );
+    await continueStep();
+
+    expect(saved.current).toEqual({ "markers.mode": "both" });
+  });
+
+  it("takes lazy playback back when the storage choice changes to Fetch when needed", async () => {
+    settings.current = {
+      ...settings.current,
+      "markers.mode": "local",
+      "markers.lazy_playback": "false",
+    };
+    render(<FeaturesStep />);
+    await userEvent.click(
+      screen.getByRole("switch", { name: "Skip markers from TheIntroDB and Silo" }),
+    );
+    await userEvent.click(screen.getByRole("combobox", { name: "Save online markers" }));
+    await userEvent.click(screen.getByRole("option", { name: "Fetch when needed" }));
+    await continueStep();
+
+    expect(saved.current).toEqual({
+      "markers.mode": "both",
+      "markers.online_storage": "on_demand",
+    });
+  });
+
   it("saves nothing after push is turned off and on again", async () => {
     // Only one platform delivers; the switch reads on.
     settings.current["notifications.android_push_delivery_enabled"] = "false";

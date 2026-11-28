@@ -97,7 +97,7 @@ func (p *candidatePlannerV3) progressiveCandidate(c candidateV3) *PlannerResultV
 	}
 	channels := 0
 	if a.progressiveConverts {
-		channels = aacOutputChannelsV3(request, DeliveryClassProgressiveV3, source.AudioChannels, a.progressiveChannelLimited)
+		channels = a.progressiveAACChannels
 		if !p.progressiveAACOK() || !audioRemuxFitsServerCapV3(p.input, p.file, channels) {
 			return nil
 		}

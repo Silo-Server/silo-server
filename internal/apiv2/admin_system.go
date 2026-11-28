@@ -24,51 +24,52 @@ type AdminBuildInfo struct {
 }
 type AdminBuildInfoOutput struct{ Body AdminBuildInfo }
 type AdminSystemResources struct {
-	Available   bool                      `json:"available"`
-	SampledAt   *Instant                  `json:"sampled_at,omitempty"`
-	System      *AdminSystemStats         `json:"system,omitempty"`
-	GPU         []AdminGPUStats           `json:"gpu"`
-	Stale       bool                      `json:"stale"`
-	Attribution *AdminResourceAttribution `json:"attribution,omitempty"`
+	Available   bool                      `json:"available" doc:"True when this host can be sampled. False on non-Linux hosts, before the first sample completes, or without a sampler; do not read false as zero load."`
+	SampledAt   *Instant                  `json:"sampled_at,omitempty" doc:"When the sample was taken; omitted when no sample exists."`
+	System      *AdminSystemStats         `json:"system,omitempty" doc:"Host or cgroup CPU, memory, load, disk, and network sample; omitted when unavailable."`
+	GPU         []AdminGPUStats           `json:"gpu" doc:"One entry per visible GPU, always an array. Missing measurements are omitted while a measured zero remains zero."`
+	Stale       bool                      `json:"stale" doc:"True when no sample exists or its age exceeds three sampling intervals."`
+	Attribution *AdminResourceAttribution `json:"attribution,omitempty" doc:"Scope and source of each system reading, plus process, cgroup, and owned FFmpeg child detail; omitted when none is reported."`
 }
 type AdminSystemStats struct {
-	CPUPct     int              `json:"cpu_pct"`
-	Load1      float64          `json:"load1"`
-	Cores      int              `json:"cores"`
-	MemUsedMB  int64            `json:"mem_used_mb"`
-	MemTotalMB int64            `json:"mem_total_mb"`
-	Disks      []AdminDiskStats `json:"disks"`
-	NetRxBps   int64            `json:"net_rx_bps"`
-	NetTxBps   int64            `json:"net_tx_bps"`
+	CPUPct     int              `json:"cpu_pct" doc:"Aggregate busy percentage across available cores over the last sampling interval (0-100; idle and iowait count as not busy). Uses cgroup usage against cgroup quota when a CPU limit binds; attribution.cpu reports which."`
+	Load1      float64          `json:"load1" doc:"1-minute load average, including tasks blocked on storage I/O. Always host-wide (or lxcfs-virtualized); read relative to cores."`
+	Cores      int              `json:"cores" doc:"CPUs available to this process: cgroup CPU quota rounded up when limited, otherwise all CPUs the kernel reports."`
+	MemUsedMB  int64            `json:"mem_used_mb" doc:"Memory in use in MiB. Matches the cgroup working set when a concrete memory limit binds, otherwise the host; paired with mem_total_mb from the same domain (see attribution.memory)."`
+	MemTotalMB int64            `json:"mem_total_mb" doc:"Total memory capacity in MiB, from the same host or cgroup domain as mem_used_mb."`
+	Disks      []AdminDiskStats `json:"disks" doc:"Sampled mounts (transcode scratch first, then library roots), deduplicated by filesystem and bounded."`
+	NetRxBps   int64            `json:"net_rx_bps" doc:"Aggregate received network throughput in bits per second, excluding loopback. Covers Silo's network namespace (container interfaces under bridge Docker, or host NICs), not streaming traffic alone; use GET /api/v2/admin/stats/timeseries for Silo viewer egress."`
+	NetTxBps   int64            `json:"net_tx_bps" doc:"Aggregate transmitted network throughput in bits per second, excluding loopback. Covers Silo's network namespace (all traffic, not streaming alone); use GET /api/v2/admin/stats/timeseries for Silo viewer egress."`
 }
 type AdminDiskStats struct {
 	Path        string  `json:"path,omitempty" doc:"Where the mount is; omitted for scoped API keys"`
-	Role        string  `json:"role,omitempty"`
-	UsedGB      float64 `json:"used_gb"`
-	TotalGB     float64 `json:"total_gb"`
-	Stale       bool    `json:"stale,omitzero"`
-	Unavailable bool    `json:"unavailable,omitzero"`
-	Scratch     bool    `json:"scratch,omitzero"`
+	Role        string  `json:"role,omitempty" doc:"Mount role: scratch for the transcode working directory, or library-N positionally for each media root."`
+	UsedGB      float64 `json:"used_gb" doc:"Used space on the filesystem in GiB (bytes divided by 1024^3)."`
+	TotalGB     float64 `json:"total_gb" doc:"Usable filesystem capacity in GiB (bytes used plus bytes available to this process, excluding blocks reserved for root)."`
+	Stale       bool    `json:"stale,omitzero" doc:"True when the mount's last probe did not finish in time and this reading is carried forward."`
+	Unavailable bool    `json:"unavailable,omitzero" doc:"True when the mount has never been measured successfully; used_gb and total_gb are meaningless when true."`
+	Scratch     bool    `json:"scratch,omitzero" doc:"True for the transcode working directory mount (at most one entry per sample)."`
 }
 type AdminGPUStats struct {
-	Device        string `json:"device"`
-	Vendor        string `json:"vendor,omitempty"`
-	Sessions      int    `json:"sessions"`
-	VideoBusyPct  *int   `json:"video_busy_pct,omitempty"`
-	RenderBusyPct *int   `json:"render_busy_pct,omitempty"`
-	TotalBusyPct  *int   `json:"total_busy_pct,omitempty"`
-	VRAMUsedMB    *int64 `json:"vram_used_mb,omitempty"`
-	VRAMTotalMB   *int64 `json:"vram_total_mb,omitempty"`
-	Source        string `json:"source"`
+	Device        string `json:"device" doc:"Render device path (for example /dev/dri/renderD128) or CUDA index/UUID when no DRM render node is visible."`
+	Vendor        string `json:"vendor,omitempty" doc:"GPU vendor (for example nvidia, intel, amd); new values may appear."`
+	Sessions      int    `json:"sessions" doc:"Active hardware-accelerated sessions attributed to this GPU."`
+	VideoBusyPct  *int   `json:"video_busy_pct,omitempty" doc:"Video engine busy percentage when reported; omitted when not measurable."`
+	RenderBusyPct *int   `json:"render_busy_pct,omitempty" doc:"Render/3D engine busy percentage when reported; omitted when not measurable."`
+	TotalBusyPct  *int   `json:"total_busy_pct,omitempty" doc:"Overall GPU busy percentage when reported; omitted when not measurable."`
+	VRAMUsedMB    *int64 `json:"vram_used_mb,omitempty" doc:"GPU memory in use in MiB when reported; omitted when not measurable."`
+	VRAMTotalMB   *int64 `json:"vram_total_mb,omitempty" doc:"Total GPU memory in MiB when reported; omitted when not measurable."`
+	Source        string `json:"source" doc:"Measurement source (fdinfo, nvidia-smi, fdinfo+nvidia-smi, unavailable); new values may appear."`
 }
 type AdminSystemResourcesOutput struct{ Body AdminSystemResources }
 
 type AdminResourceCapabilities struct {
 	Capability
-	InstanceAttribution bool `json:"instance_attribution"`
-	ProcessResources    bool `json:"process_resources"`
-	CgroupResources     bool `json:"cgroup_resources"`
-	SampleFreshness     bool `json:"sample_freshness"`
+	InstanceAttribution bool `json:"instance_attribution" doc:"Responses include attribution.instance_id and per-metric scope and source metadata."`
+	ProcessResources    bool `json:"process_resources" doc:"Responses may include attribution.process and attribution.children."`
+	CgroupResources     bool `json:"cgroup_resources" doc:"Responses may include attribution.cgroup_cpu and attribution.cgroup_memory."`
+	SampleFreshness     bool `json:"sample_freshness" doc:"Responses include sampled_at, stale, and attribution sample interval and duration."`
+	ProcessCPUPercent   bool `json:"process_cpu_percent" doc:"Responses may include attribution.process.cpu_pct and attribution.children.cpu_pct."`
 }
 type AdminResourceCapabilitiesOutput struct {
 	Status       int
@@ -85,7 +86,7 @@ func registerAdminSystem(reg *Registry) {
 		} else if runtime.GOOS != "linux" {
 			state = StateUnsupported
 		}
-		return &AdminResourceCapabilitiesOutput{Body: AdminResourceCapabilities{Capability: Capability{State: state}, InstanceAttribution: true, ProcessResources: true, CgroupResources: true, SampleFreshness: true}}, nil
+		return &AdminResourceCapabilitiesOutput{Body: AdminResourceCapabilities{Capability: Capability{State: state}, InstanceAttribution: true, ProcessResources: true, CgroupResources: true, SampleFreshness: true, ProcessCPUPercent: true}}, nil
 	})
 	Register(reg, Operation{Operation: humaOp("GET", Prefix+"/admin/system/build", "getAdminBuildInfo", "admin-settings", "Inspect build metadata; use capabilities for feature detection."), Class: ClassActingAdmin}, getAdminBuildInfo)
 	Register(reg, Operation{Operation: humaOp("GET", Prefix+"/admin/system/resources", "getAdminSystemResources", "admin-settings", "Read this API host's last resource sample without probing hardware."), Class: ClassActingAdmin}, reg.getAdminSystemResources)

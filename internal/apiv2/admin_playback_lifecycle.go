@@ -20,7 +20,8 @@ type AdminPlaybackLifecycleEvent struct {
 	EndReason string `json:"end_reason,omitempty"`
 	// Session is the session's live admin row, as listAdminPlaybackSessions
 	// returns it, on a started, paused or resumed event; absent when no
-	// server has a live row for it.
+	// server has a live row for it. It never carries egress, which only the
+	// list fills, on request.
 	Session *AdminPlaybackSession `json:"session,omitempty"`
 	// History is the admin history entry the end recorded, as
 	// listAdminPlaybackHistory returns it, on a stopped event.

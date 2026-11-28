@@ -45,6 +45,28 @@ type ClientVariant struct {
 	Channel string
 }
 
+// PathKind says whether a request reached the server over the regular listeners
+// or over a direct path.
+type PathKind string
+
+const (
+	PathKindRegular PathKind = "regular"
+	PathKindDirect  PathKind = "direct"
+)
+
+// Transport is how a request reached the server, recorded only for requests on
+// a direct path. Class and PathKind are the only values metrics may label with;
+// the ports and the path generation are for admin responses, never for labels.
+type Transport struct {
+	PathKind       PathKind
+	Class          string
+	HostID         string
+	AddressFamily  string
+	LocalPort      int
+	PeerPort       int
+	PathGeneration uint64
+}
+
 type CaptureSet struct {
 	Method          string
 	Pattern         string
@@ -55,6 +77,8 @@ type CaptureSet struct {
 	ReceivedAt      time.Time
 	TokenIssuedAt   time.Time
 	TokenIssuedFrom TokenIssuedAtSource
+	// Transport is the zero value for a request on the regular path.
+	Transport Transport
 }
 
 type Attachment struct {

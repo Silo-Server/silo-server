@@ -157,6 +157,12 @@ func (h *ExternalSignInHandler) ListIdentities(ctx context.Context, userID int) 
 	return h.views(identities), nil
 }
 
+// ListLocalPasswordOffAccounts answers one page of the accounts that lose
+// their way in when local password sign-in is turned off.
+func (h *ExternalSignInHandler) ListLocalPasswordOffAccounts(ctx context.Context, q auth.LocalPasswordOffQuery) (auth.LocalPasswordOffPage, error) {
+	return h.identities.LocalPasswordOffAccounts(ctx, q)
+}
+
 // CanUnlinkAccountIdentity reports whether the caller can disconnect one
 // of its identities now (UnlinkAccountIdentity's rule).
 func (h *ExternalSignInHandler) CanUnlinkAccountIdentity(ctx context.Context, userID int) (bool, error) {

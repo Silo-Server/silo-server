@@ -79,14 +79,14 @@ type RefreshSessionOutput struct {
 
 // LoginSession is one live login session of the caller's account.
 type LoginSession struct {
-	ID             ID              `json:"id" doc:"Session identifier; the value deleteSession takes. A session opened by device sign-in sees every session's id, and of another session nothing else but current" example:"6f1c2a1e-8d3b-4f0e-9a7c-2b5d8e1f3a4c"`
-	DeviceName     string          `json:"device_name" doc:"Device name the client sent in X-Silo-Device-Name when it signed in, else its User-Agent; empty when it sent neither. A device-code sign-in falls back to the name the device started with, then its User-Agent, then This device. Empty on another session's item for a session opened by device sign-in" example:"Living Room Apple TV"`
-	IPAddress      string          `json:"ip_address" doc:"Client address recorded at login; empty when unknown, and on another session's item for a session opened by device sign-in" example:"203.0.113.7"`
-	CreatedAt      Instant         `json:"created_at" doc:"When the session was opened. On another session's item, a session opened by device sign-in sees its own created_at" example:"2026-01-02T03:04:05.678Z"`
-	ExpiresAt      Instant         `json:"expires_at" doc:"When the session expires unless refreshed. On another session's item, a session opened by device sign-in sees its own expires_at" example:"2026-02-01T03:04:05.678Z"`
-	DeviceID       string          `json:"device_id,omitempty" doc:"Device identifier the client sent in X-Silo-Device-Id when it signed in; absent when it sent none. Client-reported: it identifies the device for display and audit and authorizes nothing. Absent on another session's item for a session opened by device sign-in" example:"8d2f6a4e-3c1b-4e5f-9a7d-0b1c2d3e4f50"`
-	DevicePlatform string          `json:"device_platform,omitempty" doc:"Platform the client sent in X-Silo-Device-Platform when it signed in; absent when it sent none, and on another session's item for a session opened by device sign-in" example:"tvOS"`
-	LastSeenAt     NullableInstant `json:"last_seen_at" doc:"Most recent authenticated request, coalesced to at most one update per minute; null until recorded, and on another session's item for a session opened by device sign-in" example:"2026-01-02T03:04:05.678Z"`
+	ID             ID              `json:"id" doc:"Session identifier; the value deleteSession takes. A session opened by device sign-in, and a demo visitor (see listSessions), sees every session's id, and of another session nothing else but current" example:"6f1c2a1e-8d3b-4f0e-9a7c-2b5d8e1f3a4c"`
+	DeviceName     string          `json:"device_name" doc:"Device name the client sent in X-Silo-Device-Name when it signed in, else its User-Agent; empty when it sent neither. A device-code sign-in falls back to the name the device started with, then its User-Agent, then This device. Empty on another session's item for a session opened by device sign-in or a demo visitor" example:"Living Room Apple TV"`
+	IPAddress      string          `json:"ip_address" doc:"Client address recorded at login; empty when unknown, and on another session's item for a session opened by device sign-in or a demo visitor" example:"203.0.113.7"`
+	CreatedAt      Instant         `json:"created_at" doc:"When the session was opened. On another session's item, a session opened by device sign-in or a demo visitor sees its own created_at" example:"2026-01-02T03:04:05.678Z"`
+	ExpiresAt      Instant         `json:"expires_at" doc:"When the session expires unless refreshed. On another session's item, a session opened by device sign-in or a demo visitor sees its own expires_at" example:"2026-02-01T03:04:05.678Z"`
+	DeviceID       string          `json:"device_id,omitempty" doc:"Device identifier the client sent in X-Silo-Device-Id when it signed in; absent when it sent none. Client-reported: it identifies the device for display and audit and authorizes nothing. Absent on another session's item for a session opened by device sign-in or a demo visitor" example:"8d2f6a4e-3c1b-4e5f-9a7d-0b1c2d3e4f50"`
+	DevicePlatform string          `json:"device_platform,omitempty" doc:"Platform the client sent in X-Silo-Device-Platform when it signed in; absent when it sent none, and on another session's item for a session opened by device sign-in or a demo visitor" example:"tvOS"`
+	LastSeenAt     NullableInstant `json:"last_seen_at" doc:"Most recent authenticated request, coalesced to at most one update per minute; null until recorded, and on another session's item for a session opened by device sign-in or a demo visitor" example:"2026-01-02T03:04:05.678Z"`
 	Current        bool            `json:"current" doc:"Whether this is the login session making this request"`
 }
 
@@ -221,7 +221,7 @@ func registerAuthSessions(reg *Registry) {
 	Register(reg, Operation{Operation: refresh, RetrySafety: RetrySafetyDomainIdentity, Class: ClassPublic, ServiceBacked: true}, reg.refreshSession)
 	list := humaOp(http.MethodGet, Prefix+"/auth/sessions", opListSessions, "auth",
 		"List the caller's live login sessions, newest first.")
-	list.Description = sessionReachListDescription
+	list.Description = sessionReachListDescription + " " + sessionReachDemoListDescription
 	Register(reg, Operation{
 		Operation: list,
 		Class:     ClassAuthenticated, ServiceBacked: true,
@@ -230,7 +230,9 @@ func registerAuthSessions(reg *Registry) {
 	})
 	del := humaOp(http.MethodDelete, Prefix+"/auth/sessions/{id}", "deleteSession", "auth",
 		"Revoke one of the caller's login sessions.")
-	del.Description = sessionReachDeleteDescription
+	del.Description = "In demo mode a caller that is not an administrator may revoke only the session making the request; any other session of the account is 403 permission_denied, while an unknown session or one of another account is 404 as for every caller. getLoginSessionCapabilities reports this as revoke_other_sessions. " +
+		sessionReachDeleteDescription
+	// 403: another session, refused in demo mode or to a session limited to itself.
 	del.Errors = []int{http.StatusNotFound, http.StatusForbidden}
 	Register(reg, Operation{Operation: del, RetrySafety: RetrySafetyNaturalIdempotent, Class: ClassAuthenticated, ServiceBacked: true, Audited: true}, reg.deleteSession)
 	setup := humaOp(http.MethodPost, Prefix+"/auth/setup", "setupServer", "system",
@@ -338,6 +340,12 @@ func (reg *Registry) listSessions(ctx context.Context, cursors *Cursors, in *Log
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
+	if !limited {
+		var p *Problem
+		if limited, p = demoVisitorListing(ctx, reg.deps.DemoSettings, claims); p != nil {
+			return nil, p
+		}
+	}
 	if limited {
 		return reg.limitedLoginSessionPage(ctx, cursors, claims, in)
 	}
@@ -412,7 +420,33 @@ func (reg *Registry) deleteSession(ctx context.Context, in *DeleteSessionInput) 
 	if claims == nil {
 		return nil, NewProblem(TypeAuthenticationRequired, "Authentication is required.")
 	}
-	if err := reg.deps.Sessions.RevokeSession(ctx, string(in.ID), claims.UserID); err != nil {
+	// Read before the revocation's transaction, so no setting read waits
+	// under its row lock.
+	restricted, demoErr := demoRestricted(ctx, reg.deps.DemoSettings)
+	// The check runs after the ownership check, in the revocation's
+	// transaction, so an unknown session or another account's is 404 as
+	// without demo mode.
+	var refused *Problem
+	check := func(session *models.AuthSession) error {
+		// Demo visitors share one account, so its other sessions are other
+		// visitors': they may sign themselves out, not each other.
+		if session.ID != claims.SessionID {
+			if demoErr != nil {
+				refused = serviceProblem(demoErr)
+			} else if restricted {
+				refused = demoRestrictedProblem()
+			}
+		}
+		if refused != nil {
+			return refused
+		}
+		return nil
+	}
+	err := reg.deps.Sessions.RevokeSessionChecked(ctx, string(in.ID), claims.UserID, check)
+	if refused != nil {
+		return nil, refused
+	}
+	if err != nil {
 		return nil, serviceProblem(err)
 	}
 	return nil, nil
@@ -517,8 +551,8 @@ func invalidEmailProblem(email string) *Problem {
 // everything else follows the v1 status.
 func registrationProblem(err error) *Problem {
 	// A password the policy refused reads as on every other password path.
-	if message, ok := auth.PasswordRuleMessage(err); ok {
-		return passwordMemberProblem(message)
+	if p, ok := passwordRuleProblem(err, "password"); ok {
+		return p
 	}
 	var apiErr *handlers.APIError
 	if errors.As(err, &apiErr) && apiErr.Field != "" {

@@ -27,7 +27,7 @@ import (
 )
 
 const (
-	swapStamp    = "20261031t040000z"
+	swapStamp    = "20261031t040000z_100"
 	liveDB       = "silo"
 	restoredDB   = "silo_restore_" + swapStamp
 	beforeDB     = "silo_before_restore_" + swapStamp
@@ -54,7 +54,11 @@ type fakeDB struct {
 // anything can record it; lostReply applies a statement and then reports an
 // error, as a dropped connection would.
 type fakeControl struct {
-	t         *testing.T
+	t *testing.T
+	// own answers OwnApplicationName, and liveURLs records the live
+	// database URLs the loader was asked to read.
+	own       string
+	liveURLs  []string
 	dbs       map[string]*fakeDB
 	nextOID   uint32
 	calls     []string
@@ -164,6 +168,7 @@ func (f *fakeControl) OtherConnections(_ context.Context, name string) (int, err
 	}
 	return 0, nil
 }
+func (f *fakeControl) OwnApplicationName() string                    { return f.own }
 func (f *fakeControl) CheckPrivileges(context.Context, string) error { return nil }
 func (f *fakeControl) CheckExtensions(_ context.Context, names []string) error {
 	f.checkedExtensions = names
@@ -271,6 +276,7 @@ func (l fakeLoader) CarryPolicies(context.Context, string, string) ([]string, er
 func (l fakeLoader) CarryPluginReleases(context.Context, string, string) ([]string, error) {
 	return nil, nil
 }
+func (l fakeLoader) AdvanceAccountIDs(context.Context, string, string) error { return nil }
 func (l fakeLoader) DisablePlugins(context.Context, string) ([]string, error) {
 	return nil, nil
 }
@@ -291,7 +297,8 @@ func (l fakeLoader) Superuser(context.Context, string) (bool, error)            
 func (l fakeLoader) AccountRollback(context.Context, string, string) (AccountRollback, error) {
 	return AccountRollback{}, nil
 }
-func (l fakeLoader) ServerID(context.Context, string) (string, error) {
+func (l fakeLoader) ServerID(_ context.Context, liveURL string) (string, error) {
+	l.ctl.liveURLs = append(l.ctl.liveURLs, liveURL)
 	if l.ctl.liveServerID != "" {
 		return l.ctl.liveServerID, nil
 	}
@@ -602,6 +609,27 @@ func (f *swapFixture) wantClosedThroughout() {
 	for i := closed; i < reopened; i++ {
 		if len(f.ctl.openAfter[i]) != 0 {
 			f.t.Fatalf("after %q these databases admitted connections: %v", f.ctl.calls[i], f.ctl.openAfter[i])
+		}
+	}
+}
+
+// TestSwapNamesItsOwnConnections: the restore reads the live database over
+// connections of its own just before it counts the other clients, and a
+// closed connection stays listed for a moment. Those connections carry the
+// control's application name so the count can leave them out. It catches a
+// restore refusing a database nothing else is using.
+func TestSwapNamesItsOwnConnections(t *testing.T) {
+	f := newSwapFixture(t)
+	f.ctl.own = "silo-restore-test"
+	if err, _ := f.restore(); err != nil {
+		t.Fatalf("restore: %v\n%s", err, f.output.String())
+	}
+	if len(f.ctl.liveURLs) == 0 {
+		t.Fatal("the restore never read the live database")
+	}
+	for _, liveURL := range f.ctl.liveURLs {
+		if !strings.Contains(liveURL, "application_name=silo-restore-test") {
+			t.Fatalf("a live read used %q, without the restore's application name", liveURL)
 		}
 	}
 }

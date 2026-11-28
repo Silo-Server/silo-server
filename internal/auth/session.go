@@ -180,6 +180,19 @@ func (r *SessionRepository) GetByID(ctx context.Context, id string) (*models.Aut
 	return scanSession(r.pool.QueryRow(ctx, query, id))
 }
 
+// LiveSession returns the user's session when it is live: the user's own, not
+// revoked and not expired. Any other session is ErrSessionNotFound.
+func (r *SessionRepository) LiveSession(ctx context.Context, userID int, sessionID string) (*models.AuthSession, error) {
+	session, err := r.GetByID(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if session.UserID != userID || session.RevokedAt != nil || !session.ExpiresAt.After(time.Now()) {
+		return nil, ErrSessionNotFound
+	}
+	return session, nil
+}
+
 // SessionKey is the keyset position of one session in the
 // (created_at DESC, id DESC) order ListByUserPage serves.
 type SessionKey struct {

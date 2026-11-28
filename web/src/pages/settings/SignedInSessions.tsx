@@ -17,5 +17,6 @@ export default function SignedInSessions() {
     );
   if (!capabilities.data?.available)
     return <p role="status">{t("web.settings.signedInSessions.unavailable")}</p>;
-  return <LoginSessionsPanel />;
+  // Absent from a server that doesn't send it yet: other sessions stay manageable.
+  return <LoginSessionsPanel manageOthers={capabilities.data.revoke_other_sessions !== false} />;
 }

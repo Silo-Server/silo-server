@@ -318,7 +318,7 @@ func (reg *Registry) getDownloadCapability(ctx context.Context, _ *CapabilityInp
 		// mutations to non-admins, so the effective answer is no even when
 		// the account itself is permitted. Discovered the same way as every
 		// other demo-restricted capability (notification email verification).
-		out.Allowed = new(view.DownloadAllowed && !demoRestricted(ctx, reg.deps.DemoSettings))
+		out.Allowed = new(view.DownloadAllowed && demoAllows(ctx, reg.deps.DemoSettings))
 	}
 	return &DownloadCapabilityOutput{CacheControl: "private, no-cache", Body: out}, nil
 }

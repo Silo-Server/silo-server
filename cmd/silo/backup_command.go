@@ -304,10 +304,20 @@ func runBackupRestore(ctx context.Context, args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
+	ctl, err := backup.ConnectControl(ctx, liveURL)
+	if err != nil {
+		return err
+	}
+	defer closeControl(ctx, ctl)
+	// Every connection the restore opens to the live database carries the
+	// control's application name, so the checks that no other client is
+	// connected leave out one of its own that is still closing.
+	if liveURL, err = backup.WithApplicationName(liveURL, ctl.OwnApplicationName()); err != nil {
+		return err
+	}
 	// The live deployment's storage, read from its configuration before
-	// anything changes; this connection closes before the preflight checks
-	// that no other client is connected. The journal keeps the storage so
-	// --recover never reopens a database to find it.
+	// anything changes. The journal keeps the storage so --recover never
+	// reopens a database to find it.
 	var storeConfig backup.StoreConfig
 	if !f.databaseOnly {
 		cfg, err := liveConfigFromDatabase(ctx, liveURL, cipher)
@@ -316,11 +326,6 @@ func runBackupRestore(ctx context.Context, args []string, out io.Writer) error {
 		}
 		storeConfig = backupStoreConfig(cfg)
 	}
-	ctl, err := backup.ConnectControl(ctx, liveURL)
-	if err != nil {
-		return err
-	}
-	defer closeControl(ctx, ctl)
 	workDir, err := os.Getwd()
 	if err != nil {
 		return err

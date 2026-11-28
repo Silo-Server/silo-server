@@ -329,6 +329,10 @@ func ValidateThrottleAttestation(req TranscodeStartRequest, response TranscodeSt
 type HealthResponse struct {
 	Status     string `json:"status"`
 	ActiveJobs int32  `json:"active_jobs"`
+	// ActiveJobsByKind breaks ActiveJobs down by nodepool.JobKind, naming
+	// every kind. The core's planner spreads each kind of work evenly across
+	// nodes from it.
+	ActiveJobsByKind map[nodepool.JobKind]int `json:"active_jobs_by_kind"`
 	// CapabilitiesHash identifies this node's last computed hardware capability
 	// snapshot. It is read from the stored snapshot only — health must stay a
 	// cheap liveness answer, so it never triggers a probe — and is empty until
@@ -468,14 +472,18 @@ type Server struct {
 	// reconstruction. It is always acquired before lifecycleMu or mu.
 	reloadMu   sync.RWMutex
 	activeJobs atomic.Int32
+	// jobKinds breaks activeJobs down by kind; see countJob and endJob.
+	jobKinds jobKindCounts
 	// jobCap is the node's own job cap, 0 for none; admission guards
-	// admitted, the new work it let in that activeJobs does not count yet,
+	// admitted, the new work it let in that activeJobs does not count yet
+	// (admittedKinds by kind; health reports both, see reportedJobs),
 	// remuxSeen, when each progressive remux transport was last served, and
 	// continuing, the overlap allowances granted per playback session and
 	// not yet registered. See jobcap.go.
 	jobCap          atomic.Int32
 	admission       sync.Mutex
 	admitted        int
+	admittedKinds   map[nodepool.JobKind]int
 	remuxSeen       map[string]time.Time
 	continuing      map[string]int
 	remuxSeenPruned time.Time
@@ -973,17 +981,18 @@ func (s *Server) reapSession(sessionID string, session *playback.TranscodeSessio
 // encoder is counted by nothing and a re-probe admitted in the gap smoke-encodes
 // beside it.
 func (s *Server) closeSessionOffGPU(session *playback.TranscodeSession) error {
-	return s.retireGPUSession(session.Close)
+	return s.retireGPUSession(sessionJobKind(session), session.Close)
 }
 
-// retireGPUSession drops the node's job count and runs one session's teardown
-// with the gate holding it as work throughout. The hold discipline is the same
-// whatever the teardown is, which is why it is separate from what it closes.
-func (s *Server) retireGPUSession(close func() error) error {
+// retireGPUSession drops the node's job count for a job of kind and runs one
+// session's teardown with the gate holding it as work throughout. The hold
+// discipline is the same whatever the teardown is, which is why it is
+// separate from what it closes.
+func (s *Server) retireGPUSession(kind nodepool.JobKind, teardown func() error) error {
 	s.gpu.holdWork()
 	defer s.gpu.endWork()
-	s.activeJobs.Add(-1)
-	return close()
+	s.endJob(kind)
+	return teardown()
 }
 
 // SetStreamTelemetry wires local stream observation. A nil registry is a
@@ -1159,7 +1168,7 @@ func (s *Server) handleDownloadPrepare(w http.ResponseWriter, r *http.Request) {
 		// (another recipe), so the node has to encode after all. Admitted
 		// before the receipt goes, so a refusal leaves the artifact that is
 		// there usable for the recipe it answers.
-		admitted, refused := s.admitNewPreparation(w)
+		admitted, refused := s.admitNewPreparation(w, req.JobKind())
 		if refused {
 			return
 		}
@@ -1173,8 +1182,9 @@ func (s *Server) handleDownloadPrepare(w http.ResponseWriter, r *http.Request) {
 
 	jobCtx, cancelJob := sourceContext(r.Context(), source)
 	defer cancelJob()
-	s.countJob(slot)
-	defer s.activeJobs.Add(-1)
+	prepareKind := req.JobKind()
+	s.countJob(slot, prepareKind)
+	defer s.endJob(prepareKind)
 	if s.tracker != nil {
 		trackingID := "download-" + req.ArtifactID
 		s.tracker.Track(jobCtx, nodesessions.SessionInfo{
@@ -1433,10 +1443,13 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 		redacted := usage.RedactPath()
 		artifacts = &redacted
 	}
+	status := s.healthStatus()
+	activeJobs, activeJobsByKind := s.reportedJobs(status == HealthStatusDrained)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(HealthResponse{
-		Status:             s.healthStatus(),
-		ActiveJobs:         s.activeJobs.Load(),
+		Status:             status,
+		ActiveJobs:         activeJobs,
+		ActiveJobsByKind:   activeJobsByKind,
 		CapabilitiesHash:   s.storedCapabilityHash(),
 		System:             snapshot.System,
 		GPU:                snapshot.GPU,
@@ -2026,7 +2039,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	unlock()
-	s.countJob(slot)
+	s.countJob(slot, sessionJobKind(session))
 	s.armSessionThrottler(session, req.ThrottleSeconds)
 
 	w.WriteHeader(http.StatusAccepted)
@@ -2232,7 +2245,7 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 	s.registerSessionLocked(sessionID, session, identityOfResolution(resolution), source)
 	sourceOwned = true
 	s.mu.Unlock()
-	s.activeJobs.Add(1)
+	s.countJob(nil, sessionJobKind(session))
 	s.armSessionThrottler(session, card.ThrottleSeconds)
 
 	s.trackRebuilt(r.Context(), sessionID, session, resolution)
@@ -2449,7 +2462,7 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 		overlap, continues = s.claimContinuation(playbackSessionID, time.Now())
 		defer overlap.release()
 		if !continues {
-			admitted, ok := s.admitJob()
+			admitted, ok := s.admitJob(nodepool.StreamJobKind(false, claims.TranscodeAudio))
 			if !ok {
 				writeAtCapacity(w)
 				return
@@ -2561,9 +2574,10 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 
 	// The remux is registered above, so it counts as running from here: its
 	// slot when it was new work, the overlap allowance when it continued.
-	s.countJob(slot)
+	remuxKind := nodepool.StreamJobKind(false, claims.TranscodeAudio)
+	s.countJob(slot, remuxKind)
 	overlap.release()
-	defer s.activeJobs.Add(-1)
+	defer s.endJob(remuxKind)
 	s.noteRemux(playbackSessionID, time.Now())
 	defer func() { s.noteRemux(playbackSessionID, time.Now()) }()
 	if s.tracker != nil {

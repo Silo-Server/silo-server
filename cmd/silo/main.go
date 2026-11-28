@@ -72,6 +72,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/database"
 	"github.com/Silo-Server/silo-server/internal/database/pglock"
 	"github.com/Silo-Server/silo-server/internal/database/queryattr"
+	"github.com/Silo-Server/silo-server/internal/demomode"
 	"github.com/Silo-Server/silo-server/internal/diagnostics"
 	"github.com/Silo-Server/silo-server/internal/directconn"
 	"github.com/Silo-Server/silo-server/internal/downloads"
@@ -388,6 +389,9 @@ func newStreamTelemetryRegistry(ctx context.Context, nodeID string, redisClient 
 			pingCancel()
 		} else {
 			slog.ErrorContext(ctx, "stream telemetry distributed mode requested but redis is not configured; using local store")
+			// The registry reports this mode to readers of its merged view, which
+			// then holds only this process.
+			streamTelemetryConfig.Distributed = false
 		}
 	}
 	if streamTelemetryConfig.Enabled {
@@ -1560,7 +1564,21 @@ func main() {
 	}
 
 	if mode == "" || mode == "integrated" || mode == "api" {
-		streamTelemetryRegistry = newStreamTelemetryRegistry(appCtx, nodeID, apiRedisClient)
+		// The merged view's rebuild bounds its Redis reads with a timeout and
+		// the admin sessions list waits on it, so this client's sockets must
+		// give up at that deadline rather than at the URL's read timeout,
+		// which may be unlimited.
+		var streamTelemetryRedis *redis.Client
+		if apiRedisClient != nil {
+			telemetryClient, telemetryErr := cache.NewDeadlineRedisClientForRole(cfg.Redis, "api")
+			if telemetryErr != nil {
+				slog.Warn("redis client init failed; stream telemetry stays local to this process", "error", telemetryErr)
+			} else if telemetryClient != nil {
+				defer func() { _ = cache.CloseRedisClient(telemetryClient) }()
+				streamTelemetryRedis = telemetryClient
+			}
+		}
+		streamTelemetryRegistry = newStreamTelemetryRegistry(appCtx, nodeID, streamTelemetryRedis)
 		streamTelemetryRegistry.Start(appCtx)
 		streamTelemetryViewCache = newStreamTelemetryViewCache(streamTelemetryRegistry)
 	}
@@ -1570,6 +1588,7 @@ func main() {
 	// startup completes.
 	var ipResolver *clientip.Resolver
 	var directConn *directconn.Service
+	var directCoordination *directconn.Coordination
 	var rootHandler http.Handler
 	// Assigned below when recommendations start; nil (a no-op) otherwise.
 	var settingsRecWorker *recommendations.Worker
@@ -1589,6 +1608,7 @@ func main() {
 	// Set when shutdown begins; /api/v1/ready fails from then on.
 	var shuttingDown atomic.Bool
 	deps := api.Dependencies{
+		DemoMode:                     demomode.New(settingsRepo),
 		ShuttingDown:                 shuttingDown.Load,
 		AdminDefaults:                adminDefaults,
 		SubtitlePlaySync:             subtitlePlaySync,
@@ -3275,10 +3295,28 @@ func main() {
 			// HandlerReady, after rootHandler exists.
 			AwaitHandler: true,
 			ServerFactory: func(e *engine.Engine, policy n4.Policy) *http3.Server {
-				return directconn.NewHTTP3Server(e, lanTLS.HTTP3Config(), policy, nodeID, rootHandler)
+				return directConn.NewHTTP3Server(e, lanTLS.HTTP3Config(), policy, rootHandler)
 			},
 		})
 		deps.DirectConnections = directConn
+		deps.DirectState = directConn
+		// The store stays off, and with it enrollment, when its client cannot be
+		// built: the direct gate already fails closed on the same Redis config.
+		if coordinationStore, closeCoordinationStore, storeErr := newDirectCoordinationStore(cfg.Redis, apiReplicaPresence.ID()); storeErr != nil {
+			slog.ErrorContext(appCtx, "direct connections: coordination store unavailable", "component", "directconn", "error", storeErr)
+		} else {
+			defer closeCoordinationStore()
+			directCoordination = newDirectCoordination(appCtx, deps.DB, userStoreProvider, directconn.CoordinationConfig{
+				Store: coordinationStore, AuthSecret: cfg.Auth.JWTSecret, Logger: slog.Default(),
+				Host: directConn, TLSPin: lanTLS.Pin(), ACKDecimation: tuningCfg.DirectACKDecimation, ReceiveWindowMiB: tuningCfg.DirectReceiveWindowMiB,
+			})
+		}
+		if directCoordination != nil {
+			deps.DirectCoordination = directCoordination
+			deps.DirectRevoker = directCoordination
+			// Attach before the first settings read starts the engine.
+			directConn.SetCoordination(directCoordination)
+		}
 		// Subscribe before the initial read: Subscribe returns once Redis
 		// confirms it, so a change another replica commits after that point
 		// reaches this service, and one committed before it is in the read.
@@ -3515,7 +3553,7 @@ func main() {
 				if deps.OnUserSessionsRevoked != nil {
 					deps.OnUserSessionsRevoked(ctx, userID)
 				}
-			}).WithSecretCipher(dataCipher)
+			}).WithSecretCipher(dataCipher).WithDemoSettings(deps.DemoMode)
 		authProviderRegistry = auth.NewPluginProviderRegistry(auth.PluginProviderRegistryConfig{
 			Bindings:   pluginRuntimeConfigStore,
 			NeedsSetup: auth.NewUserRepository(deps.DB).NeedsSetup,
@@ -4057,10 +4095,11 @@ func main() {
 		}
 		absScopeResolver := newViewerResolver(absUserRepo, nil)
 		absHDeps := audiobooks.ABSHandlerDeps{
-			Pool:     deps.DB,
-			Items:    absItemRepo,
-			Files:    deps.FileRepo,
-			Settings: settingsRepo,
+			Pool:         deps.DB,
+			Items:        absItemRepo,
+			Files:        deps.FileRepo,
+			Settings:     settingsRepo,
+			DemoSettings: deps.DemoMode,
 			Auth: &audiobooks.SiloCredValidator{
 				Auth:        absAuthSvc,
 				Pool:        deps.DB,
@@ -4102,12 +4141,23 @@ func main() {
 	}); err != nil {
 		slog.Warn("subscribe session revocation failed", "error", err)
 	}
-	deps.OnUserSessionsRevoked = func(ctx context.Context, userID int) {
-		dropCompatSessions(userID)
+	announceSessionsRevoked := func(ctx context.Context, userID int) {
 		if err := eventBus.Publish(ctx, cache.ChannelAdmin, cache.Event{Type: cache.EventUserSessionsRevoked, Payload: strconv.Itoa(userID)}); err != nil {
 			slog.WarnContext(ctx, "publish session revocation failed", "user_id", userID, "error", err)
 		}
 	}
+	deps.OnUserSessionsRevoked = accountSessionsRevoked(dropCompatSessions, directCoordination, announceSessionsRevoked)
+	// A password change that signs out the other sessions keeps the enrollment
+	// that the session which made it issued for its own device.
+	keptSessions := auth.NewSessionRepository(deps.DB)
+	deps.OnUserOtherSessionsRevoked = accountOtherSessionsRevoked(dropCompatSessions, directCoordination, announceSessionsRevoked,
+		func(ctx context.Context, userID int, sessionID string) (string, error) {
+			session, err := keptSessions.LiveSession(ctx, userID, sessionID)
+			if err != nil {
+				return "", err
+			}
+			return session.DeviceID, nil
+		})
 	// Jellyfin- and Audiobookshelf-compatible downloads go through the
 	// router's download service, so they meet the same policy and share its
 	// bandwidth limiters. Without a service both refuse them.
@@ -4623,6 +4673,11 @@ func main() {
 	waitForAPIStop(sigCh, restartReqCh, errCh, apiShutdownDelay(os.Getenv(apiShutdownDelayEnv)), func() {
 		shuttingDown.Store(true)
 		stopLANDiscovery()
+		// Enrollment answers 503 and the capability marks the host draining; every
+		// other direct request serves as normal until the HTTP servers stop.
+		if directConn != nil {
+			directConn.BeginDrain()
+		}
 	})
 	appCancel()
 
@@ -5722,6 +5777,105 @@ type audiobooksSettingsAdapter struct {
 
 func (a *audiobooksSettingsAdapter) GetString(ctx context.Context, key string) (string, error) {
 	return a.repo.Get(ctx, key)
+}
+
+// newDirectCoordinationStore builds the coordination store on a Redis client that
+// honors context deadlines at the socket, as the engine's client does. Every
+// coordination read and write, and each read of the revocation sweep, is bounded
+// by a context deadline, which a plain client does not enforce: it holds a
+// stalled connection for the URL's read timeout, which may be unlimited. Without
+// a Redis URL the store is the in-process memory store. The returned function
+// closes the client.
+func newDirectCoordinationStore(cfg config.RedisConfig, fence string) (directconn.CoordinationStore, func(), error) {
+	client, err := cache.NewDeadlineRedisClientForRole(cfg, "api")
+	if err != nil {
+		return nil, nil, fmt.Errorf("build coordination Redis client: %w", err)
+	}
+	closeClient := func() {
+		if client != nil {
+			_ = cache.CloseRedisClient(client)
+		}
+	}
+	return directconn.NewCoordinationStore(client, fence), closeClient, nil
+}
+
+// newDirectCoordination builds direct-connection enrollment from cfg. With a
+// database, enrollments write their audit rows to db and check their login
+// session there after they write; with a user store provider they also check
+// that their household profile still exists. A build failure is logged and
+// returns nil: the server then runs without enrollment.
+func newDirectCoordination(ctx context.Context, db *pgxpool.Pool, users userstore.UserStoreProvider, cfg directconn.CoordinationConfig) *directconn.Coordination {
+	if db != nil {
+		cfg.Audit = directconn.NewEnrollmentAudit(db)
+		cfg.SessionActive = auth.NewSessionRepository(db).IsValid
+	}
+	if users != nil {
+		cfg.ProfileActive = profileExists(users)
+	}
+	coordination, err := directconn.NewCoordination(cfg)
+	if err != nil {
+		slog.ErrorContext(ctx, "direct connections: enrollment unavailable", "component", "directconn", "error", err)
+		return nil
+	}
+	return coordination
+}
+
+// profileExists reports whether a household profile of an account still exists.
+// A store that returns no profile and no error means the profile was deleted.
+func profileExists(users userstore.UserStoreProvider) func(ctx context.Context, userID int, profileID string) (bool, error) {
+	return func(ctx context.Context, userID int, profileID string) (bool, error) {
+		store, err := users.ForUser(ctx, userID)
+		if err != nil {
+			return false, fmt.Errorf("open user store: %w", err)
+		}
+		profile, err := store.GetProfile(ctx, profileID)
+		if err != nil {
+			return false, fmt.Errorf("get profile: %w", err)
+		}
+		return profile != nil, nil
+	}
+}
+
+// accountSessionsRevoked is the hook that runs after every login session of an
+// account ended. It drops the account's cached Jellyfin-compatible sessions,
+// withdraws every direct-connection entry the account holds (direct may be nil
+// when enrollment is unavailable), then announces the revocation to the other
+// replicas.
+func accountSessionsRevoked(dropCompat func(userID int), direct *directconn.Coordination, announce func(ctx context.Context, userID int)) func(ctx context.Context, userID int) {
+	return func(ctx context.Context, userID int) {
+		dropCompat(userID)
+		if direct != nil {
+			direct.RevokeAccount(ctx, userID)
+		}
+		announce(ctx, userID)
+	}
+}
+
+// accountOtherSessionsRevoked is the hook that runs after a password change
+// signed the account out of its other login sessions. It drops the same
+// compatible sessions and announces the same event as accountSessionsRevoked,
+// but withdraws every direct-connection entry except the one that the kept
+// session issued for the device it was opened from. keptDevice reads that device
+// ID; when it fails or returns "", the hook withdraws every entry, so a read
+// failure never leaves a signed-out device enrolled.
+func accountOtherSessionsRevoked(
+	dropCompat func(userID int),
+	direct *directconn.Coordination,
+	announce func(ctx context.Context, userID int),
+	keptDevice func(ctx context.Context, userID int, sessionID string) (string, error),
+) func(ctx context.Context, userID int, keptSessionID string) {
+	return func(ctx context.Context, userID int, keptSessionID string) {
+		dropCompat(userID)
+		if direct != nil {
+			device, err := keptDevice(ctx, userID, keptSessionID)
+			if err != nil {
+				slog.WarnContext(ctx, "direct connections: kept session device unreadable, withdrawing every entry", "component", "directconn", "user_id", userID, "error", err)
+				device = ""
+			}
+			direct.RevokeAccountExceptSession(ctx, userID, keptSessionID, device)
+		}
+		announce(ctx, userID)
+	}
 }
 
 // directConnectionListener keeps the netadmin constructor out of directconn.

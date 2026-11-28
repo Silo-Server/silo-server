@@ -1,0 +1,20 @@
+{
+  "revision": "69726af6a1415369afac861a5aaa11cd05b48ffac93c9f5ab43244229117ec13",
+  "state": "available",
+  "allowed": true,
+  "protocol_revision": "1",
+  "coordination_url": "/api/v2/direct-connections",
+  "tls_pin": "dGVzdC1waW4tbm90LWEtcmVhbC1waW4=",
+  "stun_servers": [
+    "stun.example.test:3478"
+  ],
+  "ack_decimation": false,
+  "receive_window_mib": 32,
+  "hosts": [
+    {
+      "host_id": "api",
+      "node_key": "nodekey:fa00000000000000000000000000000000000000000000000000000000000001",
+      "state": "available"
+    }
+  ]
+}

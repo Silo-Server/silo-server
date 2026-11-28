@@ -458,23 +458,22 @@ function resolveSubtitleReferenceHeight(
 }
 
 /**
- * Font scale factor for the rendered video size: 1 at the 720px reference
- * height, growing/shrinking proportionally with the window so subtitles keep
- * the same size relative to the video. Falls back to 1 until measured.
+ * Font scale factor for the player size: 1 when the largest 16:9 frame that
+ * fits the player is 720px tall, growing and shrinking with the window. The
+ * picture's own aspect ratio is deliberately not an input, so one size setting
+ * draws the same text for a 2.39:1 film, a 16:9 episode and a 4:3 show in the
+ * same window. Fill follows the visible player height, as its picture covers
+ * the whole window. Falls back to 1 until the player is measured.
  */
 export function computeSubtitleFontScale(
   playerWidth: number,
   playerHeight: number,
-  videoAspect: number,
   videoFit: VideoFitMode = "contain",
 ): number {
-  const refHeight = resolveSubtitleReferenceHeight(
-    playerWidth,
-    playerHeight,
-    videoAspect,
-    videoFit,
-  );
-  return refHeight === null ? 1 : refHeight / SUBTITLE_REFERENCE_HEIGHT;
+  if (playerWidth <= 0 || playerHeight <= 0) return 1;
+  const refHeight =
+    videoFit === "cover" ? playerHeight : Math.min(playerHeight, playerWidth * (9 / 16));
+  return refHeight / SUBTITLE_REFERENCE_HEIGHT;
 }
 
 /**

@@ -1245,8 +1245,9 @@ type fakeSessionService struct {
 	// 5), as for a request that came through that provider's overlay.
 	// NetworkSignIn signs laura in at installation 5 and answers installation
 	// 7 as a request from off the overlay; lastNetwork is its last input.
-	networkPeer bool
-	lastNetwork handlers.NetworkSignInInput
+	networkPeer  bool
+	lastNetwork  handlers.NetworkSignInInput
+	demoLoginErr error
 }
 
 func (f *fakeSessionService) CurrentLoginSession(context.Context, int, string) (*models.AuthSession, error) {
@@ -1328,6 +1329,14 @@ func (f *fakeSessionService) NetworkSignIn(_ context.Context, in handlers.Networ
 		User: handlers.UserView{ID: 1, Username: "laura", Email: "laura@example.test", Role: "user", PolicyPermissions: []string{"marker_edit"}, DownloadAllowed: true}}, nil
 }
 
+func (f *fakeSessionService) DemoLogin(_ context.Context, _ handlers.DemoLoginInput) (handlers.TokenPairView, error) {
+	if f.demoLoginErr != nil {
+		return handlers.TokenPairView{}, f.demoLoginErr
+	}
+	return handlers.TokenPairView{AccessToken: "demo-acc", RefreshToken: "demo-ref", ExpiresIn: 3600,
+		User: handlers.UserView{ID: 9, Username: "demo", Email: "demo@example.test", Role: "user"}}, nil
+}
+
 func (f *fakeSessionService) Refresh(_ context.Context, token string) (handlers.RefreshedTokensView, error) {
 	switch token {
 	case "ref":
@@ -1400,12 +1409,27 @@ func (f *fakeSessionService) SessionLimitedToItself(context.Context, string) (bo
 	return false, f.err
 }
 
-func (f *fakeSessionService) RevokeSession(_ context.Context, sessionID string, _ int) error {
+func (f *fakeSessionService) RevokeSession(ctx context.Context, sessionID string, userID int) error {
+	return f.RevokeSessionChecked(ctx, sessionID, userID, nil)
+}
+
+// fakeSessionOwners are the sessions RevokeSessionChecked knows: s1 and s9
+// are account 1's (memberToken is s1), s2 is account 2's.
+var fakeSessionOwners = map[string]int{"s1": 1, "s9": 1, "s2": 2}
+
+// RevokeSessionChecked answers like the real seam: an unknown session or
+// another account's is not found, before check runs.
+func (f *fakeSessionService) RevokeSessionChecked(_ context.Context, sessionID string, userID int, check func(*models.AuthSession) error) error {
 	if f.err != nil {
 		return f.err
 	}
-	if sessionID != "s1" && sessionID != "s9" {
+	if owner, ok := fakeSessionOwners[sessionID]; !ok || owner != userID {
 		return &handlers.APIError{Status: 404, Code: "not_found", Message: "Session not found"}
+	}
+	if check != nil {
+		if err := check(&models.AuthSession{ID: sessionID, UserID: userID}); err != nil {
+			return &handlers.APIError{Status: 500, Code: "internal_error", Message: "An unexpected error occurred"}
+		}
 	}
 	f.revoked = append(f.revoked, sessionID)
 	return nil

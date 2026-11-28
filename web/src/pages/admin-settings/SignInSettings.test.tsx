@@ -186,6 +186,43 @@ let failures: Record<string, unknown>;
 // Operations that answer only when the test resolves them.
 let held: Record<string, Promise<unknown>>;
 let testResult: unknown;
+// Who loses sign-in when passwords go off, per group.
+let localOff: Record<string, { items: unknown[]; total: number }>;
+type LocalOffQuery = { group: string; email_auto_match: string; limit: number; cursor?: string };
+
+// Totals a group's response reports instead of the current ones, to stand
+// for a response answered at another moment than the other group's.
+let staleTotals: Record<string, { email_match: number; admin_link: number }>;
+
+/** One page of the fake read: the cursor is the index of the next row. */
+function localOffPage(query: LocalOffQuery) {
+  const group = localOff[query.group]!;
+  const start = Number(query.cursor ?? 0);
+  const end = start + query.limit;
+  const more = end < group.items.length;
+  return {
+    items: group.items.slice(start, end),
+    page: more ? { has_more: true, next_cursor: String(end) } : { has_more: false },
+    email_auto_match: query.email_auto_match === "true",
+    totals: staleTotals[query.group] ?? {
+      email_match: localOff.email_match!.total,
+      admin_link: localOff.admin_link!.total,
+    },
+  };
+}
+
+function account(id: number, reason = "email_match") {
+  return {
+    id: String(id),
+    username: `person${id}`,
+    email: `person${id}@example.test`,
+    role: "user",
+    is_owner: false,
+    reason,
+  };
+}
+
+const passwordSwitch = () => screen.getByRole("switch", { name: "Allow password sign-in" });
 // The server's restart registry, served to the page's useRestartKeys.
 let restartKeys: { keys: string[]; prefixes: string[] };
 const calls: Array<{ op: string; options?: { body?: unknown; path?: unknown } }> = [];
@@ -245,8 +282,13 @@ beforeEach(() => {
       { id: "client", label: "Client credentials accepted", ok: false, message: "invalid_client" },
     ],
   };
+  localOff = { email_match: { items: [], total: 0 }, admin_link: { items: [], total: 0 } };
+  staleTotals = {};
   calls.length = 0;
-  vi.mocked(v2).mockImplementation(((op: string, options?: { body?: unknown }) => {
+  vi.mocked(v2).mockImplementation(((
+    op: string,
+    options?: { body?: unknown; query?: LocalOffQuery },
+  ) => {
     calls.push({ op, options });
     if (failures[op]) return Promise.reject(failures[op]);
     if (held[op]) return held[op];
@@ -255,6 +297,8 @@ beforeEach(() => {
         return Promise.resolve(capabilities);
       case "GET /api/v2/admin/settings/restart-keys":
         return Promise.resolve(restartKeys);
+      case "GET /api/v2/admin/sign-in/local-password-off/accounts":
+        return Promise.resolve(localOffPage(options!.query!));
       case "GET /api/v2/auth/providers":
         return Promise.resolve({
           items: [
@@ -420,7 +464,7 @@ describe("SignInSettings turning a provider on and off", () => {
     mount();
     await user.click(screen.getByRole("button", { name: "Turn on" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Another sign-in provider is already on",
+      "Another sign-in provider is active",
     );
   });
 
@@ -430,7 +474,7 @@ describe("SignInSettings turning a provider on and off", () => {
     const oidc = providerPanel("OpenID Connect");
     await user.click(within(oidc).getByRole("button", { name: "Turn off" }));
     const dialog = await screen.findByRole("alertdialog");
-    expect(dialog).toHaveTextContent("can't sign in until it's back on");
+    expect(dialog).toHaveTextContent("won’t be able to sign in until you turn it back on");
     await user.click(within(dialog).getByRole("button", { name: "Turn off" }));
     await waitFor(() =>
       expect(
@@ -441,19 +485,17 @@ describe("SignInSettings turning a provider on and off", () => {
     expect(await screen.findByText(/Single sign-on is off/)).toBeInTheDocument();
   });
 
-  it("says who can still sign in when the provider goes off with passwords off", async () => {
+  it("won't turn the provider off while password sign-in is off", async () => {
     const user = userEvent.setup();
     state.values["auth.local_password_login"] = "false";
     mount();
     const oidc = providerPanel("OpenID Connect");
     await user.click(within(oidc).getByRole("button", { name: "Turn off" }));
     const dialog = await screen.findByRole("alertdialog");
-    expect(dialog).toHaveTextContent("only break-glass admins can sign in");
-    await user.click(within(dialog).getByRole("button", { name: "Turn off" }));
-    expect(
-      await screen.findByText(/Password sign-in is off too, so only break-glass admins/),
-    ).toBeInTheDocument();
-    expect(screen.queryByText(/Only Silo passwords sign in now/)).toBeNull();
+    // The server refuses it (sign_in_provider_required); the page says why.
+    expect(dialog).toHaveTextContent("Turn password sign-in back on first");
+    expect(within(dialog).getByRole("button", { name: "Turn off" })).toBeDisabled();
+    expect(opCalls("PUT /api/v2/admin/plugins/installations/{id}/auth-binding")).toHaveLength(0);
   });
 
   it("keeps Turn on off until required fields are saved", async () => {
@@ -820,7 +862,9 @@ describe("SignInSettings connection test", () => {
     const issuer = within(oidc).getByLabelText("Issuer URL");
     await user.clear(issuer);
     await user.type(issuer, "https://id.example.test/new");
-    expect(within(oidc).getByText(/Tests your unsaved changes/)).toBeInTheDocument();
+    expect(
+      within(oidc).getByText(/Tests your current settings, including unsaved changes/),
+    ).toBeInTheDocument();
     await user.click(await within(oidc).findByRole("button", { name: "Test connection" }));
     expect(await within(oidc).findByText("Every check passed.")).toBeInTheDocument();
     const call = opCalls("POST /api/v2/admin/plugins/installations/{id}/auth-binding/test")[0]!;
@@ -920,11 +964,11 @@ describe("SignInSettings password sign-in", () => {
     const user = userEvent.setup();
     state.users = [admin({ break_glass: false })];
     mount();
-    expect(screen.getByText(/No break-glass admin yet/)).toBeInTheDocument();
+    expect(screen.getByText(/No break-glass admins yet/)).toBeInTheDocument();
     await user.click(screen.getByRole("switch", { name: "Allow password sign-in" }));
     expect(state.setValue).not.toHaveBeenCalled();
     const alert = screen.getByRole("alert");
-    expect(alert).toHaveTextContent("Password sign-in can't be turned off yet");
+    expect(alert).toHaveTextContent("Password sign-in can’t be turned off yet");
     await waitFor(() => expect(document.activeElement).toBe(alert));
   });
 
@@ -961,11 +1005,97 @@ describe("SignInSettings password sign-in", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("Turn on a sign-in provider first");
   });
 
-  it("stages turning password sign-in off when a break-glass admin exists", async () => {
+  it("names who loses sign-in and stages the change only on confirm", async () => {
+    const user = userEvent.setup();
+    state.values["auth.email_auto_match"] = "true";
+    localOff = {
+      email_match: {
+        items: [
+          {
+            id: "12",
+            username: "alice",
+            email: "alice@example.test",
+            role: "user",
+            is_owner: false,
+            reason: "email_match",
+          },
+        ],
+        total: 7,
+      },
+      admin_link: {
+        items: [
+          {
+            id: "2",
+            username: "carol",
+            email: "carol@example.test",
+            role: "admin",
+            is_owner: false,
+            reason: "administrator",
+          },
+          {
+            id: "9",
+            username: "dave",
+            email: "",
+            role: "user",
+            is_owner: false,
+            reason: "no_email",
+          },
+        ],
+        total: 2,
+      },
+    };
+    mount();
+    await user.click(screen.getByRole("switch", { name: "Allow password sign-in" }));
+    const dialog = await screen.findByRole("alertdialog");
+    const matched = await within(dialog).findByRole("region", {
+      name: "7 accounts connect by email",
+    });
+    expect(matched).toHaveTextContent("alice");
+    const unmatched = within(dialog).getByRole("region", {
+      name: "2 accounts can't sign in until an admin links them",
+    });
+    expect(unmatched).toHaveTextContent("carol");
+    expect(unmatched).toHaveTextContent("Admin");
+    expect(unmatched).toHaveTextContent("No email");
+    // The provider creates accounts, so the second group is warned.
+    expect(unmatched).toHaveTextContent("a new, separate account");
+    expect(dialog).toHaveTextContent("This doesn't sign anyone out");
+    expect(dialog).toHaveTextContent("they can still approve new devices");
+    for (const link of within(dialog).getAllByRole("link", { name: /Users/ })) {
+      expect(link).toHaveAttribute("href", "/admin/users");
+    }
+    // The staged email matching value decides the grouping.
+    expect(
+      opCalls("GET /api/v2/admin/sign-in/local-password-off/accounts").map(
+        (call) => (call.options as { query?: unknown }).query,
+      ),
+    ).toContainEqual({ group: "email_match", email_auto_match: "true", limit: 5 });
+    expect(state.setValue).not.toHaveBeenCalled();
+
+    await user.click(within(dialog).getByRole("button", { name: "Turn off password sign-in" }));
+    expect(state.setValue).toHaveBeenCalledWith("auth.local_password_login", "false");
+  });
+
+  it("says when nobody loses sign-in and still asks", async () => {
     const user = userEvent.setup();
     mount();
     await user.click(screen.getByRole("switch", { name: "Allow password sign-in" }));
-    expect(state.setValue).toHaveBeenCalledWith("auth.local_password_login", "false");
+    const dialog = await screen.findByRole("alertdialog");
+    expect(
+      await within(dialog).findByText("Every account can still sign in after this."),
+    ).toBeInTheDocument();
+    expect(state.setValue).not.toHaveBeenCalled();
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(state.setValue).not.toHaveBeenCalled();
+  });
+
+  it("turns password sign-in back on without asking", async () => {
+    const user = userEvent.setup();
+    state.values["auth.local_password_login"] = "false";
+    mount();
+    await user.click(screen.getByRole("switch", { name: "Allow password sign-in" }));
+    expect(state.setValue).toHaveBeenCalledWith("auth.local_password_login", "true");
+    expect(screen.queryByRole("alertdialog")).toBeNull();
   });
 
   it("explains the server refusing the save for want of a break-glass admin", async () => {
@@ -975,7 +1105,283 @@ describe("SignInSettings password sign-in", () => {
     state.save.mockRejectedValue(problem("break_glass_required", 409));
     mount();
     await user.click(screen.getByRole("button", { name: "Save" }));
+    await confirmOff(user);
     expect(await screen.findByRole("alert")).toHaveTextContent(breakGlassRequiredText());
+  });
+
+  it("shows the server's text when it refuses the save for want of a provider", async () => {
+    const user = userEvent.setup();
+    state.values["auth.local_password_login"] = "false";
+    state.dirty = new Set(["auth.local_password_login"]);
+    const refusal = problem("sign_in_provider_required", 409, "No provider people can use");
+    state.save.mockRejectedValue(refusal);
+    mount();
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await confirmOff(user);
+    expect(await screen.findByRole("alert")).toHaveTextContent(refusal.message);
+  });
+
+  it("refuses to turn password sign-in off while OpenID Connect has no public URL", async () => {
+    const user = userEvent.setup();
+    state.values["server.public_url"] = "";
+    mount();
+    await user.click(passwordSwitch());
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(screen.getByRole("alert")).toHaveTextContent("Set the server's public URL first");
+  });
+
+  it("pages through a group with Show more and keeps the count in the heading", async () => {
+    const user = userEvent.setup();
+    localOff.email_match = { items: Array.from({ length: 8 }, (_, i) => account(i + 1)), total: 8 };
+    mount();
+    await user.click(passwordSwitch());
+    const dialog = await screen.findByRole("alertdialog");
+    const group = await within(dialog).findByRole("region", {
+      name: "8 accounts connect by email",
+    });
+    expect(within(group).getAllByRole("listitem")).toHaveLength(5);
+    await user.click(within(group).getByRole("button", { name: "Show 3 more" }));
+    await waitFor(() => expect(within(group).getAllByRole("listitem")).toHaveLength(8));
+    expect(within(group).queryByRole("button", { name: /Show/ })).toBeNull();
+    expect(group).toHaveTextContent("person8");
+    expect(
+      opCalls("GET /api/v2/admin/sign-in/local-password-off/accounts").map(
+        (call) => (call.options as { query?: LocalOffQuery }).query?.cursor,
+      ),
+    ).toContain("5");
+    expect(within(dialog).getByRole("button", { name: "Turn off password sign-in" })).toBeEnabled();
+  });
+
+  it("keeps Show more while the read has more, even when the first count is short", async () => {
+    const user = userEvent.setup();
+    // The first page counted five; three accounts were added before the next.
+    localOff.email_match = { items: Array.from({ length: 8 }, (_, i) => account(i + 1)), total: 5 };
+    mount();
+    await user.click(passwordSwitch());
+    const dialog = await screen.findByRole("alertdialog");
+    const group = await within(dialog).findByRole("region", {
+      name: "5 accounts connect by email",
+    });
+    expect(within(group).getAllByRole("listitem")).toHaveLength(5);
+    localOff.email_match.total = 8;
+    await user.click(within(group).getByRole("button", { name: "Show more" }));
+    await waitFor(() => expect(within(group).getAllByRole("listitem")).toHaveLength(8));
+    expect(within(group).queryByRole("button", { name: /Show/ })).toBeNull();
+    // The heading counts from the newest page, as the list does.
+    expect(group).toHaveAccessibleName("8 accounts connect by email");
+  });
+
+  it("returns focus to the switch when the confirmation is cancelled", async () => {
+    const user = userEvent.setup();
+    mount();
+    await user.click(passwordSwitch());
+    const dialog = await screen.findByRole("alertdialog");
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(document.activeElement).toBe(passwordSwitch()));
+  });
+
+  it("still lets the owner confirm when the list can't load", async () => {
+    const user = userEvent.setup();
+    failures["GET /api/v2/admin/sign-in/local-password-off/accounts"] = problem(
+      "internal_error",
+      500,
+    );
+    mount();
+    await user.click(passwordSwitch());
+    const dialog = await screen.findByRole("alertdialog");
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+      "Couldn't check which accounts this affects",
+    );
+    await user.click(within(dialog).getByRole("button", { name: "Turn off password sign-in" }));
+    expect(state.setValue).toHaveBeenCalledWith("auth.local_password_login", "false");
+  });
+
+  it("takes each group's count from its own response", async () => {
+    const user = userEvent.setup();
+    // The email-match response saw nobody; the admin-link one, a moment
+    // later, sees an account.
+    localOff.admin_link = { items: [account(60, "administrator")], total: 1 };
+    staleTotals = { email_match: { email_match: 0, admin_link: 0 } };
+    mount();
+    await user.click(passwordSwitch());
+    const dialog = await screen.findByRole("alertdialog");
+    expect(
+      await within(dialog).findByRole("region", {
+        name: "1 account can't sign in until an admin links it",
+      }),
+    ).toHaveTextContent("person60");
+    expect(within(dialog).queryByText("Every account can still sign in after this.")).toBeNull();
+  });
+
+  it("does not confirm against the previous answer when reopened", async () => {
+    const user = userEvent.setup();
+    mount();
+    await user.click(passwordSwitch());
+    let dialog = await screen.findByRole("alertdialog");
+    await within(dialog).findByText("Every account can still sign in after this.");
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+
+    // An account became affected; its answer is still on the way.
+    localOff.admin_link = { items: [account(30, "administrator")], total: 1 };
+    let answer!: () => void;
+    held["GET /api/v2/admin/sign-in/local-password-off/accounts"] = new Promise((resolve) => {
+      answer = () =>
+        resolve(localOffPage({ group: "admin_link", email_auto_match: "false", limit: 5 }));
+    });
+    await user.click(passwordSwitch());
+    dialog = await screen.findByRole("alertdialog");
+    const confirm = within(dialog).getByRole("button", { name: "Turn off password sign-in" });
+    expect(confirm).toBeDisabled();
+    expect(within(dialog).queryByText("Every account can still sign in after this.")).toBeNull();
+    answer();
+    expect(
+      await within(dialog).findByRole("region", {
+        name: "1 account can't sign in until an admin links it",
+      }),
+    ).toBeInTheDocument();
+    expect(confirm).toBeEnabled();
+  });
+
+  it.each([
+    ["nobody affected", () => {}, "Every account can still sign in after this."],
+    [
+      "a list",
+      () => {
+        localOff.admin_link = { items: [account(50, "administrator")], total: 1 };
+      },
+      "person50",
+    ],
+  ])(
+    "shows a failed reload as a load failure, not the cached answer (%s)",
+    async (_name, seed, cached) => {
+      const user = userEvent.setup();
+      seed();
+      mount();
+      await user.click(passwordSwitch());
+      let dialog = await screen.findByRole("alertdialog");
+      await within(dialog).findByText(cached);
+      await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+
+      failures["GET /api/v2/admin/sign-in/local-password-off/accounts"] = problem(
+        "internal_error",
+        500,
+      );
+      await user.click(passwordSwitch());
+      dialog = await screen.findByRole("alertdialog");
+      expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+        "Couldn't check which accounts this affects",
+      );
+      expect(within(dialog).queryByText(cached)).toBeNull();
+      await user.click(within(dialog).getByRole("button", { name: "Turn off password sign-in" }));
+      expect(state.setValue).toHaveBeenCalledWith("auth.local_password_login", "false");
+    },
+  );
+
+  it("keeps the shown accounts when Show more fails, and retries", async () => {
+    const user = userEvent.setup();
+    localOff.email_match = { items: Array.from({ length: 8 }, (_, i) => account(i + 1)), total: 8 };
+    mount();
+    await user.click(passwordSwitch());
+    const dialog = await screen.findByRole("alertdialog");
+    const group = await within(dialog).findByRole("region", {
+      name: "8 accounts connect by email",
+    });
+    failures["GET /api/v2/admin/sign-in/local-password-off/accounts"] = problem(
+      "internal_error",
+      500,
+    );
+    await user.click(within(group).getByRole("button", { name: "Show 3 more" }));
+    expect(await within(group).findByRole("alert")).toHaveTextContent(
+      "Couldn't load more accounts",
+    );
+    expect(within(group).getAllByRole("listitem")).toHaveLength(5);
+    expect(within(dialog).queryByText(/Couldn't check which accounts/)).toBeNull();
+
+    delete failures["GET /api/v2/admin/sign-in/local-password-off/accounts"];
+    await user.click(within(group).getByRole("button", { name: "Show 3 more" }));
+    await waitFor(() => expect(within(group).getAllByRole("listitem")).toHaveLength(8));
+    expect(within(group).queryByRole("alert")).toBeNull();
+  });
+});
+
+/** Confirms the open "Turn off password sign-in?" dialog. */
+async function confirmOff(user: ReturnType<typeof userEvent.setup>) {
+  const dialog = await screen.findByRole("alertdialog");
+  const confirm = within(dialog).getByRole("button", { name: "Turn off password sign-in" });
+  await waitFor(() => expect(confirm).toBeEnabled());
+  await user.click(confirm);
+}
+
+describe("SignInSettings confirming with what will be saved", () => {
+  // The form mock keeps what the page stages, as the real form does.
+  beforeEach(() => {
+    state.setValue.mockImplementation((key: string, value: string) => {
+      state.values[key] = value;
+      state.dirty.add(key);
+    });
+  });
+
+  async function confirmThenSave(
+    user: ReturnType<typeof userEvent.setup>,
+    change: () => Promise<void> | void,
+  ) {
+    const view = mount();
+    await user.click(passwordSwitch());
+    await confirmOff(user);
+    await change();
+    view.rerender(<SignInSettings />);
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    // The confirmation was made with other values, so it asks again first.
+    expect(state.save).not.toHaveBeenCalled();
+    await confirmOff(user);
+    await waitFor(() => expect(state.save).toHaveBeenCalledTimes(1));
+  }
+
+  it("saves at once when nothing changed since the confirmation", async () => {
+    const user = userEvent.setup();
+    mount();
+    await user.click(passwordSwitch());
+    await confirmOff(user);
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(state.save).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+  });
+
+  it("asks again when email matching changed", async () => {
+    const user = userEvent.setup();
+    await confirmThenSave(user, () => {
+      state.values["auth.email_auto_match"] = "true";
+      state.dirty.add("auth.email_auto_match");
+    });
+    // The second confirmation was answered with the staged value.
+    expect(
+      opCalls("GET /api/v2/admin/sign-in/local-password-off/accounts").map(
+        (call) => (call.options as { query?: LocalOffQuery }).query?.email_auto_match,
+      ),
+    ).toContain("true");
+  });
+
+  it("asks again when account creation changed, and warns with the staged value", async () => {
+    const user = userEvent.setup();
+    localOff.admin_link = { items: [account(40, "administrator")], total: 1 };
+    await confirmThenSave(user, async () => {
+      const oidc = providerPanel("OpenID Connect");
+      await user.click(
+        within(oidc).getByRole("switch", { name: "Create accounts on first sign-in" }),
+      );
+    });
+  });
+
+  it("asks again when the active provider changed", async () => {
+    const user = userEvent.setup();
+    await confirmThenSave(user, () => {
+      const on = (installation: PluginInstallation, enabled: boolean) =>
+        ({
+          ...installation,
+          auth_bindings: installation.auth_bindings!.map((binding) => ({ ...binding, enabled })),
+        }) as PluginInstallation;
+      state.installations = [on(oidcInstallation(), false), on(ldapInstallation(), true)];
+    });
   });
 });
 

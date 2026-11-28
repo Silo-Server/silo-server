@@ -378,7 +378,7 @@ func (h *PlaybackHandler) moveTranscodeOffNodeV3(
 		// The client fetches media from this server and keeps doing so, so only
 		// API-egress shapes are candidates; the policy still decides between a
 		// worker and this process, and a hard execution boundary is never crossed.
-		decision, resolveErr := noderouting.Resolve(noderouting.AdaptSessionPlanner(h.NodePlanner), noderouting.ResolveRequest{
+		decision, resolveErr := resolveRouteV3(ctx, noderouting.AdaptSessionPlanner(h.NodePlanner), noderouting.ResolveRequest{
 			Request: noderouting.Request{
 				Workload: workload, Delivery: delivery, Policy: h.playbackRoutingPolicyV3(), ProxyAllowed: false,
 			},
@@ -386,6 +386,7 @@ func (h *PlaybackHandler) moveTranscodeOffNodeV3(
 			EstimatedBitrateKbps: card.TargetBitrateKbps,
 			TranscodeEligible:    eligible,
 			ExcludedShapeIDs:     excludedShapes,
+			TranscodesAudio:      playback.TranscodesAudio(card.TargetCodecAudio),
 		})
 		if resolveErr != nil {
 			return resolveErr

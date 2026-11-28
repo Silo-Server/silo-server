@@ -181,7 +181,7 @@ func TestUnchangedBooksDoNotQueryLiteraryWorks(t *testing.T) {
 			if kind == "ebooks" {
 				err = s.reconcileEbookFile(ctx, folder, paths[0], &skipped, newEbookGroupLocks())
 			} else {
-				err = s.reconcileAudiobookFolder(ctx, folder, paths[0], nil, nil, time.Time{}, &skipped, nil)
+				err = s.reconcileAudiobookFolder(ctx, folder, paths[0], nil, nil, time.Time{}, &skipped, nil, nil)
 			}
 			if err != nil {
 				t.Fatal(err)
@@ -791,7 +791,7 @@ func TestAudiobookRegroupKeepsContentIDsDB(t *testing.T) {
 	}
 	snapshot := func() (map[string]book, map[string]string) {
 		t.Helper()
-		if err := s.ScanAudiobookFolder(ctx, folder, true); err != nil {
+		if _, err := s.ScanAudiobookFolder(ctx, folder, true); err != nil {
 			t.Fatal(err)
 		}
 		rows, err := pool.Query(ctx, `SELECT mf.observed_root_path, mf.content_id, count(*), max(mf.probe_updated_at)::text
@@ -965,7 +965,7 @@ func TestAudiobookUnreadableDiscKeepsIndexedBookDB(t *testing.T) {
 	snapshot := func() []string {
 		t.Helper()
 		// A walk failure leaves the scan's warning set; only the rows matter here.
-		_ = s.ScanAudiobookFolder(ctx, folder, true)
+		_, _ = s.ScanAudiobookFolder(ctx, folder, true)
 		rows, err := pool.Query(ctx, `SELECT mf.file_path || ' ' || mf.content_id || ' ' || COALESCE(mf.presentation_part_index, 0) || '/' ||
 			COALESCE(mf.presentation_part_total, 0) || ' ' || (mf.missing_since IS NULL) || ' ' || mf.probe_updated_at::text ||
 			' member=' || EXISTS (SELECT 1 FROM media_item_libraries ml WHERE ml.content_id = mf.content_id AND ml.media_folder_id = mf.media_folder_id)
@@ -1025,4 +1025,92 @@ cat <<'JSON'
 JSON
 `)
 	return path
+}
+
+// TestScanFolderAudiobookReportsCatalogChangesDB covers issue #5375: an
+// audiobook library scan returned an empty ScanResult, so library ingest never
+// announced the change and Home rows kept serving the old books until their
+// cache expired. A scan that adds or removes a book must say so, in files as
+// the scan API documents; a scan that changes nothing must not.
+func TestScanFolderAudiobookReportsCatalogChangesDB(t *testing.T) {
+	pool := newScannerTestPool(t)
+	ctx := t.Context()
+	root := t.TempDir()
+	ffprobe := filepath.Join(t.TempDir(), "ffprobe")
+	writeFakeTool(t, ffprobe, `#!/bin/sh
+cat <<'JSON'
+{"format":{"format_name":"mov,mp4,m4a","duration":"3600.0","size":"1","bit_rate":"64000","tags":{"title":"Some Book","artist":"Some Author","date":"2020"}},"streams":[{"index":0,"codec_type":"audio","codec_name":"aac","channels":2}],"chapters":[]}
+JSON
+`)
+	folderID := seedDeadRootTestFolder(t, pool, "audiobooks", fmt.Sprintf("scan-result-%d", time.Now().UnixNano()))
+	folder := &models.MediaFolder{ID: folderID, Type: "audiobooks", Paths: []string{root}}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id IN (SELECT content_id FROM media_files WHERE media_folder_id = $1)`, folderID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_item_libraries WHERE media_folder_id = $1`, folderID)
+	})
+	addPart := func(dir string, part int) {
+		if err := os.WriteFile(filepath.Join(dir, fmt.Sprintf("part%d.m4b", part)), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	addBook := func(name string, parts int) string {
+		dir := filepath.Join(root, "Some Author", name)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		for part := 1; part <= parts; part++ {
+			addPart(dir, part)
+		}
+		return dir
+	}
+	s := NewScanner(NewFileRepository(pool), ffprobe, nil, 2, false, time.Hour)
+	scan := func(step string) ScanResult {
+		t.Helper()
+		result, err := s.ScanFolder(ctx, folder)
+		if err != nil {
+			t.Fatalf("%s: scan: %v", step, err)
+		}
+		if result == nil {
+			t.Fatalf("%s: nil scan result", step)
+		}
+		return *result
+	}
+	requireCounts := func(step string, got ScanResult, newFiles, updated, unchanged, missing int) {
+		t.Helper()
+		if got.New != newFiles || got.Updated != updated || got.Unchanged != unchanged || got.Missing != missing {
+			t.Fatalf("%s: new/updated/unchanged/missing = %d/%d/%d/%d, want %d/%d/%d/%d",
+				step, got.New, got.Updated, got.Unchanged, got.Missing, newFiles, updated, unchanged, missing)
+		}
+	}
+
+	first := addBook("Book One", 1)
+	addBook("Book Two", 1)
+	requireCounts("first scan", scan("first scan"), 2, 0, 0, 0)
+
+	noop := scan("rescan without changes")
+	requireCounts("rescan without changes", noop, 0, 0, 2, 0)
+	if noop.FilesDeleted != 0 || noop.MembershipsRemoved != 0 || noop.ItemsDeleted != 0 {
+		t.Fatalf("rescan without changes removed something: %+v", noop)
+	}
+
+	third := addBook("Book Three", 3)
+	requireCounts("three-part book added", scan("three-part book added"), 3, 0, 2, 0)
+
+	// A part added to an indexed book is a new file; the book's other parts
+	// are rewritten with it.
+	addPart(third, 4)
+	requireCounts("part added", scan("part added"), 1, 3, 2, 0)
+
+	if err := os.RemoveAll(first); err != nil {
+		t.Fatal(err)
+	}
+	requireCounts("book removed", scan("book removed"), 0, 0, 5, 1)
+
+	// The removed book's file stays marked missing; a later scan must not
+	// report it again.
+	again := scan("rescan after removal")
+	requireCounts("rescan after removal", again, 0, 0, 5, 0)
+	if again.FilesDeleted != 0 || again.MembershipsRemoved != 0 || again.ItemsDeleted != 0 {
+		t.Fatalf("rescan after removal removed something: %+v", again)
+	}
 }

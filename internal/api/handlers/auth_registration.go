@@ -169,6 +169,14 @@ func (h *AuthHandler) SessionLimitedToItself(ctx context.Context, sessionID stri
 // from the login session the request authenticated with (none for an API
 // key): a session limited to itself may end only itself.
 func (h *AuthHandler) RevokeSession(ctx context.Context, sessionID string, userID int) error {
+	return h.RevokeSessionChecked(ctx, sessionID, userID, nil)
+}
+
+// RevokeSessionChecked is RevokeSession with auth.Service's further check on
+// the caller's own session; v2 deleteSession calls it. The check's error is
+// answered as an internal error here, so a caller that refuses through it
+// keeps its own answer.
+func (h *AuthHandler) RevokeSessionChecked(ctx context.Context, sessionID string, userID int, check func(*models.AuthSession) error) error {
 	if sessionID == "" {
 		return apiError(http.StatusBadRequest, "bad_request", "Session ID is required")
 	}
@@ -176,7 +184,7 @@ func (h *AuthHandler) RevokeSession(ctx context.Context, sessionID string, userI
 	if claims := apimw.GetClaims(ctx); claims != nil {
 		callerSessionID = claims.SessionID
 	}
-	if err := h.service.RevokeSessionFrom(ctx, callerSessionID, sessionID, userID); err != nil {
+	if err := h.service.RevokeSessionChecked(ctx, callerSessionID, sessionID, userID, check); err != nil {
 		if auth.IsSessionNotFound(err) {
 			return apiError(http.StatusNotFound, "not_found", "Session not found")
 		}
@@ -185,6 +193,7 @@ func (h *AuthHandler) RevokeSession(ctx context.Context, sessionID string, userI
 		}
 		return apiError(http.StatusInternalServerError, "internal_error", "An unexpected error occurred")
 	}
+	h.revokeDirect(ctx, userID, sessionID)
 	return nil
 }
 

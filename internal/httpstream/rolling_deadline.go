@@ -20,6 +20,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/quic-go/quic-go"
 )
 
 const (
@@ -48,9 +50,16 @@ const (
 type StreamOutcome string
 
 const (
-	OutcomeCompleted   StreamOutcome = "completed"
+	// OutcomeCompleted means the whole response was accepted by the transport.
+	OutcomeCompleted StreamOutcome = "completed"
+	// OutcomeStalledReap means a write deadline expired because the peer stopped
+	// reading while its connection stayed alive.
 	OutcomeStalledReap StreamOutcome = "stalled_reap"
-	OutcomeClientGone  StreamOutcome = "client_gone"
+	// OutcomePeerTimeout means the QUIC connection ended on its idle timeout, so
+	// the peer stopped answering altogether.
+	OutcomePeerTimeout StreamOutcome = "peer_timeout"
+	// OutcomeClientGone means the peer or the request ended the response early.
+	OutcomeClientGone StreamOutcome = "client_gone"
 )
 
 // StallWindow returns the configured stall window for streaming responses.
@@ -235,8 +244,13 @@ func (s *RollingDeadlineWriter) Outcome(ctx context.Context) StreamOutcome {
 
 // ClassifyOutcome classifies a streaming response from its first write error
 // and request-context error. It is shared by every streaming writer so stalled
-// connections have one definition throughout the server.
+// connections have one definition throughout the server. A QUIC idle timeout is
+// a dead peer, not a write stall, so it has its own outcome.
 func ClassifyOutcome(firstWriteErr, ctxErr error) StreamOutcome {
+	var idle *quic.IdleTimeoutError
+	if errors.As(firstWriteErr, &idle) {
+		return OutcomePeerTimeout
+	}
 	if isTimeoutError(firstWriteErr) {
 		return OutcomeStalledReap
 	}

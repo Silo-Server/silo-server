@@ -320,13 +320,14 @@ func (s *Scanner) ScanFolder(ctx context.Context, folder *models.MediaFolder) (*
 	defer stopWatch()
 
 	if librarykind.IsAudiobook(folder.Type) {
-		if err := s.ScanAudiobookFolder(watchCtx, folder, true); err != nil {
+		result, err := s.ScanAudiobookFolder(watchCtx, folder, true)
+		if err != nil {
 			return nil, err
 		}
 		if err := s.syncFolderScopedAudioLibraryState(watchCtx, folder.ID); err != nil {
 			return nil, err
 		}
-		return &ScanResult{}, nil
+		return result, nil
 	}
 
 	if librarykind.IsPodcast(folder.Type) {
@@ -410,13 +411,14 @@ func (s *Scanner) ScanSubtree(ctx context.Context, folder *models.MediaFolder, s
 		if err != nil {
 			return nil, err
 		}
-		if err := s.scanAudiobookPaths(watchCtx, folder, []string{scanRoot}, false, true, ""); err != nil {
+		result, err := s.scanAudiobookPaths(watchCtx, folder, []string{scanRoot}, false, true, "")
+		if err != nil {
 			return nil, err
 		}
 		if err := s.syncFolderScopedAudioLibraryState(watchCtx, folder.ID); err != nil {
 			return nil, err
 		}
-		return &ScanResult{}, nil
+		return result, nil
 	}
 	if librarykind.IsPodcast(folder.Type) {
 		return s.scanPodcastSubtree(watchCtx, folder, cleanSubtree)
@@ -2714,7 +2716,7 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 				return err
 			}
 			if info, statErr := fspath.Stat(scanRoot); statErr == nil && info.IsDir() {
-				if err := s.scanAudiobookPaths(ctx, folder, []string{scanRoot}, false, honorIgnores, admit); err != nil {
+				if _, err := s.scanAudiobookPaths(ctx, folder, []string{scanRoot}, false, honorIgnores, admit); err != nil {
 					return err
 				}
 			} else if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
@@ -2722,7 +2724,7 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 			}
 			return s.syncFolderScopedAudioLibraryState(ctx, folder.ID)
 		}
-		if err := s.scanAudiobookPaths(ctx, folder, []string{scanRoot}, false, honorIgnores, admit); err != nil {
+		if _, err := s.scanAudiobookPaths(ctx, folder, []string{scanRoot}, false, honorIgnores, admit); err != nil {
 			return err
 		}
 		return s.syncFolderScopedAudioLibraryState(ctx, folder.ID)

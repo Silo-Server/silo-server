@@ -912,7 +912,6 @@ func ServeRemuxWithOptions(w http.ResponseWriter, r *http.Request, filePath, out
 	}
 	setStreamHeaders := func() {
 		w.Header().Set("Content-Type", contentType)
-		w.Header().Set("Transfer-Encoding", "chunked")
 	}
 	// net/http discards a HEAD response's body, so a remux started for one
 	// would run ffmpeg over the whole file for nothing. Answer with the

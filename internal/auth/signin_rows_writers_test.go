@@ -50,9 +50,13 @@ const (
 // here, not that it keeps the rule named beside it: the rule is for whoever
 // adds or changes a writer to read and check.
 var signInRowWriters = map[string]string{
-	// The uninstall itself: installation, then identities (cascade), then
-	// device sign-in requests and sessions (SET NULL).
-	"internal/plugins/installation.go:Delete": "the uninstall",
+	// The uninstall itself: the bindings lock, the installation, then the
+	// server-settings lock (sign-in provider guard), then the installation's
+	// identities FOR UPDATE NOWAIT in id order (it never waits for one while
+	// holding the settings lock; a held identity rolls the attempt back and
+	// it retries, then answers busy), then the delete: identities (cascade),
+	// then device sign-in requests and sessions (SET NULL).
+	"internal/plugins/installation.go:deleteOnce": "the uninstall",
 
 	"internal/auth/admin_users.go:MutateAdminAccount":                          identitiesFirst,
 	"internal/auth/password_reset.go:revokeSignInsInTransaction":               identitiesFirst,

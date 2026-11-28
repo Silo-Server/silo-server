@@ -66,11 +66,11 @@ type nonReservingCapacityPlanner struct {
 	reservationUsed bool
 }
 
-func (p *nonReservingCapacityPlanner) ReserveTranscodeWork(string) (*nodepool.Node, func()) {
+func (p *nonReservingCapacityPlanner) ReserveTranscodeWork(string, nodepool.JobKind) (*nodepool.Node, func()) {
 	return nil, nil
 }
 
-func (p *nonReservingCapacityPlanner) ReserveTranscodeWorkWith(string, func(*nodepool.Node) bool) (*nodepool.Node, func()) {
+func (p *nonReservingCapacityPlanner) ReserveTranscodeWorkWith(string, nodepool.JobKind, func(*nodepool.Node) bool) (*nodepool.Node, func()) {
 	p.reservationUsed = true
 	return nil, nil
 }
@@ -474,10 +474,6 @@ func TestNodeAwarePreparerCapabilityErrorsRedactNodeURLSecrets(t *testing.T) {
 // one does. It reserves nothing: these tests only price probes.
 type nodeLookupPlanner struct {
 	node *nodepool.Node
-}
-
-func (p *nodeLookupPlanner) ReserveTranscodeWork(string) (*nodepool.Node, func()) {
-	return nil, func() {}
 }
 
 func (p *nodeLookupPlanner) TranscodeNode(int) (*nodepool.Node, bool) { return nil, false }

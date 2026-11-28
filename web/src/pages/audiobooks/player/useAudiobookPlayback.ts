@@ -1073,7 +1073,10 @@ export function useAudiobookPlayback({
       return;
     }
     setSleepChapterEndSeconds(null);
-    setSleepTargetMs(Date.now() + sleepSetting.seconds * 1000);
+    // Restart the clock with the target: the ticker only refreshes it a second later.
+    const now = Date.now();
+    setSleepNowMs(now);
+    setSleepTargetMs(now + sleepSetting.seconds * 1000);
   }, [sleepSetting]);
 
   useEffect(() => {

@@ -29,8 +29,8 @@ type Path struct {
 }
 
 // DirectPath identifies an N4 request's terminating host and admitted peer.
-// Class is "direct". UserID, DeviceID and Policy remain empty until enrollment
-// supplies them; this transport identity alone grants no application authority.
+// Class is "direct". UserID, DeviceID and Policy come from the peer's enrolled
+// entry; this transport identity alone grants no application authority.
 type DirectPath struct {
 	HostID   string
 	PeerKey  string
@@ -38,6 +38,10 @@ type DirectPath struct {
 	UserID   int
 	Class    string
 	Policy   string
+	// LocalPort is the API host's UDP port; PathGeneration changes whenever the
+	// peer's path does. Both are zero when the host does not know them.
+	LocalPort      uint16
+	PathGeneration uint64
 }
 
 // IsDefault reports whether the request did not arrive through a provider.

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"hash"
 	"math"
 	"sort"
 	"strconv"
@@ -61,14 +62,32 @@ type PublisherValue struct {
 }
 
 type GlobalSessionView struct {
-	Subject                     Subject
-	ProfileID                   string
-	SessionID                   string
-	MediaFileID                 int
-	StartedAt                   time.Time
-	StartedAtSource             StartedAtSource
-	StartedAtDegraded           bool
-	ViewerBytesAccepted         int64
+	Subject             Subject
+	ProfileID           string
+	SessionID           string
+	MediaFileID         int
+	StartedAt           time.Time
+	StartedAtSource     StartedAtSource
+	StartedAtDegraded   bool
+	ViewerBytesAccepted int64
+	// ViewerBytesMeasuredAt is the latest CapturedAt among the publishers whose
+	// viewer-egress routes make up ViewerBytesAccepted. It is the publishers'
+	// clock, not this view's BuiltAt, so every replica reading the same
+	// publisher state reports the same instant for the same byte count.
+	ViewerBytesMeasuredAt time.Time
+	// ViewerBytesSeries is an opaque token over the (PublisherID,
+	// PublisherEpoch) of those publishers. It changes when a viewer-edge
+	// publisher joins, leaves the view (stale or departed) or restarts, each
+	// of which can move ViewerBytesAccepted by a publisher's whole count, so a
+	// client diffs bytes only within one series. It is empty when no publisher
+	// has a viewer edge.
+	ViewerBytesSeries string
+	// ViewerBytesClockAhead is set when one of those publishers captured its
+	// snapshot further ahead of this view's clock than Freshness allows, so
+	// ViewerBytesMeasuredAt comes from a clock running ahead. A client that
+	// took it as a baseline would discard every later observation until the
+	// other servers' clocks caught up with it.
+	ViewerBytesClockAhead       bool
 	RelayBytesAccepted          int64
 	BytesDegraded               bool
 	LastByteAccepted            time.Time
@@ -84,6 +103,8 @@ type GlobalSessionView struct {
 	DeviceIDsOverflowed         bool
 	ClientVariants              []ClientVariant
 	ClientVariantsOverflowed    bool
+	Transports                  []Transport
+	TransportsOverflowed        bool
 	UserAgents                  []string
 	UserAgentsOverflowed        bool
 	MediaFileIDs                []int
@@ -177,11 +198,17 @@ func (r *Registry) GlobalView(ctx context.Context) (GlobalMonitoringView, error)
 type publisherContribution struct {
 	ref      PublisherRef
 	snapshot Snapshot
+	// clockAhead is set when the snapshot's capture time is ahead of the
+	// view's clock by more than Freshness.
+	clockAhead bool
 }
 
 type sessionContribution struct {
-	ref  PublisherRef
-	view SessionView
+	ref        PublisherRef
+	epoch      int64
+	capturedAt time.Time
+	clockAhead bool
+	view       SessionView
 }
 
 func BuildGlobalView(set PublisherSet, at time.Time, params ViewParams) GlobalMonitoringView {
@@ -259,7 +286,7 @@ func BuildGlobalView(set PublisherSet, at time.Time, params ViewParams) GlobalMo
 			status.State = PublisherDegraded
 		}
 		view.Publishers = append(view.Publishers, status)
-		contributions = append(contributions, publisherContribution{ref: ref, snapshot: snapshot})
+		contributions = append(contributions, publisherContribution{ref: ref, snapshot: snapshot, clockAhead: capturedAge < -params.Freshness})
 	}
 	sort.Slice(view.MissingPublishers, func(i, j int) bool { return refLess(view.MissingPublishers[i], view.MissingPublishers[j]) })
 	if len(view.MissingPublishers) > 0 {
@@ -302,7 +329,9 @@ func mergeContributions(view *GlobalMonitoringView, contributions []publisherCon
 		view.UnattributedBytes = saturatingAdd(view.UnattributedBytes, contribution.snapshot.UnattributedBytes)
 		view.Truncated = view.Truncated || contribution.snapshot.Truncated
 		for _, session := range contribution.snapshot.Sessions {
-			bySession[session.SessionID] = append(bySession[session.SessionID], sessionContribution{ref: contribution.ref, view: session})
+			bySession[session.SessionID] = append(bySession[session.SessionID], sessionContribution{ref: contribution.ref,
+				epoch: contribution.snapshot.PublisherEpoch, capturedAt: contribution.snapshot.CapturedAt,
+				clockAhead: contribution.clockAhead, view: session})
 		}
 		for _, transfer := range contribution.snapshot.Transfers {
 			view.Transfers = append(view.Transfers, GlobalTransferView{TransferView: cloneTransfer(transfer), Publisher: contribution.ref})
@@ -340,11 +369,13 @@ func mergeSession(id string, contributions []sessionContribution, params ViewPar
 	viewerIPs, deviceIDs, userAgents, playMethods := map[string]struct{}{}, map[string]struct{}{}, map[string]struct{}{}, map[string]struct{}{}
 	mediaFileIDs, tokenTimes := map[int]struct{}{}, map[int64]struct{}{}
 	clients := map[ClientVariant]struct{}{}
+	transports := map[Transport]struct{}{}
 	routes := map[string]RouteActivityView{}
 	subjectValues, profileValues, mediaValues := map[string][]PublisherRef{}, map[string][]PublisherRef{}, map[string][]PublisherRef{}
 	winningRank := 0
 	winningTimes := map[int64]struct{}{}
 	hasViewerEdge := false
+	var series hash.Hash
 	for _, contribution := range contributions {
 		for _, route := range contribution.view.Routes {
 			if route.Role == RoleViewerEgress {
@@ -368,6 +399,14 @@ func mergeSession(id string, contributions []sessionContribution, params ViewPar
 		}
 		if viewerEdge {
 			result.ViewerEdgePublishers = append(result.ViewerEdgePublishers, ref)
+			if series == nil {
+				series = sha256.New()
+			}
+			_, _ = fmt.Fprintf(series, "%s\x00%d\n", ref.PublisherID, contribution.epoch)
+			if contribution.capturedAt.After(result.ViewerBytesMeasuredAt) {
+				result.ViewerBytesMeasuredAt = contribution.capturedAt
+			}
+			result.ViewerBytesClockAhead = result.ViewerBytesClockAhead || contribution.clockAhead
 			if session.Subject.Kind != "" && session.Subject.ID != "" {
 				key := string(session.Subject.Kind) + "\x00" + session.Subject.ID
 				subjectValues[key] = append(subjectValues[key], ref)
@@ -443,6 +482,9 @@ func mergeSession(id string, contributions []sessionContribution, params ViewPar
 		for _, value := range session.ClientVariants {
 			clients[value] = struct{}{}
 		}
+		for _, value := range session.Transports {
+			transports[value] = struct{}{}
+		}
 		for _, value := range session.MediaFileIDs {
 			mediaFileIDs[value] = struct{}{}
 		}
@@ -468,6 +510,7 @@ func mergeSession(id string, contributions []sessionContribution, params ViewPar
 		result.ViewerIPsOverflowed = result.ViewerIPsOverflowed || session.ViewerIPsOverflowed
 		result.DeviceIDsOverflowed = result.DeviceIDsOverflowed || session.DeviceIDsOverflowed
 		result.ClientVariantsOverflowed = result.ClientVariantsOverflowed || session.ClientVariantsOverflowed
+		result.TransportsOverflowed = result.TransportsOverflowed || session.TransportsOverflowed
 		result.UserAgentsOverflowed = result.UserAgentsOverflowed || session.UserAgentsOverflowed
 		result.MediaFileIDsOverflowed = result.MediaFileIDsOverflowed || session.MediaFileIDsOverflowed
 		result.PlayMethodsOverflowed = result.PlayMethodsOverflowed || session.PlayMethodsOverflowed
@@ -480,6 +523,9 @@ func mergeSession(id string, contributions []sessionContribution, params ViewPar
 	if winningRank == 1 || len(winningTimes) > 1 {
 		result.StartedAtDegraded = true
 	}
+	if series != nil {
+		result.ViewerBytesSeries = hex.EncodeToString(series.Sum(nil)[:8])
+	}
 	applyIdentity(&result, identityFieldSubject, subjectValues)
 	applyIdentity(&result, identityFieldProfileID, profileValues)
 	applyIdentity(&result, identityFieldMediaFileID, mediaValues)
@@ -489,6 +535,7 @@ func mergeSession(id string, contributions []sessionContribution, params ViewPar
 	result.PlayMethods, result.PlayMethodsOverflowed = cappedStrings(playMethods, params.MaxPlayMethodsPerSession, result.PlayMethodsOverflowed)
 	result.MediaFileIDs, result.MediaFileIDsOverflowed = cappedInts(mediaFileIDs, params.MaxMediaFileIDsPerSession, result.MediaFileIDsOverflowed)
 	result.ClientVariants, result.ClientVariantsOverflowed = cappedClients(clients, params.MaxClientVariantsPerSession, result.ClientVariantsOverflowed)
+	result.Transports, result.TransportsOverflowed = cappedTransports(transports, params.MaxClientVariantsPerSession, result.TransportsOverflowed)
 	result.TokenIssuedAts, result.TokenIssuedAtsOverflowed = cappedTimes(tokenTimes, params.MaxTokenIssuedAtPerSession, result.TokenIssuedAtsOverflowed)
 	for _, route := range routes {
 		result.Routes = append(result.Routes, route)
@@ -591,6 +638,18 @@ func cappedClients(values map[ClientVariant]struct{}, maximum int, overflow bool
 		out = append(out, value)
 	}
 	sort.Slice(out, func(i, j int) bool { return clientVariantKey(out[i]) < clientVariantKey(out[j]) })
+	if maximum > 0 && len(out) > maximum {
+		out = out[:maximum]
+		overflow = true
+	}
+	return out, overflow
+}
+func cappedTransports(values map[Transport]struct{}, maximum int, overflow bool) ([]Transport, bool) {
+	out := make([]Transport, 0, len(values))
+	for value := range values {
+		out = append(out, value)
+	}
+	sort.Slice(out, func(i, j int) bool { return transportKey(out[i]) < transportKey(out[j]) })
 	if maximum > 0 && len(out) > maximum {
 		out = out[:maximum]
 		overflow = true

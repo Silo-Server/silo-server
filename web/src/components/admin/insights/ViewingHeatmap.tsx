@@ -7,12 +7,17 @@ import { cn } from "@/lib/utils";
 
 import { useHourLabels, useWeekdayLabels, type ViewingTimeCell } from "./viewingTime";
 
+// One-hue ramp on the Direct play color, so the grid matches the other
+// Insights charts. --primary is near-white in this theme, and opacity steps of
+// it read as greys that are hard to tell apart. The first step stays as far
+// from an empty cell as the old one was, and the top step mixes past --chart-1
+// toward --contrast-boost so the busiest hours stand out.
 const LEVEL_CLASSES = [
   "bg-muted/35",
-  "bg-primary/20",
-  "bg-primary/40",
-  "bg-primary/65",
-  "bg-primary/90",
+  "bg-chart-1/40",
+  "bg-chart-1/70",
+  "bg-chart-1",
+  "bg-[color-mix(in_srgb,var(--chart-1)_45%,var(--contrast-boost))]",
 ] as const;
 
 function heatmapLevel(plays: number, maxPlays: number): number {

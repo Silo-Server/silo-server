@@ -114,7 +114,7 @@ it("renders pending and partial history failures with explicit restart", () => {
 it("retains revoke confirmation and row on failure", async () => {
   mocks.revoke.mockRejectedValue(new Error("Could not revoke"));
   render(<InvitationsTab />, { wrapper: MemoryRouter });
-  fireEvent.click(screen.getByTitle("Revoke this link"));
+  fireEvent.click(screen.getByTitle("Revoke invitation"));
   fireEvent.click(screen.getByRole("button", { name: "Revoke" }));
   expect(await screen.findByText("Could not revoke")).toBeInTheDocument();
   expect(screen.getByRole("dialog")).toBeInTheDocument();
@@ -138,7 +138,9 @@ it("keeps a one-time link after clipboard failure, resets mutation state, and di
   });
   const view = render(<InvitationsTab />, { wrapper: MemoryRouter });
   fireEvent.click(screen.getByTitle("Email a new link"));
-  expect(await screen.findByText(/email delivery failed or is uncertain/)).toBeInTheDocument();
+  expect(
+    await screen.findByText(/email delivery failed or couldn’t be confirmed/),
+  ).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Copy link" }));
   expect(await screen.findByText(/Could not copy/)).toBeInTheDocument();
   expect(claimLink("https://example.invalid/invite/one-time")).toBeInTheDocument();
@@ -160,7 +162,7 @@ it("blocks synchronous double submit and dismissal until delivery resolves", asy
   render(<InvitationsTab />, { wrapper: MemoryRouter });
   fireEvent.click(screen.getByRole("button", { name: "Invite someone" }));
   fireEvent.change(screen.getByLabelText("Email address"), { target: { value: row.email } });
-  const submit = screen.getByRole("button", { name: "Send invite" });
+  const submit = screen.getByRole("button", { name: "Send invitation" });
   fireEvent.click(submit);
   fireEvent.click(submit);
   expect(mocks.create).toHaveBeenCalledTimes(1);
@@ -173,7 +175,7 @@ it("blocks synchronous double submit and dismissal until delivery resolves", asy
       delivery_status: "not_configured",
     }),
   );
-  expect(await screen.findByText(/deliver this link yourself/)).toBeInTheDocument();
+  expect(await screen.findByText(/share this link yourself/)).toBeInTheDocument();
 });
 it("guides unsupported profile creation and preserves false booleans", async () => {
   mocks.profile = false;
@@ -184,10 +186,10 @@ it("guides unsupported profile creation and preserves false booleans", async () 
   });
   render(<InvitationsTab />, { wrapper: MemoryRouter });
   fireEvent.click(screen.getByRole("button", { name: "Invite someone" }));
-  expect(screen.getByRole("status")).toHaveTextContent("cannot create a default profile");
+  expect(screen.getByRole("status")).toHaveTextContent("can’t create a first profile");
   fireEvent.change(screen.getByLabelText("Email address"), { target: { value: row.email } });
   fireEvent.click(screen.getByLabelText("Show the feature tour on first sign-in"));
-  fireEvent.click(screen.getByRole("button", { name: "Send invite" }));
+  fireEvent.click(screen.getByRole("button", { name: "Send invitation" }));
   await waitFor(() =>
     expect(mocks.create).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -201,12 +203,10 @@ it("asks for the public URL before anyone fills in an invitation", () => {
   mocks.publicURL = "";
   render(<InvitationsTab />, { wrapper: MemoryRouter });
   expect(screen.getByRole("button", { name: "Invite someone" })).toBeDisabled();
-  expect(screen.getByTitle("Copy a new link without emailing")).toBeDisabled();
+  expect(screen.getByTitle("Create a new link without emailing")).toBeDisabled();
   expect(screen.getByTitle("Email a new link")).toBeDisabled();
-  expect(screen.getByTitle("Revoke this link")).not.toBeDisabled();
-  expect(
-    screen.getByText(/Set the Silo public URL to create invitation links/),
-  ).toBeInTheDocument();
+  expect(screen.getByTitle("Revoke invitation")).not.toBeDisabled();
+  expect(screen.getByText(/Set your server’s public URL in/)).toBeInTheDocument();
   expect(screen.getByRole("link", { name: /General settings/ })).toHaveAttribute(
     "href",
     "/admin/settings/general",
@@ -231,7 +231,7 @@ it("creates a link invitation without an address and shows the link to share", a
   expect(body.email).toBeUndefined();
   expect(await screen.findByText(/Invitation link created/)).toBeInTheDocument();
   expect(claimLink("https://example.invalid/invite/link-only")).toBeInTheDocument();
-  expect(screen.getByText(/Anyone with the link can use it/)).toBeInTheDocument();
+  expect(screen.getByText(/Anyone with it can use it/)).toBeInTheDocument();
 });
 it("selects a delivery option when its card text is clicked", () => {
   render(<InvitationsTab />, { wrapper: MemoryRouter });
@@ -239,7 +239,7 @@ it("selects a delivery option when its card text is clicked", () => {
   fireEvent.click(screen.getByText("You share the link yourself, for example in a chat."));
   expect(screen.getByLabelText("Create link")).toBeChecked();
   expect(screen.getByLabelText("Create link")).toHaveFocus();
-  fireEvent.click(screen.getByText("We email the link. You can copy it too."));
+  fireEvent.click(screen.getByText("Silo emails the link. You can copy it too."));
   expect(screen.getByLabelText("Send email")).toBeChecked();
 });
 it("offers only link creation when email is not configured", () => {
@@ -263,7 +263,7 @@ it("replaces an emailed invitation's link without emailing it", async () => {
     delivery_status: "not_requested",
   });
   render(<InvitationsTab />, { wrapper: MemoryRouter });
-  fireEvent.click(screen.getByTitle("Copy a new link without emailing"));
+  fireEvent.click(screen.getByTitle("Create a new link without emailing"));
   await waitFor(() =>
     expect(mocks.resend).toHaveBeenCalledWith(
       expect.objectContaining({ id: "7", delivery: "link" }),
@@ -294,7 +294,7 @@ it("emails a new link only when asked and email is configured", async () => {
   mocks.linkRow = true;
   render(<InvitationsTab />, { wrapper: MemoryRouter });
   expect(screen.queryByTitle("Email a new link")).toBeNull();
-  expect(screen.getByTitle("Copy a new link without emailing")).toBeInTheDocument();
+  expect(screen.getByTitle("Create a new link without emailing")).toBeInTheDocument();
   // A link invitation has no address to email.
   expect(screen.getAllByTitle(/new link/)).toHaveLength(2);
   fireEvent.click(screen.getByTitle("Replace with a new link"));
