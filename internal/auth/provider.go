@@ -105,13 +105,19 @@ func (p *LocalProvider) Authenticate(ctx context.Context, creds Credentials) (*m
 	}
 
 	if !user.Enabled {
-		return nil, ErrUserDisabled
+		return nil, &signInRefusalError{err: ErrUserDisabled, reason: "account disabled", user: user}
 	}
 
 	// The server-wide switch and a network provider's refusal are checked
 	// after the password, so a refusal does not tell a stranger which names
 	// have accounts.
 	if err := localPasswordPolicy(ctx, p.users.pool, user); err != nil {
+		if errors.Is(err, ErrLocalLoginDisabled) {
+			return nil, &signInRefusalError{err: err, reason: "local password sign-in turned off", user: user}
+		}
+		if errors.Is(err, ErrNotPermitted) {
+			return nil, &signInRefusalError{err: err, reason: "not permitted", user: user}
+		}
 		return nil, err
 	}
 
@@ -160,14 +166,17 @@ func checkLocalPassword(ctx context.Context, users LoginDirectory, creds Credent
 		if err := comparePasswordHash(ctx, placeholderPasswordHash(), []byte(creds.Password)); errors.Is(err, passwordhash.ErrBusy) {
 			return nil, err
 		}
-		return nil, ErrInvalidCredentials
+		if err != nil {
+			return nil, &signInRefusalError{err: ErrInvalidCredentials, reason: "unknown name"}
+		}
+		return nil, &signInRefusalError{err: ErrInvalidCredentials, reason: "no local password", user: user}
 	}
 	ok, err := CheckPassword(ctx, user, creds.Password)
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
-		return nil, ErrInvalidCredentials
+		return nil, &signInRefusalError{err: ErrInvalidCredentials, reason: "wrong password", user: user}
 	}
 	return user, nil
 }
