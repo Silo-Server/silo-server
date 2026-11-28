@@ -219,10 +219,11 @@ export function SubtitleMenu({
   const valueLabel = activeTrack
     ? getLanguageName(activeTrack.language)
     : t("web.subtitles.menu.off");
-  const canTranslate =
-    canAddSubtitles &&
-    ((aiEnabled && tracks.some(isTranslatableSource)) ||
-      (aiTranscribeEnabled && (audioTracks?.length ?? 0) > 0));
+  // The AI dialog translates a subtitle track when it can, and otherwise only
+  // generates subtitles from the audio; the menu item names which it will do.
+  const canTranslateTrack = aiEnabled && tracks.some(isTranslatableSource);
+  const canTranscribe = aiTranscribeEnabled && (audioTracks?.length ?? 0) > 0;
+  const canUseAi = canAddSubtitles && (canTranslateTrack || canTranscribe);
 
   return (
     <div ref={menuRef} className="relative">
@@ -386,7 +387,7 @@ export function SubtitleMenu({
                 {t("web.subtitles.menu.addSubtitles")}
               </button>
             )}
-            {canTranslate && (
+            {canUseAi && (
               <button
                 role="menuitem"
                 type="button"
@@ -396,7 +397,9 @@ export function SubtitleMenu({
                 <span aria-hidden="true" className="hud-item-icon">
                   <Languages />
                 </span>
-                {t("web.subtitles.menu.translateWithAi")}
+                {canTranslateTrack
+                  ? t("web.subtitles.menu.translateWithAi")
+                  : t("web.subtitles.menu.generateWithAi")}
               </button>
             )}
             <button
