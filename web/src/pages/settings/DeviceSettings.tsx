@@ -633,22 +633,21 @@ function DeviceDetail({
                 throw new Error("profile changed before the reset was sent");
               }
               try {
-                await clearValue.mutateAsync({
-                  key: SETTING_KEYS.PLAYBACK_SUBTITLE_APPEARANCE,
-                  identity,
-                });
+                await clearValue
+                  .mutateAsync({ key: SETTING_KEYS.PLAYBACK_SUBTITLE_APPEARANCE, identity })
+                  .catch((error) => {
+                    // A 404 means another client cleared it first: the state asked for.
+                    if (!isSettingValueMissing(error)) throw error;
+                  });
+                // Queued edits build on this read, so a failed read fails the clear.
+                await queryClient.refetchQueries(
+                  { queryKey: effective, exact: true },
+                  { throwOnError: true },
+                );
               } catch (error) {
-                // A 404 means another client cleared it first: the state asked for.
-                if (!isSettingValueMissing(error)) {
-                  toast.error(v2ErrorText(error, t("web.settings.device.settingResetFailed")));
-                  throw error;
-                }
+                toast.error(v2ErrorText(error, t("web.settings.device.settingResetFailed")));
+                throw error;
               }
-              // Queued edits build on this read, so a failed read fails the clear.
-              await queryClient.refetchQueries(
-                { queryKey: effective, exact: true },
-                { throwOnError: true },
-              );
             },
             () =>
               parseSubtitleAppearance(
