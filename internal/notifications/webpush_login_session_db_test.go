@@ -327,3 +327,60 @@ func TestWebPushRetryAfterNeverShortensTheScheduleDB(t *testing.T) {
 		t.Fatalf("attempt after a 429 with Retry-After: 1 = %s, next try in %s; want retrying in about 30s", state, wait)
 	}
 }
+
+// A send that outlives its lease is reclaimed by the retry sweep. Only the
+// worker holding the current claim records the outcome, so the stale send's
+// 503 neither overwrites the new claim nor counts a failure on the
+// subscription (#4593).
+func TestWebPushLateFinishAfterReclaimLeavesTheNewClaimDB(t *testing.T) {
+	repo, pool := loginSessionWebPushDB(t)
+	ctx := t.Context()
+	var reclaimed []DeliveryAttempt
+	sender, sub := webPushTestSender(t, repo, pool, func(w http.ResponseWriter, r *http.Request) {
+		if reclaimed == nil {
+			if _, err := pool.Exec(r.Context(), `UPDATE web_push_delivery_attempts SET next_retry_at = now() - interval '1 second' WHERE id = 'attempt'`); err != nil {
+				t.Error(err)
+			}
+			var err error
+			if reclaimed, err = repo.ClaimDue(r.Context(), 10); err != nil || len(reclaimed) != 1 {
+				t.Errorf("reclaim = %v, %v; want the expired attempt", reclaimed, err)
+			}
+		}
+		w.WriteHeader(http.StatusServiceUnavailable)
+	})
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO notification_deliveries (id, user_id, profile_id, type, reason_flags)
+		VALUES ('delivery', 7, 'default', $1, '{}')`, DeliveryTypeRequestDeclined); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO web_push_delivery_attempts (id, notification_delivery_id, subscription_id, attempt_number, outcome)
+		VALUES ('attempt', 'delivery', $1, 0, 'pending')`, sub.ID); err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := repo.ClaimPendingForDelivery(ctx, "delivery")
+	if err != nil || len(claimed) != 1 {
+		t.Fatalf("claim = %v, %v", claimed, err)
+	}
+
+	sender.processAttempt(ctx, claimed[0])
+	if len(reclaimed) != 1 {
+		t.FailNow()
+	}
+	var state string
+	var attemptNumber, failures int
+	var nextRetry *time.Time
+	if err := pool.QueryRow(ctx, `
+		SELECT a.outcome, a.attempt_number, a.next_retry_at, s.consecutive_failures
+		FROM web_push_delivery_attempts a JOIN web_push_subscriptions s ON s.id = a.subscription_id
+		WHERE a.id = 'attempt'`).Scan(&state, &attemptNumber, &nextRetry, &failures); err != nil {
+		t.Fatal(err)
+	}
+	if state != WebhookOutcomeRetrying || attemptNumber != 0 || nextRetry == nil || !nextRetry.Equal(*reclaimed[0].NextRetryAt) {
+		t.Fatalf("after the stale send: outcome %q, attempt %d, next retry %v; want the reclaimed claim untouched (%v)",
+			state, attemptNumber, nextRetry, reclaimed[0].NextRetryAt)
+	}
+	if failures != 0 {
+		t.Fatalf("subscription consecutive_failures = %d after a send whose claim was reclaimed, want 0", failures)
+	}
+}
