@@ -234,7 +234,7 @@ export default function PersonDetail() {
 
             {/* Bio */}
             {person.bio && (
-              <p className="text-muted-foreground max-w-2xl text-sm leading-relaxed">
+              <p className="text-muted-foreground max-w-2xl text-sm leading-relaxed whitespace-pre-line">
                 {person.bio}
               </p>
             )}
