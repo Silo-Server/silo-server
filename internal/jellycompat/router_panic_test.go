@@ -118,17 +118,40 @@ func (hijackableRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	return server, bufio.NewReadWriter(bufio.NewReader(server), bufio.NewWriter(server)), nil
 }
 
-// A status written after a hijack, as a recoverer's 500 for a panic after the
-// upgrade, leaves the outcome hijacked: the server sent no such response.
-func TestStatusResponseWriterKeepsAHijackedOutcome(t *testing.T) {
-	sw := &statusResponseWriter{ResponseWriter: hijackableRecorder{httptest.NewRecorder()}}
-	conn, _, err := sw.Hijack()
+// A handler that panics after hijacking the connection, as the session socket
+// can mid-session, sent no 500, so the recoverer's 500 reaches no recorder: the
+// metrics keep the hijacked outcome and the activity log row is not a 500.
+func TestCompatPanicAfterHijackKeepsTheHijackedOutcome(t *testing.T) {
+	cfg, err := config.LoadFromDB(map[string]string{})
 	if err != nil {
-		t.Fatalf("Hijack: %v", err)
+		t.Fatalf("LoadFromDB: %v", err)
 	}
-	defer func() { _ = conn.Close() }()
-	sw.WriteHeader(http.StatusInternalServerError)
-	if got := compatStatusClass(sw.status, sw.hijacked); got != compatStatusHijacked {
-		t.Fatalf("status class = %q, want %q", got, compatStatusHijacked)
+	const pattern = "/panic-after-hijack-test"
+	activity := &compatPanicActivityWriter{}
+	router := NewRouter(Dependencies{Config: cfg, ActivityLogWriter: activity})
+	router.Get(pattern, func(w http.ResponseWriter, _ *http.Request) {
+		conn, _, err := http.NewResponseController(w).Hijack()
+		if err != nil {
+			t.Errorf("Hijack: %v", err)
+			return
+		}
+		defer func() { _ = conn.Close() }()
+		panic("boom")
+	})
+
+	req := httptest.NewRequest(http.MethodGet, pattern, nil)
+	req.Header.Set("Connection", "Upgrade")
+	req.Header.Set("Upgrade", "websocket")
+	counter := compatRequestsTotal.WithLabelValues(pattern, compatMethodLabel(http.MethodGet), compatStatusHijacked, compatClientFamily(req))
+	before := testutil.ToFloat64(counter)
+	rec := hijackableRecorder{httptest.NewRecorder()}
+	router.ServeHTTP(rec, req)
+
+	if got := testutil.ToFloat64(counter) - before; got != 1 {
+		t.Fatalf("silo_jellycompat_requests_total{status_class=hijacked} grew by %v, want 1", got)
+	}
+	entries := activity.recorded()
+	if len(entries) != 1 || entries[0].StatusCode == http.StatusInternalServerError {
+		t.Fatalf("activity entries = %+v, want one row that is not a 500", entries)
 	}
 }
