@@ -1,9 +1,10 @@
 {
-  "revision": "c2ad5bef8e79e0c72d2ae466a1b7831346f6f4e70b61f96f7196b33237ea053b",
+  "revision": "bbb1266041fff9f42d12fe2afb9e651cb7a7e6986f7b4aae236747643ddd84c1",
   "state": "not_configured",
   "allowed": false,
   "instance_attribution": true,
   "process_resources": true,
   "cgroup_resources": true,
-  "sample_freshness": true
+  "sample_freshness": true,
+  "process_cpu_percent": true
 }

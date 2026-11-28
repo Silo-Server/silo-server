@@ -23,6 +23,18 @@ import (
 const (
 	labelRemote = "remote"
 	labelLocal  = "local"
+	labelDirect = "direct"
+)
+
+// Class is the transport class a connection key identifies.
+type Class uint8
+
+const (
+	// ClassRegular keys the connection by how the request reaches the server
+	// over the regular network: provider, local or remote.
+	ClassRegular Class = iota
+	// ClassDirect keys the connection by the device's direct path.
+	ClassDirect
 )
 
 const (
@@ -84,7 +96,15 @@ type Store struct{ Pool *pgxpool.Pool }
 
 // Key never retains a public address. IPv6 rotations within a /64 share a key.
 // An unresolved address has no identity and must not share another viewer's limit.
-func Key(ctx context.Context, secret string) (key, label string) {
+//
+// ClassDirect returns directKey, the device's direct key from the direct
+// state; an empty directKey is an unresolved path with no identity, never the
+// regular key. ClassRegular never reads the direct path of ctx: an address
+// keys the same way whichever transport carried the request.
+func Key(ctx context.Context, secret string, class Class, directKey string) (key, label string) {
+	if class == ClassDirect {
+		return directKey, labelDirect
+	}
 	if provider := netaccess.PathFromContext(ctx).Provider; provider != "" {
 		return "provider:" + provider, "provider:" + provider
 	}
@@ -92,7 +112,10 @@ func Key(ctx context.Context, secret string) (key, label string) {
 	if ip == nil {
 		return "", labelRemote
 	}
-	if streamlocation.FromContext(ctx) == streamlocation.Local {
+	// The address alone classifies the request: Path.Direct makes
+	// streamlocation.FromContext answer remote, which would key a LAN request
+	// that also holds a direct path as a remote one.
+	if !clientip.ForwardedClientUnknown(ctx) && streamlocation.FromMetadata(clientip.FromContext(ctx), "") == streamlocation.Local {
 		return labelLocal, labelLocal
 	}
 	if secret == "" {
@@ -307,6 +330,9 @@ func (s *Store) list(ctx context.Context, user int, device, key string) ([]Admin
 		r.Connection = r.ID
 		if strings.HasPrefix(r.ID, labelRemote+":") {
 			r.Connection = labelRemote
+		}
+		if strings.HasPrefix(r.ID, labelDirect+":") {
+			r.Connection = labelDirect
 		}
 		if probeKbps != nil && measured != nil && transport != nil {
 			r.Probe = &Probe{Kbps: *probeKbps, LowerBound: lowerBound, MeasuredAt: *measured, Transport: *transport}

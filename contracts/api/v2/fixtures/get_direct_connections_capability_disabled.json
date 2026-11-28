@@ -1,0 +1,12 @@
+{
+  "revision": "2899ee2f1cb3c8363145ff72b2e75b05eef5dee2f1992a07f131eaedc7191ca1",
+  "state": "disabled",
+  "allowed": false,
+  "protocol_revision": "1",
+  "coordination_url": "/api/v2/direct-connections",
+  "tls_pin": "dGVzdC1waW4tbm90LWEtcmVhbC1waW4=",
+  "stun_servers": [],
+  "ack_decimation": false,
+  "receive_window_mib": 32,
+  "hosts": []
+}

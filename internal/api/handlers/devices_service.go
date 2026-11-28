@@ -95,6 +95,11 @@ func (h *DeviceHandler) RemoveDeviceSettings(ctx context.Context, actor DeviceSe
 		return err
 	}
 	if forget {
+		// Forgetting ends the device's direct-connection enrollment; clearing
+		// its settings leaves the device registered and enrolled.
+		if h.DirectRevoker != nil {
+			h.DirectRevoker.RevokeProfileDevice(ctx, actor.UserID, deviceID, profileID)
+		}
 		registry, _ := store.(userstore.DeviceRegistry)
 		forgetPlaybackConnections(ctx, h.Connections, registry, actor.UserID, []string{deviceID})
 	}

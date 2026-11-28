@@ -75,6 +75,8 @@ func stampLiveRouteV3(card *playback.RecipeCard, current *playback.Session) {
 	card.RoutingExecutionNodeID = current.RoutingExecutionNodeID
 	card.RoutingEgress = current.RoutingEgress
 	card.RoutingEgressNodeID = current.RoutingEgressNodeID
+	card.MediaTransport = current.MediaTransport
+	card.PathGeneration = current.PathGeneration
 }
 
 // sessionRecipeCardV3 is a builder's base card for the recovery copy, with the

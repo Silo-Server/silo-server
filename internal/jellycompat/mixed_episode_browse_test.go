@@ -194,6 +194,11 @@ func TestFavoritesAndIdsWithEpisodeAndOtherTypesIncludeEpisodes(t *testing.T) {
 		{"IncludeItemTypes=Movie,Episode", []string{"movie-2", "ep-2"}, "", []string{"movie-2", "ep-2"}},
 		{"IncludeItemTypes=Episode", []string{"movie-2", "ep-2"}, "", []string{"ep-2"}},
 		{"IncludeItemTypes=Movie,Episode&Filters=IsFavorite", []string{"movie-1", "movie-2", "ep-1", "ep-3"}, "", []string{"movie-1", "ep-1"}},
+		// No IncludeItemTypes means every type, Episode included (#5331).
+		{"Filters=IsFavorite&Recursive=true", nil, "", []string{"movie-1", "ep-1"}},
+		{"Filters=IsFavorite&Recursive=true&SortBy=SortName", nil, "", []string{"movie-1", "ep-1"}},
+		{"SortBy=SortName", []string{"movie-2", "ep-2"}, "", []string{"movie-2", "ep-2"}},
+		{"Filters=IsFavorite", []string{"movie-1", "movie-2", "ep-1", "ep-3"}, "", []string{"movie-1", "ep-1"}},
 		// A series or season ParentId keeps only its own episodes.
 		{"IncludeItemTypes=Episode&Recursive=true", []string{"ep-1", "ep-2"}, "series", []string{"ep-1", "ep-2"}},
 		{"IncludeItemTypes=Episode&Recursive=true", []string{"ep-1", "ep-2"}, "other-series", nil},

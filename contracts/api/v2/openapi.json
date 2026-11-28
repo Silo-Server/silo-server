@@ -6491,35 +6491,43 @@
         "additionalProperties": false,
         "properties": {
           "periods": {
+            "description": "Total cgroup CPU bandwidth enforcement periods elapsed.",
             "format": "int64",
             "minimum": 0,
             "type": "integer"
           },
           "pressure_some_pct": {
+            "description": "Linux PSI cpu some avg10 percentage (10-second average).",
             "format": "double",
             "type": "number"
           },
           "quota_cores": {
+            "description": "Effective CPU quota in cores at the selected cgroup level (may reflect a tighter cpuset); omitted when unlimited.",
             "format": "double",
             "type": "number"
           },
           "scope": {
+            "description": "Selected visible cgroup level: leaf or ancestor (an ancestor includes sibling workloads); new values may appear.",
             "type": "string"
           },
           "throttled_periods": {
+            "description": "Enforcement periods during which the cgroup was CPU-throttled.",
             "format": "int64",
             "minimum": 0,
             "type": "integer"
           },
           "throttled_seconds": {
+            "description": "Cumulative CPU time spent throttled by cgroup bandwidth limits in seconds.",
             "format": "double",
             "type": "number"
           },
           "usage_seconds": {
+            "description": "Cumulative CPU time consumed by the selected cgroup in seconds.",
             "format": "double",
             "type": "number"
           },
           "version": {
+            "description": "Cgroup hierarchy version: v1 or v2; new values may appear.",
             "type": "string"
           }
         },
@@ -6533,55 +6541,67 @@
         "additionalProperties": false,
         "properties": {
           "current_bytes": {
+            "description": "Total memory charged to the selected cgroup in bytes, including page cache. In all-in-one containers this includes co-resident services such as bundled Postgres or Redis.",
             "format": "int64",
             "minimum": 0,
             "type": "integer"
           },
           "high_events": {
+            "description": "Count of memory.high throttle events on cgroup v2.",
             "format": "int64",
             "minimum": 0,
             "type": "integer"
           },
           "limit_bytes": {
+            "description": "Concrete memory limit of the selected cgroup in bytes; omitted when unlimited.",
             "format": "int64",
             "minimum": 0,
             "type": "integer"
           },
           "max_events": {
+            "description": "Count of memory.max (v2) or failcnt (v1) limit-hit events.",
             "format": "int64",
             "minimum": 0,
             "type": "integer"
           },
           "oom_events": {
+            "description": "Count of cgroup OOM events.",
             "format": "int64",
             "minimum": 0,
             "type": "integer"
           },
           "oom_kills": {
+            "description": "Count of processes killed by the cgroup OOM killer.",
             "format": "int64",
             "minimum": 0,
             "type": "integer"
           },
           "pressure_full_pct": {
+            "description": "Linux PSI memory full avg10 percentage (10-second average).",
             "format": "double",
             "type": "number"
           },
           "pressure_some_pct": {
+            "description": "Linux PSI memory some avg10 percentage (10-second average).",
             "format": "double",
             "type": "number"
           },
           "scope": {
+            "description": "Selected visible cgroup level: leaf or ancestor (an ancestor includes sibling workloads); new values may appear.",
             "type": "string"
           },
           "swap_bytes": {
+            "description": "Swap usage of the selected cgroup in bytes.",
             "format": "int64",
             "minimum": 0,
             "type": "integer"
           },
           "version": {
+            "description": "Cgroup hierarchy version: v1 or v2; new values may appear.",
             "type": "string"
           },
           "working_set_bytes": {
+            "description": "Selected cgroup memory charge minus inactive file pages in bytes; closest single figure for container memory use, though an ancestor scope includes sibling workloads and it is not an exact OOM predictor.",
             "format": "int64",
             "minimum": 0,
             "type": "integer"
@@ -6596,27 +6616,40 @@
       "AdminChildStats": {
         "additionalProperties": false,
         "properties": {
+          "cpu_pct": {
+            "description": "CPU of live owned FFmpeg children over the last sample window, on the same scale and capacity as system.cpu_pct. A lower bound: a child's last partial window and a child that starts and exits between two samples are missed. Omitted when the window was not measured, including a truncated pass.",
+            "format": "double",
+            "maximum": 100,
+            "minimum": 0,
+            "type": "number"
+          },
           "cpu_seconds": {
+            "description": "Summed lifetime CPU seconds of currently live owned child processes. Decreases when a child exits; do not diff as a monotonic counter.",
             "format": "double",
             "type": "number"
           },
           "resident_bytes": {
+            "description": "Summed resident memory (RSS) in bytes across sampled live owned child processes (transcodes, remuxes, media analysis, trickplay and chapter thumbnails); may count shared pages more than once.",
             "format": "int64",
             "minimum": 0,
             "type": "integer"
           },
           "sampled": {
+            "description": "Live owned child processes successfully read in this sample.",
             "format": "int64",
             "type": "integer"
           },
           "truncated": {
+            "description": "True when more live owned child processes existed than the per-sample cap (256).",
             "type": "boolean"
           },
           "unavailable": {
+            "description": "Live owned child processes whose /proc entries could not be read.",
             "format": "int64",
             "type": "integer"
           },
           "workload": {
+            "description": "Owned child workload sampled (for example ffmpeg); new values may appear.",
             "type": "string"
           }
         },
@@ -7562,24 +7595,31 @@
             "type": "boolean"
           },
           "api_clients": {
+            "description": "GET /admin/stats/api-clients and GET /admin/stats/api-clients/{session_id}/endpoints serve per-session API request counts.",
             "type": "boolean"
           },
           "downloads_stats": {
+            "description": "GET /admin/stats/downloads serves managed-download aggregates and timeseries points carry download_egress_kbps.",
             "type": "boolean"
           },
           "egress_by_source": {
+            "description": "GET /admin/stats/timeseries carries egress_sources and each point's egress_by_source split.",
             "type": "boolean"
           },
           "egress_totals": {
+            "description": "GET /admin/stats/timeseries carries window-wide egress_bytes and download_egress_bytes totals.",
             "type": "boolean"
           },
           "health": {
+            "description": "GET /admin/server/status carries the health object.",
             "type": "boolean"
           },
           "log_level_list": {
+            "description": "GET /admin/logs/app accepts a multi-level filter.",
             "type": "boolean"
           },
           "playback_activity": {
+            "description": "GET /admin/stats/playback-activity serves rolling playback activity buckets and reliability counts.",
             "type": "boolean"
           },
           "revision": {
@@ -7587,6 +7627,7 @@
             "type": "string"
           },
           "server_layouts": {
+            "description": "Per-account dashboard layout storage (GET/PUT/DELETE /admin/dashboard/layout) is accepted for clients. Stays false until the layout lifecycle is accepted, although the routes are served.",
             "type": "boolean"
           },
           "state": {
@@ -7600,15 +7641,19 @@
             "type": "string"
           },
           "streams_by_method": {
+            "description": "GET /admin/stats/timeseries points carry streams_by_method.",
             "type": "boolean"
           },
           "timeseries": {
+            "description": "GET /admin/stats/timeseries serves sampled concurrent-stream and viewer-egress history.",
             "type": "boolean"
           },
           "top_activity": {
+            "description": "GET /admin/stats/top-activity serves title and profile watch-history leaderboards.",
             "type": "boolean"
           },
           "watch_providers": {
+            "description": "GET /admin/stats carries the watch_providers array.",
             "type": "boolean"
           }
         },
@@ -7942,14 +7987,17 @@
         "additionalProperties": false,
         "properties": {
           "direct": {
+            "description": "Direct-play sessions during the bucket's peak-streams minute.",
             "format": "int64",
             "type": "integer"
           },
           "remux": {
+            "description": "Remux sessions during the bucket's peak-streams minute.",
             "format": "int64",
             "type": "integer"
           },
           "transcode": {
+            "description": "Transcode sessions during the bucket's peak-streams minute.",
             "format": "int64",
             "type": "integer"
           }
@@ -7965,10 +8013,12 @@
         "additionalProperties": false,
         "properties": {
           "download_egress_bytes": {
+            "description": "Total API file-transfer egress over the window in bytes, integrated from every sampled minute; subset of egress_bytes.",
             "format": "int64",
             "type": "integer"
           },
           "egress_bytes": {
+            "description": "Total viewer-facing egress served over the window in bytes, integrated from every sampled minute rather than from peak-per-bucket points.",
             "format": "int64",
             "type": "integer"
           },
@@ -7980,14 +8030,14 @@
             "type": "array"
           },
           "from": {
-            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "description": "Start of the requested window in UTC.",
             "format": "date-time",
             "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
             "patternDescription": "a non-zero RFC 3339 instant",
             "type": "string"
           },
           "oldest_sample_at": {
-            "description": "RFC 3339 instant in UTC with millisecond precision, or null",
+            "description": "Timestamp of the oldest retained minute sample, or null until the first sample is written.",
             "format": "date-time",
             "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
             "patternDescription": "a non-zero RFC 3339 instant",
@@ -7997,17 +8047,19 @@
             ]
           },
           "points": {
+            "description": "Sampled buckets in ascending time order; buckets with no sample are omitted rather than zero-filled. Wider buckets report per-column peak minutes.",
             "items": {
               "$ref": "#/components/schemas/AdminDashboardTimeseriesPoint"
             },
             "type": "array"
           },
           "resolution_seconds": {
+            "description": "Bucket width in seconds chosen for the requested window (60 for \u003c=2h, 300 for \u003c=48h, 1800 for \u003c=336h, 7200 wider).",
             "format": "int64",
             "type": "integer"
           },
           "to": {
-            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "description": "End of the requested window in UTC.",
             "format": "date-time",
             "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
             "patternDescription": "a non-zero RFC 3339 instant",
@@ -8030,10 +8082,12 @@
         "additionalProperties": false,
         "properties": {
           "direct": {
+            "description": "Peak direct-play sessions in the bucket; taken independently of streams and may come from a different minute. Use streams_by_method to stack methods.",
             "format": "int64",
             "type": "integer"
           },
           "download_egress_kbps": {
+            "description": "Peak API file-transfer egress subset in kbps (offline and direct downloads, ebook/audiobook fetches, theme audio, bandwidth probes). Proxy nodes do not split downloads out. Past a 2-hour window this peak can come from a different minute than egress_kbps, so do not subtract them to derive playback rate.",
             "format": "int64",
             "type": "integer"
           },
@@ -8046,14 +8100,17 @@
             "type": "object"
           },
           "egress_kbps": {
+            "description": "Peak viewer-facing Silo egress in kbps for the bucket, summing API stream telemetry and enabled healthy stream nodes with internal relay hops excluded.",
             "format": "int64",
             "type": "integer"
           },
           "remux": {
+            "description": "Peak remux sessions in the bucket; taken independently of streams. Use streams_by_method to stack methods.",
             "format": "int64",
             "type": "integer"
           },
           "streams": {
+            "description": "Peak concurrent playback sessions in the bucket.",
             "format": "int64",
             "type": "integer"
           },
@@ -8062,13 +8119,14 @@
             "description": "streams split by play method, from the bucket's peak-streams minute, so the parts add up to no more than streams and can be stacked. direct, remux and transcode on the point are each their own peak and may come from different minutes. Sessions with any other play method are streams minus the sum of these values."
           },
           "t": {
-            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "description": "Start of the bucket in UTC.",
             "format": "date-time",
             "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
             "patternDescription": "a non-zero RFC 3339 instant",
             "type": "string"
           },
           "transcode": {
+            "description": "Peak transcode sessions in the bucket; taken independently of streams. Use streams_by_method to stack methods.",
             "format": "int64",
             "type": "integer"
           }
@@ -9322,16 +9380,19 @@
         "additionalProperties": false,
         "properties": {
           "inodes_total": {
+            "description": "Total inodes on the filesystem.",
             "format": "int64",
             "minimum": 0,
             "type": "integer"
           },
           "inodes_used": {
+            "description": "Inodes currently allocated on the filesystem.",
             "format": "int64",
             "minimum": 0,
             "type": "integer"
           },
           "role": {
+            "description": "Mount role matching the corresponding system.disks entry (scratch or library-N).",
             "type": "string"
           }
         },
@@ -9348,22 +9409,28 @@
             "type": "string"
           },
           "role": {
+            "description": "Mount role: scratch for the transcode working directory, or library-N positionally for each media root.",
             "type": "string"
           },
           "scratch": {
+            "description": "True for the transcode working directory mount (at most one entry per sample).",
             "type": "boolean"
           },
           "stale": {
+            "description": "True when the mount's last probe did not finish in time and this reading is carried forward.",
             "type": "boolean"
           },
           "total_gb": {
+            "description": "Usable filesystem capacity in GiB (bytes used plus bytes available to this process, excluding blocks reserved for root).",
             "format": "double",
             "type": "number"
           },
           "unavailable": {
+            "description": "True when the mount has never been measured successfully; used_gb and total_gb are meaningless when true.",
             "type": "boolean"
           },
           "used_gb": {
+            "description": "Used space on the filesystem in GiB (bytes divided by 1024^3).",
             "format": "double",
             "type": "number"
           }
@@ -11202,35 +11269,44 @@
         "additionalProperties": false,
         "properties": {
           "device": {
+            "description": "Render device path (for example /dev/dri/renderD128) or CUDA index/UUID when no DRM render node is visible.",
             "type": "string"
           },
           "render_busy_pct": {
+            "description": "Render/3D engine busy percentage when reported; omitted when not measurable.",
             "format": "int64",
             "type": "integer"
           },
           "sessions": {
+            "description": "Active hardware-accelerated sessions attributed to this GPU.",
             "format": "int64",
             "type": "integer"
           },
           "source": {
+            "description": "Measurement source (fdinfo, nvidia-smi, fdinfo+nvidia-smi, unavailable); new values may appear.",
             "type": "string"
           },
           "total_busy_pct": {
+            "description": "Overall GPU busy percentage when reported; omitted when not measurable.",
             "format": "int64",
             "type": "integer"
           },
           "vendor": {
+            "description": "GPU vendor (for example nvidia, intel, amd); new values may appear.",
             "type": "string"
           },
           "video_busy_pct": {
+            "description": "Video engine busy percentage when reported; omitted when not measurable.",
             "format": "int64",
             "type": "integer"
           },
           "vram_total_mb": {
+            "description": "Total GPU memory in MiB when reported; omitted when not measurable.",
             "format": "int64",
             "type": "integer"
           },
           "vram_used_mb": {
+            "description": "GPU memory in use in MiB when reported; omitted when not measurable.",
             "format": "int64",
             "type": "integer"
           }
@@ -12457,17 +12533,18 @@
         "additionalProperties": false,
         "properties": {
           "from": {
-            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "description": "Start of the resolved window in UTC.",
             "format": "date-time",
             "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
             "patternDescription": "a non-zero RFC 3339 instant",
             "type": "string"
           },
           "has_remote_nodes": {
+            "description": "True when any stream node is registered or contributed bandwidth in the window.",
             "type": "boolean"
           },
           "oldest_metric_at": {
-            "description": "RFC 3339 instant in UTC with millisecond precision, or null",
+            "description": "Oldest retained bandwidth metric timestamp across daily archives and live minute samples, or null.",
             "format": "date-time",
             "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
             "patternDescription": "a non-zero RFC 3339 instant",
@@ -12477,7 +12554,7 @@
             ]
           },
           "oldest_route_facts_at": {
-            "description": "RFC 3339 instant in UTC with millisecond precision, or null",
+            "description": "Oldest session timestamp with recorded route facts (local/remote location), or null.",
             "format": "date-time",
             "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
             "patternDescription": "a non-zero RFC 3339 instant",
@@ -12487,28 +12564,32 @@
             ]
           },
           "points": {
+            "description": "Daily UTC bandwidth points in ascending date order; days with no samples are omitted.",
             "items": {
               "$ref": "#/components/schemas/AdminInsightsBandwidthPoint"
             },
             "type": "array"
           },
           "sources": {
+            "description": "Per-source totals across the window (API first, then stream nodes by egress_bytes descending).",
             "items": {
               "$ref": "#/components/schemas/AdminInsightsEgressSource"
             },
             "type": "array"
           },
           "summary": {
-            "$ref": "#/components/schemas/AdminInsightsBandwidthSummary"
+            "$ref": "#/components/schemas/AdminInsightsBandwidthSummary",
+            "description": "Window-wide bandwidth totals, peak rates, and session location counts."
           },
           "to": {
-            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "description": "End of the resolved window in UTC.",
             "format": "date-time",
             "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
             "patternDescription": "a non-zero RFC 3339 instant",
             "type": "string"
           },
           "tz": {
+            "description": "Requested IANA timezone used to resolve window bounds and session location counts; daily points remain UTC calendar days.",
             "type": "string"
           }
         },
@@ -12529,6 +12610,7 @@
         "additionalProperties": false,
         "properties": {
           "api_egress_bytes": {
+            "description": "Viewer-facing egress served directly by API server processes on this UTC day in bytes.",
             "format": "int64",
             "type": "integer"
           },
@@ -12537,6 +12619,7 @@
               "format": "int64",
               "type": "integer"
             },
+            "description": "Daily egress in bytes keyed by sources[].key (\"api\" or \"node:\u003cnode_id\u003e\").",
             "type": "object"
           },
           "date": {
@@ -12545,18 +12628,22 @@
             "type": "string"
           },
           "download_egress_bytes": {
+            "description": "API file-transfer egress on this UTC day in bytes.",
             "format": "int64",
             "type": "integer"
           },
           "egress_bytes": {
+            "description": "Total viewer-facing egress served on this UTC day in bytes.",
             "format": "int64",
             "type": "integer"
           },
           "peak_download_kbps": {
+            "description": "Highest sampled minute API file-transfer egress rate on this UTC day in kbps.",
             "format": "int64",
             "type": "integer"
           },
           "peak_egress_kbps": {
+            "description": "Highest sampled minute total egress rate on this UTC day in kbps.",
             "format": "int64",
             "type": "integer"
           },
@@ -12565,9 +12652,11 @@
               "format": "int64",
               "type": "integer"
             },
+            "description": "Daily peak minute egress in kbps keyed by sources[].key.",
             "type": "object"
           },
           "playback_egress_bytes": {
+            "description": "Estimated playback egress on this UTC day in bytes (max(egress_bytes - download_egress_bytes, 0)).",
             "format": "int64",
             "type": "integer"
           }
@@ -12589,35 +12678,42 @@
         "additionalProperties": false,
         "properties": {
           "active_days": {
+            "description": "UTC calendar days in the window with at least one daily rollup or live metric sample.",
             "format": "int64",
             "type": "integer"
           },
           "api_egress_bytes": {
+            "description": "Total viewer-facing egress served directly by API server processes in bytes.",
             "format": "int64",
             "type": "integer"
           },
           "avg_daily_bytes": {
+            "description": "Mean daily egress across active_days in bytes (0 when active_days is 0).",
             "format": "int64",
             "type": "integer"
           },
           "download_egress_bytes": {
+            "description": "API file-transfer egress in bytes (offline and direct downloads, ebook/audiobook fetches, theme audio, bandwidth probes).",
             "format": "int64",
             "type": "integer"
           },
           "local_sessions": {
+            "description": "Playback sessions started in the window classified as local (count of sessions, not bytes).",
             "format": "int64",
             "type": "integer"
           },
           "node_egress_bytes": {
+            "description": "Total viewer-facing egress served by remote stream nodes in bytes.",
             "format": "int64",
             "type": "integer"
           },
           "peak_download_kbps": {
+            "description": "Highest sampled minute API file-transfer egress rate in the window in kbps.",
             "format": "int64",
             "type": "integer"
           },
           "peak_egress_at": {
-            "description": "RFC 3339 instant in UTC with millisecond precision, or null",
+            "description": "Timestamp of the peak_egress_kbps minute, or null when no samples exist.",
             "format": "date-time",
             "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
             "patternDescription": "a non-zero RFC 3339 instant",
@@ -12627,22 +12723,27 @@
             ]
           },
           "peak_egress_kbps": {
+            "description": "Highest sampled minute total egress rate in the window in kbps.",
             "format": "int64",
             "type": "integer"
           },
           "playback_egress_bytes": {
+            "description": "Estimated playback egress in bytes (sum of daily max(egress_bytes - download_egress_bytes, 0)). Includes proxy-served downloads because proxy nodes do not split downloads out.",
             "format": "int64",
             "type": "integer"
           },
           "remote_sessions": {
+            "description": "Playback sessions started in the window classified as remote (count of sessions, not bytes).",
             "format": "int64",
             "type": "integer"
           },
           "total_egress_bytes": {
+            "description": "Total viewer-facing egress served across the window in bytes (API servers plus stream nodes, relays excluded).",
             "format": "int64",
             "type": "integer"
           },
           "unknown_location_sessions": {
+            "description": "Playback sessions started in the window without a recorded local/remote classification.",
             "format": "int64",
             "type": "integer"
           }
@@ -13138,13 +13239,16 @@
         "additionalProperties": false,
         "properties": {
           "egress_bytes": {
+            "description": "Total bytes this source served over the window.",
             "format": "int64",
             "type": "integer"
           },
           "key": {
+            "description": "Source key used in bytes_by_source and peak_kbps_by_source: \"api\" or \"node:\u003cnode_id\u003e\".",
             "type": "string"
           },
           "kind": {
+            "description": "api covers all API server processes together; node is one stream node.",
             "enum": [
               "api",
               "node"
@@ -13152,10 +13256,11 @@
             "type": "string"
           },
           "name": {
+            "description": "Display name; deleted or archived nodes keep a fallback label.",
             "type": "string"
           },
           "node_id": {
-            "description": "Opaque identifier",
+            "description": "Stream node identifier when kind is node.",
             "examples": [
               "1"
             ],
@@ -13163,16 +13268,19 @@
             "type": "string"
           },
           "node_type": {
+            "description": "Stream node type (proxy or transcode) when known; null for api or removed nodes without a recorded type.",
             "type": [
               "string",
               "null"
             ]
           },
           "peak_egress_kbps": {
+            "description": "Highest sampled minute egress rate for this source in the window in kbps.",
             "format": "int64",
             "type": "integer"
           },
           "share_of_total": {
+            "description": "Fraction of summary.total_egress_bytes served by this source (0 to 1, rounded to 4 decimal places).",
             "format": "double",
             "type": "number"
           }
@@ -15768,6 +15876,129 @@
         ],
         "type": "object"
       },
+      "AdminLocalPasswordOffAccount": {
+        "additionalProperties": false,
+        "properties": {
+          "email": {
+            "description": "The account's email; empty when it has none",
+            "examples": [
+              "alice@example.test"
+            ],
+            "type": "string"
+          },
+          "id": {
+            "description": "Opaque identifier",
+            "examples": [
+              "12"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "is_owner": {
+            "description": "Whether the account is the server Owner",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
+          "reason": {
+            "description": "What decides the account's outcome. email_match: an ordinary account with an email, and email auto-match is on, so the provider's first sign-in for that verified email links it. email_match_off: the same, with email auto-match off. administrator: an admin or the Owner, which email auto-match never links. no_email: an ordinary account without an email",
+            "enum": [
+              "email_match",
+              "email_match_off",
+              "administrator",
+              "no_email"
+            ],
+            "examples": [
+              "email_match"
+            ],
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "admin",
+              "user"
+            ],
+            "examples": [
+              "user"
+            ],
+            "type": "string"
+          },
+          "username": {
+            "examples": [
+              "alice"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "username",
+          "email",
+          "role",
+          "is_owner",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "AdminLocalPasswordOffAccounts": {
+        "additionalProperties": false,
+        "properties": {
+          "email_auto_match": {
+            "description": "The auth.email_auto_match value the grouping used",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "items": {
+            "description": "The page's items; empty, never null",
+            "items": {
+              "$ref": "#/components/schemas/AdminLocalPasswordOffAccount"
+            },
+            "type": "array"
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageInfo",
+            "description": "Cursor state; absent for bounded unpaginated collections"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/AdminLocalPasswordOffTotals"
+          }
+        },
+        "required": [
+          "email_auto_match",
+          "totals",
+          "items"
+        ],
+        "type": "object"
+      },
+      "AdminLocalPasswordOffTotals": {
+        "additionalProperties": false,
+        "properties": {
+          "admin_link": {
+            "description": "Accounts in the admin_link group",
+            "examples": [
+              1
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "email_match": {
+            "description": "Accounts in the email_match group",
+            "examples": [
+              3
+            ],
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "email_match",
+          "admin_link"
+        ],
+        "type": "object"
+      },
       "AdminLoginSessionsRevoked": {
         "additionalProperties": false,
         "properties": {
@@ -16714,7 +16945,7 @@
             ]
           },
           "last_stats": {
-            "description": "Worker resource sample stored at the last health check."
+            "description": "Raw JSON worker health snapshot stored at the last health check; may contain optional system, gpu, attribution, sampled_at, build, and artifacts members. Read GET /api/v2/admin/nodes/summary resources for the typed, path-free form."
           },
           "max_bandwidth_kbps": {
             "format": "int64",
@@ -17117,23 +17348,26 @@
         "additionalProperties": false,
         "properties": {
           "attribution": {
-            "$ref": "#/components/schemas/AdminResourceAttribution"
+            "$ref": "#/components/schemas/AdminResourceAttribution",
+            "description": "Node metric scopes, process, cgroup, and owned FFmpeg child detail; omitted when unavailable."
           },
           "gpu": {
+            "description": "Node GPU measurements, always an array.",
             "items": {
               "$ref": "#/components/schemas/AdminGPUStats"
             },
             "type": "array"
           },
           "sampled_at": {
-            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "description": "When the node took this sample; omitted when not reported.",
             "format": "date-time",
             "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
             "patternDescription": "a non-zero RFC 3339 instant",
             "type": "string"
           },
           "system": {
-            "$ref": "#/components/schemas/AdminSystemStats"
+            "$ref": "#/components/schemas/AdminSystemStats",
+            "description": "Node host or cgroup CPU, memory, load, disk (without mount paths), and network sample; omitted when unavailable."
           }
         },
         "required": [
@@ -17293,6 +17527,7 @@
             "type": "string"
           },
           "egress_kbps": {
+            "description": "Node-reported viewer egress rate at the last health check in kbps (30-second rolling average).",
             "format": "int64",
             "type": "integer"
           },
@@ -18782,6 +19017,10 @@
             "description": "Whole-session method: direct, remux, direct_stream (copied video, converted audio) or transcode; absent when unknown",
             "type": "string"
           },
+          "egress": {
+            "$ref": "#/components/schemas/AdminPlaybackSessionEgress",
+            "description": "Viewer egress of the session, only when the list was read with include_egress=true. Absent when it is unknown: stream telemetry is off, its merged view is not built, its last refresh failed, the session's routes exceeded the telemetry route cap, a counting server's clock runs ahead of this server's beyond the telemetry tolerance, telemetry has no record of the session, or a proxy node served the session while telemetry is not shared between servers. Never present in session.* events."
+          },
           "episode_number": {
             "description": "Episode number; absent when not an episode",
             "format": "int64",
@@ -19186,6 +19425,10 @@
             },
             "type": "array"
           },
+          "egress": {
+            "description": "Stream telemetry is enabled: the list accepts include_egress and rows may then carry egress",
+            "type": "boolean"
+          },
           "is_jellyfin_client": {
             "type": "boolean"
           },
@@ -19276,10 +19519,39 @@
           "lifecycle_events",
           "adaptation_reasons",
           "subtitle",
+          "egress",
           "adaptation_reason_values",
           "revision",
           "state",
           "allowed"
+        ],
+        "type": "object"
+      },
+      "AdminPlaybackSessionEgress": {
+        "additionalProperties": false,
+        "properties": {
+          "bytes": {
+            "description": "Bytes Silo has sent to the viewer for this playback session so far, summed across every API server and proxy node; hops between Silo's own nodes are not counted",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "measured_at": {
+            "description": "When the newest of the counting servers took its count, on that server's clock; the same on every API server for the same reports. Servers report about once a second and their clocks can differ slightly, so rates over short intervals jitter. Divide a change in bytes by the change in this, not by the time between polls",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "series": {
+            "description": "Opaque token naming the set of servers that make up bytes. Ignore an observation whose measured_at is not newer than the baseline's, whatever its series. Otherwise start a new baseline when series differs from the baseline's or bytes fell, and compare bytes only within one series",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bytes",
+          "measured_at",
+          "series"
         ],
         "type": "object"
       },
@@ -21407,56 +21679,74 @@
       "AdminProcessStats": {
         "additionalProperties": false,
         "properties": {
+          "cpu_pct": {
+            "description": "This process's CPU over the last sample window, on the same scale and capacity as system.cpu_pct. Omitted when the window was not measured; a measured idle process is 0.",
+            "format": "double",
+            "maximum": 100,
+            "minimum": 0,
+            "type": "number"
+          },
           "cpu_seconds": {
+            "description": "Cumulative CPU time consumed by this Silo process in seconds (user + system).",
             "format": "double",
             "type": "number"
           },
           "go_memory_bytes": {
+            "description": "Total memory mapped by the Go runtime in bytes; this is a runtime reservation, not RSS.",
             "format": "int64",
             "minimum": 0,
             "type": "integer"
           },
           "goroutines": {
+            "description": "Live goroutine count in this Silo process.",
             "format": "int64",
             "minimum": 0,
             "type": "integer"
           },
           "heap_live_bytes": {
+            "description": "Marked live Go heap after the last GC cycle in bytes (subset of resident_bytes; subtracting from RSS does not yield exact native allocations).",
             "format": "int64",
             "minimum": 0,
             "type": "integer"
           },
           "max_fds": {
+            "description": "Soft file-descriptor limit (RLIMIT_NOFILE) of this Silo process.",
             "format": "int64",
             "minimum": 0,
             "type": "integer"
           },
           "open_fds": {
+            "description": "Open file descriptors held by this Silo process.",
             "format": "int64",
             "minimum": 0,
             "type": "integer"
           },
           "read_bytes": {
+            "description": "Cumulative storage bytes read from /proc/PID/io; on Linux this includes I/O attributed to waited-for children.",
             "format": "int64",
             "minimum": 0,
             "type": "integer"
           },
           "resident_bytes": {
+            "description": "Resident set size (RSS) of this Silo server process alone in bytes; excludes FFmpeg children and separate database/cache processes.",
             "format": "int64",
             "minimum": 0,
             "type": "integer"
           },
           "threads": {
+            "description": "OS thread count of this Silo process.",
             "format": "int64",
             "minimum": 0,
             "type": "integer"
           },
           "virtual_bytes": {
+            "description": "Virtual memory size of this Silo process in bytes.",
             "format": "int64",
             "minimum": 0,
             "type": "integer"
           },
           "write_bytes": {
+            "description": "Cumulative storage bytes written from /proc/PID/io; on Linux this includes I/O attributed to waited-for children.",
             "format": "int64",
             "minimum": 0,
             "type": "integer"
@@ -23391,47 +23681,60 @@
         "additionalProperties": false,
         "properties": {
           "cgroup_cpu": {
-            "$ref": "#/components/schemas/AdminCgroupCPUStats"
+            "$ref": "#/components/schemas/AdminCgroupCPUStats",
+            "description": "Visible cgroup CPU usage, quota, throttling, and pressure; omitted when unavailable."
           },
           "cgroup_memory": {
-            "$ref": "#/components/schemas/AdminCgroupMemoryStats"
+            "$ref": "#/components/schemas/AdminCgroupMemoryStats",
+            "description": "Visible cgroup memory usage, limit, events, and pressure; omitted when unavailable. Overlaps with process and children; do not add them together."
           },
           "children": {
-            "$ref": "#/components/schemas/AdminChildStats"
+            "$ref": "#/components/schemas/AdminChildStats",
+            "description": "Bounded point-in-time snapshot of live owned FFmpeg children; omitted when unavailable. Overlaps with cgroup_memory; do not add to cgroup_memory."
           },
           "cpu": {
-            "$ref": "#/components/schemas/AdminResourceSource"
+            "$ref": "#/components/schemas/AdminResourceSource",
+            "description": "Scope, source, and availability of system.cpu_pct and system.cores."
           },
           "disks": {
+            "description": "Inode counts keyed by disk role, carrying the matching system.disks entry's freshness; omitted when none.",
             "items": {
               "$ref": "#/components/schemas/AdminDiskDetails"
             },
             "type": "array"
           },
           "dropped_disk_roots": {
+            "description": "Configured media roots beyond the bounded disk sampling cap that were not probed.",
             "format": "int64",
             "type": "integer"
           },
           "instance_id": {
+            "description": "Random identifier for this sampler lifetime; identifies which process answered behind a load balancer without exposing a hostname.",
             "type": "string"
           },
           "load": {
-            "$ref": "#/components/schemas/AdminResourceSource"
+            "$ref": "#/components/schemas/AdminResourceSource",
+            "description": "Scope, source, and availability of system.load1."
           },
           "memory": {
-            "$ref": "#/components/schemas/AdminResourceSource"
+            "$ref": "#/components/schemas/AdminResourceSource",
+            "description": "Scope, source, and availability of system.mem_used_mb and system.mem_total_mb."
           },
           "network": {
-            "$ref": "#/components/schemas/AdminResourceSource"
+            "$ref": "#/components/schemas/AdminResourceSource",
+            "description": "Scope, source, and availability of system.net_rx_bps and system.net_tx_bps."
           },
           "process": {
-            "$ref": "#/components/schemas/AdminProcessStats"
+            "$ref": "#/components/schemas/AdminProcessStats",
+            "description": "Resource usage of this Silo process alone. Overlaps with children and cgroup_memory; do not add them together."
           },
           "sample_duration_seconds": {
+            "description": "Wall-clock duration of the last completed sampling pass in seconds.",
             "format": "double",
             "type": "number"
           },
           "sample_interval_seconds": {
+            "description": "Configured sampling cadence in seconds.",
             "format": "double",
             "type": "number"
           }
@@ -23456,12 +23759,19 @@
             "type": "boolean"
           },
           "cgroup_resources": {
+            "description": "Responses may include attribution.cgroup_cpu and attribution.cgroup_memory.",
             "type": "boolean"
           },
           "instance_attribution": {
+            "description": "Responses include attribution.instance_id and per-metric scope and source metadata.",
+            "type": "boolean"
+          },
+          "process_cpu_percent": {
+            "description": "Responses may include attribution.process.cpu_pct and attribution.children.cpu_pct.",
             "type": "boolean"
           },
           "process_resources": {
+            "description": "Responses may include attribution.process and attribution.children.",
             "type": "boolean"
           },
           "revision": {
@@ -23469,6 +23779,7 @@
             "type": "string"
           },
           "sample_freshness": {
+            "description": "Responses include sampled_at, stale, and attribution sample interval and duration.",
             "type": "boolean"
           },
           "state": {
@@ -23487,6 +23798,7 @@
           "process_resources",
           "cgroup_resources",
           "sample_freshness",
+          "process_cpu_percent",
           "revision",
           "state",
           "allowed"
@@ -23497,12 +23809,15 @@
         "additionalProperties": false,
         "properties": {
           "available": {
+            "description": "True when the corresponding system reading was measured in this sample.",
             "type": "boolean"
           },
           "scope": {
+            "description": "Population measured: host, virtualized_host, cgroup, or network_namespace; new values may appear.",
             "type": "string"
           },
           "source": {
+            "description": "Operating-system source: procfs, lxcfs, cgroup_v1, or cgroup_v2; new values may appear.",
             "type": "string"
           }
         },
@@ -25344,29 +25659,34 @@
         "additionalProperties": false,
         "properties": {
           "attribution": {
-            "$ref": "#/components/schemas/AdminResourceAttribution"
+            "$ref": "#/components/schemas/AdminResourceAttribution",
+            "description": "Scope and source of each system reading, plus process, cgroup, and owned FFmpeg child detail; omitted when none is reported."
           },
           "available": {
+            "description": "True when this host can be sampled. False on non-Linux hosts, before the first sample completes, or without a sampler; do not read false as zero load.",
             "type": "boolean"
           },
           "gpu": {
+            "description": "One entry per visible GPU, always an array. Missing measurements are omitted while a measured zero remains zero.",
             "items": {
               "$ref": "#/components/schemas/AdminGPUStats"
             },
             "type": "array"
           },
           "sampled_at": {
-            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "description": "When the sample was taken; omitted when no sample exists.",
             "format": "date-time",
             "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
             "patternDescription": "a non-zero RFC 3339 instant",
             "type": "string"
           },
           "stale": {
+            "description": "True when no sample exists or its age exceeds three sampling intervals.",
             "type": "boolean"
           },
           "system": {
-            "$ref": "#/components/schemas/AdminSystemStats"
+            "$ref": "#/components/schemas/AdminSystemStats",
+            "description": "Host or cgroup CPU, memory, load, disk, and network sample; omitted when unavailable."
           }
         },
         "required": [
@@ -25380,36 +25700,44 @@
         "additionalProperties": false,
         "properties": {
           "cores": {
+            "description": "CPUs available to this process: cgroup CPU quota rounded up when limited, otherwise all CPUs the kernel reports.",
             "format": "int64",
             "type": "integer"
           },
           "cpu_pct": {
+            "description": "Aggregate busy percentage across available cores over the last sampling interval (0-100; idle and iowait count as not busy). Uses cgroup usage against cgroup quota when a CPU limit binds; attribution.cpu reports which.",
             "format": "int64",
             "type": "integer"
           },
           "disks": {
+            "description": "Sampled mounts (transcode scratch first, then library roots), deduplicated by filesystem and bounded.",
             "items": {
               "$ref": "#/components/schemas/AdminDiskStats"
             },
             "type": "array"
           },
           "load1": {
+            "description": "1-minute load average, including tasks blocked on storage I/O. Always host-wide (or lxcfs-virtualized); read relative to cores.",
             "format": "double",
             "type": "number"
           },
           "mem_total_mb": {
+            "description": "Total memory capacity in MiB, from the same host or cgroup domain as mem_used_mb.",
             "format": "int64",
             "type": "integer"
           },
           "mem_used_mb": {
+            "description": "Memory in use in MiB. Matches the cgroup working set when a concrete memory limit binds, otherwise the host; paired with mem_total_mb from the same domain (see attribution.memory).",
             "format": "int64",
             "type": "integer"
           },
           "net_rx_bps": {
+            "description": "Aggregate received network throughput in bits per second, excluding loopback. Covers Silo's network namespace (container interfaces under bridge Docker, or host NICs), not streaming traffic alone; use GET /api/v2/admin/stats/timeseries for Silo viewer egress.",
             "format": "int64",
             "type": "integer"
           },
           "net_tx_bps": {
+            "description": "Aggregate transmitted network throughput in bits per second, excluding loopback. Covers Silo's network namespace (all traffic, not streaming alone); use GET /api/v2/admin/stats/timeseries for Silo viewer egress.",
             "format": "int64",
             "type": "integer"
           }
@@ -35279,6 +35607,38 @@
         ],
         "type": "object"
       },
+      "DemoLoginCapability": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed": {
+            "description": "Whether the current principal may use the capability",
+            "type": "boolean"
+          },
+          "revision": {
+            "description": "Opaque revision of this document",
+            "type": "string"
+          },
+          "state": {
+            "description": "Support and configuration state, not health",
+            "enum": [
+              "available",
+              "disabled",
+              "not_configured",
+              "unsupported"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "revision",
+          "state"
+        ],
+        "type": "object"
+      },
+      "DemoLoginInputBody": {
+        "additionalProperties": false,
+        "type": "object"
+      },
       "DetectedBackend": {
         "additionalProperties": false,
         "properties": {
@@ -36056,6 +36416,308 @@
         ],
         "type": "object"
       },
+      "DirectConnectionConfirmation": {
+        "additionalProperties": false,
+        "properties": {
+          "disco_key": {
+            "description": "That node's discovery key at the pong",
+            "pattern": "^discokey:[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "endpoint": {
+            "description": "The unicast UDP source of the pong, as host:port; not validated as a URI",
+            "type": "string"
+          },
+          "peer": {
+            "description": "The node whose direct pong was received",
+            "pattern": "^nodekey:[0-9a-f]{64}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "peer",
+          "disco_key",
+          "endpoint"
+        ],
+        "type": "object"
+      },
+      "DirectConnectionEnrollment": {
+        "additionalProperties": false,
+        "properties": {
+          "coordination_url": {
+            "examples": [
+              "/api/v2/direct-connections"
+            ],
+            "format": "uri-reference",
+            "type": "string"
+          },
+          "expires_at": {
+            "description": "End of the enrollment lease and of the ticket",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "ticket": {
+            "description": "Secret credential for the coordination operations; send it in the Silo-Signaling-Ticket header and never log it",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ticket",
+          "expires_at",
+          "coordination_url"
+        ],
+        "type": "object"
+      },
+      "DirectConnectionEnrollmentRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "connection_path": {
+            "description": "The device's playback.connection_path setting",
+            "enum": [
+              "automatic",
+              "direct_only"
+            ],
+            "type": "string"
+          },
+          "node_key": {
+            "description": "The engine's public node key",
+            "pattern": "^nodekey:[0-9a-f]{64}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_key",
+          "connection_path"
+        ],
+        "type": "object"
+      },
+      "DirectConnectionHostEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "confirmation": {
+            "$ref": "#/components/schemas/DirectConnectionConfirmation",
+            "description": "The host's observation of the requesting device, when it has one"
+          },
+          "disco_key": {
+            "pattern": "^discokey:[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "endpoints": {
+            "description": "Unicast UDP endpoints as host:port",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "home_region": {
+            "description": "Always 0: the device builds the signal URL from its base URL",
+            "format": "int64",
+            "type": "integer"
+          },
+          "label": {
+            "description": "The host's label; the API host is api",
+            "type": "string"
+          },
+          "node_key": {
+            "pattern": "^nodekey:[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "origin": {
+            "description": "Never sent by this server",
+            "type": "string"
+          }
+        },
+        "required": [
+          "label",
+          "node_key",
+          "disco_key",
+          "endpoints",
+          "home_region"
+        ],
+        "type": "object"
+      },
+      "DirectConnectionNetmap": {
+        "additionalProperties": false,
+        "properties": {
+          "hosts": {
+            "items": {
+              "$ref": "#/components/schemas/DirectConnectionHostEntry"
+            },
+            "type": "array"
+          },
+          "lease_seconds": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "refresh_seconds": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "regions": {
+            "description": "Never sent by this server",
+            "items": {
+              "$ref": "#/components/schemas/DirectConnectionRegion"
+            },
+            "type": "array"
+          },
+          "version": {
+            "description": "Opaque content hash; send it back as the version query to hold the call until the netmap changes",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "lease_seconds",
+          "refresh_seconds",
+          "hosts"
+        ],
+        "type": "object"
+      },
+      "DirectConnectionPeer": {
+        "additionalProperties": false,
+        "properties": {
+          "address_family": {
+            "enum": [
+              "ipv4",
+              "ipv6"
+            ],
+            "type": "string"
+          },
+          "class": {
+            "description": "The path class; only direct exists today. A client treats an unknown value as direct",
+            "enum": [
+              "direct"
+            ],
+            "type": "string"
+          },
+          "connected_at": {
+            "description": "When the device's path last became direct",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "device_id": {
+            "type": "string"
+          },
+          "device_name": {
+            "description": "Absent when the device has no registered name",
+            "type": "string"
+          },
+          "host": {
+            "$ref": "#/components/schemas/NetworkAccessHostRef"
+          },
+          "local_port": {
+            "description": "The API host's UDP port",
+            "format": "int64",
+            "type": "integer"
+          },
+          "peer_endpoint": {
+            "description": "The device's observed UDP address as host:port; not validated as a URI",
+            "type": "string"
+          },
+          "user_id": {
+            "description": "Opaque identifier",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "username": {
+            "description": "Empty when the account's name could not be read",
+            "type": "string"
+          }
+        },
+        "required": [
+          "host",
+          "user_id",
+          "username",
+          "device_id",
+          "class",
+          "address_family",
+          "peer_endpoint",
+          "local_port",
+          "connected_at"
+        ],
+        "type": "object"
+      },
+      "DirectConnectionPeerCollection": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DirectConnectionPeer"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "DirectConnectionRegion": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "url": {
+            "format": "uri",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "url"
+        ],
+        "type": "object"
+      },
+      "DirectConnectionRegistration": {
+        "additionalProperties": false,
+        "properties": {
+          "confirmations": {
+            "description": "At most 64 observations of direct pongs, one per peer",
+            "items": {
+              "$ref": "#/components/schemas/DirectConnectionConfirmation"
+            },
+            "maxItems": 64,
+            "type": "array"
+          },
+          "disco_key": {
+            "description": "The engine's discovery key",
+            "pattern": "^discokey:[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "endpoints": {
+            "description": "At most 64 unicast UDP endpoints as host:port",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 64,
+            "type": "array"
+          },
+          "node_key": {
+            "description": "The engine's node key; it must equal the ticket's",
+            "pattern": "^nodekey:[0-9a-f]{64}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_key",
+          "disco_key",
+          "endpoints"
+        ],
+        "type": "object"
+      },
       "DirectConnectionsCapabilities": {
         "additionalProperties": false,
         "properties": {
@@ -36087,6 +36749,84 @@
         "required": [
           "status",
           "refresh",
+          "revision",
+          "state",
+          "allowed"
+        ],
+        "type": "object"
+      },
+      "DirectConnectionsCapability": {
+        "additionalProperties": false,
+        "properties": {
+          "ack_decimation": {
+            "description": "true asks the client, which receives the media, to send fewer QUIC ACKs for application data on its direct connections to this server; false asks for the standard RFC 9000 rate. A local receiver setting that nothing negotiates; a client whose QUIC stack cannot change its ACK rate ignores it. Absent: keep the client default",
+            "type": "boolean"
+          },
+          "allowed": {
+            "description": "Whether the current principal may use the capability",
+            "type": "boolean"
+          },
+          "coordination_url": {
+            "description": "Base URL of the coordination operations. A value that starts with / is appended to the saved base URL, keeping its path; an absolute https URL is used as is",
+            "examples": [
+              "/api/v2/direct-connections"
+            ],
+            "format": "uri-reference",
+            "type": "string"
+          },
+          "hosts": {
+            "description": "The hosts reachable directly; empty when the capability is disabled",
+            "items": {
+              "$ref": "#/components/schemas/DirectConnectionsHost"
+            },
+            "type": "array"
+          },
+          "protocol_revision": {
+            "description": "Opaque revision of the direct protocol between a client engine and the server. Compare it for exact equality with each revision the client supports; a client that does not know it does not enroll",
+            "examples": [
+              "1"
+            ],
+            "type": "string"
+          },
+          "receive_window_mib": {
+            "description": "Largest flow-control receive window in MiB (1,048,576 bytes) the client grants to one QUIC stream on its direct connections to this server. It sets neither the initial stream window nor the connection window. A client that cannot set a stream window ignores it. Absent: keep the client default",
+            "format": "int64",
+            "maximum": 128,
+            "minimum": 4,
+            "type": "integer"
+          },
+          "revision": {
+            "description": "Opaque revision of this document",
+            "type": "string"
+          },
+          "state": {
+            "description": "Support and configuration state, not health",
+            "enum": [
+              "available",
+              "disabled",
+              "not_configured",
+              "unsupported"
+            ],
+            "type": "string"
+          },
+          "stun_servers": {
+            "description": "STUN servers as host:port",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "tls_pin": {
+            "description": "Base64 SHA-256 of the SubjectPublicKeyInfo the direct path and the local route present. It authenticates those two only, never coordination_url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "protocol_revision",
+          "coordination_url",
+          "tls_pin",
+          "stun_servers",
+          "hosts",
           "revision",
           "state",
           "allowed"
@@ -36150,7 +36890,8 @@
               "replica_lease_held",
               "udp_port_invalid",
               "udp_port_bind_failed",
-              "engine_start_failed"
+              "engine_start_failed",
+              "state_store_unavailable"
             ],
             "type": "string"
           },
@@ -36172,6 +36913,37 @@
         "required": [
           "feature",
           "kind",
+          "state"
+        ],
+        "type": "object"
+      },
+      "DirectConnectionsHost": {
+        "additionalProperties": false,
+        "properties": {
+          "host_id": {
+            "examples": [
+              "api"
+            ],
+            "type": "string"
+          },
+          "node_key": {
+            "description": "The host's node key; the engine dials it",
+            "pattern": "^nodekey:[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "state": {
+            "description": "Whether the host can take direct connections now. A client treats an unknown state as unavailable",
+            "enum": [
+              "available",
+              "unavailable",
+              "draining"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "host_id",
+          "node_key",
           "state"
         ],
         "type": "object"
@@ -39078,6 +39850,10 @@
             "description": "Whether auth binding and auth plugin changes apply without a server restart",
             "type": "boolean"
           },
+          "local_password_off_accounts": {
+            "description": "Whether listAdminLocalPasswordOffAccounts lists the accounts that lose their way in when auth.local_password_login is turned off, and whether updateAdminSettings refuses turning it off without an enabled OIDC or LDAP provider (sign_in_provider_required)",
+            "type": "boolean"
+          },
           "network_link_keeps_password": {
             "description": "Whether linking a network identity (linkAccountIdentityWithNetwork, or createAdminUserIdentity at a network provider) keeps the account's local password sign-in. While the provider's latest answer refuses the person, that password is refused with not_permitted (break-glass accounts excepted); an unavailable or unsupported answer keeps the refusal, and it ends when the provider vouches again or the network provider is turned off. Servers without the field turn local password sign-in off on such a link. network_sign_in says whether the link operations are served",
             "type": "boolean"
@@ -39115,6 +39891,7 @@
           "provider_recheck",
           "credentials_linking",
           "network_sign_in",
+          "local_password_off_accounts",
           "network_link_keeps_password",
           "revision",
           "state"
@@ -40007,6 +40784,13 @@
             "description": "Whether the current principal may use the capability",
             "type": "boolean"
           },
+          "emby_custom_server": {
+            "description": "Whether emby_base_url is honored for direct Emby server sign-in",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
           "max_plex_connections": {
             "description": "How many Plex addresses one run races, counting plex_base_url",
             "examples": [
@@ -40040,6 +40824,7 @@
         "required": [
           "plex_connection_fallback",
           "max_plex_connections",
+          "emby_custom_server",
           "revision",
           "state",
           "allowed"
@@ -40261,6 +41046,14 @@
             ],
             "type": "string"
           },
+          "emby_base_url": {
+            "description": "Emby: the server address for a direct sign-in",
+            "examples": [
+              "https://emby.example.test"
+            ],
+            "format": "uri-reference",
+            "type": "string"
+          },
           "jellyfin_base_url": {
             "description": "Jellyfin: the server address",
             "examples": [
@@ -40278,7 +41071,7 @@
             "type": "string"
           },
           "password": {
-            "description": "Emby: the source server password when importing from a configured source; empty for an account without one",
+            "description": "Emby: the source server password when importing from a configured source or emby_base_url; empty for an account without one",
             "type": "string"
           },
           "plex_account_token": {
@@ -40349,7 +41142,7 @@
             "type": "string"
           },
           "username": {
-            "description": "Emby: the source server user name when importing from a configured source",
+            "description": "Emby: the source server user name when importing from a configured source or emby_base_url",
             "type": "string"
           }
         },
@@ -42966,7 +43759,7 @@
         "additionalProperties": false,
         "properties": {
           "created_at": {
-            "description": "When the session was opened. On another session's item, a session opened by device sign-in sees its own created_at",
+            "description": "When the session was opened. On another session's item, a session opened by device sign-in or a demo visitor sees its own created_at",
             "examples": [
               "2026-01-02T03:04:05.678Z"
             ],
@@ -42980,28 +43773,28 @@
             "type": "boolean"
           },
           "device_id": {
-            "description": "Device identifier the client sent in X-Silo-Device-Id when it signed in; absent when it sent none. Client-reported: it identifies the device for display and audit and authorizes nothing. Absent on another session's item for a session opened by device sign-in",
+            "description": "Device identifier the client sent in X-Silo-Device-Id when it signed in; absent when it sent none. Client-reported: it identifies the device for display and audit and authorizes nothing. Absent on another session's item for a session opened by device sign-in or a demo visitor",
             "examples": [
               "8d2f6a4e-3c1b-4e5f-9a7d-0b1c2d3e4f50"
             ],
             "type": "string"
           },
           "device_name": {
-            "description": "Device name the client sent in X-Silo-Device-Name when it signed in, else its User-Agent; empty when it sent neither. A device-code sign-in falls back to the name the device started with, then its User-Agent, then This device. Empty on another session's item for a session opened by device sign-in",
+            "description": "Device name the client sent in X-Silo-Device-Name when it signed in, else its User-Agent; empty when it sent neither. A device-code sign-in falls back to the name the device started with, then its User-Agent, then This device. Empty on another session's item for a session opened by device sign-in or a demo visitor",
             "examples": [
               "Living Room Apple TV"
             ],
             "type": "string"
           },
           "device_platform": {
-            "description": "Platform the client sent in X-Silo-Device-Platform when it signed in; absent when it sent none, and on another session's item for a session opened by device sign-in",
+            "description": "Platform the client sent in X-Silo-Device-Platform when it signed in; absent when it sent none, and on another session's item for a session opened by device sign-in or a demo visitor",
             "examples": [
               "tvOS"
             ],
             "type": "string"
           },
           "expires_at": {
-            "description": "When the session expires unless refreshed. On another session's item, a session opened by device sign-in sees its own expires_at",
+            "description": "When the session expires unless refreshed. On another session's item, a session opened by device sign-in or a demo visitor sees its own expires_at",
             "examples": [
               "2026-02-01T03:04:05.678Z"
             ],
@@ -43011,7 +43804,7 @@
             "type": "string"
           },
           "id": {
-            "description": "Session identifier; the value deleteSession takes. A session opened by device sign-in sees every session's id, and of another session nothing else but current",
+            "description": "Session identifier; the value deleteSession takes. A session opened by device sign-in, and a demo visitor (see listSessions), sees every session's id, and of another session nothing else but current",
             "examples": [
               "6f1c2a1e-8d3b-4f0e-9a7c-2b5d8e1f3a4c"
             ],
@@ -43019,14 +43812,14 @@
             "type": "string"
           },
           "ip_address": {
-            "description": "Client address recorded at login; empty when unknown, and on another session's item for a session opened by device sign-in",
+            "description": "Client address recorded at login; empty when unknown, and on another session's item for a session opened by device sign-in or a demo visitor",
             "examples": [
               "203.0.113.7"
             ],
             "type": "string"
           },
           "last_seen_at": {
-            "description": "Most recent authenticated request, coalesced to at most one update per minute; null until recorded, and on another session's item for a session opened by device sign-in",
+            "description": "Most recent authenticated request, coalesced to at most one update per minute; null until recorded, and on another session's item for a session opened by device sign-in or a demo visitor",
             "examples": [
               "2026-01-02T03:04:05.678Z"
             ],
@@ -43106,7 +43899,7 @@
             "description": "The caller's live session, even when it falls outside this page; null for API-key callers or another account's admin listing",
             "properties": {
               "created_at": {
-                "description": "When the session was opened. On another session's item, a session opened by device sign-in sees its own created_at",
+                "description": "When the session was opened. On another session's item, a session opened by device sign-in or a demo visitor sees its own created_at",
                 "examples": [
                   "2026-01-02T03:04:05.678Z"
                 ],
@@ -43120,28 +43913,28 @@
                 "type": "boolean"
               },
               "device_id": {
-                "description": "Device identifier the client sent in X-Silo-Device-Id when it signed in; absent when it sent none. Client-reported: it identifies the device for display and audit and authorizes nothing. Absent on another session's item for a session opened by device sign-in",
+                "description": "Device identifier the client sent in X-Silo-Device-Id when it signed in; absent when it sent none. Client-reported: it identifies the device for display and audit and authorizes nothing. Absent on another session's item for a session opened by device sign-in or a demo visitor",
                 "examples": [
                   "8d2f6a4e-3c1b-4e5f-9a7d-0b1c2d3e4f50"
                 ],
                 "type": "string"
               },
               "device_name": {
-                "description": "Device name the client sent in X-Silo-Device-Name when it signed in, else its User-Agent; empty when it sent neither. A device-code sign-in falls back to the name the device started with, then its User-Agent, then This device. Empty on another session's item for a session opened by device sign-in",
+                "description": "Device name the client sent in X-Silo-Device-Name when it signed in, else its User-Agent; empty when it sent neither. A device-code sign-in falls back to the name the device started with, then its User-Agent, then This device. Empty on another session's item for a session opened by device sign-in or a demo visitor",
                 "examples": [
                   "Living Room Apple TV"
                 ],
                 "type": "string"
               },
               "device_platform": {
-                "description": "Platform the client sent in X-Silo-Device-Platform when it signed in; absent when it sent none, and on another session's item for a session opened by device sign-in",
+                "description": "Platform the client sent in X-Silo-Device-Platform when it signed in; absent when it sent none, and on another session's item for a session opened by device sign-in or a demo visitor",
                 "examples": [
                   "tvOS"
                 ],
                 "type": "string"
               },
               "expires_at": {
-                "description": "When the session expires unless refreshed. On another session's item, a session opened by device sign-in sees its own expires_at",
+                "description": "When the session expires unless refreshed. On another session's item, a session opened by device sign-in or a demo visitor sees its own expires_at",
                 "examples": [
                   "2026-02-01T03:04:05.678Z"
                 ],
@@ -43151,7 +43944,7 @@
                 "type": "string"
               },
               "id": {
-                "description": "Session identifier; the value deleteSession takes. A session opened by device sign-in sees every session's id, and of another session nothing else but current",
+                "description": "Session identifier; the value deleteSession takes. A session opened by device sign-in, and a demo visitor (see listSessions), sees every session's id, and of another session nothing else but current",
                 "examples": [
                   "6f1c2a1e-8d3b-4f0e-9a7c-2b5d8e1f3a4c"
                 ],
@@ -43159,14 +43952,14 @@
                 "type": "string"
               },
               "ip_address": {
-                "description": "Client address recorded at login; empty when unknown, and on another session's item for a session opened by device sign-in",
+                "description": "Client address recorded at login; empty when unknown, and on another session's item for a session opened by device sign-in or a demo visitor",
                 "examples": [
                   "203.0.113.7"
                 ],
                 "type": "string"
               },
               "last_seen_at": {
-                "description": "Most recent authenticated request, coalesced to at most one update per minute; null until recorded, and on another session's item for a session opened by device sign-in",
+                "description": "Most recent authenticated request, coalesced to at most one update per minute; null until recorded, and on another session's item for a session opened by device sign-in or a demo visitor",
                 "examples": [
                   "2026-01-02T03:04:05.678Z"
                 ],
@@ -48973,6 +49766,14 @@
           "expires_at": {
             "type": "string"
           },
+          "media_transport": {
+            "description": "The transport this plan's media uses. direct means the client carries the media requests it would send to its saved base URL through the direct path to the api host; regular means the saved base URL, or the local route.",
+            "enum": [
+              "regular",
+              "direct"
+            ],
+            "type": "string"
+          },
           "plan_attempt_key": {
             "type": "string"
           },
@@ -49045,7 +49846,8 @@
           "requested_media_file_id",
           "effective_media_file_id",
           "source",
-          "subtitle_fidelity_policy"
+          "subtitle_fidelity_policy",
+          "media_transport"
         ],
         "type": "object"
       },
@@ -49114,6 +49916,11 @@
             "maximum": 1000000000,
             "minimum": 1,
             "type": "integer"
+          },
+          "connection_receipt": {
+            "description": "The Silo-Connection-Receipt header value of the probe response this result measured. A device enrolled for direct connections must send it: without it the result is refused with 422 (code missing), and a receipt that is not the host's for this account and device is refused with 422 (code invalid). An expired receipt, or a direct receipt of a path that has since been replaced, is accepted and the result is not kept.",
+            "maxLength": 2048,
+            "type": "string"
           },
           "duration_ms": {
             "format": "int64",
@@ -49260,6 +50067,14 @@
             },
             "maxItems": 8,
             "type": "array"
+          },
+          "media_transport": {
+            "description": "The transport the client asks the media to use. direct asks for the direct path to this server; send it only when the local route is not active, the device is enrolled and the engine is up. Omitted means regular.",
+            "enum": [
+              "regular",
+              "direct"
+            ],
+            "type": "string"
           },
           "metered": {
             "deprecated": true,
@@ -50306,6 +51121,14 @@
             "enum": [
               "ignore",
               "clear"
+            ],
+            "type": "string"
+          },
+          "media_transport": {
+            "description": "The transport the client asks the media to use. direct asks for the direct path to this server; send it only when the local route is not active, the device is enrolled and the engine is up. Omitted means regular.",
+            "enum": [
+              "regular",
+              "direct"
             ],
             "type": "string"
           },
@@ -85210,7 +86033,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Discover dashboard features supported by v2 in this build. Support does not promise dependency readiness; layout storage is not yet available on v2.",
+        "summary": "Discover dashboard features supported by v2 in this build. Support does not promise dependency readiness; server_layouts stays false until the layout lifecycle is accepted, although layout read, save and reset are served.",
         "tags": [
           "admin-observability"
         ],
@@ -87364,12 +88187,154 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Discover direct-connection readiness operations and service configuration, independently of probe health and the hidden setting.",
+        "summary": "Discover direct-connection readiness operations and service configuration, independently of probe health and the direct_connections.enabled setting.",
         "tags": [
           "direct-connections"
         ],
         "x-silo-class": "acting_admin",
         "x-silo-conditional": true,
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/direct-connections/peers": {
+      "get": {
+        "operationId": "listAdminDirectConnectionPeers",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DirectConnectionPeerCollection"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List the devices that have a direct path to the API host now, with their observed addresses and ports. Needs the acting administrator; no other caller sees an endpoint.",
+        "tags": [
+          "direct-connections"
+        ],
+        "x-silo-class": "acting_admin",
         "x-silo-service-backed": true
       }
     },
@@ -87518,7 +88483,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Read the API host's direct-connection readiness. Network probes run only when the hidden setting is enabled. Refresh joins an in-flight check or starts a new one. The settings read and the check have separate fifteen-second bounds, so a request can take about thirty seconds.",
+        "summary": "Read the API host's direct-connection readiness. Network probes run only when the direct_connections.enabled setting is on. Refresh joins an in-flight check or starts a new one. The settings read and the check have separate fifteen-second bounds, so a request can take about thirty seconds.",
         "tags": [
           "direct-connections"
         ],
@@ -117004,7 +117969,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Stop the plugin, delete the installation row (configuration, bindings and archives cascade) and remove its files. Row delete and file removal are not one transaction and a repeat finds no row: a later 404 is not this caller's receipt; never automatically retry.",
+        "summary": "Delete the installation row (configuration, bindings and archives cascade), then stop the plugin and remove its files. Row delete and file removal are not one transaction and a repeat finds no row: a later 404 is not this caller's receipt; never automatically retry. Uninstalling the last OIDC or LDAP provider people can sign in with while auth.local_password_login is off is 409 sign_in_provider_required, and the plugin keeps running. While another request is changing the sign-in accounts of this plugin, the uninstall changes nothing and answers 503 dependency_unavailable with Retry-After; repeat it then.",
         "tags": [
           "admin-plugins"
         ],
@@ -117211,7 +118176,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Assign enabled and/or update_policy on one installation. Disabling stops the running plugin first. Repeating the same assignment converges on one stored row.",
+        "summary": "Assign enabled and/or update_policy on one installation. Disabling stops the running plugin once the change is saved. Disabling the installation of the last OIDC or LDAP provider people can sign in with while auth.local_password_login is off is 409 sign_in_provider_required, and the plugin keeps running. Repeating the same assignment converges on one stored row.",
         "tags": [
           "admin-plugins"
         ],
@@ -117421,7 +118386,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Replace the auth provider binding for one capability. Sign-in providers rebuild on every node without a restart. Enabling a binding while another one is enabled is 409 provider_already_enabled. The whole row is assigned, so repeating the request converges on one stored binding.",
+        "summary": "Replace the auth provider binding for one capability. Sign-in providers rebuild on every node without a restart. Enabling a binding while another one is enabled is 409 provider_already_enabled. Turning off the last OIDC or LDAP binding people can sign in with while auth.local_password_login is off is 409 sign_in_provider_required. The whole row is assigned, so repeating the request converges on one stored binding.",
         "tags": [
           "admin-plugins"
         ],
@@ -134638,6 +135603,16 @@
               "minLength": 1,
               "type": "string"
             }
+          },
+          {
+            "description": "Add egress to the rows. Send it only when the capabilities report egress true.",
+            "explode": false,
+            "in": "query",
+            "name": "include_egress",
+            "schema": {
+              "description": "Add egress to the rows. Send it only when the capabilities report egress true.",
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -134946,7 +135921,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Read live playback observations; these do not confer control authority. Pagination bounds the SQL source and response using session identity.",
+        "summary": "Discover live playback observation features and supported row fields on this server.",
         "tags": [
           "admin"
         ],
@@ -135318,7 +136293,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Read live playback observations; these do not confer control authority. Pagination bounds the SQL source and response using session identity.",
+        "summary": "Read a bounded sample and total count of live playback observations without session identifiers or diagnostic metadata.",
         "tags": [
           "admin"
         ],
@@ -136571,7 +137546,7 @@
         "x-silo-service-backed": true
       },
       "put": {
-        "description": "Turning auth.local_password_login off while no enabled break-glass admin can sign in with a password is 409 break_glass_required.",
+        "description": "Turning auth.local_password_login off while no enabled break-glass admin can sign in with a password is 409 break_glass_required, and while no OIDC or LDAP provider people can sign in with is on it is 409 sign_in_provider_required (an OpenID Connect provider counts only with server.public_url set, so clearing server.public_url while auth.local_password_login is off and it is the only provider is refused the same way). Otherwise the change applies at once; listAdminLocalPasswordOffAccounts tells beforehand which accounts lose their way in.",
         "operationId": "updateAdminSettings",
         "parameters": [
           {
@@ -137598,7 +138573,7 @@
         "x-silo-service-backed": true
       },
       "put": {
-        "description": "Turning auth.local_password_login off while no enabled break-glass admin can sign in with a password is 409 break_glass_required.",
+        "description": "Turning auth.local_password_login off while no enabled break-glass admin can sign in with a password is 409 break_glass_required, and while no OIDC or LDAP provider people can sign in with is on it is 409 sign_in_provider_required (an OpenID Connect provider counts only with server.public_url set, so clearing server.public_url while auth.local_password_login is off and it is the only provider is refused the same way). Otherwise the change applies at once; listAdminLocalPasswordOffAccounts tells beforehand which accounts lose their way in.",
         "operationId": "updateAdminSetting",
         "parameters": [
           {
@@ -137844,6 +138819,204 @@
         "x-silo-demo-restricted": true,
         "x-silo-guarded": true,
         "x-silo-retry-safety": "non_retryable",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/sign-in/local-password-off/accounts": {
+      "get": {
+        "description": "Answers for turning auth.local_password_login off: enabled accounts whose local password signs in today, that are not break-glass admins and have no linked identity at an enabled provider. Break-glass admins keep their password and are not listed; neither are disabled accounts. Each account is in one group: email_match when email auto-match can link it at its first provider sign-in (the provider must assert that email as verified), otherwise admin_link. totals counts both groups whichever is asked for. Ordered by username; pages are live, not a snapshot.",
+        "operationId": "listAdminLocalPasswordOffAccounts",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "email_match: accounts email auto-match can link at their first provider sign-in. admin_link: accounts nothing links until an administrator does",
+            "explode": false,
+            "in": "query",
+            "name": "group",
+            "required": true,
+            "schema": {
+              "description": "email_match: accounts email auto-match can link at their first provider sign-in. admin_link: accounts nothing links until an administrator does",
+              "enum": [
+                "email_match",
+                "admin_link"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Answer as if auth.email_auto_match had this value, for an edit that changes both settings; omitted uses the saved value",
+            "explode": false,
+            "in": "query",
+            "name": "email_auto_match",
+            "schema": {
+              "description": "Answer as if auth.email_auto_match had this value, for an edit that changes both settings; omitted uses the saved value",
+              "enum": [
+                "true",
+                "false"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size; default 50, maximum 200",
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "description": "Page size; default 50, maximum 200",
+              "examples": [
+                50
+              ],
+              "format": "int64",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "maxLength": 8192,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminLocalPasswordOffAccounts"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List the accounts that lose their way in when local password sign-in is turned off.",
+        "tags": [
+          "admin-users"
+        ],
+        "x-silo-class": "acting_admin",
         "x-silo-service-backed": true
       }
     },
@@ -138524,11 +139697,13 @@
             }
           },
           {
+            "description": "Window length in hours (1 to 744, up to 31 days).",
             "explode": false,
             "in": "query",
             "name": "hours",
             "schema": {
               "default": 24,
+              "description": "Window length in hours (1 to 744, up to 31 days).",
               "format": "int64",
               "maximum": 744,
               "minimum": 1,
@@ -138689,11 +139864,13 @@
             }
           },
           {
+            "description": "Window length in hours (1 to 744, up to 31 days).",
             "explode": false,
             "in": "query",
             "name": "hours",
             "schema": {
               "default": 24,
+              "description": "Window length in hours (1 to 744, up to 31 days).",
               "format": "int64",
               "maximum": 744,
               "minimum": 1,
@@ -151905,6 +153082,302 @@
         "x-silo-service-backed": true
       }
     },
+    "/api/v2/auth/demo": {
+      "post": {
+        "description": "Only a server whose operator runs it as a public demo offers this: demo mode (the demo.enabled setting) is on and the demo.username setting names an account that is not an administrator. Every other server answers 409 capability_disabled, or capability_not_configured on a demo server with no usable demo account; getDemoLoginCapability tells a client which before it offers the action. The session opened is the one a visitor gets by typing the demo account's password, restricted by demo mode in the same way. Send an empty JSON object as the body.",
+        "operationId": "demoLogin",
+        "parameters": [
+          {
+            "description": "The client's stable device identifier, recorded on the login session this sign-in opens",
+            "in": "header",
+            "name": "X-Silo-Device-Id",
+            "schema": {
+              "description": "The client's stable device identifier, recorded on the login session this sign-in opens",
+              "examples": [
+                "8d2f6a4e-3c1b-4e5f-9a7d-0b1c2d3e4f50"
+              ],
+              "maxLength": 128,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional device name recorded on the login session (first 120 characters)",
+            "in": "header",
+            "name": "X-Silo-Device-Name",
+            "schema": {
+              "description": "Optional device name recorded on the login session (first 120 characters)",
+              "examples": [
+                "Living Room Apple TV"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional platform recorded on the login session (first 40 characters)",
+            "in": "header",
+            "name": "X-Silo-Device-Platform",
+            "schema": {
+              "description": "Optional platform recorded on the login session (first 40 characters)",
+              "examples": [
+                "tvOS"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DemoLoginInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenPair"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Sign in to the public demo account of a server run as a public demo.",
+        "tags": [
+          "auth"
+        ],
+        "x-silo-class": "public",
+        "x-silo-retry-safety": "non_retryable",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/auth/demo/capability": {
+      "get": {
+        "operationId": "getDemoLoginCapability",
+        "parameters": [
+          {
+            "description": "Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed.",
+            "in": "header",
+            "name": "If-Match",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-None-Match",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DemoLoginCapability"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "The representation named by If-None-Match is current; no body.",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Describe whether this server offers demo sign-in: available only on a public demo, disabled when demo mode is off, not_configured when no demo account is named.",
+        "tags": [
+          "auth"
+        ],
+        "x-silo-class": "public",
+        "x-silo-conditional": true
+      }
+    },
     "/api/v2/auth/device": {
       "get": {
         "description": "A six-digit Jellyfin Quick Connect code is looked up only for the account's own signed-in session: send its bearer token. Without a valid one the lookup is 401, and from an impersonation session 403. Each such lookup also spends the account's Quick Connect code budget.",
@@ -155297,7 +156770,7 @@
     },
     "/api/v2/auth/sessions": {
       "get": {
-        "description": "A session opened by device sign-in (a code a signed-in person approved, Jellyfin Quick Connect, or a remote-playback handoff), and a session from before this rule was recorded whose X-Silo-Device-Platform was tvOS, android-tv or roku, sees only itself in full. It still gets every live session of the account, but another session's item carries only its id and current: device_name and ip_address are empty, device_id and device_platform are absent, last_seen_at is null, and created_at and expires_at repeat the caller's own. For such a caller the page is ordered by id, not newest first, and a cursor from the other kind of caller is invalid_cursor.",
+        "description": "A session opened by device sign-in (a code a signed-in person approved, Jellyfin Quick Connect, or a remote-playback handoff), and a session from before this rule was recorded whose X-Silo-Device-Platform was tvOS, android-tv or roku, sees only itself in full. It still gets every live session of the account, but another session's item carries only its id and current: device_name and ip_address are empty, device_id and device_platform are absent, last_seen_at is null, and created_at and expires_at repeat the caller's own. For such a caller the page is ordered by id, not newest first, and a cursor from the other kind of caller is invalid_cursor. In demo mode a caller that is not an administrator gets the same page: demo visitors share one account, so its other sessions are other visitors'. A session that already gets the reduced page (see above) is unaffected by demo mode: the setting is not read for it, and its cursor stays valid when demo mode is switched on or off. For any other such caller, when the server has never read whether demo mode is on, the answer is 500 internal_error rather than the full page. An API key of such a caller, which has no session of its own, gets that 500 too, and 403 permission_denied once the setting has been read and demo mode is on.",
         "operationId": "listSessions",
         "parameters": [
           {
@@ -156947,6 +158420,207 @@
           "home"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/capabilities/direct-connections": {
+      "get": {
+        "operationId": "getDirectConnectionsCapability",
+        "parameters": [
+          {
+            "description": "Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed.",
+            "in": "header",
+            "name": "If-Match",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-None-Match",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DirectConnectionsCapability"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "The representation named by If-None-Match is current; no body.",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Discover whether this server offers direct connections to the calling client, and the values its engine needs.",
+        "tags": [
+          "direct-connections"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-conditional": true,
         "x-silo-service-backed": true
       }
     },
@@ -174993,6 +176667,769 @@
         "x-silo-service-backed": true
       }
     },
+    "/api/v2/direct-connections/enrollment": {
+      "delete": {
+        "operationId": "withdrawDirectConnectionDevice",
+        "parameters": [
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The client's stable device identifier",
+            "in": "header",
+            "name": "X-Silo-Device-Id",
+            "required": true,
+            "schema": {
+              "description": "The client's stable device identifier",
+              "examples": [
+                "iphone-1"
+              ],
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Withdraw the calling device's enrollment. Withdrawing a device that is not enrolled succeeds.",
+        "tags": [
+          "direct-connections"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-retry-safety": "natural_idempotent",
+        "x-silo-service-backed": true
+      },
+      "post": {
+        "description": "Enrolling the same device again with the same node key renews the lease. A new node key replaces the entry and ends the old ticket. 409 direct_device_limit means the account holds the most devices it may; show the limit. 409 direct_node_key_conflict means another device holds the node key; make a new key and enroll again. 409 capability_disabled means an administrator turned direct connections off.",
+        "operationId": "enrollDirectConnectionDevice",
+        "parameters": [
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The client's stable device identifier",
+            "in": "header",
+            "name": "X-Silo-Device-Id",
+            "required": true,
+            "schema": {
+              "description": "The client's stable device identifier",
+              "examples": [
+                "iphone-1"
+              ],
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DirectConnectionEnrollmentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DirectConnectionEnrollment"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Enroll the calling device's engine, or renew its enrollment, and return the ticket for the coordination operations. Needs a login session; an API key or a View as user session is refused.",
+        "tags": [
+          "direct-connections"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-retry-safety": "natural_idempotent",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/direct-connections/netmap": {
+      "get": {
+        "operationId": "getDirectConnectionNetmap",
+        "parameters": [
+          {
+            "description": "The enrollment ticket; a missing or invalid one is 401. Never log it",
+            "in": "header",
+            "name": "Silo-Signaling-Ticket",
+            "schema": {
+              "description": "The enrollment ticket; a missing or invalid one is 401. Never log it",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The version of the netmap the caller holds; an equal current version holds the call up to 25 seconds",
+            "explode": false,
+            "in": "query",
+            "name": "version",
+            "schema": {
+              "description": "The version of the netmap the caller holds; an equal current version holds the call up to 25 seconds",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DirectConnectionNetmap"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Read the hosts this device can reach, holding the call while the netmap is unchanged. Authenticated by the enrollment ticket.",
+        "tags": [
+          "direct-connections"
+        ],
+        "x-silo-class": "public",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/direct-connections/registration": {
+      "post": {
+        "operationId": "registerDirectConnectionPeer",
+        "parameters": [
+          {
+            "description": "The enrollment ticket; a missing or invalid one is 401. Never log it",
+            "in": "header",
+            "name": "Silo-Signaling-Ticket",
+            "schema": {
+              "description": "The enrollment ticket; a missing or invalid one is 401. Never log it",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DirectConnectionRegistration"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Publish the calling engine's discovery key, endpoints and confirmations. Authenticated by the enrollment ticket.",
+        "tags": [
+          "direct-connections"
+        ],
+        "x-silo-class": "public",
+        "x-silo-retry-safety": "natural_idempotent",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/direct-connections/signal": {
+      "get": {
+        "operationId": "connectDirectConnectionSignal",
+        "parameters": [
+          {
+            "description": "The enrollment ticket; a missing or invalid one is 401 before any upgrade. Never log it.",
+            "in": "header",
+            "name": "Silo-Signaling-Ticket",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Offer derp.",
+            "in": "header",
+            "name": "Sec-WebSocket-Protocol",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "101": {
+            "description": "Signaling stream established.",
+            "headers": {
+              "Connection": {
+                "description": "WebSocket handshake header.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Sec-WebSocket-Accept": {
+                "description": "WebSocket handshake header.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Sec-WebSocket-Protocol": {
+                "description": "The selected subprotocol, always derp.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Upgrade": {
+                "description": "WebSocket handshake header.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Handshake refused."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Handshake refused."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Handshake refused."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Handshake refused."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Handshake refused."
+          }
+        },
+        "summary": "Open the calling engine's signaling stream. Authenticated by the enrollment ticket; the stream carries DERP frames as binary messages.",
+        "tags": [
+          "direct-connections"
+        ],
+        "x-silo-class": "public",
+        "x-silo-raw-protocol": "websocket",
+        "x-silo-raw-reason": "Enrollment ticket and entry checks precede the upgrade; the stream closes at the ticket's expiry or when the entry is revoked.",
+        "x-silo-service-backed": true
+      }
+    },
     "/api/v2/direct-download": {
       "get": {
         "operationId": "getDirectDownload",
@@ -186567,7 +189004,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Describe what an import run may rely on, including Plex connection fallback.",
+        "summary": "Describe what an import run may rely on, including Plex connection fallback and direct Emby server URLs.",
         "tags": [
           "history-imports"
         ],
@@ -209521,6 +211958,27 @@
             "schema": {
               "type": "boolean"
             }
+          },
+          {
+            "description": "The transport the client asks the probe to measure: regular or direct. Omitted means regular.",
+            "in": "query",
+            "name": "media_transport",
+            "schema": {
+              "enum": [
+                "regular",
+                "direct"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The client's stable device identifier. A device the server holds a direct enrollment for names itself here so the probe is measured, and receipted, on the path its media takes. Optional.",
+            "in": "header",
+            "name": "X-Silo-Device-Id",
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -209545,6 +212003,12 @@
                 "schema": {
                   "format": "int64",
                   "type": "integer"
+                }
+              },
+              "Silo-Connection-Receipt": {
+                "description": "Sent when the request names a device. Names the account, the device and the connection class that carried the bytes: regular over TCP, direct over a direct path. A client sends it back as connection_receipt with the result.",
+                "schema": {
+                  "type": "string"
                 }
               }
             }
@@ -258619,6 +261083,10 @@
       "nodemetrics_ChildStats": {
         "additionalProperties": false,
         "properties": {
+          "cpu_pct": {
+            "format": "double",
+            "type": "number"
+          },
           "cpu_seconds": {
             "format": "double",
             "type": "number"
@@ -258755,6 +261223,10 @@
       "nodemetrics_ProcessStats": {
         "additionalProperties": false,
         "properties": {
+          "cpu_pct": {
+            "format": "double",
+            "type": "number"
+          },
           "cpu_seconds": {
             "format": "double",
             "type": "number"
@@ -259388,12 +261860,20 @@
             "format": "int64",
             "type": "integer"
           },
+          "media_transport": {
+            "type": "string"
+          },
           "original_started_at": {
             "format": "date-time",
             "type": "string"
           },
           "output_subdir": {
             "type": "string"
+          },
+          "path_generation": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
           },
           "plan_id": {
             "type": "string"

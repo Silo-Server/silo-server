@@ -68,9 +68,9 @@ func TestBuildMatchDecisionNamesRejectingRule(t *testing.T) {
 		requiredScore float64
 	}{
 		{
-			name:          "lone candidate without a year",
+			name:          "lone undated candidate without a year",
 			hints:         &MatchHints{Title: "4th Man Out", Type: "movie"},
-			candidates:    []MatchCandidate{tmdbMovie("4th Man Out", 2015, "342672")},
+			candidates:    []MatchCandidate{tmdbMovie("4th Man Out", 0, "342672")},
 			rejection:     MatchRejectionLoneCandidate,
 			requiredScore: automaticMatchLoneCandidateScore,
 		},

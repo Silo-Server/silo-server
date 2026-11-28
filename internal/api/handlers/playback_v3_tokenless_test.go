@@ -45,10 +45,10 @@ func TestPlaybackURLBuildersRefuseTokensForMediaAuthorizedSessions(t *testing.T)
 		t.Fatalf("legacy stream URL = %q, want a restart token", got)
 	}
 
-	if got, servedByProxy := handler.identityStreamURLV3(secure, file, proxy, netaccess.Path{}); servedByProxy || got != "/stream/session-secure" {
+	if got, servedByProxy := handler.identityStreamURLV3(secure, file, proxy, netaccess.Path{}, nodepool.DirectMedia{}); servedByProxy || got != "/stream/session-secure" {
 		t.Fatalf("secure identity URL = %q (proxy %v), want the API-local route", got, servedByProxy)
 	}
-	if got, servedByProxy := handler.identityStreamURLV3(&legacy, file, proxy, netaccess.Path{}); !servedByProxy || !strings.HasPrefix(got, proxy.URL) {
+	if got, servedByProxy := handler.identityStreamURLV3(&legacy, file, proxy, netaccess.Path{}, nodepool.DirectMedia{}); !servedByProxy || !strings.HasPrefix(got, proxy.URL) {
 		t.Fatalf("legacy identity URL = %q (proxy %v), want the signed proxy route", got, servedByProxy)
 	}
 
@@ -56,10 +56,10 @@ func TestPlaybackURLBuildersRefuseTokensForMediaAuthorizedSessions(t *testing.T)
 	card.RoutingWorkload = string(noderouting.WorkloadVideoTranscode)
 	card.RoutingExecution = string(noderouting.ExecutionTranscode)
 	card.RoutingEgress = string(noderouting.EgressProxy)
-	if got := handler.buildProxyManifestURL(card, proxy, true, netaccess.Path{}); got != "/playback/transcode/session-secure/master.m3u8" {
+	if got := handler.buildProxyManifestURL(card, proxy, true, netaccess.Path{}, nodepool.DirectMedia{}); got != "/playback/transcode/session-secure/master.m3u8" {
 		t.Fatalf("secure manifest URL = %q, want the tokenless API-local manifest", got)
 	}
-	legacyManifestURL := handler.buildProxyManifestURL(card, proxy, false, netaccess.Path{})
+	legacyManifestURL := handler.buildProxyManifestURL(card, proxy, false, netaccess.Path{}, nodepool.DirectMedia{})
 	if !strings.HasPrefix(legacyManifestURL, proxy.URL+"/stream/transcode/") {
 		t.Fatalf("legacy manifest URL = %q, want the signed proxy manifest", legacyManifestURL)
 	}
@@ -83,7 +83,7 @@ func TestPlaybackURLBuildersRefuseTokensForMediaAuthorizedSessions(t *testing.T)
 	// must never fall back to minting the credential the mode removed.
 	grants := &recordingRecipeCardStoreV3{}
 	handler.ProxyGrantStore = grants
-	got, servedByProxy, _ := handler.identityGrantStreamURLV3(context.Background(), secure, file, proxy, netaccess.Path{})
+	got, servedByProxy, _ := handler.identityGrantStreamURLV3(context.Background(), secure, file, proxy, netaccess.Path{}, nodepool.DirectMedia{})
 	if !servedByProxy || got != proxy.URL+"/stream/v3/session-secure" {
 		t.Fatalf("origins identity URL = %q (proxy %v), want the credential-free proxy route", got, servedByProxy)
 	}
@@ -94,7 +94,7 @@ func TestPlaybackURLBuildersRefuseTokensForMediaAuthorizedSessions(t *testing.T)
 		t.Fatalf("identity grant egress node ID = %d, want 71", grant.RoutingEgressNodeID)
 	}
 
-	got, servedByProxy, _ = handler.grantManifestURLV3(context.Background(), card, proxy, netaccess.Path{})
+	got, servedByProxy, _ = handler.grantManifestURLV3(context.Background(), card, proxy, netaccess.Path{}, nodepool.DirectMedia{})
 	if !servedByProxy || got != proxy.URL+"/stream/v3/session-secure/master.m3u8" {
 		t.Fatalf("origins manifest URL = %q (proxy %v), want the credential-free proxy manifest", got, servedByProxy)
 	}
@@ -291,15 +291,15 @@ func TestProxyURLBuildersUseThePublicURLWhenSet(t *testing.T) {
 	proxy := &nodepool.Node{URL: "http://10.0.0.9:8083", PublicURL: &public}
 
 	session := &playback.Session{ID: "session-public", UserID: 7, ProfileID: "profile-1", MediaFileID: file.ID, PlayMethod: playback.PlayDirect}
-	if got, servedByProxy := handler.identityStreamURLV3(session, file, proxy, netaccess.Path{}); !servedByProxy || !strings.HasPrefix(got, public+"/stream/direct/") {
+	if got, servedByProxy := handler.identityStreamURLV3(session, file, proxy, netaccess.Path{}, nodepool.DirectMedia{}); !servedByProxy || !strings.HasPrefix(got, public+"/stream/direct/") {
 		t.Fatalf("identity URL = %q (proxy %v), want the public origin", got, servedByProxy)
 	}
 
 	card := playback.NewRecipeCard(session.UserID, session.ProfileID, file.ID, "", playback.TranscodeOpts{SessionID: session.ID, InputPath: file.FilePath})
-	if got := handler.buildProxyManifestURL(card, proxy, false, netaccess.Path{}); !strings.HasPrefix(got, public+"/stream/transcode/") {
+	if got := handler.buildProxyManifestURL(card, proxy, false, netaccess.Path{}, nodepool.DirectMedia{}); !strings.HasPrefix(got, public+"/stream/transcode/") {
 		t.Fatalf("manifest URL = %q, want the public origin", got)
 	}
-	if strings.Contains(handler.buildProxyManifestURL(card, proxy, false, netaccess.Path{}), "10.0.0.9") {
+	if strings.Contains(handler.buildProxyManifestURL(card, proxy, false, netaccess.Path{}, nodepool.DirectMedia{}), "10.0.0.9") {
 		t.Fatalf("manifest URL leaked the backend address")
 	}
 }

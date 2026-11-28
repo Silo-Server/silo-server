@@ -136,10 +136,20 @@ func (s *RedisStore) Publish(ctx context.Context, snapshot Snapshot) error {
 	// post-write field count; a mismatch means the key was reconstructed from
 	// the delta alone and the next publish must be full. Costs one pipelined
 	// command and self-heals in one sweep instead of up to FullResyncEvery.
+	//
+	// A failover to a replica that missed recent publishes keeps the count but
+	// rolls every field back. Meta changes on every publish, so reading it before
+	// this delta's writes and comparing it with the meta last written here makes
+	// the next publish full in that case too.
 	var fieldCount *redis.IntCmd
+	var storedMeta *redis.SliceCmd
+	lastMeta := s.published[publisherMetaField]
 	_, err = s.client.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
 		if full {
 			pipe.Del(ctx, key)
+		} else {
+			// HMGET, not HGET: a missing key reads as nil instead of failing the transaction.
+			storedMeta = pipe.HMGet(ctx, key, publisherMetaField)
 		}
 		for start := 0; start < len(dels); start += redisFieldChunk {
 			end := min(start+redisFieldChunk, len(dels))
@@ -183,6 +193,13 @@ func (s *RedisStore) Publish(ctx context.Context, snapshot Snapshot) error {
 	s.needFullResync = false
 	if fieldCount != nil {
 		if held, hlenErr := fieldCount.Result(); hlenErr != nil || held != int64(len(fields)) {
+			s.needFullResync = true
+		}
+	}
+	if storedMeta != nil {
+		if values, metaErr := storedMeta.Result(); metaErr != nil {
+			s.needFullResync = true
+		} else if stored, ok := values[0].(string); !ok || digest128([]byte(stored)) != lastMeta {
 			s.needFullResync = true
 		}
 	}
@@ -245,7 +262,13 @@ func (s *RedisStore) LoadAll(ctx context.Context) (PublisherSet, error) {
 		return set, err
 	}
 	maxFields := s.maxFieldsPerPublisher()
-	readPipe := s.client.Pipeline()
+	// Each publish is one transaction; reading every publisher's hash in one
+	// transaction too makes the set a single cut of Redis. A plain pipeline
+	// lets publishes land between its reads, so two API servers could each
+	// build a view that is newer for one publisher and older for another,
+	// and the session egress a client diffs across them would step back
+	// without any write being lost.
+	readPipe := s.client.TxPipeline()
 	reads := make(map[string]*redis.MapStringStringCmd, len(set.Members))
 	for _, member := range set.Members {
 		length, lengthErr := hlens[member.PublisherID].Result()

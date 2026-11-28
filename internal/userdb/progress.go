@@ -887,6 +887,8 @@ func AddHistoryIfMissing(db *sql.DB, entry WatchHistoryEntry) (bool, error) {
 	}
 	// One SQLite write statement holds the writer lock for the visibility
 	// check, duplicate check, and insert, including across pooled connections.
+	// A row in the same second is the same play, except that a partial row
+	// does not hide a completion, as on Postgres.
 	result, err := db.Exec(`
 
         INSERT INTO watch_history (id, profile_id, media_item_id, watched_at, duration_seconds, completed, source, watch_identity)
@@ -897,9 +899,10 @@ func AddHistoryIfMissing(db *sql.DB, entry WatchHistoryEntry) (bool, error) {
         ) AND NOT EXISTS (
             SELECT 1 FROM watch_history
             WHERE profile_id = ? AND media_item_id = ? AND watched_at = ?
+              AND (completed OR NOT ?)
         )`,
 		entry.ID, entry.ProfileID, entry.MediaItemID, entry.WatchedAt, entry.DurationSeconds, entry.Completed, entry.Source, string(identityJSON),
-		entry.ProfileID, entry.MediaItemID, entry.WatchedAt, entry.ProfileID, entry.MediaItemID, entry.WatchedAt)
+		entry.ProfileID, entry.MediaItemID, entry.WatchedAt, entry.ProfileID, entry.MediaItemID, entry.WatchedAt, entry.Completed)
 	if err != nil {
 		return false, fmt.Errorf("adding missing history: %w", err)
 	}

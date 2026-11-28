@@ -334,6 +334,14 @@
               "format": "date-time"
             }
           }
+        },
+        "media_transport": {
+          "type": "string",
+          "enum": [
+            "regular",
+            "direct"
+          ],
+          "description": "The transport this plan's media uses. direct means the client carries the media requests it would send to its saved base URL through the direct path to the API host. Omitted means regular."
         }
       },
       "additionalProperties": true,

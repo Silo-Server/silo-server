@@ -210,28 +210,28 @@ func TestProxyURLBuildersRefuseALANOnlyProxyOnAProviderPath(t *testing.T) {
 	card := playback.NewRecipeCard(session.UserID, session.ProfileID, file.ID, "", playback.TranscodeOpts{SessionID: session.ID, InputPath: file.FilePath})
 	handler.ProxyGrantStore = &recordingRecipeCardStoreV3{}
 
-	if got, byProxy := handler.identityStreamURLV3(session, file, lanOnly, tailnet); byProxy || got != handler.playbackStreamURL(session) {
+	if got, byProxy := handler.identityStreamURLV3(session, file, lanOnly, tailnet, nodepool.DirectMedia{}); byProxy || got != handler.playbackStreamURL(session) {
 		t.Fatalf("identityStreamURLV3 = %q (proxy %v), want the API-local route", got, byProxy)
 	}
-	if got, byProxy, _ := handler.identityGrantStreamURLV3(context.Background(), session, file, lanOnly, tailnet); byProxy || got != handler.playbackStreamURL(session) {
+	if got, byProxy, _ := handler.identityGrantStreamURLV3(context.Background(), session, file, lanOnly, tailnet, nodepool.DirectMedia{}); byProxy || got != handler.playbackStreamURL(session) {
 		t.Fatalf("identityGrantStreamURLV3 = %q (proxy %v), want the API-local route", got, byProxy)
 	}
-	if got := handler.buildProxyManifestURL(card, lanOnly, false, tailnet); !strings.HasPrefix(got, "/playback/transcode/session-builders/master.m3u8") {
+	if got := handler.buildProxyManifestURL(card, lanOnly, false, tailnet, nodepool.DirectMedia{}); !strings.HasPrefix(got, "/playback/transcode/session-builders/master.m3u8") {
 		t.Fatalf("buildProxyManifestURL = %q, want the API-local manifest", got)
 	}
-	if got, byProxy, _ := handler.grantManifestURLV3(context.Background(), card, lanOnly, tailnet); byProxy || got != "/playback/transcode/session-builders/master.m3u8" {
+	if got, byProxy, _ := handler.grantManifestURLV3(context.Background(), card, lanOnly, tailnet, nodepool.DirectMedia{}); byProxy || got != "/playback/transcode/session-builders/master.m3u8" {
 		t.Fatalf("grantManifestURLV3 = %q (proxy %v), want the API-local manifest", got, byProxy)
 	}
 
 	connected := &nodepool.Node{ID: 41, URL: testLANProxyURL, NetworkAccess: netaccess.NodeNetworkAccess{testTailnetProvider: {State: netaccess.StateConnected, Origin: testTailnetOrigin}}}
-	if got, byProxy := handler.identityStreamURLV3(session, file, connected, tailnet); !byProxy || !strings.HasPrefix(got, testTailnetOrigin+"/stream/direct/") {
+	if got, byProxy := handler.identityStreamURLV3(session, file, connected, tailnet, nodepool.DirectMedia{}); !byProxy || !strings.HasPrefix(got, testTailnetOrigin+"/stream/direct/") {
 		t.Fatalf("identityStreamURLV3 on a connected proxy = %q (proxy %v)", got, byProxy)
 	}
-	if got := handler.buildProxyManifestURL(card, connected, false, tailnet); !strings.HasPrefix(got, testTailnetOrigin+"/stream/transcode/") {
+	if got := handler.buildProxyManifestURL(card, connected, false, tailnet, nodepool.DirectMedia{}); !strings.HasPrefix(got, testTailnetOrigin+"/stream/transcode/") {
 		t.Fatalf("buildProxyManifestURL on a connected proxy = %q", got)
 	}
 	// The default path is unchanged by the report: LAN clients keep the LAN URL.
-	if got, byProxy := handler.identityStreamURLV3(session, file, connected, netaccess.Path{}); !byProxy || !strings.HasPrefix(got, testLANProxyURL+"/stream/direct/") {
+	if got, byProxy := handler.identityStreamURLV3(session, file, connected, netaccess.Path{}, nodepool.DirectMedia{}); !byProxy || !strings.HasPrefix(got, testLANProxyURL+"/stream/direct/") {
 		t.Fatalf("identityStreamURLV3 on the default path = %q (proxy %v)", got, byProxy)
 	}
 }

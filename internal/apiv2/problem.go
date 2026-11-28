@@ -51,6 +51,11 @@ var (
 	TypeInvalidGrant = ProblemType{"invalid_grant", http.StatusBadRequest, "Invalid grant"}
 )
 
+// TypeSignInProviderRequired: local password sign-in cannot be turned off
+// while no OIDC or LDAP sign-in provider is on, since only break-glass
+// admins could still sign in.
+var TypeSignInProviderRequired = ProblemType{"sign_in_provider_required", http.StatusConflict, "Sign-in provider required"}
+
 // TypePreparedFileExpired: a finished download's prepared file was cleaned up
 // from the server. The client keeps its copy and calls prepareDownloadAgain
 // before fetching the file again.
@@ -76,6 +81,13 @@ var TypeBackupUnauthenticated = ProblemType{"backup_unauthenticated", http.Statu
 // and its row cannot be deleted here. Remove it from that configuration and
 // restart the API servers first.
 var TypeNodeDeploymentManaged = ProblemType{"node_deployment_managed", http.StatusConflict, "Node managed by deployment configuration"}
+
+// The two enrollment refusals that need their own client behavior: show the
+// device limit, or make a new node key and enroll again.
+var (
+	TypeDirectDeviceLimit     = ProblemType{"direct_device_limit", http.StatusConflict, "Direct device limit"}
+	TypeDirectNodeKeyConflict = ProblemType{"direct_node_key_conflict", http.StatusConflict, "Direct node key conflict"}
+)
 
 // ProblemType is one entry of the shared problem catalog.
 type ProblemType struct {
@@ -139,7 +151,7 @@ var (
 	TypeCapabilityUnsupported                         = ProblemType{"capability_unsupported", http.StatusNotImplemented, "Capability unsupported"}
 	TypeDependencyUnavailable                         = ProblemType{"dependency_unavailable", http.StatusServiceUnavailable, "Dependency unavailable"}
 	TypeClientUpgradeRequired                         = ProblemType{"client_upgrade_required", http.StatusGone, "Client upgrade required"}
-	catalog                                           = []ProblemType{TypeRangeNotSatisfiable, TypeDeviceLoginExpired, TypeUnsupportedSource, TypeMalformedRequest, TypeInvalidCursor, TypeAuthenticationRequired, TypeInvalidToken, TypeSessionExpired, TypePermissionDenied, TypeProfileVerificationRequired, TypePushInstallationKeyMismatch, TypeNotFound, TypeMethodNotAllowed, TypeNotAcceptable, TypeRequestTimeout, TypeConflict, TypeIdempotencyConflict, TypeJobNotCancelable, TypeCapabilityDisabled, TypeCapabilityNotConfigured, TypePreconditionFailed, TypePayloadTooLarge, TypeUnsupportedMediaType, TypeValidationFailed, TypePreconditionRequired, TypeRateLimited, TypeInternalError, TypeCapabilityUnsupported, TypeDependencyUnavailable, TypeClientUpgradeRequired, TypeSyncResetRequired, TypeSnapshotRequestConflict, TypeProgressSnapshotTooLarge, TypePlaybackInstallationChanged, TypePlaybackSessionEnded, TypePlaybackSessionPausedTimeout, TypePlaybackTransportSuperseded, TypePlaybackProgressConflict, TypePasswordChangeRequired, TypeNotPermitted, TypeAccountRequired, TypeLocalLoginDisabled, TypeProviderPasswordExpired, TypeEmailInUse, TypeIdentityLinkedElsewhere, TypeProviderAlreadyEnabled, TypeBreakGlassRequired, TypeLastSignInMethod, TypeProviderUnavailable, TypeInvalidGrant, TypeAccountDisabled, TypeLocalPasswordRequired, TypeAlreadyLinked, TypeTokenRefreshRequired, TypeNetworkIdentityRequired, TypePreparedFileExpired, TypeDeviceBindingMismatch, TypeRestoreSetChanged, TypeBackupUnauthenticated, TypeNodeDeploymentManaged, TypeUploadLimitReached}
+	catalog                                           = []ProblemType{TypeRangeNotSatisfiable, TypeDeviceLoginExpired, TypeUnsupportedSource, TypeMalformedRequest, TypeInvalidCursor, TypeAuthenticationRequired, TypeInvalidToken, TypeSessionExpired, TypePermissionDenied, TypeProfileVerificationRequired, TypePushInstallationKeyMismatch, TypeNotFound, TypeMethodNotAllowed, TypeNotAcceptable, TypeRequestTimeout, TypeConflict, TypeIdempotencyConflict, TypeJobNotCancelable, TypeCapabilityDisabled, TypeCapabilityNotConfigured, TypePreconditionFailed, TypePayloadTooLarge, TypeUnsupportedMediaType, TypeValidationFailed, TypePreconditionRequired, TypeRateLimited, TypeInternalError, TypeCapabilityUnsupported, TypeDependencyUnavailable, TypeClientUpgradeRequired, TypeSyncResetRequired, TypeSnapshotRequestConflict, TypeProgressSnapshotTooLarge, TypePlaybackInstallationChanged, TypePlaybackSessionEnded, TypePlaybackSessionPausedTimeout, TypePlaybackTransportSuperseded, TypePlaybackProgressConflict, TypePasswordChangeRequired, TypeNotPermitted, TypeAccountRequired, TypeLocalLoginDisabled, TypeProviderPasswordExpired, TypeEmailInUse, TypeIdentityLinkedElsewhere, TypeProviderAlreadyEnabled, TypeBreakGlassRequired, TypeLastSignInMethod, TypeProviderUnavailable, TypeInvalidGrant, TypeAccountDisabled, TypeLocalPasswordRequired, TypeAlreadyLinked, TypeTokenRefreshRequired, TypeNetworkIdentityRequired, TypePreparedFileExpired, TypeDeviceBindingMismatch, TypeRestoreSetChanged, TypeBackupUnauthenticated, TypeNodeDeploymentManaged, TypeUploadLimitReached, TypeSignInProviderRequired, TypeDirectDeviceLimit, TypeDirectNodeKeyConflict}
 	defaultTypeByStatus                               = map[int]ProblemType{}
 	problemContentType                                = "application/problem+json"
 	_                               error             = (*Problem)(nil)

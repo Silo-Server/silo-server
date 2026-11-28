@@ -137,6 +137,9 @@ type Dependencies struct {
 	ScanControls                    ScanControlService
 	AuthProviderIconPublic          AuthProviderIconPublic
 	AdminPlaybackSessions           AdminPlaybackSessionService
+	// AdminSessionEgress serves per-session viewer egress for the admin
+	// sessions list. Wired only when stream telemetry is enabled.
+	AdminSessionEgress AdminSessionEgressService
 	// PlaybackLifecycleEvents reports that this server announces session.*
 	// lifecycle events on the admin sessions channel.
 	PlaybackLifecycleEvents          bool
@@ -170,6 +173,7 @@ type Dependencies struct {
 	EventsCapability               EventsCapabilityService
 	NetworkAccess                  NetworkAccessService
 	DirectConnections              DirectConnectionsService
+	DirectCoordination             DirectCoordinationService
 	ServerIdentity                 ServerIdentityService
 	ServerConnections              ServerConnections
 	NotificationDestinationCreate  NotificationDestinationCreateService
@@ -1282,6 +1286,7 @@ var externalSignInProblemTypes = map[string]ProblemType{
 	TypeIdentityLinkedElsewhere.ID: TypeIdentityLinkedElsewhere,
 	TypeProviderAlreadyEnabled.ID:  TypeProviderAlreadyEnabled,
 	TypeBreakGlassRequired.ID:      TypeBreakGlassRequired,
+	TypeSignInProviderRequired.ID:  TypeSignInProviderRequired,
 	TypeLastSignInMethod.ID:        TypeLastSignInMethod,
 	TypeProviderUnavailable.ID:     TypeProviderUnavailable,
 	TypeAlreadyLinked.ID:           TypeAlreadyLinked,
@@ -1340,6 +1345,10 @@ type SessionService interface {
 	// NetworkSignIn signs in the overlay peer of the request through a
 	// network identity provider.
 	NetworkSignIn(ctx context.Context, in handlers.NetworkSignInInput) (handlers.TokenPairView, error)
+	// DemoLogin signs a visitor in to the public demo account. It returns
+	// auth.ErrDemoLoginDisabled or auth.ErrDemoLoginNotConfigured when demo
+	// sign-in is not available.
+	DemoLogin(ctx context.Context, in handlers.DemoLoginInput) (handlers.TokenPairView, error)
 }
 
 // DeviceLoginService is the slice of *handlers.AuthHandler the device-pairing

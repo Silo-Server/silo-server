@@ -37,6 +37,7 @@ const (
 	playbackSubtitleSSA        = "text/x-ssa"
 	playbackParamPath          = "path"
 	playbackParamQuery         = "query"
+	playbackParamHeader        = "header"
 	playbackSegmentName        = "name"
 	playbackBinaryFormat       = "binary"
 	playbackCacheControlHeader = "Cache-Control"

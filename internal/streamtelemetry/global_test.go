@@ -171,3 +171,54 @@ func TestBuildGlobalViewWholeViewPermutationInvariant(t *testing.T) {
 		t.Fatalf("permutation changed view\nleft: %s\nright:%s", leftJSON, rightJSON)
 	}
 }
+
+// A client diffs a session's viewer bytes between polls, so the merge must say
+// when the publishers behind them changed and when they last reported.
+func TestBuildGlobalViewViewerEgressSeries(t *testing.T) {
+	at := time.Unix(1_700_000_000, 0)
+	session := func(routes ...RouteActivityView) []SessionView {
+		return []SessionView{{SessionID: "session", Routes: routes}}
+	}
+	relay := RouteActivityView{Method: "GET", Pattern: "/relay", Role: RoleInternalRelay, BytesAccepted: 500}
+	merge := func(snapshots ...Snapshot) GlobalSessionView {
+		t.Helper()
+		view := BuildGlobalView(globalSet(at, snapshots...), at, globalTestParams())
+		if len(view.Sessions) != 1 {
+			t.Fatalf("sessions = %+v", view.Sessions)
+		}
+		return view.Sessions[0]
+	}
+	api := Snapshot{PublisherID: "api", PublisherEpoch: 1, CapturedAt: at.Add(-2 * time.Second), Sessions: session(viewerRoute(100))}
+	proxy := Snapshot{PublisherID: "proxy", PublisherEpoch: 7, CapturedAt: at.Add(-time.Second), Sessions: session(viewerRoute(200))}
+	node := Snapshot{PublisherID: "node", PublisherEpoch: 3, CapturedAt: at, Sessions: session(relay)}
+
+	both := merge(api, proxy, node)
+	if both.ViewerBytesAccepted != 300 || both.ViewerBytesSeries == "" {
+		t.Fatalf("bytes %d series %q", both.ViewerBytesAccepted, both.ViewerBytesSeries)
+	}
+	// The relay-only node is newest but counts no viewer bytes, so it sets
+	// neither the time nor the series.
+	if !both.ViewerBytesMeasuredAt.Equal(proxy.CapturedAt) {
+		t.Fatalf("measured at %v, want the newest viewer edge %v", both.ViewerBytesMeasuredAt, proxy.CapturedAt)
+	}
+	if again := merge(api, proxy); again.ViewerBytesSeries != both.ViewerBytesSeries {
+		t.Fatal("series changed with a relay publisher, which counts no viewer bytes")
+	}
+	advanced := proxy
+	advanced.Sequence, advanced.CapturedAt = 9, at
+	advanced.Sessions = session(viewerRoute(900))
+	if next := merge(api, advanced, node); next.ViewerBytesSeries != both.ViewerBytesSeries || !next.ViewerBytesMeasuredAt.Equal(at) {
+		t.Fatalf("a new report from the same publishers changed the series or kept the old time: %+v", next)
+	}
+	if departed := merge(api, node); departed.ViewerBytesSeries == both.ViewerBytesSeries {
+		t.Fatal("series held when a viewer-edge publisher left the view")
+	}
+	restarted := proxy
+	restarted.PublisherEpoch = 8
+	if next := merge(api, restarted, node); next.ViewerBytesSeries == both.ViewerBytesSeries {
+		t.Fatal("series held when a viewer-edge publisher restarted")
+	}
+	if relayOnly := merge(node); relayOnly.ViewerBytesSeries != "" || !relayOnly.ViewerBytesMeasuredAt.IsZero() {
+		t.Fatalf("a session with no viewer edge has a series: %+v", relayOnly)
+	}
+}

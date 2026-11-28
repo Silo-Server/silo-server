@@ -381,7 +381,11 @@ func TestChangePasswordSignOutOtherSessionsDB(t *testing.T) {
 	otherAccount := f.signIns(other, f.session(other, nil))
 	svc := NewService(nil, nil, f.sessions, f.users, nil, nil, nil)
 	var revoked []int
-	svc.OnSessionsRevoked(func(_ context.Context, userID int) { revoked = append(revoked, userID) })
+	var kept []string
+	svc.OnSessionsRevoked(func(_ context.Context, userID int, keptSessionID string) {
+		revoked = append(revoked, userID)
+		kept = append(kept, keptSessionID)
+	})
 
 	if err := svc.ChangePassword(ctx, target, caller, "old password", "middle password", false); err != nil {
 		t.Fatal(err)
@@ -402,8 +406,8 @@ func TestChangePasswordSignOutOtherSessionsDB(t *testing.T) {
 	if live := f.live(otherAccount); slices.Contains(live, false) {
 		t.Fatalf("another account was signed out: live %v", live)
 	}
-	if !slices.Equal(revoked, []int{target}) {
-		t.Fatalf("OnSessionsRevoked calls = %v, want [%d]", revoked, target)
+	if !slices.Equal(revoked, []int{target}) || !slices.Equal(kept, []string{caller}) {
+		t.Fatalf("OnSessionsRevoked calls = %v with kept sessions %v, want [%d] keeping [%s]", revoked, kept, target, caller)
 	}
 	user, err := f.users.GetByID(ctx, target)
 	if err != nil {

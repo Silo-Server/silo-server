@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { SubtitleUploadForm } from "./SubtitleUploadForm";
+import { SubtitleUploadForm, type SubtitleUploadInput } from "./SubtitleUploadForm";
 
 afterEach(cleanup);
 
@@ -67,6 +67,36 @@ describe("SubtitleUploadForm", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/Unsupported file type/);
     expect(languageSelect).toHaveValue("de");
+  });
+
+  it("keeps the uploading file selected when another file is chosen mid-upload", async () => {
+    let finishUpload: () => void = () => {};
+    const upload = vi.fn(
+      (_input: SubtitleUploadInput) =>
+        new Promise<void>((resolve) => {
+          finishUpload = resolve;
+        }),
+    );
+    const onSuccess = vi.fn();
+    const { container } = render(
+      <SubtitleUploadForm mediaFileId={1} upload={upload} onSuccess={onSuccess} variant="player" />,
+    );
+    chooseFile(container, new File(["WEBVTT\n"], "a.vtt", { type: "text/vtt" }));
+    fireEvent.click(screen.getByRole("button", { name: "Upload" }));
+    await screen.findByRole("button", { name: "Uploading…" });
+
+    chooseFile(container, new File(["1\n"], "b.srt", { type: "application/x-subrip" }));
+    fireEvent.drop(screen.getByRole("button", { name: "Drop subtitle file here or browse" }), {
+      dataTransfer: { files: [new File(["notes"], "notes.txt", { type: "text/plain" })] },
+    });
+
+    expect(screen.getByText(/a\.vtt/)).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(upload).toHaveBeenCalledTimes(1);
+    expect(upload.mock.calls[0]?.[0].file.name).toBe("a.vtt");
+
+    await act(async () => finishUpload());
+    expect(onSuccess).toHaveBeenCalledTimes(1);
   });
 
   it("ignores a detection result that arrives after the file is rejected", async () => {

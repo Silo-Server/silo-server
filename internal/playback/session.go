@@ -87,6 +87,13 @@ type Session struct {
 	// when another replica finalizes a session it does not hold in memory.
 	ReportingNode string
 
+	// MediaTransport and PathGeneration attribute the session's connection
+	// readings: the transport its plan's media uses (regular or direct, empty on
+	// a session that predates the field) and, for direct, the generation of the
+	// API host's path to the device when the plan was made.
+	MediaTransport string
+	PathGeneration uint64
+
 	StreamBitrateKbps      int          // currently delivered bitrate, when known
 	TargetResolution       string       // requested output resolution for transcodes
 	TargetVideoCodec       string       // requested output video codec for transcodes
@@ -197,6 +204,8 @@ type SessionStreamState struct {
 	RoutingEgress                 string
 	RoutingEgressNodeID           int
 	RoutingEgressNodeURL          string
+	MediaTransport                string
+	PathGeneration                uint64
 	RequireMediaAuthorization     bool
 	MediaAuthorizationSet         bool
 
@@ -1304,6 +1313,8 @@ func applySessionStreamStateLocked(s *Session, state SessionStreamState) {
 		s.RoutingEgress = state.RoutingEgress
 		s.RoutingEgressNodeID = state.RoutingEgressNodeID
 		s.RoutingEgressNodeURL = state.RoutingEgressNodeURL
+		s.MediaTransport = state.MediaTransport
+		s.PathGeneration = state.PathGeneration
 	}
 	if state.MediaAuthorizationSet {
 		s.RequireMediaAuthorization = state.RequireMediaAuthorization
@@ -1359,6 +1370,8 @@ func snapshotSessionStreamStateLocked(s *Session) SessionStreamState {
 		RoutingEgress:                 s.RoutingEgress,
 		RoutingEgressNodeID:           s.RoutingEgressNodeID,
 		RoutingEgressNodeURL:          s.RoutingEgressNodeURL,
+		MediaTransport:                s.MediaTransport,
+		PathGeneration:                s.PathGeneration,
 		RequireMediaAuthorization:     s.RequireMediaAuthorization,
 		MediaAuthorizationSet:         true,
 		SubtitleTrackIndex:            s.SubtitleTrackIndex,
@@ -1405,6 +1418,8 @@ func restoreSessionStreamStateLocked(s *Session, state SessionStreamState) {
 	s.RoutingEgress = state.RoutingEgress
 	s.RoutingEgressNodeID = state.RoutingEgressNodeID
 	s.RoutingEgressNodeURL = state.RoutingEgressNodeURL
+	s.MediaTransport = state.MediaTransport
+	s.PathGeneration = state.PathGeneration
 	s.RequireMediaAuthorization = state.RequireMediaAuthorization
 	s.SubtitleTrackIndex = state.SubtitleTrackIndex
 	s.SubtitleBurnIn = state.SubtitleBurnIn

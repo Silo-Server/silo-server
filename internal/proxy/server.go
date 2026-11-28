@@ -433,6 +433,11 @@ func (s *Server) buildCapabilitySnapshotLocked(ctx context.Context) (playback.HW
 	}
 	info.Transformations = registry.Advertised()
 	info.TransportFeatures = []string{playback.TransportFeatureProgressiveRemuxRelayV1, playback.TransportFeatureThemeAudioEgressV1, playback.TransportFeatureBandwidthProbeV1, playback.TransportFeatureRemuxRangeRefusalV1}
+	// A probe receipt names this node, so a proxy that has not learned its node
+	// ID sends none and must not advertise them.
+	if id, known := s.currentNodeRowID(); known && id > 0 {
+		info.TransportFeatures = append(info.TransportFeatures, playback.TransportFeatureConnectionReceiptV1)
+	}
 	// Advertised before the hash is taken, because it is part of what the hash
 	// covers: a build that needs longer reaches the sweep rather than sitting
 	// behind an unchanged identity.

@@ -1245,8 +1245,9 @@ type fakeSessionService struct {
 	// 5), as for a request that came through that provider's overlay.
 	// NetworkSignIn signs laura in at installation 5 and answers installation
 	// 7 as a request from off the overlay; lastNetwork is its last input.
-	networkPeer bool
-	lastNetwork handlers.NetworkSignInInput
+	networkPeer  bool
+	lastNetwork  handlers.NetworkSignInInput
+	demoLoginErr error
 }
 
 func (f *fakeSessionService) CurrentLoginSession(context.Context, int, string) (*models.AuthSession, error) {
@@ -1326,6 +1327,14 @@ func (f *fakeSessionService) NetworkSignIn(_ context.Context, in handlers.Networ
 	}
 	return handlers.TokenPairView{AccessToken: "acc", RefreshToken: "ref", ExpiresIn: 3600,
 		User: handlers.UserView{ID: 1, Username: "laura", Email: "laura@example.test", Role: "user", PolicyPermissions: []string{"marker_edit"}, DownloadAllowed: true}}, nil
+}
+
+func (f *fakeSessionService) DemoLogin(_ context.Context, _ handlers.DemoLoginInput) (handlers.TokenPairView, error) {
+	if f.demoLoginErr != nil {
+		return handlers.TokenPairView{}, f.demoLoginErr
+	}
+	return handlers.TokenPairView{AccessToken: "demo-acc", RefreshToken: "demo-ref", ExpiresIn: 3600,
+		User: handlers.UserView{ID: 9, Username: "demo", Email: "demo@example.test", Role: "user"}}, nil
 }
 
 func (f *fakeSessionService) Refresh(_ context.Context, token string) (handlers.RefreshedTokensView, error) {

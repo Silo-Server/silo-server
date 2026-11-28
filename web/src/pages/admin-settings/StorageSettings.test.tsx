@@ -245,7 +245,7 @@ describe("StorageSettings", () => {
     serverStatus.current = { artwork_storage: { backend: "s3", locked: true } };
     mockForm({ getValue: (key: string) => (key === "artwork.storage_backend" ? "auto" : "") });
     render(<StorageSettings />);
-    const backend = screen.getByRole("combobox", { name: "Backend" });
+    const backend = screen.getByRole("combobox", { name: "Storage backend" });
     expect(backend).toBeEnabled();
     expect(backend).toHaveTextContent("S3");
     expect(screen.queryByText(/Locked to S3/)).not.toBeInTheDocument();
@@ -256,10 +256,8 @@ describe("StorageSettings", () => {
     await userEvent.click(backend);
     await userEvent.click(screen.getByRole("option", { name: "Automatic" }));
     expect(screen.getByRole("dialog", { name: "Change artwork storage" })).toBeInTheDocument();
-    expect(screen.queryByRole("combobox", { name: "Target" })).not.toBeInTheDocument();
-    expect(screen.getByRole("group", { name: "Target" })).toHaveTextContent(
-      "Local disk (default Silo behavior)",
-    );
+    expect(screen.queryByRole("combobox", { name: "Destination" })).not.toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Destination" })).toHaveTextContent("Local disk");
     expect(screen.queryByText("Configured S3 location")).not.toBeInTheDocument();
     serverStatus.current = undefined;
   });
@@ -274,7 +272,7 @@ describe("StorageSettings", () => {
     const form = stageForm({ values: { "artwork.storage_backend": "s3" } });
     render(<StorageSettings />);
 
-    await userEvent.click(screen.getByRole("combobox", { name: "Backend" }));
+    await userEvent.click(screen.getByRole("combobox", { name: "Storage backend" }));
     await userEvent.click(screen.getByRole("option", { name: "Local disk" }));
 
     expect(
@@ -289,15 +287,17 @@ describe("StorageSettings", () => {
     createStorageTransitionMock.mockResolvedValueOnce({ job: { id: "transition-1" } });
     render(<StorageSettings />);
 
-    await userEvent.click(screen.getByRole("combobox", { name: "Backend" }));
+    await userEvent.click(screen.getByRole("combobox", { name: "Storage backend" }));
     await userEvent.click(screen.getByRole("option", { name: "Local disk" }));
 
     expect(sourceHealthMock).toHaveBeenCalledWith(true, true);
     expect(
-      screen.getByText("Backfill Metadata Images downloads from saved provider URLs, not old S3."),
+      screen.getByText(
+        "The Backfill Metadata Images task downloads from saved provider URLs, not your old S3 bucket.",
+      ),
     ).toBeInTheDocument();
     await userEvent.click(screen.getByRole("radio", { name: /Start fresh/ }));
-    await userEvent.click(screen.getByRole("button", { name: "Queue transition" }));
+    await userEvent.click(screen.getByRole("button", { name: "Start migration" }));
 
     await waitFor(() =>
       expect(createStorageTransitionMock).toHaveBeenCalledWith({
@@ -335,7 +335,7 @@ describe("StorageSettings", () => {
     stageForm({ values: S3_WITH_LOCAL_PATH });
     render(<StorageSettings />);
 
-    await userEvent.click(screen.getByRole("combobox", { name: "Backend" }));
+    await userEvent.click(screen.getByRole("combobox", { name: "Storage backend" }));
     await userEvent.click(screen.getByRole("option", { name: "Local disk" }));
 
     expect(
@@ -346,10 +346,10 @@ describe("StorageSettings", () => {
     expect(screen.getByRole("radio", { name: /Preserve personal uploads/ })).toBeDisabled();
     expect(screen.getByRole("radio", { name: /Migrate everything/ })).toBeDisabled();
     expect(screen.getByRole("radio", { name: /Start fresh/ })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "Queue transition" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Start migration" })).toBeDisabled();
 
     await userEvent.click(screen.getByRole("radio", { name: /Start fresh/ }));
-    expect(screen.getByRole("button", { name: "Queue transition" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Start migration" })).toBeEnabled();
     await userEvent.click(screen.getByRole("button", { name: "Retry check" }));
     expect(refetch).toHaveBeenCalledOnce();
     serverStatus.current = undefined;
@@ -410,7 +410,7 @@ describe("StorageSettings", () => {
     stageForm(BUCKET_AND_UNRELATED_EDIT, { save });
     render(<StorageSettings />);
 
-    await userEvent.click(screen.getByRole("button", { name: "Review transition" }));
+    await userEvent.click(screen.getByRole("button", { name: "Review migration" }));
 
     expect(save).toHaveBeenCalledWith(["server.log_level"]);
     expect(screen.getByRole("dialog", { name: "Change artwork storage" })).toBeVisible();
@@ -431,13 +431,13 @@ describe("StorageSettings", () => {
       const form = stageForm(BUCKET_AND_UNRELATED_EDIT);
       render(<StorageSettings />);
 
-      await userEvent.click(screen.getByRole("button", { name: "Review transition" }));
+      await userEvent.click(screen.getByRole("button", { name: "Review migration" }));
 
       expect(form.save).not.toHaveBeenCalled();
       expect(
         screen.queryByRole("dialog", { name: "Change artwork storage" }),
       ).not.toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "Review transition" })).toBeVisible();
+      expect(screen.getByRole("button", { name: "Review migration" })).toBeVisible();
     },
   );
 
@@ -460,16 +460,16 @@ describe("StorageSettings", () => {
     createStorageTransitionMock.mockResolvedValueOnce({ job: { id: "transition-s3" } });
     render(<StorageSettings />);
 
-    await userEvent.click(screen.getByRole("button", { name: "Review transition" }));
+    await userEvent.click(screen.getByRole("button", { name: "Review migration" }));
 
     const dialog = screen.getByRole("dialog", { name: "Change artwork storage" });
-    expect(within(dialog).getByRole("group", { name: "Target" })).toHaveTextContent(
+    expect(within(dialog).getByRole("group", { name: "Destination" })).toHaveTextContent(
       "New S3 location",
     );
-    expect(within(dialog).getByRole("group", { name: "Target" })).toHaveTextContent(
+    expect(within(dialog).getByRole("group", { name: "Destination" })).toHaveTextContent(
       "new-artwork · https://new-s3.example",
     );
-    await userEvent.click(within(dialog).getByRole("button", { name: "Queue transition" }));
+    await userEvent.click(within(dialog).getByRole("button", { name: "Start migration" }));
 
     await waitFor(() =>
       expect(createStorageTransitionMock).toHaveBeenCalledWith({
@@ -501,13 +501,13 @@ describe("StorageSettings", () => {
     render(<StorageSettings />);
 
     expect(screen.getByLabelText("Local storage path")).toBeEnabled();
-    await userEvent.click(screen.getByRole("button", { name: "Review transition" }));
+    await userEvent.click(screen.getByRole("button", { name: "Review migration" }));
 
     const dialog = screen.getByRole("dialog", { name: "Change artwork storage" });
-    expect(within(dialog).getByLabelText("Local artwork path")).toHaveValue(
+    expect(within(dialog).getByLabelText("Local storage path")).toHaveValue(
       "/srv/silo/artwork-new",
     );
-    await userEvent.click(within(dialog).getByRole("button", { name: "Queue transition" }));
+    await userEvent.click(within(dialog).getByRole("button", { name: "Start migration" }));
     await waitFor(() =>
       expect(createStorageTransitionMock).toHaveBeenCalledWith({
         policy: "preserve_uploads",
@@ -576,7 +576,7 @@ describe("StorageSettings", () => {
     render(<StorageSettings />);
 
     expect(screen.getByRole("button", { name: "Save" })).toBeVisible();
-    expect(screen.queryByRole("button", { name: "Review transition" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Review migration" })).not.toBeInTheDocument();
   });
 
   it.each([
@@ -595,9 +595,9 @@ describe("StorageSettings", () => {
     });
     render(<StorageSettings />);
 
-    expect(screen.getByRole("alert")).toHaveTextContent("Storage lock status is unavailable");
+    expect(screen.getByRole("alert")).toHaveTextContent("Storage status is unavailable");
     expect(screen.getByRole("switch", { name: "Save provider artwork to storage" })).toBeEnabled();
-    expect(screen.getByRole("combobox", { name: "Backend" })).toBeDisabled();
+    expect(screen.getByRole("combobox", { name: "Storage backend" })).toBeDisabled();
     expect(screen.getByLabelText("Local storage path")).toBeDisabled();
     for (const name of ["Public storage", "Private storage"]) {
       expect(screen.queryByRole("group", { name })).not.toBeInTheDocument();
@@ -621,7 +621,7 @@ describe("StorageSettings", () => {
     expect(publicStorage.getByLabelText("Endpoint")).toBeDisabled();
     expect(publicStorage.getByLabelText("Bucket")).toBeDisabled();
     // Credentials are not a location, so they stay editable.
-    expect(publicStorage.getByLabelText("Access Key")).toBeEnabled();
+    expect(publicStorage.getByLabelText("Access key")).toBeEnabled();
   });
 
   it("holds a staged storage location until lock status can be retried", async () => {
@@ -636,7 +636,7 @@ describe("StorageSettings", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
     expect(form.save).not.toHaveBeenCalled();
-    await userEvent.click(screen.getByRole("button", { name: "Retry status" }));
+    await userEvent.click(screen.getByRole("button", { name: "Retry check" }));
     expect(serverStatus.refetch).toHaveBeenCalledOnce();
   });
 
@@ -674,7 +674,7 @@ describe("StorageSettings", () => {
     const form = stageForm(S3_SAVED_ACCESS_KEY_EDIT);
     render(<StorageSettings />);
 
-    await userEvent.click(screen.getByRole("button", { name: "Review transition" }));
+    await userEvent.click(screen.getByRole("button", { name: "Review migration" }));
     expect(form.save).not.toHaveBeenCalled();
     expect(screen.getByRole("dialog")).toBeVisible();
   });
@@ -715,17 +715,15 @@ describe("StorageSettings", () => {
     createStorageTransitionMock.mockResolvedValueOnce({ job: { id: "transition-auto-s3" } });
     render(<StorageSettings />);
 
-    expect(
-      screen.getByText(/Saving this bucket opens a managed transition from local storage/),
-    ).toBeVisible();
-    await userEvent.click(screen.getByRole("button", { name: "Review transition" }));
+    expect(screen.getByText(/Saving opens a storage migration from local disk/)).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: "Review migration" }));
 
     const dialog = screen.getByRole("dialog", { name: "Change artwork storage" });
-    expect(within(dialog).getByRole("group", { name: "Target" })).toHaveTextContent(
+    expect(within(dialog).getByRole("group", { name: "Destination" })).toHaveTextContent(
       "New S3 location",
     );
     await userEvent.click(within(dialog).getByRole("radio", { name: /Start fresh/ }));
-    await userEvent.click(within(dialog).getByRole("button", { name: "Queue transition" }));
+    await userEvent.click(within(dialog).getByRole("button", { name: "Start migration" }));
     await waitFor(() =>
       expect(createStorageTransitionMock).toHaveBeenCalledWith({
         policy: "start_fresh",
@@ -753,10 +751,10 @@ describe("StorageSettings", () => {
     });
     render(<StorageSettings />);
 
-    await userEvent.click(screen.getByRole("button", { name: "Review transition" }));
+    await userEvent.click(screen.getByRole("button", { name: "Review migration" }));
 
     const dialog = screen.getByRole("dialog", { name: "Change artwork storage" });
-    expect(within(dialog).getByRole("group", { name: "Target" })).toHaveTextContent(
+    expect(within(dialog).getByRole("group", { name: "Destination" })).toHaveTextContent(
       "New S3 location",
     );
   });
@@ -775,11 +773,13 @@ describe("StorageSettings", () => {
     createStorageTransitionMock.mockResolvedValueOnce({ job: { id: "transition-auto-local" } });
     render(<StorageSettings />);
 
-    await userEvent.click(screen.getByRole("button", { name: "Review transition" }));
+    await userEvent.click(screen.getByRole("button", { name: "Review migration" }));
     const dialog = screen.getByRole("dialog", { name: "Change artwork storage" });
-    expect(within(dialog).getByRole("group", { name: "Target" })).toHaveTextContent("Local disk");
+    expect(within(dialog).getByRole("group", { name: "Destination" })).toHaveTextContent(
+      "Local disk",
+    );
     await userEvent.click(within(dialog).getByRole("radio", { name: /Start fresh/ }));
-    await userEvent.click(within(dialog).getByRole("button", { name: "Queue transition" }));
+    await userEvent.click(within(dialog).getByRole("button", { name: "Start migration" }));
 
     await waitFor(() =>
       expect(createStorageTransitionMock).toHaveBeenCalledWith({
@@ -801,7 +801,7 @@ describe("StorageSettings", () => {
     });
     render(<StorageSettings />);
 
-    await userEvent.click(screen.getByRole("combobox", { name: "Backend" }));
+    await userEvent.click(screen.getByRole("combobox", { name: "Storage backend" }));
     await userEvent.click(screen.getByRole("option", { name: "Automatic" }));
 
     expect(
@@ -837,15 +837,18 @@ describe("StorageSettings", () => {
     const privateStorage = within(screen.getByRole("group", { name: "Private storage" }));
     expect(privateStorage.getByLabelText("Endpoint")).toBeEnabled();
 
-    await userEvent.click(screen.getByRole("button", { name: "Review transition" }));
+    await userEvent.click(screen.getByRole("button", { name: "Review migration" }));
     expect(save).toHaveBeenCalledWith(["metadata.cache_images"]);
     expect(screen.getByLabelText("Local storage path")).toBeDisabled();
     expect(privateStorage.getByLabelText("Endpoint")).toBeDisabled();
     expect(privateStorage.getByLabelText("Bucket")).toBeDisabled();
 
     finishSave?.();
-    expect(await screen.findByRole("dialog", { name: "Change artwork storage" })).toBeVisible();
-    expect(screen.getByLabelText("Local artwork path")).toHaveValue("/srv/silo/artwork-new");
+    const dialog = await screen.findByRole("dialog", { name: "Change artwork storage" });
+    expect(dialog).toBeVisible();
+    expect(within(dialog).getByLabelText("Local storage path")).toHaveValue(
+      "/srv/silo/artwork-new",
+    );
   });
 
   it.each<[string, (typeof serverStatus)["current"], Staged, string]>([
@@ -890,7 +893,7 @@ describe("StorageSettings", () => {
     stageForm(staged);
     render(<StorageSettings />);
 
-    await userEvent.click(screen.getByRole("button", { name: "Review transition" }));
+    await userEvent.click(screen.getByRole("button", { name: "Review migration" }));
     expect(screen.getByRole("dialog", { name: dialog })).toBeVisible();
   });
 
@@ -911,23 +914,25 @@ describe("StorageSettings", () => {
     );
     render(<StorageSettings />);
 
-    await userEvent.click(screen.getByRole("button", { name: "Review transition" }));
+    await userEvent.click(screen.getByRole("button", { name: "Review migration" }));
 
     const dialog = screen.getByRole("dialog", { name: "Change private storage" });
-    expect(within(dialog).getByRole("group", { name: "Target" })).toHaveTextContent(
+    expect(within(dialog).getByRole("group", { name: "Destination" })).toHaveTextContent(
       "private-new · https://private.example",
     );
     expect(within(dialog).getByRole("radio", { name: /Preserve profile avatars/ })).toBeVisible();
     expect(
-      within(dialog).getByText(/Preserve profile avatars and Start fresh leave/),
+      within(dialog).getByText(
+        /Only “Migrate all private data” copies diagnostic bundles and catalog job files/,
+      ),
     ).toBeVisible();
-    expect(
-      within(dialog).getByText(/Existing profile avatars will appear missing after the switch/),
-    ).toBeVisible();
+    expect(within(dialog).getByText(/Existing profile avatars will appear missing/)).toBeVisible();
     expect(within(dialog).queryByText(/Provider artwork is rebuilt/)).not.toBeInTheDocument();
     expect(within(dialog).queryByText(/Backfill Metadata Images/)).not.toBeInTheDocument();
     expect(within(dialog).queryByText(/NFO\/sidecar/)).not.toBeInTheDocument();
-    expect(within(dialog).getByText(/reconciled in the background after restart/)).toBeVisible();
+    expect(
+      within(dialog).getByText(/library artwork links update in the background after restart/),
+    ).toBeVisible();
   });
 
   it("requires private S3 before offering avatar-preserving copy policies", async () => {
@@ -943,14 +948,14 @@ describe("StorageSettings", () => {
     });
     render(<StorageSettings />);
 
-    await userEvent.click(screen.getByRole("button", { name: "Review transition" }));
+    await userEvent.click(screen.getByRole("button", { name: "Review migration" }));
 
     expect(screen.getByRole("radio", { name: /Preserve personal uploads/ })).toBeDisabled();
     expect(screen.getByRole("radio", { name: /Migrate everything/ })).toBeDisabled();
     expect(screen.getAllByText(/Configure a private S3 bucket/)).toHaveLength(2);
-    expect(screen.getByRole("button", { name: "Queue transition" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Start migration" })).toBeDisabled();
     await userEvent.click(screen.getByRole("radio", { name: /Start fresh/ }));
-    expect(screen.getByRole("button", { name: "Queue transition" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Start migration" })).toBeEnabled();
     serverStatus.current = undefined;
   });
 
@@ -969,16 +974,16 @@ describe("StorageSettings", () => {
     createStorageTransitionMock.mockResolvedValueOnce({ job: { id: "transition-private" } });
     render(<StorageSettings />);
 
-    await userEvent.click(screen.getByRole("button", { name: "Review transition" }));
+    await userEvent.click(screen.getByRole("button", { name: "Review migration" }));
 
     const dialog = screen.getByRole("dialog", { name: "Change private storage" });
-    expect(within(dialog).getByRole("group", { name: "Target" })).toHaveTextContent(
+    expect(within(dialog).getByRole("group", { name: "Destination" })).toHaveTextContent(
       "Private bucket: private-new · https://private.example",
     );
-    expect(within(dialog).queryByLabelText("Local artwork path")).not.toBeInTheDocument();
+    expect(within(dialog).queryByLabelText("Local storage path")).not.toBeInTheDocument();
     expect(within(dialog).queryByText(/Backfill Metadata Images/)).not.toBeInTheDocument();
     await userEvent.click(within(dialog).getByRole("radio", { name: /Migrate all private data/ }));
-    await userEvent.click(within(dialog).getByRole("button", { name: "Queue transition" }));
+    await userEvent.click(within(dialog).getByRole("button", { name: "Start migration" }));
 
     await waitFor(() =>
       expect(createStorageTransitionMock).toHaveBeenCalledWith({
@@ -1007,11 +1012,11 @@ describe("StorageSettings", () => {
     });
     render(<StorageSettings />);
 
-    await userEvent.click(screen.getByRole("button", { name: "Review transition" }));
+    await userEvent.click(screen.getByRole("button", { name: "Review migration" }));
 
     const dialog = screen.getByRole("dialog", { name: "Change private storage" });
-    expect(within(dialog).getByRole("group", { name: "Target" })).toHaveTextContent(
-      "kept on local disk",
+    expect(within(dialog).getByRole("group", { name: "Destination" })).toHaveTextContent(
+      "stay on local disk",
     );
     // The old private bucket is the copy source, so its reachability is checked.
     expect(sourceHealthMock).toHaveBeenCalledWith(true, true);
@@ -1033,14 +1038,14 @@ describe("StorageSettings", () => {
     );
     render(<StorageSettings />);
 
-    await userEvent.click(screen.getByRole("button", { name: "Review transition" }));
+    await userEvent.click(screen.getByRole("button", { name: "Review migration" }));
 
     const dialog = screen.getByRole("dialog", { name: "Change private storage" });
-    expect(within(dialog).getByRole("group", { name: "Target" })).toHaveTextContent(
+    expect(within(dialog).getByRole("group", { name: "Destination" })).toHaveTextContent(
       "private-new · endpoint not set",
     );
     expect(within(dialog).getByText(/Enter the private storage endpoint/)).toBeVisible();
-    expect(within(dialog).getByRole("button", { name: "Queue transition" })).toBeDisabled();
+    expect(within(dialog).getByRole("button", { name: "Start migration" })).toBeDisabled();
   });
 
   it("locks only the private bucket when it alone holds data", async () => {
@@ -1066,7 +1071,7 @@ describe("StorageSettings", () => {
     render(<StorageSettings />);
 
     expect(screen.getByLabelText("Local storage path")).toBeEnabled();
-    await userEvent.click(screen.getByRole("button", { name: "Review transition" }));
+    await userEvent.click(screen.getByRole("button", { name: "Review migration" }));
     expect(screen.getByRole("dialog", { name: "Change private storage" })).toBeVisible();
   });
 
@@ -1080,7 +1085,7 @@ describe("StorageSettings", () => {
 
     render(<StorageSettings />);
 
-    expect(screen.queryByText(/Storage transition:/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Storage migration:/)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Refresh" })).not.toBeInTheDocument();
   });
 
@@ -1106,13 +1111,13 @@ describe("StorageSettings", () => {
 
     render(<StorageSettings />);
 
-    expect(screen.getByText("Storage transition failed")).toBeVisible();
-    expect(screen.getByText(/Target storage could not be verified/)).toBeVisible();
-    expect(screen.getByText("2 objects verified")).toBeVisible();
+    expect(screen.getByText("Storage migration failed")).toBeVisible();
+    expect(screen.getByText(/Couldn’t verify the destination storage/)).toBeVisible();
+    expect(screen.getByText("2 files verified")).toBeVisible();
     expect(screen.queryByText(/private\/object-key/)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Refresh" })).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Dismiss" }));
-    expect(screen.queryByText(/Target storage could not be verified/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Couldn’t verify the destination storage/)).not.toBeInTheDocument();
   });
 
   it("shows a dismissible manual-restart alert without showing ordinary completed jobs", async () => {
@@ -1134,7 +1139,7 @@ describe("StorageSettings", () => {
     render(<StorageSettings />);
 
     expect(screen.getByText("Manual restart required")).toBeVisible();
-    expect(screen.getByText(/Restart the server to activate the new storage safely/)).toBeVisible();
+    expect(screen.getByText(/Restart the server to use the new storage/)).toBeVisible();
     await userEvent.click(screen.getByRole("button", { name: "Dismiss" }));
     expect(screen.queryByText("Manual restart required")).not.toBeInTheDocument();
   });
@@ -1182,8 +1187,8 @@ describe("StorageSettings", () => {
     expect(sourceHealthMock).toHaveBeenCalledWith(false, true);
     expect(sourceHealthMock).toHaveBeenCalledWith(true, false);
     expect(screen.getByText("Storage recovery: waiting to retry")).toBeVisible();
-    expect(screen.getByText("Reconciliation paused; waiting to retry.")).toBeVisible();
-    expect(screen.getByText(/Recovery needs attention/)).toBeVisible();
+    expect(screen.getByText("Artwork reference update paused; waiting to retry.")).toBeVisible();
+    expect(screen.getByText(/Storage recovery needs attention/)).toBeVisible();
     expect(screen.queryByText(/private\/object-key/)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Refresh" })).not.toBeInTheDocument();
   });
@@ -1207,9 +1212,9 @@ describe("StorageSettings", () => {
 
     render(<StorageSettings />);
 
-    expect(screen.getByText("Storage transition: running")).toBeInTheDocument();
-    expect(screen.getByText("Copying storage objects")).toBeVisible();
-    expect(screen.getByText("2 objects verified")).toBeVisible();
+    expect(screen.getByText("Storage migration: running")).toBeInTheDocument();
+    expect(screen.getByText("Copying files")).toBeVisible();
+    expect(screen.getByText("2 files verified")).toBeVisible();
     expect(screen.queryByText("99 / 100 objects")).not.toBeInTheDocument();
     expect(screen.queryByText(/private\/object-key/)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Refresh" })).toBeEnabled();
@@ -1230,7 +1235,7 @@ describe("StorageSettings", () => {
     render(<StorageSettings />);
 
     const publicGroup = within(screen.getByRole("group", { name: "Public storage" }));
-    const input = publicGroup.getByLabelText("Access Key");
+    const input = publicGroup.getByLabelText("Access key");
 
     // Deleting the draft means "keep the saved secret", never "clear it".
     await userEvent.clear(input);
@@ -1243,11 +1248,9 @@ describe("StorageSettings", () => {
 
     render(<StorageSettings />);
 
-    expect(screen.getByRole("alert")).toHaveTextContent(
-      "Protected credential status is unavailable",
-    );
-    expect(screen.queryByLabelText("Access Key")).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("Secret Key")).not.toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("Couldn’t check saved credentials");
+    expect(screen.queryByLabelText("Access key")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Secret key")).not.toBeInTheDocument();
   });
 
   describe("staging the S3 backend", () => {
@@ -1270,7 +1273,7 @@ describe("StorageSettings", () => {
       render(<StorageSettings />);
       expect(screen.queryByRole("group", { name: "Public storage" })).not.toBeInTheDocument();
 
-      await userEvent.click(screen.getByRole("combobox", { name: "Backend" }));
+      await userEvent.click(screen.getByRole("combobox", { name: "Storage backend" }));
       await userEvent.click(screen.getByRole("option", { name: "S3" }));
       expect(screen.getByRole("group", { name: "Private storage" })).toBeInTheDocument();
       const publicStorage = within(screen.getByRole("group", { name: "Public storage" }));
@@ -1289,15 +1292,17 @@ describe("StorageSettings", () => {
       serverStatus.current = { artwork_storage: { backend: "local", locked: true } };
       render(<StorageSettings />);
 
-      await userEvent.click(screen.getByRole("combobox", { name: "Backend" }));
+      await userEvent.click(screen.getByRole("combobox", { name: "Storage backend" }));
       await userEvent.click(screen.getByRole("option", { name: "S3" }));
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
       const publicStorage = within(screen.getByRole("group", { name: "Public storage" }));
       await userEvent.type(publicStorage.getByLabelText("Bucket"), "artwork");
-      await userEvent.click(screen.getByRole("button", { name: "Review transition" }));
+      await userEvent.click(screen.getByRole("button", { name: "Review migration" }));
 
       const dialog = await screen.findByRole("dialog", { name: "Change artwork storage" });
-      expect(within(dialog).getByRole("group", { name: "Target" })).toHaveTextContent("artwork");
+      expect(within(dialog).getByRole("group", { name: "Destination" })).toHaveTextContent(
+        "artwork",
+      );
       expect(updateSettingsMock).not.toHaveBeenCalled();
       serverStatus.current = { artwork_storage: { backend: "local", locked: false } };
     });
@@ -1342,7 +1347,7 @@ describe("StorageSettings", () => {
       await userEvent.click(publicGroup.getByRole("button", { name: "Keep saved value" }));
 
       expect(screen.queryByText("1 unsaved change")).not.toBeInTheDocument();
-      expect(publicGroup.getByLabelText("Access Key")).toHaveAttribute(
+      expect(publicGroup.getByLabelText("Access key")).toHaveAttribute(
         "placeholder",
         "••••••••••••",
       );
@@ -1368,17 +1373,17 @@ describe("StorageSettings", () => {
 
       const publicGroup = within(screen.getByRole("group", { name: "Public storage" }));
       const linkMode = publicGroup.getByRole("combobox", {
-        name: "How asset links are authorized",
+        name: "How download links are authorized",
       });
       await userEvent.click(linkMode);
       await userEvent.click(screen.getByRole("option", { name: "Cloudflare signed token" }));
       await userEvent.click(publicGroup.getByRole("button", { name: /Advanced/ }));
-      await userEvent.type(publicGroup.getByLabelText("Token Secret"), "secret");
+      await userEvent.type(publicGroup.getByLabelText("Token secret"), "secret");
       await userEvent.click(linkMode);
       await userEvent.click(screen.getByRole("option", { name: "Signed links (recommended)" }));
 
       expect(screen.getByText("1 unsaved change")).toBeInTheDocument();
-      expect(publicGroup.getByLabelText("Token Secret")).toHaveValue("secret");
+      expect(publicGroup.getByLabelText("Token secret")).toHaveValue("secret");
     });
 
     it("lets go of a token secret that was typed and erased again", async () => {
@@ -1386,18 +1391,18 @@ describe("StorageSettings", () => {
 
       const publicGroup = within(screen.getByRole("group", { name: "Public storage" }));
       const linkMode = publicGroup.getByRole("combobox", {
-        name: "How asset links are authorized",
+        name: "How download links are authorized",
       });
       await userEvent.click(linkMode);
       await userEvent.click(screen.getByRole("option", { name: "Cloudflare signed token" }));
       await userEvent.click(publicGroup.getByRole("button", { name: /Advanced/ }));
-      await userEvent.type(publicGroup.getByLabelText("Token Secret"), "secret");
-      await userEvent.clear(publicGroup.getByLabelText("Token Secret"));
+      await userEvent.type(publicGroup.getByLabelText("Token secret"), "secret");
+      await userEvent.clear(publicGroup.getByLabelText("Token secret"));
       await userEvent.click(linkMode);
       await userEvent.click(screen.getByRole("option", { name: "Signed links (recommended)" }));
 
       expect(screen.queryByText(/unsaved change/)).not.toBeInTheDocument();
-      expect(publicGroup.queryByLabelText("Token Secret")).not.toBeInTheDocument();
+      expect(publicGroup.queryByLabelText("Token secret")).not.toBeInTheDocument();
     });
   });
 });

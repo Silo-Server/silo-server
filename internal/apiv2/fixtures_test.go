@@ -51,6 +51,9 @@ type fixtureCase struct {
 	// headers the index records; every listed name must be present.
 	assertHeaders []string
 	schema        string
+	// deps, when set, adjusts a copy of fixtureDeps for this case alone, for a
+	// state the shared wiring cannot show.
+	deps func(*testing.T, *Dependencies)
 }
 
 // fixtureRequestID is the deterministic request id of the i-th fixture, the
@@ -1794,6 +1797,8 @@ func fixtureCases() []fixtureCase {
 	)
 	cases = append(cases, adminPlaybackHistoryDetailFixtureCases()...)
 	cases = append(cases, adminInsightsFixtureCases()...)
+	cases = append(cases, localPasswordOffFixtureCases()...)
+	cases = append(cases, adminSessionEgressFixtureCases()...)
 	return cases
 }
 
@@ -2236,6 +2241,7 @@ func fixtureDeps() Dependencies {
 	deps.ThemeSongs = &fakeThemeSongs{}
 	deps.UserLibraries = new(fakeUserLibraries)
 	deps.AdminPlaybackSessions = new(fakeAdminPlaybackSessions)
+	deps.AdminSessionEgress = fixtureSessionEgress()
 	deps.AdminDownloadPreparations = new(fakeAdminDownloadPreparations)
 	deps.AdminDownloadPreparationControls = new(fakeAdminDownloadPreparationControls)
 	deps.AdminDownloadStorage = new(fakeAdminDownloadStorage)
@@ -2337,10 +2343,16 @@ type fixtureRequest struct {
 // files to commit, keyed by name relative to contracts/api/v2/fixtures.
 func generateFixtures(t *testing.T) map[string][]byte {
 	t.Helper()
-	h := newTestHandler(t, fixtureDeps())
+	shared := newTestHandler(t, fixtureDeps())
 	files := map[string][]byte{}
 	var entries []fixtureIndexEntry
 	for i, c := range fixtureCases() {
+		h := shared
+		if c.deps != nil {
+			deps := fixtureDeps()
+			c.deps(t, &deps)
+			h = newTestHandler(t, deps)
+		}
 		var body *strings.Reader
 		if c.body != "" {
 			body = strings.NewReader(c.body)

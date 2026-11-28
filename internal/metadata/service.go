@@ -27,6 +27,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/metadata/showstatus"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/naming"
+	"github.com/Silo-Server/silo-server/internal/pluginhost"
 	"github.com/Silo-Server/silo-server/internal/scanner"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -1670,14 +1671,16 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 			selectionHints = &hintsCopy
 		}
 		searchQuery = suppressTitleYearFallbackForTrustedIDs(searchQuery)
-		searchProviders := func(query SearchQuery) []SearchResult {
+		searchProviders := func(query SearchQuery) ([]SearchResult, bool) {
 			resultsForQuery := make([]SearchResult, 0)
+			remoteTransientError := false
 			for _, p := range itemChain {
 				sp, ok := p.(SearchProvider)
 				if !ok {
 					continue
 				}
-				if _, local := p.(IdentityHintProvider); local && skipLocalProvider {
+				_, local := p.(IdentityHintProvider)
+				if local && skipLocalProvider {
 					continue
 				}
 				results, searchErr := sp.Search(ctx, query)
@@ -1687,6 +1690,9 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 					continue
 				}
 				if searchErr != nil {
+					if !local && hasTransientMatchError([]error{searchErr}) {
+						remoteTransientError = true
+					}
 					if handleProvider404(provider404s, accumulatedIDs, p.Slug(), searchErr,
 						"title", query.Title,
 						"year", query.Year,
@@ -1717,16 +1723,16 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 					}
 					resultsForQuery = append(resultsForQuery, result)
 				}
-				if _, local := p.(IdentityHintProvider); !local {
+				if !local {
 					for _, r := range results {
 						nfoVerifiedIDs = recordVerifiedIDs(nfoVerifiedIDs, r.ProviderIDs, nfoHintIDs)
 					}
 				}
 			}
-			return resultsForQuery
+			return resultsForQuery, remoteTransientError
 		}
 
-		allResults := searchProviders(searchQuery)
+		allResults, remoteTransientErr := searchProviders(searchQuery)
 		// A dead NFO identity leaves the tag ids alone: when a provider
 		// rejected every id the NFO named, search again with the ids it
 		// replaced, less any the providers just rejected. Clearing the NFO's
@@ -1743,7 +1749,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 				}
 			}
 			nfoReplacedTagIDs, nfoHintIDs, nfoVerifiedIDs = nil, nil, nil
-			allResults = searchProviders(searchQuery)
+			allResults, remoteTransientErr = searchProviders(searchQuery)
 		}
 
 		candidates := NormalizeCandidatesForLanguage(allResults, contentType, searchQuery.Language)
@@ -1757,8 +1763,13 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		for _, p := range itemChain {
 			providerPriority = append(providerPriority, p.Slug())
 		}
-		trySelection := func(hints *MatchHints, selectionCandidates []MatchCandidate) (*MatchCandidate, bool) {
+		trySelection := func(hints *MatchHints, selectionCandidates []MatchCandidate, partialRemoteSearch bool) (*MatchCandidate, bool) {
 			selected, ok := selectInitialMatchCandidate(hints, selectionCandidates, providerPriority)
+			// A lone-result match assumes no other configured provider has rivals;
+			// retry instead of persisting when a remote provider failed transiently.
+			if ok && partialRemoteSearch && slices.Contains(selected.MatchReasons, "sole_exact_title") {
+				return nil, false
+			}
 			if ok {
 				return selected, true
 			}
@@ -1776,7 +1787,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 			candidates []MatchCandidate
 		}
 		aliasAttempts := []aliasAttempt{{selectionHints, candidates}}
-		winner, matched := trySelection(selectionHints, candidates)
+		winner, matched := trySelection(selectionHints, candidates, remoteTransientErr)
 		// Structured IDs remain decisive and never fall back to a title search.
 		// For title/year identities, try independently parsed path hypotheses only
 		// after the primary identity fails. Each attempt is bounded and scored
@@ -1797,13 +1808,14 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 				alternateQuery := searchQuery
 				alternateQuery.Title = alternate.Title
 				alternateQuery.Year = alternate.Year
-				alternateResults := searchProviders(alternateQuery)
+				alternateResults, alternateRemoteTransientErr := searchProviders(alternateQuery)
+				remoteTransientErr = remoteTransientErr || alternateRemoteTransientErr
 				alternateCandidates := NormalizeCandidatesForLanguage(alternateResults, contentType, alternateQuery.Language)
 				if len(alternateCandidates) == 0 {
 					continue
 				}
 				aliasAttempts = append(aliasAttempts, aliasAttempt{&alternateHints, alternateCandidates})
-				alternateWinner, alternateMatched := trySelection(&alternateHints, alternateCandidates)
+				alternateWinner, alternateMatched := trySelection(&alternateHints, alternateCandidates, remoteTransientErr)
 				if len(candidates) == 0 || alternateMatched || bestCandidateScore(&alternateHints, alternateCandidates) > bestCandidateScore(effectiveHints, candidates) {
 					candidates = alternateCandidates
 					effectiveHints = &alternateHints
@@ -2551,6 +2563,9 @@ func hasTransientMatchError(errs []error) bool {
 	for _, err := range errs {
 		if err == nil || errors.Is(err, ErrLocalMetadataUnavailable) {
 			continue // classified above, not by its message
+		}
+		if errors.Is(err, pluginhost.ErrPluginUnhealthy) {
+			return true
 		}
 		switch status.Code(err) {
 		case codes.DeadlineExceeded, codes.ResourceExhausted, codes.Aborted, codes.Unavailable:

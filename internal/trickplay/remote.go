@@ -84,7 +84,7 @@ func (e *NodeExtractor) SetSourceGrants(grants nodesource.FileGranter) {
 // TranscodeNodeWith also counts nodes at their job cap, which
 // ReserveTranscodeWorkWith skips.
 type NodeWorkPlanner interface {
-	ReserveTranscodeWorkWith(string, func(*nodepool.Node) bool) (*nodepool.Node, func())
+	ReserveTranscodeWorkWith(string, nodepool.JobKind, func(*nodepool.Node) bool) (*nodepool.Node, func())
 	TranscodeNodeWith(func(*nodepool.Node) bool) bool
 }
 
@@ -126,7 +126,7 @@ func (e *NodeExtractor) Extract(ctx context.Context, job *Job, req mediasample.R
 	var lacking error
 	busy := false
 	for e.keys != nil && e.planner != nil {
-		node, release := e.planner.ReserveTranscodeWorkWith("trickplay", func(candidate *nodepool.Node) bool {
+		node, release := e.planner.ReserveTranscodeWorkWith("trickplay", nodepool.JobKindTrickplay, func(candidate *nodepool.Node) bool {
 			return trickplayNodeEligible(candidate) && !tried[candidate.URL]
 		})
 		if node == nil {

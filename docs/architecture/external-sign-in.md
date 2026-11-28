@@ -35,6 +35,24 @@ SDK's `docs/auth-provider.md`.
   the two foreign keys' triggers, and nothing relies on it. These paths take
   one account at a time: an uninstall deletes an installation's identities in
   an order of its own, and an account holds at most one of them.
+- The uninstall also holds the server-settings lock (the sign-in provider
+  guard) while it deletes. Its order is: the bindings lock, the installation
+  row, the settings lock, then the installation's identities taken
+  `FOR UPDATE NOWAIT` in id order, then the delete and its cascade. Unlinking
+  an identity (`UnlinkOwn`) and deleting an account lock an identity first and
+  then wait for the settings lock; an account update that ends sessions takes
+  the settings lock first and then the identities. So the uninstall never
+  waits for an identity while it holds the settings lock: if one is held, it
+  rolls the whole attempt back, releasing the settings lock, and tries again
+  a bounded number of times, then answers busy (`plugins.ErrInstallationBusy`,
+  503 `dependency_unavailable` with `Retry-After`) with nothing changed. The
+  pauses between attempts add about 150 ms. Each attempt still waits, with no
+  timeout of its own, for the plugin-bindings lock, then the installation
+  row, then the settings lock; the uninstall request carries no deadline, so
+  the call ends when those are free or when the client (or a proxy in front
+  of it) disconnects and cancels the request's context.
+  `TestUninstallAddsNoLockCycleDB` stages each of those paths against it,
+  each side first.
 - Every other writer of those rows writes one row, writes only sessions that
   carry no identity (impersonation sessions), deletes an account created in
   the same request, or never waits (the expired-session and expired-request
@@ -182,6 +200,56 @@ ordered against each other.
   clearing, demoting, disabling, removing password sign-in from or deleting the
   last such account, are refused with `break_glass_required`. Both sides take
   the server-settings advisory lock, so they cannot pass each other's check.
+- While the switch is off, an OIDC or LDAP provider people can sign in with
+  must stay on (`signInProviderEnabled`): an enabled installation with an
+  enabled binding that is not a network binding (`primarySignInBindingSQL`),
+  and for an OpenID Connect binding a public URL (`OAuthSignInServed`, the
+  same test every OAuth start makes). Turning the switch off without one,
+  and, while it is off, turning off the binding, disabling or uninstalling the
+  installation, or clearing `server.public_url` when that takes away the last
+  one, are refused with `sign_in_provider_required`. Plugin writes ask the
+  check the auth package registers (`plugins.RegisterSignInCheck`) before and
+  after the write in its transaction (`plugins.signInGuard`), and are refused
+  only when sign-in worked for everyone before and does not after: a server
+  already without a usable provider can still manage its plugins, and a write
+  that makes a provider usable is always allowed. Disable and uninstall write
+  first and stop the plugin only once that write has committed (uninstall
+  stops it before removing its files), so a refused one never stopped the
+  provider; the stop runs after the locks are released, and reconciliation
+  on every node stops a process whose row no longer runs it if that stop
+  fails. Plugin writes take the server-settings lock after their own bindings
+  and installation locks, and the settings save takes only the settings lock,
+  so the two directions serialize without deadlock.
+  Deployment provisioning applies the operator's declared configuration and is
+  never refused for this: it runs the same check, and a declaration that
+  leaves no provider is applied with a warning in the log
+  (`logProvisionSignIn`). The provisioning status of the declared sign-in
+  plugins carries the same warning while it is true, worked out on every read
+  (`withSignInWarning`), so it ends as soon as password sign-in is back on or
+  a provider is usable. The warning
+  (`SignInProviderWarning`) names the ways back: the declaration, a break-glass
+  admin turning password sign-in back on, and `silo auth local-login enable`.
+- `listAdminLocalPasswordOffAccounts` answers who the switch would lock out.
+  It shares with sign-in the email-match rule (`emailMatchCandidateSQL`, also
+  used by account resolution), and with the guard the rule for which
+  providers can sign people in (`signInProviders`): a link counts as a way in
+  only to one of those, so not to a network provider (it signs the account in
+  only from its network) and not to an OpenID Connect provider without a
+  public URL. Unlinking asks a different question (`usableIdentityCount`:
+  any enabled binding, network ones included, as a fallback while the
+  password still works) and is unchanged. "Has a password that signs in" is `models.User.HasLocalPassword`
+  in Go and `passwordSignsInSQL` in SQL, kept side by side; the password reset
+  repository restates it in its own SQL (`eligibleAccount`). Change them
+  together, not in a copy.
+- Turning the switch off ends no session: refresh does not read it
+  (`checkSessionStanding`), so each session ends as it otherwise would. A
+  password session slides forward at each refresh and lasts until the account
+  signs out, an administrator ends it, or it goes unrefreshed past
+  `auth.refresh_token_expiry`. A session opened through a provider is
+  re-checked: a refusal ends it, and once its identity is unlinked it stops
+  sliding and ends `auth.refresh_token_expiry` after the provider last
+  vouched for it. Personal API keys keep working, and a session can still
+  approve a new device.
 - Recovery from a shell with the server's `DATABASE_URL`:
   `silo auth local-login enable` turns the switch back on;
   `silo auth local-login enable -user <name or email>` turns one account's
@@ -189,7 +257,14 @@ ordered against each other.
   provider outage or removing its plugin would otherwise lock the account
   out), and `-temporary-password` also gives it a random temporary password,
   printed once, that must be changed at the next sign-in, revoking its
-  sign-ins.
+  sign-ins. While the account's password sign-in is off, `-user` requires
+  `-temporary-password`: its stored password may be one nobody knows (an
+  account a provider created holds a random one), and the account would
+  otherwise count as a break-glass admin nobody can use. The switch is read
+  under the account's row lock in the transaction that turns it on. An
+  account that had a real password therefore gets a temporary one when its
+  password sign-in is turned back on this way; one whose password sign-in is
+  already on needs no flag.
 - An administrator setting an account's password (admin user update) also turns its local password sign-in back on.
 - While the switch is off, invited signup and invitation acceptance, which
   create local-password accounts, are refused with `local_login_disabled`
