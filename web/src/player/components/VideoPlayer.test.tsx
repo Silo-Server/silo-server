@@ -534,6 +534,35 @@ describe("VideoPlayer plan failure recovery", () => {
     vi.restoreAllMocks();
   });
 
+  // A subtitle change on the original file is answered with a plan that
+  // streams what is already playing; the session hands it over under the same
+  // revision and address. The new plan has its own attempt key, and the
+  // element must keep its source rather than open the file again.
+  it("keeps the media source for a new plan under the same revision", async () => {
+    const load = vi.mocked(HTMLMediaElement.prototype.load);
+    const { container, rerenderPlayer } = renderPlayer();
+    const video = container.querySelector("video")!;
+    await waitFor(() => expect(video.getAttribute("src")).toBeTruthy());
+    const source = video.getAttribute("src");
+    const loads = load.mock.calls.length;
+
+    rerenderPlayer({
+      plan: fixturePlanV3({
+        ...directPlan,
+        plan_id: "plan:subtitle",
+        plan_attempt_key: "v3:subtitle",
+        selected_tracks: {
+          ...directPlan.selected_tracks,
+          subtitle: { id: "file:7:subtitle:0", index: 0 },
+        },
+      }),
+    });
+    await act(async () => Promise.resolve());
+
+    expect(load.mock.calls.length).toBe(loads);
+    expect(video.getAttribute("src")).toBe(source);
+  });
+
   // Deleting a stored subtitle moves the later ones down an ordinal. A pick
   // still waiting for its replan names the old ordinal, which the next plan
   // gives another track.
@@ -1104,6 +1133,62 @@ describe("VideoPlayer translation handoff", () => {
     });
     expect(controls.current?.activeSubtitleIndex).toBe(2);
     expect(onRefreshSubtitles).not.toHaveBeenCalled();
+  });
+
+  // On the original file the refresh of the subtitle list is answered with the
+  // stream already playing, which keeps the plan revision; the handoff still
+  // has to pick the translated track once the list is there.
+  it("selects the translated track when the refresh is answered under the same revision", async () => {
+    const english: PlayerSubtitleInfo = {
+      index: 0,
+      language: "en",
+      label: "English",
+      source: "downloaded",
+      codec: "srt",
+      sync_key: "stored-30",
+      url: "/en.vtt",
+    };
+    const croatian: PlayerSubtitleInfo = {
+      index: 1,
+      language: "hr",
+      label: "English → Croatian (AI)",
+      source: "downloaded",
+      codec: "srt",
+      sync_key: "stored-44",
+      url: "/hr.vtt",
+    };
+    const onRefreshSubtitles = vi.fn();
+    const { rerenderPlayer } = renderPlayer({ subtitleUrls: [english], onRefreshSubtitles });
+    const base = { session_id: "session-1", file_id: 7, job_id: 1, track_key: "ai-1" };
+    act(() => {
+      realtimeOptions.current?.onEvent?.({
+        type: "event",
+        session_id: "session-1",
+        name: "subtitle_translation_started",
+        payload: { ...base, language: "hr", total_cues: 2 },
+      });
+    });
+    act(() => {
+      realtimeOptions.current?.onEvent?.({
+        type: "event",
+        session_id: "session-1",
+        name: "subtitle_translation_completed",
+        payload: { ...base, subtitle_id: 44, language: "hr" },
+      });
+    });
+    expect(onRefreshSubtitles).toHaveBeenCalledOnce();
+
+    rerenderPlayer({ subtitleUrls: [english], onRefreshSubtitles, replanning: true });
+    await act(async () => {});
+    expect(controls.current?.activeSubtitleIndex).not.toBe(1);
+
+    rerenderPlayer({
+      plan: fixturePlanV3({ ...directPlan, plan_id: "plan:refreshed" }),
+      subtitleUrls: [english, croatian],
+      onRefreshSubtitles,
+      replanning: false,
+    });
+    await waitFor(() => expect(controls.current?.activeSubtitleIndex).toBe(1));
   });
 });
 

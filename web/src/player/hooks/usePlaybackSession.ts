@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePlayerConfig } from "../context/PlayerConfigContext";
 import type { PlayerConfig } from "../context/PlayerConfigContext";
 import { startPlaybackV2 } from "../start-v2";
+import { keepsOriginalStream } from "../utils/planTransport";
 import { settleTrackPreferenceWrites } from "../utils/trackPreferenceWrites";
 import { playbackStartEnded, type PlaybackNetworkTier } from "../bandwidth-probe";
 import { hasSequencedProgress, stopSequencedSession } from "../session-mutations";
@@ -947,16 +948,23 @@ export function usePlaybackSession(
   /**
    * Adopts a decision as the live session, or surfaces its terminal.
    * Returns whether a plan was adopted.
+   *
+   * With `keepTransport`, a plan that streams what is already playing
+   * (`keepsOriginalStream`) is taken on the playing transport: a subtitle the
+   * player draws needs no new stream, and opening one stops the picture while
+   * it loads. `planRevision` names the transport, so it stays, and the plan
+   * keeps the stream and timeline the player opened.
    */
   const adoptDecision = useCallback(
     (
       decision: DecisionResponseV3,
       initialSubtitleFailure?: PlaybackSessionErrorState | null,
       onAdopt?: (planRevision: number) => void,
+      keepTransport = false,
     ): boolean => {
       serverFeaturesRef.current = decision.server_features;
-      const plan = decision.playback_plan;
-      if (!plan) {
+      const answered = decision.playback_plan;
+      if (!answered) {
         const failure = describeDecisionWithoutPlan(decision);
         if (decision.terminal) {
           reportEvent("terminal", { failureClassification: decision.terminal.reason });
@@ -976,20 +984,35 @@ export function usePlaybackSession(
         return false;
       }
 
-      // Any adopted plan proves the server is reachable and replaces the
-      // transport, so it also ends a reconnect in progress. The new transport
-      // plays only if the viewer was playing when the connection dropped; the
-      // element has been paused since, so its reported state says nothing.
-      if (reconnectRef.current.active) playbackPlayingRef.current = reconnectRef.current.resume;
-      planAutoPlayRef.current = playbackPlayingRef.current;
-      planTransportShownRef.current = false;
-      endReconnect(true);
+      const playing = planRef.current;
+      const inPlace =
+        keepTransport &&
+        !reconnectRef.current.active &&
+        playing !== null &&
+        keepsOriginalStream(playing, answered);
+      const plan: PlanV3 =
+        inPlace && playing
+          ? { ...answered, stream: playing.stream, timeline: playing.timeline }
+          : answered;
+      if (!inPlace) {
+        // Any other adopted plan proves the server is reachable and replaces
+        // the transport, so it also ends a reconnect in progress. The new
+        // transport plays only if the viewer was playing when the connection
+        // dropped; the element has been paused since, so its reported state
+        // says nothing.
+        if (reconnectRef.current.active) playbackPlayingRef.current = reconnectRef.current.resume;
+        planAutoPlayRef.current = playbackPlayingRef.current;
+        planTransportShownRef.current = false;
+        endReconnect(true);
+      }
       const sessionId = plan.session_id ?? decision.session_id ?? sessionIdRef.current;
       planAttemptIdRef.current = randomUUID();
       planRef.current = plan;
       sessionEndedRef.current = false;
       sessionIdRef.current = sessionId ?? null;
-      planRevisionRef.current += 1;
+      if (!inPlace) planRevisionRef.current += 1;
+      // Taken in place, the stream's summary, sent when it stops, names the
+      // plan the server now holds for it rather than the one it opened with.
       summaryIdentitiesRef.current.set(String(planRevisionRef.current), {
         route: {
           playbackAttemptId: playbackAttemptIdRef.current ?? "",
@@ -1019,6 +1042,7 @@ export function usePlaybackSession(
         }
       }
       if (
+        !inPlace &&
         Number.isFinite(plan.timeline.source_start_seconds) &&
         plan.timeline.source_start_seconds >= 0
       ) {
@@ -1042,6 +1066,9 @@ export function usePlaybackSession(
           playbackPlayingRef.current,
           config,
         ),
+        // The playing transport was opened with these; a newer access token
+        // or the viewer's pause since must not rebuild it.
+        ...(inPlace && { streamUrl: current.streamUrl, shouldAutoPlay: current.shouldAutoPlay }),
         networkTierRevision: networkTierRevisionRef.current,
         initialSubtitleErrorTitle:
           initialSubtitleFailure === undefined
@@ -1791,10 +1818,21 @@ export function usePlaybackSession(
         // Keep a refused-start subtitle pinned off across unrelated replans.
         // A successful explicit subtitle choice is the one action that clears
         // the marker and lets the new server-selected track take ownership.
+        // A subtitle pick, or a refresh of the subtitle list, answered with
+        // the stream already playing changes nothing the transport carries.
+        // Not when the playing stream failed while this was in flight: the
+        // recovery queued for it is dropped once the plan moves on, so the
+        // answer has to bring the new stream itself.
+        const queued = pendingReplanRef.current?.options.operation;
+        const recoveryQueued = queued === "failure_recovery" || queued === "seek_failure_recovery";
         const adopted = adoptDecision(
           decision,
           options.operation === "track_change" && options.subtitle !== undefined ? null : undefined,
           onAdopt,
+          options.operation === "track_change" &&
+            options.audio === undefined &&
+            !reconnect &&
+            !recoveryQueued,
         );
         adoptedPlan = adopted;
         if (!adopted && (failurePolicy.retireOnRefusal || tightenedStillActive)) {

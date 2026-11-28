@@ -17,6 +17,7 @@ import {
   fixturePlanV3,
   fixtureSubtitleInventoryItemV3,
 } from "../protocol-v3.fixtures";
+import type { PlanV3 } from "../protocol-v3";
 import { resetSessionMutations } from "../session-mutations";
 import { resetCodecDetectionForTests } from "./useCodecDetection";
 import {
@@ -5234,5 +5235,85 @@ describe("usePlaybackSession leaving the player", () => {
 
     answerStop(jsonResponse({ outcome: "stopped" }));
     await waitFor(() => expect(onSessionStopped).toHaveBeenCalledTimes(1));
+  });
+});
+
+describe("usePlaybackSession subtitle changes on the original file", () => {
+  const original = (overrides: Partial<PlanV3> = {}) =>
+    fixturePlanV3({
+      delivery: "original_http",
+      stream: {
+        url: "/stream/session-1?st=first",
+        protocol: "http_progressive",
+        container: "mp4",
+        mime_type: "video/mp4",
+        headers: {},
+        header_refresh: "none",
+      },
+      subtitle: { mode: "off", inventory: [] },
+      ...overrides,
+    });
+  const subtitle = { id: "file:7:subtitle:0", index: 0 };
+
+  // The server answers a subtitle pick on the playing file with a new plan: a
+  // newly signed token and a start where the viewer was. A subtitle the player
+  // draws keeps the stream the element plays. When that stream fails while the
+  // pick is in flight, the recovery queued behind it is dropped once the plan
+  // moves on, so the answer replaces the stream instead.
+  it.each([
+    { name: "keeps the stream for a subtitle the player draws", failsMeanwhile: false },
+    { name: "opens a new stream when the playing one failed meanwhile", failsMeanwhile: true },
+  ])("$name", async ({ failsMeanwhile }) => {
+    const answer = original({
+      plan_id: "plan:next",
+      plan_attempt_key: "v3:next",
+      stream: { ...original().stream, url: "/stream/session-1?st=second" },
+      timeline: { ...original().timeline, source_start_seconds: 45, player_start_seconds: 45 },
+      selected_tracks: { ...original().selected_tracks, subtitle },
+      subtitle: { mode: "render", inventory: [] },
+    });
+    let answerPick: ((response: Response) => void) | undefined;
+    const replanBodies: Array<{ operation: string }> = [];
+    vi.stubGlobal(
+      "fetch",
+      sessionFetch((init) => {
+        replanBodies.push(JSON.parse(String(init?.body)) as { operation: string });
+        if (replanBodies.length > 1) return new Promise<Response>(() => {});
+        return new Promise<Response>((resolve) => {
+          answerPick = resolve;
+        });
+      }, original()),
+    );
+    const { result, unmount } = renderSession();
+    await waitFor(() => expect(result.current.plan).not.toBeNull());
+    const before = {
+      planRevision: result.current.planRevision,
+      streamUrl: result.current.streamUrl,
+      initialPosition: result.current.initialPosition,
+    };
+
+    act(() => result.current.changeSubtitleTrack(0, 45));
+    await waitFor(() => expect(answerPick).toBeDefined());
+    if (failsMeanwhile) {
+      act(() => result.current.recoverFromFailure({ classification: "decoder_error" }, 46));
+    }
+    await act(async () => answerPick?.(jsonResponse(playable("session-1", answer))));
+
+    await waitFor(() => expect(result.current.plan?.plan_id).toBe("plan:next"));
+    expect(result.current.plan?.selected_tracks.subtitle).toEqual(subtitle);
+    expect(result.current.replanning).toBe(false);
+    expect(replanBodies.map(({ operation }) => operation)).toEqual(["track_change"]);
+    const after = {
+      planRevision: result.current.planRevision,
+      streamUrl: result.current.streamUrl,
+      initialPosition: result.current.initialPosition,
+    };
+    if (failsMeanwhile) {
+      expect(after.planRevision).toBe(before.planRevision + 1);
+      expect(after.streamUrl).toContain("st=second");
+    } else {
+      expect(after).toEqual(before);
+    }
+    unmount();
   });
 });
