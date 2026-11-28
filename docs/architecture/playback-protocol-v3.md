@@ -1158,7 +1158,7 @@ stored duration's end probes the file's last video keyframe
 the stored metadata keeps no per-stream video length and media often lives on
 network storage. ffprobe lists the video packets from a seek to the later of
 the stored duration and the requested start, and when those hold no keyframe,
-from 10 and then 60 s before that point, since MPEG-TS seeks forward. When the start's segment
+from 10 and then 120 s before that point, since MPEG-TS seeks forward. When the start's segment
 begins after that keyframe, the plan starts at the segment that holds it (an
 MPEG-TS transcode started after the last keyframe writes no video), and
 playback ends at the end of the video as above. A probe that fails, finds no
