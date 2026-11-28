@@ -121,6 +121,11 @@ type SilenceParams struct {
 	NoiseDB int `json:"noise_db"`
 	// MinSeconds is the shortest silence reported.
 	MinSeconds float64 `json:"min_seconds"`
+	// Stereo detects silence on the stereo downmix. silencedetect otherwise
+	// reports a silence only while every channel of the source is quiet, so
+	// a 5.1 track with room tone in its surrounds reports far fewer than its
+	// downmix does.
+	Stereo bool `json:"stereo,omitempty"`
 }
 
 // StatsOutput selects per-frame picture statistics. Each frame is cropped to

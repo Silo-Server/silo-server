@@ -260397,6 +260397,9 @@
           "noise_db": {
             "format": "int64",
             "type": "integer"
+          },
+          "stereo": {
+            "type": "boolean"
           }
         },
         "required": [

@@ -22,6 +22,10 @@ const logLevel = "repeat+info"
 // errorLogLevel logs only errors, for runs that read nothing from the log.
 const errorLogLevel = "error"
 
+// stereoDownmixFilter downmixes audio to stereo ahead of a filter that
+// should measure the downmix (SilenceParams.Stereo).
+const stereoDownmixFilter = "aformat=channel_layouts=stereo"
+
 const (
 	mapStreamOption        = "-map"
 	firstVideoStream       = "0:V:0"
@@ -103,8 +107,14 @@ func buildArgs(req Request, attempt Attempt, hw hardwareDecode, inputStart float
 	if audio := req.Audio; req.hasAudioOutput() {
 		args = append(args, "-t", duration, "-vn", disableSubtitlesOption, disableDataOption)
 		if audio.Silence != nil {
-			args = append(args, "-af", fmt.Sprintf("silencedetect=noise=%ddB:duration=%s",
-				audio.Silence.NoiseDB, formatSeconds(audio.Silence.MinSeconds)))
+			filter := fmt.Sprintf("silencedetect=noise=%ddB:duration=%s",
+				audio.Silence.NoiseDB, formatSeconds(audio.Silence.MinSeconds))
+			if audio.Silence.Stereo {
+				// The same downmix "-ac 2" applies for the fingerprint, so
+				// its points do not change.
+				filter = stereoDownmixFilter + "," + filter
+			}
+			args = append(args, "-af", filter)
 		}
 		if audio.Fingerprint {
 			// The chromaprint muxer takes only mono or stereo audio.

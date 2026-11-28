@@ -82,6 +82,9 @@ func (c Capabilities) Require(req Request) error {
 	if req.Audio != nil && req.Audio.Silence != nil && !c.HasFilter("silencedetect") {
 		return unsupportedError("ffmpeg does not list the silencedetect filter")
 	}
+	if req.Audio != nil && req.Audio.Silence != nil && req.Audio.Silence.Stereo && !c.HasFilter("aformat") {
+		return unsupportedError("ffmpeg does not list the aformat filter")
+	}
 	if req.Audio != nil && req.Audio.Speech != nil {
 		for _, filter := range req.Audio.Speech.filters() {
 			if !c.HasFilter(filter) {

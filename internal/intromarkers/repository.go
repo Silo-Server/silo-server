@@ -660,11 +660,10 @@ func (r *Repository) LoadFingerprint(ctx context.Context, candidate Candidate, c
 	if err != nil {
 		return nil, err
 	}
-	if artifact.State(introFingerprintIdentity(candidate, cfg), "", time.Time{}) != mediaartifact.Ready ||
-		artifact.PayloadFormat != ChromaprintFormat {
+	if artifact.State(introFingerprintIdentity(candidate, cfg), "", time.Time{}) != mediaartifact.Ready {
 		return nil, nil
 	}
-	points := mediasample.DecodeRawFingerprint(artifact.Payload)
+	points, silences := decodeFingerprintPayload(artifact.PayloadFormat, artifact.Payload, artifact.WindowStartSeconds)
 	if len(points) == 0 {
 		return nil, nil
 	}
@@ -680,6 +679,7 @@ func (r *Repository) LoadFingerprint(ctx context.Context, candidate Candidate, c
 		FingerprintFormat:     artifact.PayloadFormat,
 		SampleDurationSeconds: artifact.SampleDurationSeconds,
 		Points:                points,
+		Silences:              silences,
 	}, nil
 }
 
@@ -704,7 +704,7 @@ func (r *Repository) UpsertFingerprint(ctx context.Context, fp Fingerprint) erro
 		PayloadFormat:         fp.FingerprintFormat,
 		SampleDurationSeconds: fp.SampleDurationSeconds,
 		ItemCount:             len(fp.Points),
-		Payload:               mediasample.EncodeRawFingerprint(fp.Points),
+		Payload:               fingerprintPayload(fp),
 	})
 }
 
@@ -866,4 +866,34 @@ func subtitleInventorySignature(candidate Candidate) string {
 	}
 	sort.Strings(parts)
 	return strings.Join(parts, ",")
+}
+
+// decodeFingerprintPayload reads a stored intro fingerprint in either payload
+// format. It returns no points for a payload that is not usable, which the
+// caller treats as a cache miss: the file is fingerprinted again and the row
+// replaced.
+func decodeFingerprintPayload(format string, payload []byte, windowStart float64) ([]uint32, []mediasample.Interval) {
+	switch format {
+	case ChromaprintFormat:
+		// Stored before the fingerprint pass detected silences: the match
+		// keeps its edges rather than reading the opening again.
+		return mediasample.DecodeRawFingerprint(payload), nil
+	case chromaprintSilenceFormat:
+		points, silences, err := decodeFingerprintSilences(payload, windowStart)
+		if err != nil {
+			return nil, nil
+		}
+		return points, silences
+	default:
+		return nil, nil
+	}
+}
+
+// fingerprintPayload encodes fp's points, with its silences when its format
+// carries them.
+func fingerprintPayload(fp Fingerprint) []byte {
+	if fp.FingerprintFormat == chromaprintSilenceFormat {
+		return encodeFingerprintSilences(fp.Points, fp.Silences, fp.WindowStartSeconds)
+	}
+	return mediasample.EncodeRawFingerprint(fp.Points)
 }

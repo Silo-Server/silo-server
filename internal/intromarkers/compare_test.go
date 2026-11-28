@@ -47,8 +47,8 @@ func TestCompareFingerprintsFindsSharedRangeWithOffset(t *testing.T) {
 			t.Fatalf("file %d algorithm = %q, want %q", fileID, segment.Algorithm, ChromaprintAlgorithm)
 		}
 	}
-	// 40 points in, shifted back by the Chromaprint start lead.
-	if want := 40*DefaultPointHopSeconds + chromaprintStartLeadSeconds; math.Abs(segments[1].Start-want) > 0.01 {
+	// 40 points in, shifted by the exact Chromaprint hop and start lead.
+	if want := 40*exactChromaprintHopSeconds + introStartLeadSeconds; math.Abs(segments[1].Start-want) > 0.01 {
 		t.Fatalf("left start = %.3f, want %.3f", segments[1].Start, want)
 	}
 	if segments[2].Start < 24 || segments[2].Start > 27 {
@@ -80,8 +80,8 @@ func TestCompareFingerprintsCountsEpisodeVersionsOnce(t *testing.T) {
 
 	segments := CompareFingerprints(inputs, DefaultConfig("ffmpeg"))
 	got := segments[1].End - segments[1].Start
-	want := 300*DefaultPointHopSeconds + chromaprintEndLeadSeconds - chromaprintStartLeadSeconds
-	longer := 340*DefaultPointHopSeconds + chromaprintEndLeadSeconds - chromaprintStartLeadSeconds
+	want := 300*exactChromaprintHopSeconds + introEndLeadSeconds - introStartLeadSeconds
+	longer := 340*exactChromaprintHopSeconds + introEndLeadSeconds - introStartLeadSeconds
 	if math.Abs(got-want) > math.Abs(got-longer) && math.Abs(got-want) > 1 {
 		t.Fatalf("episode 1 intro = %.1fs, want the median of three episodes (%.1fs), not one episode's five versions (%.1fs)", got, want, longer)
 	}
@@ -120,10 +120,10 @@ func TestCompareFingerprintsWindowCountsEpisodesNotVersions(t *testing.T) {
 func TestConsensusSegmentPicksEachPartnersAgreeingVersion(t *testing.T) {
 	// Episode e2's first version matched an unrelated cue and its second the
 	// intro; the intro version is the one that agrees with the other partners.
-	segment, confirmations := consensusSegment(map[string][]Segment{
-		"e2": {{Start: 600, End: 640}, {Start: 60, End: 120}},
-		"e3": {{Start: 61, End: 121}},
-		"e4": {{Start: 59, End: 119}},
+	segment, confirmations := consensusSegmentVotes(map[string][]pairVote{
+		"e2": {{Segment: Segment{Start: 600, End: 640}}, {Segment: Segment{Start: 60, End: 120}}},
+		"e3": {{Segment: Segment{Start: 61, End: 121}}},
+		"e4": {{Segment: Segment{Start: 59, End: 119}}},
 	})
 	if confirmations != 3 || segment.Start != 60 || segment.End != 120 {
 		t.Fatalf("consensus = %+v with %d partners, want 60-120 from all three", segment, confirmations)
@@ -157,6 +157,20 @@ func TestCompareFingerprintsFallbackCountsEpisodesNotVersions(t *testing.T) {
 	segments := CompareFingerprints(inputs, DefaultConfig("ffmpeg"))
 	if _, ok := segments[1]; !ok {
 		t.Fatal("episode 1 should reach episode 11 through the fallback")
+	}
+}
+
+func TestTightConsensusPrefersLongerThemeOverNearZeroLogo(t *testing.T) {
+	// Four partners share a 22 s bumper at 0 s while three share the 60 s theme
+	// after a cold open; the confirmed theme should win.
+	seg, votes, _ := tightConsensusSegment(map[string][]pairVote{
+		"e2": {{Segment: Segment{Start: 0, End: 22}, Quality: 6}, {Segment: Segment{Start: 120, End: 180}, Quality: 6}},
+		"e3": {{Segment: Segment{Start: 0, End: 22}, Quality: 6}, {Segment: Segment{Start: 120.2, End: 180.1}, Quality: 6}},
+		"e4": {{Segment: Segment{Start: 0, End: 22}, Quality: 6}, {Segment: Segment{Start: 119.9, End: 179.8}, Quality: 6}},
+		"e5": {{Segment: Segment{Start: 0, End: 22}, Quality: 6}},
+	})
+	if votes != 3 || math.Abs(seg.Start-120) > 0.5 || math.Abs(seg.End-180) > 0.5 {
+		t.Fatalf("got %+v (%d votes), want ~120-180 (3 votes)", seg, votes)
 	}
 }
 

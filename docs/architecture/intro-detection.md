@@ -66,14 +66,43 @@ for a single item does not take the lock.
    when its stored analysis still stands. The silence backfill withdraws
    nothing, since it does not compare season groups; it runs right after the
    nightly episode pass, which has already withdrawn what it would.
-2. **Chromaprint.** Remaining files are grouped by library, season, and
-   presentation (edition and audio language). Each file's opening audio
-   (25 percent of the runtime, at most ten minutes) is fingerprinted once and
-   cached. Each file is compared with the next eight episodes in episode order,
-   and a file none of them matched with up to 48 more. Matches must last 12
-   seconds to 3 minutes.
-   A file's intro is the median of the pair results that agree with its
-   most-confirmed one (`chromaprint:v4`).
+2. **Chromaprint with silence edges** (`chromaprint:v5`). Remaining files are
+   grouped by library, season, and presentation (edition and audio language).
+   One ffmpeg pass over each file's opening audio (25 percent of the runtime,
+   at most ten minutes) computes a Chromaprint fingerprint and runs
+   `silencedetect` (-50 dB, at least 0.3 seconds) on the stereo downmix. Both
+   are cached together. A 5.1 track measured on its own channels is silent
+   only while all six are, which reports a fraction of the downmix's silences.
+   Each file is compared with the next eight episodes in episode order, and a
+   file they leave without a confirmed match of 20 seconds or more with up to
+   48 more.
+
+   - **Pair matching.** Point timestamps use libchromaprint's exact spacing
+     (1365/11025 seconds). Each candidate alignment between two files is
+     refined to a single point, and every shared run at that alignment is
+     kept, not only the longest. A run that is mostly silence is dropped. A
+     run is split at silences of 0.45 seconds or more, which separates a
+     studio logo, or the audio after the intro, from the theme. A run that
+     starts after a cold open keeps a pause in its first 15 seconds when what
+     follows the pause is long enough to be a match on its own, and a split
+     that would leave no piece of 10 seconds is not made.
+   - **Consensus.** A file's pair results that agree within 4 seconds on both
+     edges form a cluster, each partner episode counting once. The cluster
+     the most partners confirm wins, except that a theme two partners confirm
+     beats a short logo at the head of the file. The intro is the median of
+     the winning cluster.
+   - **Edges.** The file's own silences then trim the result. After a cold
+     open, a silence of 0.8 to 3 seconds that ends within 8 seconds of the
+     start moves the start to its end. The first silence that begins within
+     15 seconds before the end moves the end to its start. Neither trim
+     leaves less than 9.5 seconds.
+   - **Bounds.** A match lasts 8 seconds to 3 minutes. One shorter than 20
+     seconds needs two partner episodes, and one shorter than 9.5 seconds
+     also needs a clean pair score.
+
+   A fingerprint cached before silences were stored is still used. Its file
+   is matched the same way without the silence steps, and the opening is not
+   read again.
 
 Earlier versions moved a Chromaprint start past subtitle cues in its first
 15 seconds (`chromaprint:dialogue:v4`). Most such cues belonged to the opening
@@ -220,7 +249,16 @@ tombstone is no marker to clients, as a manual clear is.
 - Fingerprints are `intro_fingerprint` rows in the per-file analysis
   artifact table, `media_intro_fingerprints`; see
   [artifact storage](media-sampling.md#artifact-storage) for its keys and
-  statuses. Intro detection writes only `complete` rows.
+  statuses. Intro detection writes only `complete` rows. New rows use the
+  `chromaprint+silence:v1` payload, little-endian: a point count and a
+  silence count (`uint32` each), the raw points, then each silence as its
+  start and end in whole milliseconds from the window start (`uint32` each).
+  The stereo downmix ahead of `silencedetect` is the one the fingerprint
+  already took, and `silencedetect` passes it through unchanged,
+  so the points are byte for byte what a fingerprint-only run produces and the
+  cache key did not change. Rows in the older `chromaprint:raw:uint32le`
+  payload still load; their matches skip silence splitting and trimming rather
+  than reading the opening again.
 - `AnalysisBehaviorVersion` is part of the season state key. Bump it to
   re-run every season comparison over cached fingerprints.
 - A season group whose stored state settled it is skipped while its input
