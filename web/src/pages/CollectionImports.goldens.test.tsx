@@ -14,6 +14,7 @@ import {
   adminCollection,
   adminCollectionList,
   adminSyncedCollection,
+  personalCapabilities,
   personalSyncedCollection,
 } from "@/test/fixtures/collectionAnswers";
 import { artworkTile, chooseArtwork } from "@/test/collectionArtwork";
@@ -200,7 +201,65 @@ describe("personal Synced list step", () => {
     await createAndLeave();
     expect(v2Recorder.writes()).toEqual(goldens.personalTemplateTMDB);
   });
+
+  it("creates from one of the profile's own MDBList lists, searched with MDBList search off", async () => {
+    v2Recorder.answer("GET /api/v2/collections/capabilities", {
+      ...personalCapabilities,
+      mdblist_search: false,
+      mdblist_account_lists: true,
+    });
+    v2Recorder.answer("GET /api/v2/collections/import/mdblist/mine", {
+      configured: true,
+      items: [
+        ownMDBList("Weekend Picks", "weekend-picks", true),
+        ownMDBList("Holiday Movies", "holiday-movies", false),
+      ],
+    });
+    showEditorPage("/collections/new?type=synced");
+    // MDBList search being off disables browsing, not the profile's own lists.
+    expect(await screen.findByLabelText("Search lists")).toBeEnabled();
+    await type("Search lists", "weekend");
+    const pick = await screen.findByRole("radio", { name: "Weekend Picks" });
+    expect(pick).toHaveAccessibleDescription(/^Private/);
+    expect(screen.queryByRole("radio", { name: "Holiday Movies" })).toBeNull();
+    fireEvent.click(pick);
+    await createAndLeave();
+    expect(v2Recorder.writes()).toEqual([
+      expect.objectContaining({
+        operation: "POST /api/v2/collections/import/mdblist",
+        body: expect.objectContaining({
+          title: "Weekend Picks",
+          url: "https://mdblist.com/lists/alice/weekend-picks/json",
+        }),
+      }),
+    ]);
+  });
+
+  it("tells a profile without an MDBList connection where to connect it", async () => {
+    v2Recorder.answer("GET /api/v2/collections/capabilities", {
+      ...personalCapabilities,
+      mdblist_account_lists_connectable: true,
+    });
+    showEditorPage("/collections/new?type=synced");
+    expect(await screen.findByRole("link", { name: "Settings › Watch providers" })).toHaveAttribute(
+      "href",
+      "/settings/watch-providers",
+    );
+  });
 });
+
+/** One of the key account's own MDBList lists, as the account-list operations answer it. */
+function ownMDBList(name: string, slug: string, isPrivate: boolean) {
+  return {
+    name,
+    url: `https://mdblist.com/lists/alice/${slug}`,
+    media_types: ["movie"],
+    items: 3,
+    private: isPrivate,
+    dynamic: false,
+    owned: true,
+  };
+}
 
 const mdblistSearchHit = {
   id: "4242",
@@ -337,16 +396,3 @@ describe("personal Synced list editor", () => {
     expect(v2Recorder.writes()).toEqual(goldens.personalSyncedClearLimit);
   });
 });
-
-/** One of the key account's own MDBList lists, as the account-list operations answer it. */
-function ownMDBList(name: string, slug: string, isPrivate: boolean) {
-  return {
-    name,
-    url: `https://mdblist.com/lists/alice/${slug}`,
-    media_types: ["movie"],
-    items: 3,
-    private: isPrivate,
-    dynamic: false,
-    owned: true,
-  };
-}

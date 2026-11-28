@@ -36,13 +36,18 @@ export type MDBListAccountList =
 /**
  * The lists of the MDBList account whose key a scope's collections read with,
  * private ones included: for server collections, the account that owns the
- * server's MDBList API key.
+ * server's MDBList API key; for personal ones, the acting profile's own
+ * MDBList connection.
  */
 export function useMDBListAccountLists(scopeKind: ScopeKind, enabled = true) {
   return useQuery({
     queryKey: collectionKeys.mdblistAccountLists(scopeKind),
-    queryFn: () => v2("GET /api/v2/admin/collections/mdblist/lists").then((body) => body.items),
-    enabled: enabled && scopeKind === "server",
+    queryFn: () =>
+      (scopeKind === "server"
+        ? v2("GET /api/v2/admin/collections/mdblist/lists")
+        : v2("GET /api/v2/collections/import/mdblist/mine")
+      ).then((body) => body.items),
+    enabled,
     staleTime: 60_000,
   });
 }

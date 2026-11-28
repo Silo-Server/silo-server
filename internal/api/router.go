@@ -1381,6 +1381,11 @@ func newChiRouter(deps Dependencies) chi.Router {
 			)
 			userImportHandler.ArtworkStore = deps.Blobs.Assets
 			userImportHandler.ArtworkResolver = deps.ArtworkResolver
+			if lists, ok := deps.WatchProviderService.(interface {
+				MDBListProfileLists() *watchsync.MDBListProfileLists
+			}); ok {
+				userImportHandler.ProfileMDBListLists = lists.MDBListProfileLists()
+			}
 		}
 		settingsHandler = handlers.NewSettingsHandler(deps.UserStoreProvider)
 		settingsHandler.DeviceSightings = deviceSightings

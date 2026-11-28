@@ -142,6 +142,8 @@ type CollectionCapabilities struct {
 	SortPreferenceKinds       []string                       `json:"sort_preference_kinds" doc:"collection_kind values the sort-preference operations accept" example:"[\"library\",\"user\",\"watchlist\",\"favorites\"]"`
 	CreateDescription         bool                           `json:"create_description" doc:"createCollection stores a description for the acting account" example:"true"`
 	MDBListSearch             bool                           `json:"mdblist_search" doc:"searchMDBListLists and listTopMDBListLists return lists; false when the server has no MDBList API key" example:"true"`
+	MDBListAccountLists       bool                           `json:"mdblist_account_lists" doc:"listMyMDBListLists returns the lists of the acting profile's own MDBList account, and the profile's collections sync that account's private lists; false when the profile has no MDBList watch provider connection or the installed plugin can't read lists" example:"true"`
+	MDBListConnectable        bool                           `json:"mdblist_account_lists_connectable" doc:"The acting profile has no MDBList watch provider connection, and connecting MDBList in Settings › Watch providers would make mdblist_account_lists true; false when mdblist_account_lists is true or the server can't read MDBList lists for any profile" example:"false"`
 	ScheduleTimeZone          CollectionScheduleTimeZone     `json:"schedule_time_zone"`
 	SyncScheduleEditable      bool                           `json:"sync_schedule_editable" doc:"updateCollection accepts sync_schedule on a synced list; false when imports is false" example:"true"`
 	ContainsItem              bool                           `json:"contains_item" doc:"listCollections accepts contains_item and marks the acting profile's own manual collections with contains" example:"true"`
@@ -494,6 +496,8 @@ func registerPersonalCollections(reg *Registry) {
 		"Search MDBList for lists to import.")), reg.searchMDBListLists)
 	Register(reg, read(humaOp(http.MethodGet, Prefix+"/collections/import/mdblist/top", "listTopMDBListLists", "collections",
 		"MDBList's most-liked lists.")), reg.listTopMDBListLists)
+	Register(reg, read(humaOp(http.MethodGet, Prefix+"/collections/import/mdblist/mine", "listMyMDBListLists", "collections",
+		"List the lists of the acting profile's own MDBList account, private ones included, read with its MDBList connection.")), reg.listMyMDBListLists)
 }
 
 func (reg *Registry) personalCollections() (PersonalCollectionService, *Problem) {
@@ -656,6 +660,7 @@ func (reg *Registry) getCollectionCapabilities(ctx context.Context, _ *Capabilit
 			return nil, collectionProblem(err)
 		}
 	}
+	mdblistAccountLists, mdblistConnectable := reg.profileMDBListAccountListsState(ctx)
 	return &CollectionCapabilitiesOutput{Body: CollectionCapabilities{
 		Groups: features.Groups, LoginSharing: true, Imports: features.Imports, Artwork: features.Artwork, ItemReorder: features.ItemReorder,
 		ImportSources:       collectionImportSources(features.Imports),
@@ -669,6 +674,8 @@ func (reg *Registry) getCollectionCapabilities(ctx context.Context, _ *Capabilit
 		SortPreferenceKinds:       NonNil(v.SortPreferenceKinds),
 		CreateDescription:         features.Description,
 		MDBListSearch:             reg.mdblistSearch(),
+		MDBListAccountLists:       features.Imports && mdblistAccountLists,
+		MDBListConnectable:        features.Imports && mdblistConnectable,
 		ScheduleTimeZone:          reg.scheduleTimeZone(),
 		SyncScheduleEditable:      features.Imports,
 		ContainsItem:              true,
@@ -957,6 +964,41 @@ func (reg *Registry) listTopMDBListLists(ctx context.Context, _ *struct{}) (*MDB
 		return nil, collectionProblem(err)
 	}
 	return mdblistDiscoveryOf(view), nil
+}
+
+type profileMDBListAccountLists interface {
+	ProfileMDBListAccountListsState(ctx context.Context, userID int, profileID string) (available, connectable bool)
+	ProfileMDBListAccountLists(ctx context.Context, userID int, profileID string) (handlers.MDBListAccountListsView, error)
+}
+
+// profileMDBListAccountListsState reports mdblist_account_lists and
+// mdblist_account_lists_connectable for the acting profile.
+func (reg *Registry) profileMDBListAccountListsState(ctx context.Context) (available, connectable bool) {
+	svc, ok := reg.deps.CollectionImports.(profileMDBListAccountLists)
+	if !ok {
+		return false, false
+	}
+	userID, p := actingUserID(ctx)
+	if p != nil {
+		return false, false
+	}
+	return svc.ProfileMDBListAccountListsState(ctx, userID, profileFrom(ctx))
+}
+
+func (reg *Registry) listMyMDBListLists(ctx context.Context, _ *struct{}) (*MDBListAccountListCollectionOutput, error) {
+	userID, p := actingUserID(ctx)
+	if p != nil {
+		return nil, p
+	}
+	svc, ok := reg.deps.CollectionImports.(profileMDBListAccountLists)
+	if !ok {
+		return mdblistAccountListsOf(handlers.MDBListAccountListsView{Lists: []mdblist.AccountList{}}), nil
+	}
+	view, err := svc.ProfileMDBListAccountLists(ctx, userID, profileFrom(ctx))
+	if err != nil {
+		return nil, collectionProblem(err)
+	}
+	return mdblistAccountListsOf(view), nil
 }
 
 func (reg *Registry) reorderCollectionGroups(ctx context.Context, in *CollectionGroupOrderInput) (*CollectionGroupsOrderOutput, error) {

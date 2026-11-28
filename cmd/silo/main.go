@@ -3535,6 +3535,11 @@ func main() {
 			// here; the router gives it its generator.
 			deps.PersonalCollectionCollages = catalog.NewPersonalCollectionCollages(deps.DB, nil)
 			userSync.Collages = deps.PersonalCollectionCollages
+			// A personal collection reads a private MDBList list with its
+			// owner profile's own MDBList connection, never the server key.
+			if watchProviderService != nil {
+				userSync.MDBList = watchProviderService.MDBListProfileLists()
+			}
 			userCollectionScheduler = usercollections.NewScheduler(deps.DB, userSync, slog.Default())
 			deps.UserCollectionSync = userSync
 			deps.UserCollectionScheduler = userCollectionScheduler

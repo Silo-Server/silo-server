@@ -44,6 +44,10 @@ type fakeWatchSyncPluginClient struct {
 	deviceStartRequest  *pluginv1.WatchSyncDeviceAuthorizationServiceStartRequest
 	devicePollRequest   *pluginv1.WatchSyncDeviceAuthorizationServicePollRequest
 	listRequests        []*pluginv1.WatchSyncListRemoteStateRequest
+	customListsResponse *pluginv1.WatchSyncListCustomListsResponse
+	customItemResponses []*pluginv1.WatchSyncListCustomListItemsResponse
+	customItemRequests  []*pluginv1.WatchSyncListCustomListItemsRequest
+	customErr           error
 }
 
 func (f *fakeWatchSyncPluginClient) StartDeviceAuthorization(_ context.Context, req *pluginv1.WatchSyncDeviceAuthorizationServiceStartRequest) (*pluginv1.WatchSyncDeviceAuthorizationServiceStartResponse, error) {
@@ -103,6 +107,29 @@ func (f *fakeWatchSyncPluginClient) ListRemoteState(_ context.Context, req *plug
 		return f.listResponse, nil
 	}
 	return &pluginv1.WatchSyncListRemoteStateResponse{}, nil
+}
+
+func (f *fakeWatchSyncPluginClient) ListCustomLists(context.Context, *pluginv1.WatchSyncListCustomListsRequest) (*pluginv1.WatchSyncListCustomListsResponse, error) {
+	if f.customErr != nil {
+		return nil, f.customErr
+	}
+	if f.customListsResponse != nil {
+		return f.customListsResponse, nil
+	}
+	return &pluginv1.WatchSyncListCustomListsResponse{}, nil
+}
+
+func (f *fakeWatchSyncPluginClient) ListCustomListItems(_ context.Context, req *pluginv1.WatchSyncListCustomListItemsRequest) (*pluginv1.WatchSyncListCustomListItemsResponse, error) {
+	f.customItemRequests = append(f.customItemRequests, req)
+	if f.customErr != nil {
+		return nil, f.customErr
+	}
+	if len(f.customItemResponses) > 0 {
+		response := f.customItemResponses[0]
+		f.customItemResponses = f.customItemResponses[1:]
+		return response, nil
+	}
+	return &pluginv1.WatchSyncListCustomListItemsResponse{}, nil
 }
 
 type fakePluginCredentialRepository struct {

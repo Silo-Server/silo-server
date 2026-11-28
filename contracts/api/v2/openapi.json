@@ -34043,6 +34043,20 @@
             "description": "is_shared shows a collection to every profile on the login, listCollections includes other profiles' shared collections, and only a collection's creator changes or orders it",
             "type": "boolean"
           },
+          "mdblist_account_lists": {
+            "description": "listMyMDBListLists returns the lists of the acting profile's own MDBList account, and the profile's collections sync that account's private lists; false when the profile has no MDBList watch provider connection or the installed plugin can't read lists",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "mdblist_account_lists_connectable": {
+            "description": "The acting profile has no MDBList watch provider connection, and connecting MDBList in Settings › Watch providers would make mdblist_account_lists true; false when mdblist_account_lists is true or the server can't read MDBList lists for any profile",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
           "mdblist_search": {
             "description": "searchMDBListLists and listTopMDBListLists return lists; false when the server has no MDBList API key",
             "examples": [
@@ -34119,6 +34133,8 @@
           "sort_preference_kinds",
           "create_description",
           "mdblist_search",
+          "mdblist_account_lists",
+          "mdblist_account_lists_connectable",
           "schedule_time_zone",
           "sync_schedule_editable",
           "contains_item",
@@ -170206,6 +170222,149 @@
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
         "x-silo-retry-safety": "non_retryable",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/collections/import/mdblist/mine": {
+      "get": {
+        "operationId": "listMyMDBListLists",
+        "parameters": [
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MDBListAccountListCollection"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List the lists of the acting profile's own MDBList account, private ones included, read with its MDBList connection.",
+        "tags": [
+          "collections"
+        ],
+        "x-silo-class": "profile_scoped",
         "x-silo-service-backed": true
       }
     },

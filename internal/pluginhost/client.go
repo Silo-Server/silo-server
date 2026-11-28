@@ -97,6 +97,7 @@ type HTTPRoutesClient struct {
 type WatchSyncProviderClient struct {
 	client              pluginv1.WatchSyncProviderClient
 	deviceAuthorization pluginv1.WatchSyncDeviceAuthorizationServiceClient
+	customLists         pluginv1.WatchSyncCustomListServiceClient
 	timeout             time.Duration
 }
 
@@ -274,6 +275,7 @@ func (c *Client) WatchSyncProvider(capabilityID string) (*WatchSyncProviderClien
 	return &WatchSyncProviderClient{
 		client:              c.rpc.WatchSyncProvider(),
 		deviceAuthorization: c.rpc.WatchSyncDeviceAuthorization(),
+		customLists:         c.rpc.WatchSyncCustomLists(),
 		timeout:             DefaultWatchSyncTimeout,
 	}, nil
 }
@@ -566,6 +568,22 @@ func (c *WatchSyncProviderClient) PollDeviceAuthorization(ctx context.Context, r
 	callCtx, cancel := ensureDeadline(ctx, c.timeout)
 	defer cancel()
 	return c.deviceAuthorization.Poll(callCtx, req)
+}
+
+// ListCustomLists asks for the lists of the connected account. Plugins that
+// don't set provides_custom_lists answer codes.Unimplemented.
+func (c *WatchSyncProviderClient) ListCustomLists(ctx context.Context, req *pluginv1.WatchSyncListCustomListsRequest) (*pluginv1.WatchSyncListCustomListsResponse, error) {
+	callCtx, cancel := ensureDeadline(ctx, c.timeout)
+	defer cancel()
+	return c.customLists.ListCustomLists(callCtx, req)
+}
+
+// ListCustomListItems asks for one page of a list's items. Plugins that
+// don't set provides_custom_lists answer codes.Unimplemented.
+func (c *WatchSyncProviderClient) ListCustomListItems(ctx context.Context, req *pluginv1.WatchSyncListCustomListItemsRequest) (*pluginv1.WatchSyncListCustomListItemsResponse, error) {
+	callCtx, cancel := ensureDeadline(ctx, c.timeout)
+	defer cancel()
+	return c.customLists.ListCustomListItems(callCtx, req)
 }
 
 func (c *WatchSyncProviderClient) RefreshCredentials(ctx context.Context, req *pluginv1.WatchSyncRefreshCredentialsRequest) (*pluginv1.WatchSyncCredentialResponse, error) {
