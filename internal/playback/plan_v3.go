@@ -1323,6 +1323,14 @@ func hlsNativeAudioCodecV3(codec string) bool {
 	return false
 }
 
+// progressiveCopyFitsMP4V3 reports whether a progressive remux, which always
+// writes MP4, can stream-copy an audio codec. FFmpeg's MP4 muxer refuses a
+// TrueHD copy as experimental (exit 88), so TrueHD is converted even when the
+// client decodes it.
+func progressiveCopyFitsMP4V3(codec string) bool {
+	return normalizeCodecV3(codec) != audioCodecTrueHD
+}
+
 type resolvedToneMapRecipeV3 struct {
 	policy      tonemap.Policy
 	mode        tonemap.Mode
