@@ -28,8 +28,17 @@ interface AdminSubtitleAppearanceDialogProps {
    * the network layer) and reports failures.
    */
   onSave: (setting: AdminDeviceSetting, value: string) => Promise<unknown>;
-  /** Remove the override on the device. Only invoked when `isOverride`. */
-  onReset: (setting: AdminDeviceSetting) => void;
+  /**
+   * Removes the override on the device. Only invoked when `isOverride`. A
+   * returned promise settles when the clear does.
+   */
+  onReset: (setting: AdminDeviceSetting) => void | Promise<unknown>;
+  /**
+   * The stored value the device resolves to without its override (the
+   * profile's own, else the app default). Edits made after a reset build on
+   * it; without it they build on the app default.
+   */
+  inherited?: string;
 }
 
 /**
@@ -47,6 +56,7 @@ export function AdminSubtitleAppearanceDialog({
   onClose,
   onSave,
   onReset,
+  inherited,
 }: AdminSubtitleAppearanceDialogProps) {
   const t = useT();
   // Keyed by the signed-in session and the setting's target, so reopening
@@ -66,9 +76,16 @@ export function AdminSubtitleAppearanceDialog({
   const handleChange = (patch: Partial<SubtitleAppearance>) =>
     draft.edit(patch, (next) => onSave(setting, JSON.stringify(next)));
 
+  // Reset wins over every save made before it and loses to every edit made
+  // after it: the clear goes out once a save already sent has settled (or it
+  // could land after the clear and write the override back), and an editor
+  // reopened meanwhile queues its edits behind the clear, built on the value
+  // the device inherits once its override is gone.
   const handleReset = () => {
-    draft.discardQueued();
-    onReset(setting);
+    draft.clear(
+      () => Promise.resolve(onReset(setting)),
+      () => parseSubtitleAppearance(inherited),
+    );
     onClose();
   };
 

@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, expect, it, vi } from "vitest";
 import { setAccessToken, setProfileId } from "@/api/client";
 import type { AdminDeviceSetting } from "@/hooks/queries/admin/users";
+import { DEFAULT_SUBTITLE_APPEARANCE, parseSubtitleAppearance } from "@/lib/subtitleAppearance";
 import { AdminSubtitleAppearanceDialog } from "./AdminSubtitleAppearanceDialog";
 
 afterEach(cleanup);
@@ -33,6 +34,7 @@ function deferred() {
 function renderDialog(
   onSave: (s: AdminDeviceSetting, value: string) => Promise<unknown>,
   onReset = vi.fn(),
+  inherited?: string,
 ) {
   return render(
     <AdminSubtitleAppearanceDialog
@@ -41,6 +43,7 @@ function renderDialog(
       onClose={vi.fn()}
       onSave={onSave}
       onReset={onReset}
+      inherited={inherited}
     />,
   );
 }
@@ -144,4 +147,93 @@ it("doesn't join a save still in flight from an earlier sign-in", async () => {
   expect(onSave).toHaveBeenCalledTimes(2);
   expect(savedValue(onSave, 1)).toMatchObject({ fontSize: "medium", fontFamily: "monospace" });
   await act(async () => first.resolve());
+});
+
+// A save already sent could reach the server after Reset's DELETE and write
+// the override back, so the reset goes out once that save has settled,
+// whichever way it settles (#4545).
+it.each([
+  ["succeeds", (first: ReturnType<typeof deferred>) => first.resolve()],
+  ["fails", (first: ReturnType<typeof deferred>) => first.reject(new Error("rejected"))],
+])("sends the reset after a save already in flight %s", async (_case, settle) => {
+  const first = deferred();
+  const onSave = vi.fn().mockReturnValueOnce(first.promise).mockResolvedValue(undefined);
+  const onReset = vi.fn();
+  renderDialog(onSave, onReset);
+
+  fireEvent.click(radio("Large"));
+  fireEvent.click(screen.getByRole("button", { name: "Reset override" }));
+  expect(onSave).toHaveBeenCalledTimes(1);
+  expect(onReset).not.toHaveBeenCalled();
+
+  await act(async () => settle(first));
+  expect(onReset).toHaveBeenCalledTimes(1);
+});
+
+// An editor reopened while a reset waits is behind it: its edit goes out only
+// after the clear settles, built on the cleared value, so the reset can't
+// delete it and the old override doesn't come back with it (#4545 review).
+it("sends an edit made after a reset once the clear settles", async () => {
+  const first = deferred();
+  const cleared = deferred();
+  const onSave = vi.fn().mockReturnValueOnce(first.promise).mockResolvedValue(undefined);
+  const onReset = vi.fn(() => cleared.promise);
+  const { unmount } = renderDialog(onSave, onReset);
+
+  fireEvent.click(radio("Large"));
+  fireEvent.click(screen.getByRole("button", { name: "Reset override" }));
+  unmount();
+  renderDialog(onSave, onReset);
+  fireEvent.click(radio("Monospace"));
+
+  await act(async () => first.resolve());
+  expect(onReset).toHaveBeenCalledTimes(1);
+  expect(onSave).toHaveBeenCalledTimes(1);
+
+  await act(async () => cleared.resolve());
+  expect(onSave).toHaveBeenCalledTimes(2);
+  expect(savedValue(onSave, 1)).toEqual({
+    ...DEFAULT_SUBTITLE_APPEARANCE,
+    fontFamily: "monospace",
+  });
+});
+
+// After a reset the device inherits the profile's appearance, so an edit
+// queued behind the reset changes only its own field and keeps the rest of
+// what is inherited (#4545 review).
+it("builds an edit made after a reset on the value the device inherits", async () => {
+  const inherited = JSON.stringify({ fontSize: "small", fontFamily: "serif" });
+  const cleared = deferred();
+  const onSave = vi.fn().mockResolvedValue(undefined);
+  const onReset = vi.fn(() => cleared.promise);
+  const { unmount } = renderDialog(onSave, onReset, inherited);
+
+  fireEvent.click(screen.getByRole("button", { name: "Reset override" }));
+  unmount();
+  renderDialog(onSave, onReset, inherited);
+  fireEvent.click(radio("Large"));
+  await act(async () => cleared.resolve());
+
+  expect(onSave).toHaveBeenCalledTimes(1);
+  expect(savedValue(onSave, 0)).toEqual({
+    ...parseSubtitleAppearance(inherited),
+    fontSize: "large",
+  });
+});
+
+// A reset that fails leaves the stored value unknown, so an edit queued
+// behind it is dropped rather than sent on the pre-reset override.
+it("drops an edit queued behind a reset that fails", async () => {
+  const cleared = deferred();
+  const onSave = vi.fn().mockResolvedValue(undefined);
+  const onReset = vi.fn(() => cleared.promise);
+  const { unmount } = renderDialog(onSave, onReset);
+
+  fireEvent.click(screen.getByRole("button", { name: "Reset override" }));
+  unmount();
+  renderDialog(onSave, onReset);
+  fireEvent.click(radio("Large"));
+  await act(async () => cleared.reject(new Error("rejected")));
+
+  expect(onSave).not.toHaveBeenCalled();
 });

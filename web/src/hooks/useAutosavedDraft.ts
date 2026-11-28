@@ -14,6 +14,8 @@ interface Machine<T> {
   queuedSave: Save<T> | null;
   /** Shows the machine's state in the editor mounted on it, if any. */
   publish: ((m: Machine<T>) => void) | null;
+  /** A clear of the stored value waiting for the request in flight (clear). */
+  queuedClear: (() => Promise<void>) | null;
 }
 
 /**
@@ -23,27 +25,39 @@ interface Machine<T> {
  */
 const inFlight = new Map<string, unknown>();
 
-/** Send one patch; when it settles, send whatever queued up meanwhile. */
+/** Runs one request; when it settles, runs whatever queued up meanwhile. */
+function run<T>(m: Machine<T>, sending: Partial<T>, request: () => Promise<void>) {
+  m.sending = sending;
+  if (m.key !== undefined) inFlight.set(m.key, m);
+  void request().finally(() => {
+    m.sending = null;
+    const { queued, queuedSave, queuedClear } = m;
+    // A clear goes first: it was asked for before any edit still queued.
+    if (queuedClear) {
+      m.queuedClear = null;
+      run(m, {}, queuedClear);
+    } else if (queued && queuedSave) {
+      m.queued = null;
+      m.queuedSave = null;
+      send(m, queued, queuedSave);
+    } else if (m.key !== undefined && inFlight.get(m.key) === m) {
+      inFlight.delete(m.key);
+    }
+    m.publish?.(m);
+  });
+}
+
+/** Send one patch, built on the last acknowledged value. */
 function send<T>(m: Machine<T>, patch: Partial<T>, save: Save<T>) {
   const next = { ...m.confirmed, ...patch };
-  m.sending = patch;
-  if (m.key !== undefined) inFlight.set(m.key, m);
-  void save(next)
-    .then(
+  run(m, patch, () =>
+    save(next).then(
       () => {
         m.confirmed = next;
       },
       () => undefined,
-    )
-    .finally(() => {
-      m.sending = null;
-      const { queued, queuedSave } = m;
-      m.queued = null;
-      m.queuedSave = null;
-      if (queued && queuedSave) send(m, queued, queuedSave);
-      else if (m.key !== undefined && inFlight.get(m.key) === m) inFlight.delete(m.key);
-      m.publish?.(m);
-    });
+    ),
+  );
 }
 
 const viewOf = <T>(m: Machine<T>) => ({
@@ -66,8 +80,8 @@ const viewOf = <T>(m: Machine<T>) => ({
  *
  * Unmounting drops edits that haven't been sent, so nothing goes out after
  * the editor is gone (where a reset or a reopened editor couldn't stop it);
- * a save already in flight still completes. Call `discardQueued` before
- * clearing the stored value while the editor is mounted.
+ * a save already in flight still completes. Reset the stored value through
+ * `clear`, which orders the reset after that save.
  *
  * With a `key` naming the stored value, an editor opened while an earlier
  * one's save for that key is still in flight starts from that save, not from
@@ -84,6 +98,7 @@ export function useAutosavedDraft<T extends object>(initial: T, key?: string) {
         queued: null,
         queuedSave: null,
         publish: null,
+        queuedClear: null,
       },
   );
   const machine = useRef(joined);
@@ -140,5 +155,40 @@ export function useAutosavedDraft<T extends object>(initial: T, key?: string) {
     publish(m);
   }, [publish]);
 
-  return { value: view.value, saving: view.saving, edit, reset, discardQueued };
+  /**
+   * Clears the stored value through `request` (a reset), in order with the
+   * saves: edits not sent yet are dropped, the clear goes out once a save
+   * already sent has settled (so that save can't land after it and write the
+   * value back), and edits made after it wait for it and then build on
+   * `cleared()`, read once the clear has succeeded: the value in effect with
+   * nothing stored here, such as one inherited from a wider scope. If the
+   * clear fails, edits made after it are dropped. The clear outlives the
+   * editor: the value stays in flight under its key until the clear settles,
+   * so an editor reopened meanwhile queues behind it.
+   */
+  const clear = useCallback(
+    (request: () => Promise<unknown>, cleared: () => T) => {
+      const m = machine.current;
+      m.queued = null;
+      m.queuedSave = null;
+      const op = () =>
+        request().then(
+          () => {
+            m.confirmed = cleared();
+          },
+          () => {
+            // The stored value is unknown after a failed clear, so edits
+            // queued behind it don't go out built on a guess.
+            m.queued = null;
+            m.queuedSave = null;
+          },
+        );
+      if (m.sending) m.queuedClear = op;
+      else run(m, {}, op);
+      publish(m);
+    },
+    [publish],
+  );
+
+  return { value: view.value, saving: view.saving, edit, reset, discardQueued, clear };
 }

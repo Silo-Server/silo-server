@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { ChevronLeft, Info, Pencil, ShieldCheck, Trash2, Users } from "lucide-react";
 import { toast } from "sonner";
 
@@ -7,6 +8,7 @@ import {
   isCapturedProfileAuthorityActive,
   type ProfileRequestContextSnapshot,
 } from "@/api/client";
+import { adminAuthorityScope } from "@/api/v2/adminAuthority";
 import { v2ErrorText } from "@/api/v2/request";
 import type { UserDevice } from "@/api/types";
 import { useT } from "@/i18n";
@@ -32,6 +34,9 @@ import {
   type DeviceTarget,
 } from "@/hooks/queries/devices";
 import {
+  effectiveSettingsQueryKey,
+  type EffectiveSettingsMap,
+  isSettingValueMissing,
   settingsCapabilitiesSupportKey,
   useSettingsCapabilities,
   useClearSettingValue,
@@ -303,6 +308,7 @@ function DeviceDetail({
   const isLoading = capabilities.isLoading || settingsLoading;
   const capabilitiesUnavailable = !capabilities.isLoading && !canUseDeviceSettings;
 
+  const queryClient = useQueryClient();
   const setValue = useSetSettingValue();
   const clearValue = useClearSettingValue();
   const clearDevice = useClearDeviceSettings();
@@ -333,7 +339,11 @@ function DeviceDetail({
   // The server value reasserts itself whenever the panel is (re)opened.
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   const appearanceSetting = settings[SETTING_KEYS.PLAYBACK_SUBTITLE_APPEARANCE];
-  const appearance = useAutosavedDraft(parseSubtitleAppearance(appearanceSetting?.value));
+  // Keyed like the admin editor's draft, so a remounted view joins a reset in flight.
+  const appearance = useAutosavedDraft(
+    parseSubtitleAppearance(appearanceSetting?.value),
+    JSON.stringify([adminAuthorityScope(), device.profile_id, device.device_id, "appearance"]),
+  );
   const appearanceAuthority = useRef<ProfileRequestContextSnapshot | null>(null);
   const appearanceChangedHere = appearanceSetting?.scope === "profile_device";
 
@@ -603,15 +613,49 @@ function DeviceDetail({
         onClose={() => setAppearanceOpen(false)}
         canReset={appearanceChangedHere}
         onReset={() => {
-          appearance.discardQueued();
-          clearValue.mutate(
-            { key: SETTING_KEYS.PLAYBACK_SUBTITLE_APPEARANCE, identity },
-            {
-              onError: (error) =>
-                toast.error(v2ErrorText(error, t("web.settings.device.settingResetFailed"))),
-            },
-          );
           setAppearanceOpen(false);
+          // The clear goes out once a save already sent has settled, so that
+          // save can't land after it and write the override back, and edits
+          // made after it wait for it. It goes out for the profile that asked
+          // for it, as a queued save does: after a switch it is dropped.
+          const authority = captureProfileRequestContext();
+          // The read the panel opens from. Once the override is gone it
+          // answers with what the device inherits (the profile's value, or
+          // the default), which edits made after the reset build on.
+          const effective = effectiveSettingsQueryKey({
+            keys: supportedKeys,
+            deviceId: device.device_id,
+            profileId: targetProfileId,
+          });
+          appearance.clear(
+            async () => {
+              if (authority && !isCapturedProfileAuthorityActive(authority)) {
+                throw new Error("profile changed before the reset was sent");
+              }
+              try {
+                await clearValue
+                  .mutateAsync({ key: SETTING_KEYS.PLAYBACK_SUBTITLE_APPEARANCE, identity })
+                  .catch((error) => {
+                    // A 404 means another client cleared it first: the state asked for.
+                    if (!isSettingValueMissing(error)) throw error;
+                  });
+                // Queued edits build on this read, so a failed read fails the clear.
+                await queryClient.refetchQueries(
+                  { queryKey: effective, exact: true },
+                  { throwOnError: true },
+                );
+              } catch (error) {
+                toast.error(v2ErrorText(error, t("web.settings.device.settingResetFailed")));
+                throw error;
+              }
+            },
+            () =>
+              parseSubtitleAppearance(
+                queryClient.getQueryData<EffectiveSettingsMap>(effective)?.[
+                  SETTING_KEYS.PLAYBACK_SUBTITLE_APPEARANCE
+                ]?.value,
+              ),
+          );
         }}
         resetLabel={
           forSomeoneElse
