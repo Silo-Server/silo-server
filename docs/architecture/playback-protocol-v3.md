@@ -1788,7 +1788,9 @@ ends, while the same id replays the stored terminal. Their `message` tells the
 viewer what to do.
 `routing_policy_unsatisfied` and `route_capacity_unavailable` come from the node-routing resolver:
 `routing_policy_unsatisfied` means no route shape is legal under the configured
-execution and egress policy and is never retryable, while
+execution and egress policy, or for the device (a device enrolled `direct_only`
+takes no proxy, so under `proxy_only` egress for every delivery it has none), and
+is never retryable, while
 `route_capacity_unavailable` means a legal shape exists but no node could serve
 it right now and is always retryable. Route preparation returns the other two,
 both retryable: `route_capability_unavailable` when no available worker can

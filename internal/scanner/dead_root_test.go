@@ -477,7 +477,8 @@ JSON
 			lostFile:    "Lost Book/part.m4b", lostObserved: "Lost Book",
 			presentContent: func(*testing.T) []byte { return []byte("x") },
 			scan: func(ctx context.Context, s *Scanner, f *models.MediaFolder) error {
-				return s.ScanAudiobookFolder(ctx, f, true)
+				_, err := s.ScanAudiobookFolder(ctx, f, true)
+				return err
 			},
 		},
 		{
@@ -672,7 +673,7 @@ JSON
 		t.Fatal(err)
 	}
 	s := NewScanner(NewFileRepository(pool), ffprobe, nil, 2, false, time.Hour)
-	if err := s.ScanAudiobookFolder(ctx, folder, true); err != nil {
+	if _, err := s.ScanAudiobookFolder(ctx, folder, true); err != nil {
 		t.Fatalf("initial scan: %v", err)
 	}
 	const bookQuery = `

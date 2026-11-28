@@ -1300,6 +1300,26 @@
       "body_file": "admin_devices.json"
     },
     {
+      "name": "admin_direct_connections_peers_ok",
+      "operation_id": "listAdminDirectConnectionPeers",
+      "scenario": "An acting administrator lists the devices that have a direct path to the API host: one device with its observed address and ports.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/direct-connections/peers",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-primary"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/DirectConnectionPeerCollection",
+      "body_file": "admin_direct_connections_peers_ok.json"
+    },
+    {
       "name": "admin_direct_connections_status_ok",
       "operation_id": "getAdminDirectConnectionsStatus",
       "scenario": "An acting administrator reads the API host's direct-connection readiness while the hidden toggle is off.",
@@ -2861,6 +2881,25 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/CollectionAdminPlaybackSession",
       "body_file": "admin_playback_sessions.json"
+    },
+    {
+      "name": "admin_playback_sessions_egress",
+      "operation_id": "listAdminPlaybackSessions",
+      "scenario": "With include_egress, a row carries the viewer bytes the merged stream telemetry counted for it, without the relay hop between Silo's own nodes; a session telemetry has no record of omits egress.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/sessions?include_egress=true",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/CollectionAdminPlaybackSession",
+      "body_file": "admin_playback_sessions_egress.json"
     },
     {
       "name": "admin_playback_summary",
@@ -7307,6 +7346,72 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/DeviceLogin",
       "body_file": "get_device_login_ok.json"
+    },
+    {
+      "name": "get_direct_connections_capability_api_key",
+      "operation_id": "getDirectConnectionsCapability",
+      "scenario": "An API key reads the capability: available on the server, but not allowed, since only a login session may enroll a device.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/capabilities/direct-connections",
+        "headers": {
+          "Authorization": "Bearer sa_member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "private, no-cache",
+        "Content-Type": "application/json",
+        "ETag": "\"d3f97a656dd6aa3f0049aa2db83ed083fbd89fe070a4f74e57e66a6532c029e7\""
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/DirectConnectionsCapability",
+      "body_file": "get_direct_connections_capability_api_key.json"
+    },
+    {
+      "name": "get_direct_connections_capability_available",
+      "operation_id": "getDirectConnectionsCapability",
+      "scenario": "A signed-in session reads the direct-connections capability on a server whose administrator turned them on, with ACK decimation off and a 32 MiB stream window.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/capabilities/direct-connections",
+        "headers": {
+          "Authorization": "Bearer tok-direct-login",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "private, no-cache",
+        "Content-Type": "application/json",
+        "ETag": "\"3554acb4e1b5292cf09446e69157492da36bad2d2ac590351f184b5b5141d59d\""
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/DirectConnectionsCapability",
+      "body_file": "get_direct_connections_capability_available.json"
+    },
+    {
+      "name": "get_direct_connections_capability_disabled",
+      "operation_id": "getDirectConnectionsCapability",
+      "scenario": "The same read while the administrator has direct connections turned off: no hosts, and not allowed.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/capabilities/direct-connections",
+        "headers": {
+          "Authorization": "Bearer tok-direct-login",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "private, no-cache",
+        "Content-Type": "application/json",
+        "ETag": "\"d15b30569208ed3466944df2349a64108986d2a27e32bdeca4ae7091ae1b2c6a\""
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/DirectConnectionsCapability",
+      "body_file": "get_direct_connections_capability_disabled.json"
     },
     {
       "name": "get_discover_ok",

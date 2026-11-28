@@ -310,7 +310,8 @@ usable client address: the resolved address is then the forwarder's own. The web
 Activity panel shows this separately from the access-network badge.
 `GET /api/v2/admin/sessions/capabilities` advertises `stream_location` for client
 feature detection. The displayed location is fixed at playback negotiation,
-even if a later media request arrives over another network path.
+even if a later media request arrives over another network path. A session's
+[egress](#session-egress) counts under this location.
 
 The web activity views show that network alongside the named execution and egress
 nodes. API egress is labeled "API server"; its reporting identity remains in the
@@ -1303,9 +1304,9 @@ paths themselves appear only here, behind admin auth. A scoped API key receives
 the same document without disk `path` values.
 
 `GET /api/v2/admin/system/resources/capabilities` advertises
-`instance_attribution`, `process_resources`, `cgroup_resources`, and
-`sample_freshness`, with the common capability `state`, `allowed`, `revision`,
-ETag and conditional request conventions. `state` is `not_configured` without a
+`instance_attribution`, `process_resources`, `cgroup_resources`,
+`sample_freshness`, and `process_cpu_percent`, with the common capability
+`state`, `allowed`, `revision`, ETag and conditional request conventions. `state` is `not_configured` without a
 sampler and `unsupported` on a non-Linux host. Support does not guarantee each
 operating system source is readable.
 
@@ -1316,12 +1317,32 @@ The `attribution` object contains:
 | `instance_id` | Random identifier for this sampler lifetime; identifies which process answered through a load balancer without exposing a hostname. |
 | `sample_interval_seconds`, `sample_duration_seconds` | Sampling cadence and duration of the last completed pass. |
 | `cpu`, `memory`, `load`, `network` | Scope, source and availability of each corresponding `system` reading. Scopes include `host`, `virtualized_host`, `cgroup`, and `network_namespace`. |
-| `process` | Silo process RSS, virtual memory, CPU seconds, threads, open FD count/limit, last-GC live Go heap, runtime memory reservation and goroutine count. Linux storage I/O byte counters include waited-for children. Unreadable values are omitted. |
+| `process` | Silo process RSS, virtual memory, CPU seconds, CPU percent (`cpu_pct`, below), threads, open FD count/limit, last-GC live Go heap, runtime memory reservation and goroutine count. Linux storage I/O byte counters include waited-for children. Unreadable values are omitted. |
 | `cgroup_cpu` | Usage, capacity in cores, throttling, bandwidth periods and CPU pressure at the selected visible cgroup level. A tighter cpuset can set the reported capacity. |
 | `cgroup_memory` | Raw charge, concrete limit, working set, swap, limit/OOM events and memory pressure. Usage and limit are read from the same visible level. |
-| `children` | Bounded snapshot of live owned FFmpeg children. Reports partial/unavailable and truncated sampling explicitly. CPU totals can decrease when children exit; RSS can count shared pages more than once. |
+| `children` | Bounded snapshot of live owned FFmpeg children. Reports partial/unavailable and truncated sampling explicitly. `cpu_seconds` can decrease when children exit; RSS can count shared pages more than once. `cpu_pct` is described below. |
 | `disks` | Inode counts keyed by the disk role, with the matching disk's freshness. Omitted when there are none. |
 | `dropped_disk_roots` | Number of configured roots beyond the bounded disk sampling set. |
+
+`process.cpu_pct` and `children.cpu_pct` are the CPU the Silo process and its
+live FFmpeg children used over the last sample window, on the same 0–100 scale
+and against the same capacity as `system.cpu_pct`, so a monitor can chart them
+beside it: the host's CPUs when nothing caps Silo, or the cgroup quota in
+`cgroup_cpu` when one binds. Children are the processes whose name contains `ffmpeg` that Silo
+started directly (transcodes, remuxes, media analysis, trickplay and chapter
+thumbnails), not only playback; `ffprobe` runs are not counted. Each value is
+rounded to 0.01. Omitted means the window was not
+measured: the first two passes after start, a pass where `system.cpu_pct` or the
+process's own counters were unavailable, a change in what `system.cpu_pct` is
+measured against, the pass after any of those, and for children a truncated
+pass and the one after it. A measured idle process reports `0`. `children.cpu_pct`
+is a lower bound: a child's last partial window before it exits, a child that
+starts and exits between two samples, the first window of a child that starts
+while children are being listed, and the window in which a child could not be
+read are not counted. The cumulative `silo_subprocess_cpu_seconds_total`
+Prometheus counter, per workload, covers completed children. Proxy and transcode nodes
+on a build with this field report it in their attribution in
+`GET /api/v2/admin/nodes/summary`; a node on an older build leaves it out.
 
 Cgroup `scope` is `leaf` or `ancestor`; an ancestor's counters include sibling
 workloads. Limits outside the process's cgroup namespace cannot be observed.
@@ -2731,6 +2752,73 @@ administrator stop capability. The administrator commands below authorize the
 administrator separately and bind the exact target session; the caller-bound
 user stop cannot be reused by forging the target account/profile context.
 
+### Session egress
+
+With `egress: true` in the capabilities, the detailed list accepts
+`include_egress=true`, and each row it returns may then carry `egress`, the bytes
+Silo has sent to the viewer for that playback session so far. Send
+`include_egress` only after the capabilities report `egress`: v2 rejects query
+parameters a server does not declare. During a rolling upgrade an older server
+answers `include_egress` with a 422 validation failure. Behind a load balancer
+the capabilities can come from an upgraded server and the list from one that is
+not, so after a 422 leave the parameter off for a few minutes before trying it
+again rather than following the capabilities straight back into the same
+failure. `egress: true` means stream telemetry is enabled on the server; the web
+Activity views do not request it.
+
+- `bytes` sums what every API server and proxy node reporting stream telemetry
+  sent the viewer. A hop between Silo's own nodes, such as a transcode node
+  feeding the API server, is not counted, so a transcoded session counts once. A
+  proxy node with stream telemetry turned off contributes nothing, so its
+  sessions count only what an API server sent them, such as playlists.
+- `measured_at` is when the newest of the servers counting the session took its
+  count, on that server's clock. Every API server answers the same instant for
+  the same reports. Servers report about once a second and their clocks can
+  differ slightly, so rates over short intervals can jitter.
+- `series` is an opaque token naming the set of servers behind `bytes`. It changes
+  when one of them starts or stops counting the session, stops reporting, or
+  restarts.
+
+A row omits `egress` when the count is unknown: stream telemetry is off, its
+merged view is not built yet, the last refresh of that view failed, the session
+used more routes than telemetry tracks per session, a server counting it reports
+a capture time further ahead of the answering API server's clock than telemetry
+tolerates, or telemetry has no record of the session. Omission is not zero. A server that stops reporting leaves the count
+of each session it served, which changes that session's `series`; other sessions
+keep theirs. When a server records more observations than its telemetry cap
+allows, the excess is not attributed to a session, and `bytes` undercounts without
+being omitted. The `session` row in `session.*` events never carries `egress`.
+
+When stream telemetry is not shared between servers (no Redis, or
+`SILO_STREAM_TELEMETRY_DISTRIBUTED` off), `egress` counts only what the API server
+answering the list sent itself, and rows whose media a proxy node delivered
+(`routing_egress_node_id` present) omit it.
+
+To chart bandwidth, poll the list and keep, per session, the last observation you
+accepted as its baseline:
+
+1. Ignore an observation whose `measured_at` is not newer than the baseline's. A
+   load balancer can send a poll to an API server whose view is older, even one
+   from before the last `series` change; that observation is neither counted nor
+   a new baseline.
+2. When `series` differs from the baseline's, or `bytes` fell, make the
+   observation the new baseline and count nothing for that interval. `bytes` can
+   restart within a series after the session is idle long enough for telemetry
+   to forget it (five minutes by default). A client that polls less often than
+   that can miss the restart and undercount the interval.
+3. Otherwise the session sent `Δbytes` over `Δmeasured_at`; the observation
+   becomes the baseline.
+
+Sum the rates by `stream_location` for local and remote, by `user_id` for accounts
+(or `profile_id` for profiles), and by `user_id` with `device_id` for devices,
+taking device names from `GET /api/v2/admin/devices` by both fields, not
+`device_id` alone. Each session counts under its row's `stream_location`, as
+[playback node routing](#playback-node-routing) describes it. The figure is best
+effort: a play shorter than two observations, and the part after the last
+observation, are not counted. Only playback sessions are counted. Offline
+download transfers remain in the `download_egress_kbps` series of
+`GET /api/v2/admin/stats/timeseries`.
+
 ## Sequenced administrator playback commands
 
 `POST /api/v2/admin/sessions/{session_id}/pause`, `/resume`, `/stop` and
@@ -3923,6 +4011,7 @@ identifies the acting administrator. Actor filters use
 | `api_key.created`, `api_key.updated`, `api_key.deleted` | `createAdminAPIKey`, `updateAdminAPIKeyTier`, `deleteAdminAPIKey`, `createPersonalAPIKey`, `revokePersonalAPIKey` | `user_id` (owner), `label`, `rate_tier`, `scopes` (an empty list is an unscoped key with its owner's full access) |
 | `profile.created`, `profile.updated`, `profile.deleted` | `createProfile`, `updateProfile`, `deleteProfile` | `name`, `is_child`, `is_primary`, `max_content_rating`, `max_advisory_age`, `require_advisory_age`, `library_restrictions_enabled`, `allowed_library_ids`, `max_playback_quality`, `pin` |
 | `profile.updated` | `allowTitle`, `disallowTitle`, `allowCollection`, `disallowCollection`, `allowCollectionTitles`; target is the profile the allowance is for | `allowed_title` or `allowed_collection` (the item or collection ID, after when allowed, before when removed); `allowed_titles_added` count for a copy |
+| `direct_connection.enrolled` | `enrollDirectConnectionDevice`; target is the device ID; recorded for the first enrollment of a node key for a device (a key replacement included), not for a renewal of the same key | `device_id`, `node_key` (after); never the signaling ticket |
 
 `changes` lists changed allowlisted fields. `before` and `after` are optional
 strings containing canonical JSON values: JSON null represents an unset account

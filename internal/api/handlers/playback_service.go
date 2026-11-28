@@ -19,7 +19,6 @@ import (
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/playback"
-	"github.com/Silo-Server/silo-server/internal/playback/connectionstore"
 )
 
 // Playback service seams for the v2 adapter (internal/apiv2/playback.go).
@@ -69,6 +68,9 @@ const playbackCapabilityStateAvailable = "available"
 type PlaybackOperationError struct {
 	Status        int
 	Code, Message string
+	// RetryAfter is the retry hint in seconds the v2 adapter sends as
+	// Retry-After; zero sends none.
+	RetryAfter int
 }
 
 func (e *PlaybackOperationError) Error() string { return e.Message }
@@ -313,7 +315,7 @@ func (h *PlaybackHandler) StartPlaybackV2(ctx context.Context, caller PlaybackCa
 	if err != nil {
 		return playback.DecisionResponseV3{}, playbackOperationError(http.StatusBadRequest, "bad_request", "Invalid playback request")
 	}
-	response, err := h.startPlaybackApplicationV3(playbackCallerRequest(ctx, caller), body)
+	response, err := h.startPlaybackWithRetryV3(playbackCallerRequest(ctx, caller), body)
 	if err == nil && response.Outcome == playback.OutcomePlayableV3 {
 		h.recordStartingDevice(ctx, caller.UserID, caller.ProfileID, caller.DeclaredDevice)
 	}
@@ -829,7 +831,7 @@ func (h *PlaybackHandler) ReportRouteEventV2(ctx context.Context, caller Playbac
 	record := playback.RouteEventRecordV3{RouteEventV3: event, EventID: command.EventID, UserID: caller.UserID, ProfileID: caller.ProfileID, ClientName: caller.ClientName, ClientVersion: caller.ClientVersion, ClientBuild: caller.ClientBuild, ClientChannel: caller.ClientChannel, ClientModel: event.Diagnostics["device_model"]}
 	if event.Event == playback.RouteEventPlanSummaryV3 {
 		record.ConnectionDeviceID = connectionDeviceV3(caller.ConnectionDeviceID)
-		record.ConnectionKey, _ = connectionstore.Key(ctx, h.JWTSecret)
+		record.ConnectionKey = h.sampleConnectionKeyV3(ctx, caller.UserID, record.ConnectionDeviceID, event.SessionID)
 		record.ReceivedAt = time.Now().UTC()
 		record.SampleLifetime = h.playbackConfig().BandwidthProbeMaxAge()
 	}

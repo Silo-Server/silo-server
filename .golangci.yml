@@ -304,6 +304,8 @@ linters:
           msg: Wait on observable state; timing tests require a reasoned nolint.
         - pattern: '^bcrypt\.(GenerateFromPassword|CompareHashAndPassword)$'
           msg: Hash and compare through internal/auth/passwordhash, which bounds how many run at once.
+        - pattern: '^noderouting\.(Candidates|Resolve)$'
+          msg: Compile native playback routes through internal/api/handlers/playback_route_v3.go, which applies the device's direct_only rule.
       analyze-types: true
       exclude-godoc-examples: false
 
@@ -377,6 +379,13 @@ linters:
       # Tests hash directly; production goes through passwordhash's limit.
       - path: (_test\.go$|^internal/auth/passwordhash/)
         text: internal/auth/passwordhash, which bounds
+        linters:
+          - forbidigo
+      # Only native playback reads a device's direct state. noderouting itself,
+      # the Jellyfin-compatible surface and theme delivery never see it
+      # (docs/architecture/direct-connections.md, Direct Only Rule).
+      - path: (_test\.go$|^internal/noderouting/|^internal/jellycompat/|^internal/themedelivery/|^internal/api/handlers/playback_route_v3\.go$)
+        text: applies the device's direct_only rule
         linters:
           - forbidigo
       # Allow repeated strings in test files

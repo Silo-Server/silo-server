@@ -2,8 +2,10 @@ package api
 
 import (
 	"net/http"
+	"net/netip"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/streamtelemetry"
 )
@@ -38,8 +40,28 @@ func nativeCapture(pattern string) func(*http.Request) streamtelemetry.CaptureSe
 			DeviceID:  r.Header.Get("X-Silo-Device-ID"),
 			Client:    streamtelemetry.ClientVariant{Name: client.Name, Version: client.Version, Build: client.Build, Channel: client.Channel},
 			UserAgent: client.UserAgent, ReceivedAt: time.Now(),
+			Transport: directTransport(r),
 		}
 	}
+}
+
+// directTransport describes a request that arrived over a direct path; a
+// request on any other path has the zero value.
+func directTransport(r *http.Request) streamtelemetry.Transport {
+	direct := netaccess.PathFromContext(r.Context()).Direct
+	if direct == nil {
+		return streamtelemetry.Transport{}
+	}
+	transport := streamtelemetry.Transport{PathKind: streamtelemetry.PathKindDirect, Class: direct.Class, HostID: direct.HostID,
+		LocalPort: int(direct.LocalPort), PathGeneration: direct.PathGeneration}
+	if peer, err := netip.ParseAddrPort(r.RemoteAddr); err == nil {
+		transport.PeerPort = int(peer.Port())
+		transport.AddressFamily = "ipv6"
+		if peer.Addr().Unmap().Is4() {
+			transport.AddressFamily = "ipv4"
+		}
+	}
+	return transport
 }
 
 var playbackV2MediaRoutes = []streamtelemetry.MediaRoute{

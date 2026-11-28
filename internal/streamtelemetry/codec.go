@@ -34,6 +34,16 @@ type wireClientVariant struct {
 	Channel string `json:"c"`
 }
 
+type wireTransport struct {
+	PathKind       PathKind `json:"k"`
+	Class          string   `json:"c"`
+	HostID         string   `json:"h"`
+	AddressFamily  string   `json:"f"`
+	LocalPort      int      `json:"lp"`
+	PeerPort       int      `json:"pp"`
+	PathGeneration uint64   `json:"g"`
+}
+
 type wireRouteActivity struct {
 	Method             string `json:"m"`
 	Pattern            string `json:"p"`
@@ -82,6 +92,8 @@ type wireSession struct {
 	DeviceIDsOverflowed         bool                               `json:"didso"`
 	ClientVariants              []wireClientVariant                `json:"clients"`
 	ClientVariantsOverflowed    bool                               `json:"clientso"`
+	Transports                  []wireTransport                    `json:"tps"`
+	TransportsOverflowed        bool                               `json:"tpso"`
 	UserAgents                  []string                           `json:"uas"`
 	UserAgentsOverflowed        bool                               `json:"uaso"`
 	TokenIssuedAts              []int64                            `json:"tiats"`
@@ -161,7 +173,7 @@ func encodeSession(value SessionView) ([]byte, error) {
 }
 
 func encodeSessionBounded(value SessionView, encodedLimit, stringLimit int) ([]byte, error) {
-	if len(value.TokenIssuedAtSources) > maxWireMap || len(value.Outcomes) > maxWireMap || !wireCollectionsFit(len(value.MediaFileIDs), len(value.PlayMethods), len(value.Routes), len(value.ViewerIPs), len(value.DeviceIDs), len(value.ClientVariants), len(value.UserAgents), len(value.TokenIssuedAts), len(value.IdentityConflicts)) {
+	if len(value.TokenIssuedAtSources) > maxWireMap || len(value.Outcomes) > maxWireMap || !wireCollectionsFit(len(value.MediaFileIDs), len(value.PlayMethods), len(value.Routes), len(value.ViewerIPs), len(value.DeviceIDs), len(value.ClientVariants), len(value.Transports), len(value.UserAgents), len(value.TokenIssuedAts), len(value.IdentityConflicts)) {
 		return nil, errRecordBounds
 	}
 	w := wireSession{V: codecVersion, Subject: wireSubject{Kind: value.Subject.Kind, ID: value.Subject.ID}, ProfileID: value.ProfileID,
@@ -175,12 +187,16 @@ func encodeSessionBounded(value SessionView, encodedLimit, stringLimit int) ([]b
 		DeviceIDs: value.DeviceIDs, DeviceIDsOverflowed: value.DeviceIDsOverflowed, UserAgents: value.UserAgents, UserAgentsOverflowed: value.UserAgentsOverflowed,
 		TokenIssuedAtsOverflowed: value.TokenIssuedAtsOverflowed,
 		TokenIssuedAtSources:     value.TokenIssuedAtSources, Outcomes: value.Outcomes, HasIdentityConflict: value.HasIdentityConflict,
-		IdentityConflictsOverflowed: value.IdentityConflictsOverflowed, ClientVariantsOverflowed: value.ClientVariantsOverflowed}
+		IdentityConflictsOverflowed: value.IdentityConflictsOverflowed, ClientVariantsOverflowed: value.ClientVariantsOverflowed,
+		TransportsOverflowed: value.TransportsOverflowed}
 	for _, route := range value.Routes {
 		w.Routes = append(w.Routes, wireRouteActivity{Method: route.Method, Pattern: route.Pattern, Role: route.Role, Class: route.Class, CapRelevant: route.CapRelevant, Open: route.Open, Requests: route.Requests, BytesAccepted: route.BytesAccepted, LastByteAccepted: timeToUnixNano(route.LastByteAccepted), LastObservationEnd: timeToUnixNano(route.LastObservationEnd)})
 	}
 	for _, client := range value.ClientVariants {
 		w.ClientVariants = append(w.ClientVariants, wireClientVariant(client))
+	}
+	for _, transport := range value.Transports {
+		w.Transports = append(w.Transports, wireTransport(transport))
 	}
 	for _, issued := range value.TokenIssuedAts {
 		w.TokenIssuedAts = append(w.TokenIssuedAts, timeToUnixNano(issued))
@@ -220,12 +236,16 @@ func decodeSessionBounded(data []byte, encodedLimit, stringLimit int) (SessionVi
 		ViewerIPs: w.ViewerIPs, ViewerIPsOverflowed: w.ViewerIPsOverflowed, DeviceIDs: w.DeviceIDs, DeviceIDsOverflowed: w.DeviceIDsOverflowed,
 		UserAgents: w.UserAgents, UserAgentsOverflowed: w.UserAgentsOverflowed, TokenIssuedAtsOverflowed: w.TokenIssuedAtsOverflowed,
 		TokenIssuedAtSources: w.TokenIssuedAtSources, Outcomes: w.Outcomes, HasIdentityConflict: w.HasIdentityConflict,
-		IdentityConflictsOverflowed: w.IdentityConflictsOverflowed, ClientVariantsOverflowed: w.ClientVariantsOverflowed}
+		IdentityConflictsOverflowed: w.IdentityConflictsOverflowed, ClientVariantsOverflowed: w.ClientVariantsOverflowed,
+		TransportsOverflowed: w.TransportsOverflowed}
 	for _, route := range w.Routes {
 		v.Routes = append(v.Routes, RouteActivityView{Method: route.Method, Pattern: route.Pattern, Role: route.Role, Class: route.Class, CapRelevant: route.CapRelevant, Open: route.Open, Requests: route.Requests, BytesAccepted: route.BytesAccepted, LastByteAccepted: timeFromUnixNano(route.LastByteAccepted), LastObservationEnd: timeFromUnixNano(route.LastObservationEnd)})
 	}
 	for _, client := range w.ClientVariants {
 		v.ClientVariants = append(v.ClientVariants, ClientVariant(client))
+	}
+	for _, transport := range w.Transports {
+		v.Transports = append(v.Transports, Transport(transport))
 	}
 	for _, issued := range w.TokenIssuedAts {
 		v.TokenIssuedAts = append(v.TokenIssuedAts, timeFromUnixNano(issued))
@@ -243,7 +263,7 @@ func validateSessionWire(w wireSession, stringLimit int) error {
 	if w.MediaFileID < 0 || w.BytesAccepted < 0 || w.OpenObservations < 0 || w.RequestCount < 0 {
 		return errors.New("negative session counter")
 	}
-	lengths := []int{len(w.MediaFileIDs), len(w.PlayMethods), len(w.Routes), len(w.ViewerIPs), len(w.DeviceIDs), len(w.ClientVariants), len(w.UserAgents), len(w.TokenIssuedAts), len(w.IdentityConflicts)}
+	lengths := []int{len(w.MediaFileIDs), len(w.PlayMethods), len(w.Routes), len(w.ViewerIPs), len(w.DeviceIDs), len(w.ClientVariants), len(w.Transports), len(w.UserAgents), len(w.TokenIssuedAts), len(w.IdentityConflicts)}
 	for _, length := range lengths {
 		if length > maxWireSlice {
 			return errors.New("session collection too large")

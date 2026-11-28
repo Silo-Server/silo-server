@@ -810,7 +810,7 @@ func TestLateRenewalOpensANewGrant(t *testing.T) {
 				}
 				oldGrant, _ := m.window()
 				raw := &rigPacketConn{}
-				conn := fenceFor(raw, m, oldGrant)
+				conn := fenceFor(raw, newGrantFence(m, oldGrant))
 				time.Sleep(tc.idle) //nolint:forbidigo // Fake clock inside the synctest bubble: it ages the grant to its deadline.
 				if tc.latch {
 					if _, err := conn.WriteTo([]byte("after the deadline"), nil); err != nil {

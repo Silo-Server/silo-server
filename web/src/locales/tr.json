@@ -215,6 +215,12 @@
       "value": "Bu, zaten bu hesaba bağlı."
     }
   ],
+  "error.app_code_invalid": [
+    {
+      "type": 0,
+      "value": "Bu kod bilinmiyor, kullanılmış ya da süresi dolmuş. Sunucunun sayfasından yeni bir kod alın."
+    }
+  ],
   "error.authentication_required": [
     {
       "type": 0,
@@ -333,6 +339,12 @@
     {
       "type": 0,
       "value": "Bu değerin türü yanlış."
+    }
+  ],
+  "error.field.key_enrolled": [
+    {
+      "type": 0,
+      "value": "Bu anahtar bu sunucuda zaten kullanılıyor."
     }
   ],
   "error.field.malformed_form": [
@@ -2541,6 +2553,30 @@
     {
       "type": 0,
       "value": "Otomatik"
+    }
+  ],
+  "settingsManifest.playback.connection_path.description": [
+    {
+      "type": 0,
+      "value": "“Yalnızca doğrudan” seçeneği, kullanılabilir olduğunda yerel ağ bağlantısını yine de kullanır."
+    }
+  ],
+  "settingsManifest.playback.connection_path.label": [
+    {
+      "type": 0,
+      "value": "Bağlantı yolu"
+    }
+  ],
+  "settingsManifest.playback.connection_path.option.automatic": [
+    {
+      "type": 0,
+      "value": "Otomatik"
+    }
+  ],
+  "settingsManifest.playback.connection_path.option.direct_only": [
+    {
+      "type": 0,
+      "value": "Yalnızca doğrudan"
     }
   ],
   "settingsManifest.playback.intro_skip_mode.description": [
@@ -23485,6 +23521,87 @@
       }
     }
   ],
+  "web.admin.common.adminUserSignIn.unlinkConfirm.text": [
+    {
+      "type": 5,
+      "value": "last_way",
+      "options": {
+        "yes": {
+          "value": [
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " kullanıcısı artık bu sağlayıcı hesabıyla oturum açamaz. Siz bir parola belirleyene veya yeniden bir sağlayıcı bağlayana kadar "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " kullanıcısı oturum açamayacak."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " kullanıcısı artık bu sağlayıcı hesabıyla oturum açamaz."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 5,
+      "value": "keys",
+      "options": {
+        "yes": {
+          "value": [
+            {
+              "type": 0,
+              "value": " "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " kullanıcısının bu sağlayıcı hesabına bağlı Silo uygulaması anahtarları kaldırılır ve o cihazlarda oturum kapatılır."
+            }
+          ]
+        },
+        "unknown": {
+          "value": [
+            {
+              "type": 0,
+              "value": " "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " kullanıcısının bu sağlayıcı hesabına bağlı Silo uygulaması anahtarları varsa kaldırılır ve o cihazlarda oturum kapatılır."
+            }
+          ]
+        },
+        "other": {
+          "value": []
+        }
+      }
+    }
+  ],
   "web.admin.common.adminUserSignIn.unlinkConfirm.title": [
     {
       "type": 1,
@@ -25727,6 +25844,18 @@
     {
       "type": 0,
       "value": "Oynatıcıların sarma sırasında gösterdiği küçük resimleri yapılandırılmış genel varlık depolamasında oluşturur. Dosyalar arka planda düşük öncelikle işlenir. Bu seçeneği kapatmak kitaplığın önizlemelerini siler."
+    }
+  ],
+  "web.admin.common.libraryEditor.advanced.trickplayGenerate": [
+    {
+      "type": 0,
+      "value": "Eksik önizlemeleri FFmpeg ile oluştur"
+    }
+  ],
+  "web.admin.common.libraryEditor.advanced.trickplayGenerateDescription": [
+    {
+      "type": 0,
+      "value": "Önce medya dosyalarının yanındaki mevcut .trickplay ve .bif yan dosyaları kullanılır. Yalnızca yan dosyaları içe aktarmak ve FFmpeg ile oluşturmayı atlamak için bunu kapatın."
     }
   ],
   "web.admin.common.libraryEditor.advanced.trickplayUnavailable": [
@@ -29711,6 +29840,48 @@
       "value": "Yönetim: Kullanıcılar"
     }
   ],
+  "web.admin.common.trickplay.badge.awaitingSidecarCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "yan dosya bekleyen "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " dosya"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "yan dosya bekleyen "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " dosya"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.common.trickplay.badge.detail": [
     {
       "type": 0,
@@ -29837,6 +30008,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.common.trickplay.badge.sidecarsOnly": [
+    {
+      "type": 0,
+      "value": "yalnızca yan dosyalar"
     }
   ],
   "web.admin.common.trickplay.badge.srDetail": [
@@ -30001,6 +30178,42 @@
     {
       "type": 0,
       "value": "Oynatıcılar, yenileri hazır olana kadar mevcut önizlemeleri kullanmaya devam eder."
+    }
+  ],
+  "web.admin.common.trickplay.sidecarStatus.awaiting_sidecar": [
+    {
+      "type": 0,
+      "value": "Yan dosya bekleniyor"
+    }
+  ],
+  "web.admin.common.trickplay.sidecarStatus.sidecar_invalid": [
+    {
+      "type": 0,
+      "value": "Geçersiz yan dosya"
+    }
+  ],
+  "web.admin.common.trickplay.sidecarStatus.sidecar_stale": [
+    {
+      "type": 0,
+      "value": "Yan dosya güncel değil"
+    }
+  ],
+  "web.admin.common.trickplay.source.generated": [
+    {
+      "type": 0,
+      "value": "Oluşturuldu"
+    }
+  ],
+  "web.admin.common.trickplay.source.sidecar_bif": [
+    {
+      "type": 0,
+      "value": "Yan dosya (.bif)"
+    }
+  ],
+  "web.admin.common.trickplay.source.sidecar_trickplay": [
+    {
+      "type": 0,
+      "value": "Yan dosya (.trickplay)"
     }
   ],
   "web.admin.common.trickplay.state.off": [
@@ -31828,7 +32041,7 @@
     },
     {
       "type": 0,
-      "value": ". Hesabın diğer cihazlarında oturum açık kalır. İstemci, hesabın parolasıyla tekrar oturum açabilir."
+      "value": ". Hesabın diğer cihazlarında oturum açık kalır. İstemci tekrar oturum açabilir."
     }
   ],
   "web.admin.dashboard.widgets.apiClients.confirmLabel": [
@@ -43394,6 +43607,12 @@
       "value": "Profil"
     }
   ],
+  "web.admin.history.column.progress": [
+    {
+      "type": 0,
+      "value": "İlerleme"
+    }
+  ],
   "web.admin.history.column.status": [
     {
       "type": 0,
@@ -43428,6 +43647,12 @@
     {
       "type": 0,
       "value": "Oturum günlükleri"
+    }
+  ],
+  "web.admin.history.detail.backToPlay": [
+    {
+      "type": 0,
+      "value": "Birleşik oynatmaya dön"
     }
   ],
   "web.admin.history.detail.column.delivered": [
@@ -43538,6 +43763,12 @@
       "value": "İzleme süresi"
     }
   ],
+  "web.admin.history.detail.inspectSitting": [
+    {
+      "type": 0,
+      "value": "İncele"
+    }
+  ],
   "web.admin.history.detail.keyboardHint": [
     {
       "type": 0,
@@ -43622,6 +43853,12 @@
       "value": "Neden doğrudan oynatılmadı"
     }
   ],
+  "web.admin.history.detail.section.sessions": [
+    {
+      "type": 0,
+      "value": "Bu oynatmadaki oturumlar"
+    }
+  ],
   "web.admin.history.detail.section.streams": [
     {
       "type": 0,
@@ -43632,6 +43869,94 @@
     {
       "type": 0,
       "value": "Zamanlama ve izleme ilerlemesi"
+    }
+  ],
+  "web.admin.history.detail.sessionsCapped": [
+    {
+      "type": 0,
+      "value": "Bu oynatmadaki "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": " oturumun ilk "
+    },
+    {
+      "type": 1,
+      "value": "shown"
+    },
+    {
+      "type": 0,
+      "value": " tanesi gösteriliyor."
+    }
+  ],
+  "web.admin.history.detail.sessionsNotice": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Bu oynatmada "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " oturum var. Aşağıdaki akış, cihaz ve rota ayrıntıları bu oturuma aittir."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Bu oynatma "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " oturumu kapsıyor. Aşağıdaki akış, cihaz ve rota ayrıntıları birincil oturuma aittir; tek tek incelemek için aşağıdan herhangi bir oturumu seçin."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.ended": [
+    {
+      "type": 0,
+      "value": "Bitiş"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.method": [
+    {
+      "type": 0,
+      "value": "Yöntem"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.started": [
+    {
+      "type": 0,
+      "value": "Başlangıç"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.watched": [
+    {
+      "type": 0,
+      "value": "İzlenen süre"
     }
   ],
   "web.admin.history.detail.subtitlesBurnIn": [
@@ -43860,6 +44185,12 @@
       "value": "Tüm ağlar"
     }
   ],
+  "web.admin.history.filter.allMediaTypes": [
+    {
+      "type": 0,
+      "value": "Tüm medya"
+    }
+  ],
   "web.admin.history.filter.allMethods": [
     {
       "type": 0,
@@ -43896,6 +44227,24 @@
       "value": "Tamamlanan"
     }
   ],
+  "web.admin.history.filter.episodes": [
+    {
+      "type": 0,
+      "value": "Bölümler"
+    }
+  ],
+  "web.admin.history.filter.hideShort": [
+    {
+      "type": 0,
+      "value": "<30 sn gizle"
+    }
+  ],
+  "web.admin.history.filter.hideShortTitle": [
+    {
+      "type": 0,
+      "value": "30 saniyeden kısa yarım kalan oturumları gizle"
+    }
+  ],
   "web.admin.history.filter.locationLocal": [
     {
       "type": 0,
@@ -43906,6 +44255,12 @@
     {
       "type": 0,
       "value": "Uzak"
+    }
+  ],
+  "web.admin.history.filter.movies": [
+    {
+      "type": 0,
+      "value": "Filmler"
     }
   ],
   "web.admin.history.filter.partial": [
@@ -44094,6 +44449,12 @@
       "value": "Son oynatmalar"
     }
   ],
+  "web.admin.history.row.burnInBadgeTitle": [
+    {
+      "type": 0,
+      "value": "Altyazılar görüntüye işlendi"
+    }
+  ],
   "web.admin.history.row.completed": [
     {
       "type": 0,
@@ -44114,6 +44475,40 @@
     {
       "type": 0,
       "value": "Tahmini (kesin izleme süresi ölçülmeye başlanmadan önce kaydedildi)"
+    }
+  ],
+  "web.admin.history.row.groupedSessionsTitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " oturumdan birleştirildi"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " oturumdan birleştirildi"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.history.row.meta": [
@@ -44146,6 +44541,12 @@
       "value": "Yarım kaldı"
     }
   ],
+  "web.admin.history.row.progressLabel": [
+    {
+      "type": 0,
+      "value": "Oynatma ilerlemesi"
+    }
+  ],
   "web.admin.history.row.started": [
     {
       "type": 0,
@@ -44156,16 +44557,92 @@
       "value": "time"
     }
   ],
+  "web.admin.history.stats.accountsCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " hesap"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " hesap"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.history.stats.completed": [
     {
       "type": 0,
       "value": "Tamamlanan"
     }
   ],
+  "web.admin.history.stats.completionBreakdown": [
+    {
+      "type": 1,
+      "value": "completed"
+    },
+    {
+      "type": 0,
+      "value": " tamamlanan · "
+    },
+    {
+      "type": 1,
+      "value": "partial"
+    },
+    {
+      "type": 0,
+      "value": " yarım kalan"
+    }
+  ],
   "web.admin.history.stats.partial": [
     {
       "type": 0,
       "value": "Yarım kalan"
+    }
+  ],
+  "web.admin.history.stats.totalPlays": [
+    {
+      "type": 0,
+      "value": "Toplam oynatma"
+    }
+  ],
+  "web.admin.history.stats.totalSessions": [
+    {
+      "type": 0,
+      "value": "Toplam oturum"
+    }
+  ],
+  "web.admin.history.stats.uniqueProfiles": [
+    {
+      "type": 0,
+      "value": "Benzersiz profiller"
+    }
+  ],
+  "web.admin.history.stats.uniqueTitles": [
+    {
+      "type": 0,
+      "value": "Benzersiz içerikler"
     }
   ],
   "web.admin.history.stats.visibleRows": [
@@ -44184,6 +44661,24 @@
     {
       "type": 0,
       "value": "Oynatma geçmişi"
+    }
+  ],
+  "web.admin.history.view.label": [
+    {
+      "type": 0,
+      "value": "Geçmiş görünümü"
+    }
+  ],
+  "web.admin.history.view.plays": [
+    {
+      "type": 0,
+      "value": "Oynatmalar"
+    }
+  ],
+  "web.admin.history.view.sessions": [
+    {
+      "type": 0,
+      "value": "Tüm oturumlar"
     }
   ],
   "web.admin.historyImport.conflict.message": [
@@ -85847,6 +86342,210 @@
       "value": ")"
     }
   ],
+  "web.admin.users.detail.appKeys.confirm.denyDescription": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " cihazı, "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " kullanıcısının hesabında oturum açamayacak. Cihaz bu kişiye aitse kişi onu Silo uygulamasında yeniden ekleyebilir."
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKey": [
+    {
+      "type": 0,
+      "value": "Anahtarı kaldır"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKeyDescription": [
+    {
+      "type": 0,
+      "value": "Zaten oturum açmış cihazlar, siz onları kaldırana kadar çalışmaya devam eder. Bu anahtarla yeni cihaz eklenemez ve bu anahtarın eklediği, hâlâ bekleyen cihazlar reddedilir. "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " kullanıcısının Silo uygulaması, kişi oturum açıkken bir sonraki cihaz eklediğinde yeni bir anahtar oluşturur."
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKeyTitle": [
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " kullanıcısının hesap anahtarı kaldırılsın mı?"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.removeDescription": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " cihazını kaldırmak, cihazın "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " kullanıcısının hesabındaki oturumunu hemen kapatır ve anahtarını devre dışı bırakır: cihaz bu anahtarla bir daha oturum açamaz. Cihazı yeniden kullanmak için "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " kullanıcısı onu Silo uygulamasında yeniden ekler."
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.withdrawDescription": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " cihazı, bu onayı kullanarak "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " kullanıcısının hesabında oturum açamayacak."
+    }
+  ],
+  "web.admin.users.detail.appKeys.description": [
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " kullanıcısının hesabında parola olmadan, Silo uygulamasıyla oturum açan cihazlar ve uygulamalar."
+    }
+  ],
+  "web.admin.users.detail.appKeys.empty": [
+    {
+      "type": 0,
+      "value": "Bu hesapta Silo uygulamasını kullanan cihaz yok."
+    }
+  ],
+  "web.admin.users.detail.appKeys.loadFailed": [
+    {
+      "type": 0,
+      "value": "Cihazlar yüklenemedi."
+    }
+  ],
+  "web.admin.users.detail.appKeys.off": [
+    {
+      "type": 0,
+      "value": "Bu sunucuda Silo uygulamasıyla oturum açma kapalı, bu nedenle bu cihazlar oturum açamaz. Yine de cihazları kaldırabilirsiniz."
+    }
+  ],
+  "web.admin.users.detail.appKeys.ownerOnly": [
+    {
+      "type": 0,
+      "value": "Başka bir yöneticinin veya sunucu sahibinin cihazlarını yalnızca sunucu sahibi değiştirebilir."
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.description": [
+    {
+      "type": 0,
+      "value": "Silo uygulaması, "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " kullanıcısının yeni cihazlarını eklemek için bu anahtarı kullanır. Oluşturulma: "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.none": [
+    {
+      "type": 0,
+      "value": "Hesap anahtarı yok. "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " kullanıcısının Silo uygulaması, kişi oturum açıkken bir sonraki cihaz eklediğinde bir anahtar oluşturur."
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.remove": [
+    {
+      "type": 0,
+      "value": "Hesap anahtarını kaldır"
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKeyRemoved": [
+    {
+      "type": 0,
+      "value": "Hesap anahtarı kaldırıldı"
+    }
+  ],
+  "web.admin.users.detail.appKeys.preapprovals.description": [
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " kullanıcısının henüz bağlanmamış bir cihaz için onayladığı oturum açma işlemleri."
+    }
+  ],
+  "web.admin.users.detail.appKeys.waiting.description": [
+    {
+      "type": 0,
+      "value": "Bir yönetici hesabındaki yeni cihaz, "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " kullanıcısı onu oturum açtığı bir cihazdan onaylayana kadar bekler. Cihazı buradan reddedebilirsiniz."
+    }
+  ],
+  "web.admin.users.detail.appKeys.waiting.title": [
+    {
+      "type": 0,
+      "value": "Onay bekleniyor"
+    }
+  ],
   "web.admin.users.detail.common.allProfiles": [
     {
       "type": 0,
@@ -89351,6 +90050,12 @@
       "value": "Hesap, profil sınırına ulaştı"
     }
   ],
+  "web.admin.users.detail.profiles.badge.changedHere": [
+    {
+      "type": 0,
+      "value": "Burada değiştirildi"
+    }
+  ],
   "web.admin.users.detail.profiles.badge.kids": [
     {
       "type": 0,
@@ -89540,6 +90245,608 @@
     {
       "type": 0,
       "value": "PIN’i kaydet"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowAgain": [
+    {
+      "type": 0,
+      "value": "Yeniden izin ver"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowAgainAria": [
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " adlı profilin bu sunucuya geri dönmesine izin ver"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowDescription": [
+    {
+      "type": 0,
+      "value": "Kişinin uygulaması, profilleri arasında hâlâ "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " varsa ve bu hesapta başka bir profile yer varsa, bir sonraki eşitlemede "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " adlı profili bu sunucudaki geçmişi olmadan yeni bir profil olarak geri ekleyebilir."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowTitle": [
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " adlı profile yeniden izin verilsin mi?"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.alreadyCleared": [
+    {
+      "type": 0,
+      "value": "Bu değişiklik zaten temizlenmiş ya da "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " tarafından yeniden değiştirilmiş. Liste güncel."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedBy": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " tarafından "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": " tarihinde değiştirildi"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedSinceOpened": [
+    {
+      "type": 0,
+      "value": "Bu değişiklik siz açtıktan sonra güncellendi, bu nedenle hiçbir şey temizlenmedi. Değişikliği listede yeniden okuyun, hâlâ istiyorsanız ardından temizleyin."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedWhileRunning": [
+    {
+      "type": 0,
+      "value": "Bu işlem çalışırken profiller değişti, bu nedenle hiçbir şey değiştirilmedi. Liste güncel; hâlâ istiyorsanız tekrar deneyin."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clear": [
+    {
+      "type": 0,
+      "value": "Temizle"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearAndRemovePin": [
+    {
+      "type": 0,
+      "value": "Temizle ve PIN’i kaldır"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearAria": [
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " adlı profilde "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " alanındaki değişikliği temizle"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearFailed": [
+    {
+      "type": 0,
+      "value": "Değişiklik temizlenemedi."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearInherit": [
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " adlı profilde "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " alanı, kişinin uygulamasının istediği gibi, profilin şu anda devraldığı değere döner. Uygulamadan gelen değişiklikler yeniden bu alana uygulanır."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearLater": [
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " alanı, kişinin uygulaması onu bir sonraki kez gönderene kadar olduğu gibi kalır. Bundan sonra uygulamadan gelen değişiklikler yeniden bu alana uygulanır."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearNow": [
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " adlı profil şimdi kişinin uygulamasındaki değere döner ve uygulamadan gelen değişiklikler yeniden uygulanır."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearNowValue": [
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " adlı profilde "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " alanı şimdi kişinin uygulamasındaki değere döner: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": ". Uygulamadan gelen değişiklikler yeniden bu alana uygulanır."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearPin": [
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " adlı profil, kişinin uygulaması bir sonraki PIN’i gönderene kadar sizin belirlediğiniz PIN’i korur. Bundan sonra uygulamadan gelen değişiklikler yeniden uygulanır."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearPinRemoves": [
+    {
+      "type": 0,
+      "value": "Kişinin uygulaması "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " adlı profili PIN olmadan gönderiyor, bu nedenle temizlemek, belirlediğiniz PIN’i hemen kaldırır. Bundan sonra bu hesabı kullanan herkes "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " adlı profili PIN olmadan açabilir."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearTitle": [
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " adlı profilde "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " alanındaki değişiklik temizlensin mi?"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.deletedAccount": [
+    {
+      "type": 0,
+      "value": "silinmiş bir hesap"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.description": [
+    {
+      "type": 0,
+      "value": "Bu profiller "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " kullanıcısının uygulamasından geliyor. Burada yaptığınız bir değişiklik, siz temizleyene kadar bu sunucuda kalır. Bu bir kilit değildir: "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " kullanıcısı da aynı şeyi burada değiştirebilir."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismiss": [
+    {
+      "type": 0,
+      "value": "Kapat"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismissAria": [
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " adlı profilde "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " alanıyla ilgili notu kapat"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismissFailed": [
+    {
+      "type": 0,
+      "value": "Not kapatılamadı."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.isChild": [
+    {
+      "type": 0,
+      "value": "Çocuk profili"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.maxAdvisoryAge": [
+    {
+      "type": 0,
+      "value": "Yaş sınırı"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.maxContentRating": [
+    {
+      "type": 0,
+      "value": "İçerik derecelendirme sınırı"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.name": [
+    {
+      "type": 0,
+      "value": "Ad"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.picture": [
+    {
+      "type": 0,
+      "value": "Resim"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.pin": [
+    {
+      "type": 0,
+      "value": "PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.requests": [
+    {
+      "type": 0,
+      "value": "İstekler"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.requireAdvisoryAge": [
+    {
+      "type": 0,
+      "value": "Yaş sınırı bilgisi zorunlu"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.fieldValue": [
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.hidden": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " tarafından "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": " tarihinde bu sunucuda kaldırıldı. Siz izin verene kadar kişinin uygulaması onu geri eklemez."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.loadFailed": [
+    {
+      "type": 0,
+      "value": "Bu sunucuda yapılan değişiklikler yüklenemedi."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.nameTaken": [
+    {
+      "type": 0,
+      "value": "Buradaki başka bir profil aynı adı kullandığı için "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " adlı profil, kişinin uygulamasındaki ada geri dönemez: "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ". Önce o profili yeniden adlandırın, ardından bunu yeniden temizleyin."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeHiddenNextSync": [
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " adlı profil, "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " kullanıcısının uygulaması bir sonraki kez eşitlendiğinde, uygulamanın profilleri arasında hâlâ yer alıyorsa geri gelebilir."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeHiddenWoken": [
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " adlı profil, kişinin uygulaması bir sonraki kez eşitlendiğinde, uygulamanın profilleri arasında hâlâ yer alıyorsa geri gelebilir. "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " kullanıcısının telefonundan eşitleme yapması istendi."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeNextSync": [
+    {
+      "type": 0,
+      "value": "Temizlendi. Değişiklik, "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " kullanıcısının uygulaması bir sonraki kez eşitlendiğinde uygulamaya ulaşır."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeWoken": [
+    {
+      "type": 0,
+      "value": "Temizlendi. "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " kullanıcısının telefonundan eşitleme yapması istendi."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.removedBy": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " tarafından "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": " tarihinde kaldırıldı"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.replacedOwner": [
+    {
+      "type": 0,
+      "value": "Bu, sizin belirlediğiniz değerin yerini aldı."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.setBy": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " tarafından "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": " tarihinde ayarlandı"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.settled": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " bunu "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": " tarihinde değiştirdi; sizin belirlediğiniz değer artık geçerli değil."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.title": [
+    {
+      "type": 0,
+      "value": "Bu sunucuda değiştirildi"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.inherited": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (devralındı)"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.noPicture": [
+    {
+      "type": 0,
+      "value": "Resim yok"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.none": [
+    {
+      "type": 0,
+      "value": "Yok"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.off": [
+    {
+      "type": 0,
+      "value": "Kapalı"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.on": [
+    {
+      "type": 0,
+      "value": "Açık"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.picture": [
+    {
+      "type": 0,
+      "value": "Özel resim"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.pinNone": [
+    {
+      "type": 0,
+      "value": "PIN yok"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.pinSet": [
+    {
+      "type": 0,
+      "value": "PIN ayarlı"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.requestsAllowed": [
+    {
+      "type": 0,
+      "value": "İzin verildi"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.requestsBlocked": [
+    {
+      "type": 0,
+      "value": "Engellendi"
     }
   ],
   "web.admin.users.detail.profiles.setPin": [
@@ -90763,6 +92070,140 @@
     {
       "type": 0,
       "value": "Parola belirleyin"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.action": [
+    {
+      "type": 0,
+      "value": "Oturum açma bağlantısı oluştur"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.actionHint": [
+    {
+      "type": 0,
+      "value": "Tüm cihazlarını kaybetti"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.description": [
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " kullanıcısı tüm cihazlarını kaybettiyse kullanabileceği tek kullanımlık bir bağlantı. Bağlantı, kişiye Silo uygulaması için bir kod veren ya da parola belirlemesini sağlayan bir sayfa açar. 24 saat geçerlidir ve yeni bir bağlantı öncekinin yerini alır."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailAction": [
+    {
+      "type": 0,
+      "value": "E-postayla gönder"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHint": [
+    {
+      "type": 0,
+      "value": "Kopyalayıp kendiniz göndermek için bağlantıyı oluşturun ya da şu adrese e-postayla gönderin: "
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHintNoAddress": [
+    {
+      "type": 0,
+      "value": "Bağlantıyı oluşturun, ardından kopyalayıp kendiniz gönderin. Bu hesabın gönderilebilecek bir e-posta adresi yok."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHintNoMail": [
+    {
+      "type": 0,
+      "value": "Bağlantıyı oluşturun, ardından kopyalayıp kendiniz gönderin. Buradan göndermek için Ayarlar’da e-postayı ayarlayın."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailSent": [
+    {
+      "type": 0,
+      "value": "Bağlantı şu adrese gönderildi: "
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": ". Son geçerlilik: "
+    },
+    {
+      "type": 1,
+      "value": "expires"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailUnconfirmed": [
+    {
+      "type": 0,
+      "value": "E-posta sunucusu teslimatı doğrulamadı. Aşağıdaki bağlantı hâlâ çalışıyor: kopyalayıp başka bir yolla gönderin."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.failed": [
+    {
+      "type": 0,
+      "value": "Oturum açma bağlantısı oluşturulamadı."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.linkShare": [
+    {
+      "type": 0,
+      "value": "Bu bağlantıyı yalnızca "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " kullanıcısına gönderin. Bağlantıya sahip olan herkes, bağlantı kullanılana veya süresi dolana kadar bu hesapta oturum açabilir. Son geçerlilik: "
+    },
+    {
+      "type": 1,
+      "value": "expires"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.providerRequired": [
+    {
+      "type": 0,
+      "value": "Bu sunucuda yerel parolayla oturum açma kapalı, bu nedenle bir oturum açma bağlantısı sunucunun oturum açma sağlayıcısını atlamış olur. "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " kullanıcısından bu sunucunun sitesinde sağlayıcıyla oturum açmasını, ardından hesap ayarlarında “Silo’da aç” seçeneğini kullanmasını isteyin."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.title": [
+    {
+      "type": 0,
+      "value": "Oturum açma bağlantısı: "
+    },
+    {
+      "type": 1,
+      "value": "username"
     }
   ],
   "web.audiobooks.chapter.fallbackTitle": [
@@ -92551,6 +93992,120 @@
       "value": "Oturum açmayı onayla"
     }
   ],
+  "web.auth.appCode.code": [
+    {
+      "type": 0,
+      "value": "Kod"
+    }
+  ],
+  "web.auth.appCode.codeCopied": [
+    {
+      "type": 0,
+      "value": "Kod kopyalandı"
+    }
+  ],
+  "web.auth.appCode.copyCode": [
+    {
+      "type": 0,
+      "value": "Kodu kopyala"
+    }
+  ],
+  "web.auth.appCode.copyFailed": [
+    {
+      "type": 0,
+      "value": "Kod kopyalanamadı. Kodu seçip elle kopyalayın."
+    }
+  ],
+  "web.auth.appCode.expired": [
+    {
+      "type": 0,
+      "value": "Bu kodun süresi doldu."
+    }
+  ],
+  "web.auth.appCode.failed": [
+    {
+      "type": 0,
+      "value": "Silo kod oluşturamadı. Tekrar deneyin."
+    }
+  ],
+  "web.auth.appCode.instructions": [
+    {
+      "type": 0,
+      "value": "Bu cihazdaki Silo uygulamasında devam etmek için “Silo’yu aç” düğmesine basın. Uygulama yüklü değilse yükleyin, bu sekmeye geri dönün ve “Silo’yu aç” düğmesine yeniden basın."
+    }
+  ],
+  "web.auth.appCode.noScanCode": [
+    {
+      "type": 0,
+      "value": "Bu sunucunun adresi tarama kodu için çok uzun. Sunucu adresini ve kodu Silo uygulamasına yazın ya da kodu kopyalayıp oraya yapıştırın."
+    }
+  ],
+  "web.auth.appCode.open": [
+    {
+      "type": 0,
+      "value": "Silo’yu aç"
+    }
+  ],
+  "web.auth.appCode.renew": [
+    {
+      "type": 0,
+      "value": "Yeni kod al"
+    }
+  ],
+  "web.auth.appCode.scanCodeLabel": [
+    {
+      "type": 0,
+      "value": "Silo uygulaması için tarama kodu"
+    }
+  ],
+  "web.auth.appCode.scanCodeUnavailable": [
+    {
+      "type": 0,
+      "value": "Bu sunucu için tarama kodu gösterilemiyor. Sunucu adresini ve kodu Silo uygulamasına yazın ya da kodu kopyalayıp oraya yapıştırın."
+    }
+  ],
+  "web.auth.appCode.scanHint": [
+    {
+      "type": 0,
+      "value": "Bunu Silo uygulamasındaki tarayıcıyla tarayın ya da aşağıdaki sunucu adresini ve kodu yazın veya kopyalayın."
+    }
+  ],
+  "web.auth.appCode.serverAddress": [
+    {
+      "type": 0,
+      "value": "Sunucu adresi"
+    }
+  ],
+  "web.auth.appCode.singleUse": [
+    {
+      "type": 0,
+      "value": "Bu kod yalnızca bir kez çalışır ve birkaç dakika sonra geçerliliğini yitirir."
+    }
+  ],
+  "web.auth.appCode.title": [
+    {
+      "type": 0,
+      "value": "Silo’yu aç"
+    }
+  ],
+  "web.auth.appCode.typeInstructions": [
+    {
+      "type": 0,
+      "value": "Telefonunuzdaki veya tabletinizdeki Silo uygulamasında bu sunucuyu adresiyle ekleyin ve hesabınızı oluşturmak için bu kodu yazın. Kodu bilen herkes sizin yerinize katılabilir, bu yüzden kodu paylaşmayın."
+    }
+  ],
+  "web.auth.appCode.typeTitle": [
+    {
+      "type": 0,
+      "value": "Bu kodla katılın"
+    }
+  ],
+  "web.auth.appCode.webLink": [
+    {
+      "type": 0,
+      "value": "Bunun yerine siloserver.org bağlantısıyla aç"
+    }
+  ],
   "web.auth.card.rememberedIt": [
     {
       "type": 0,
@@ -92749,10 +94304,46 @@
       ]
     }
   ],
+  "web.auth.invite.appAccountEmail": [
+    {
+      "type": 0,
+      "value": "Hesabınız "
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": " adresini kullanacak."
+    }
+  ],
+  "web.auth.invite.appContinue": [
+    {
+      "type": 0,
+      "value": "Devam"
+    }
+  ],
+  "web.auth.invite.appEmailHint": [
+    {
+      "type": 0,
+      "value": "Bir e-posta adresi verirseniz, cihazlarınızı kaybettiğinizde bu sunucu size bir oturum açma bağlantısı gönderebilir."
+    }
+  ],
   "web.auth.invite.appMissing": [
     {
       "type": 0,
       "value": "Bir şey olmuyor mu? Uygulama yüklü değil — aşağıdan devam edin."
+    }
+  ],
+  "web.auth.invite.appProviderOnly": [
+    {
+      "type": 1,
+      "value": "server"
+    },
+    {
+      "type": 0,
+      "value": " sunucusu kişileri kendi oturum açma sağlayıcısı üzerinden ekler. Bu sitede sağlayıcıyla oturum açın, ardından hesap ayarlarınızdan Silo’yu açın."
     }
   ],
   "web.auth.invite.created": [
@@ -92781,6 +94372,18 @@
       "value": "E-posta adresinizi girin ve bir parola seçin. E-posta adresinizle oturum açacaksınız."
     }
   ],
+  "web.auth.invite.descriptionWithApp": [
+    {
+      "type": 0,
+      "value": "Telefonunuzdaki veya tabletinizdeki Silo uygulamasıyla katılın ya da oturum açmak için bir parola seçin."
+    }
+  ],
+  "web.auth.invite.emailOptional": [
+    {
+      "type": 0,
+      "value": "E-posta (isteğe bağlı)"
+    }
+  ],
   "web.auth.invite.emailPlaceholder": [
     {
       "type": 0,
@@ -92801,6 +94404,18 @@
     {
       "type": 1,
       "value": "inviter"
+    }
+  ],
+  "web.auth.invite.joinWithApp": [
+    {
+      "type": 0,
+      "value": "Silo uygulamasıyla katıl"
+    }
+  ],
+  "web.auth.invite.joinWithAppInstead": [
+    {
+      "type": 0,
+      "value": "Bunun yerine Silo uygulamasıyla katıl"
     }
   ],
   "web.auth.invite.loadFailed": [
@@ -92901,6 +94516,30 @@
     {
       "type": 0,
       "value": "Davet kullanılamıyor"
+    }
+  ],
+  "web.auth.invite.usePassword": [
+    {
+      "type": 0,
+      "value": "Bunun yerine parola kullan"
+    }
+  ],
+  "web.auth.invite.usernameIsAddress": [
+    {
+      "type": 0,
+      "value": "@ içeren bir kullanıcı adı, aşağıya girdiğiniz e-posta adresi olmalıdır."
+    }
+  ],
+  "web.auth.invite.usernameRequired": [
+    {
+      "type": 0,
+      "value": "Bir kullanıcı adı seçin."
+    }
+  ],
+  "web.auth.invite.usernameTaken": [
+    {
+      "type": 0,
+      "value": "Bu kullanıcı adı zaten kullanılıyor. Başka bir ad seçin."
     }
   ],
   "web.auth.languagePicker.label": [
@@ -93833,6 +95472,126 @@
     {
       "type": 0,
       "value": "Oturum aç"
+    }
+  ],
+  "web.auth.signInLink.backToCode": [
+    {
+      "type": 0,
+      "value": "Koda geri dön"
+    }
+  ],
+  "web.auth.signInLink.codeExpired": [
+    {
+      "type": 0,
+      "value": "Başka bir kod almak için bu sunucunun bir yöneticisinden yeni bir bağlantı isteyin."
+    }
+  ],
+  "web.auth.signInLink.documentTitle": [
+    {
+      "type": 0,
+      "value": "Oturum açma bağlantısı"
+    }
+  ],
+  "web.auth.signInLink.failed": [
+    {
+      "type": 0,
+      "value": "Silo bu bağlantıyı açamadı. Tekrar deneyin."
+    }
+  ],
+  "web.auth.signInLink.installFirst": [
+    {
+      "type": 0,
+      "value": "Bağlantı yalnızca bir kez çalışır ve kod birkaç dakika geçerlidir. Önce telefonunuza veya tabletinize Silo uygulamasını yükleyin, ardından Devam düğmesine basın."
+    }
+  ],
+  "web.auth.signInLink.intro": [
+    {
+      "type": 0,
+      "value": "Yeniden oturum açabilmeniz için bir yönetici size bu bağlantıyı gönderdi. Silo uygulaması için kod almak veya parola seçmek için devam edin."
+    }
+  ],
+  "web.auth.signInLink.keepOpen": [
+    {
+      "type": 0,
+      "value": "İşiniz bitene kadar bu sayfayı açık tutun. Bağlantı kullanıldı; sayfayı yenilerseniz veya sayfadan ayrılırsanız bağlantının size sağladıklarını kaybedersiniz."
+    }
+  ],
+  "web.auth.signInLink.leaveAction": [
+    {
+      "type": 0,
+      "value": "Ayrıl"
+    }
+  ],
+  "web.auth.signInLink.leaveDescription": [
+    {
+      "type": 0,
+      "value": "Bağlantı kullanıldı. Ayrılırsanız Silo uygulaması için verilen kod ve parola belirleme imkânı kaybolur; yeni bir bağlantıya ihtiyacınız olur."
+    }
+  ],
+  "web.auth.signInLink.leaveTitle": [
+    {
+      "type": 0,
+      "value": "Bu sayfadan ayrılmak istiyor musunuz?"
+    }
+  ],
+  "web.auth.signInLink.noCodeAdministrator": [
+    {
+      "type": 0,
+      "value": "Bu bir yönetici hesabı olduğundan bu bağlantı yalnızca parola belirler. Bir parola belirleyin, bu sunucunun sitesinde oturum açın, ardından oradaki hesap ayarlarınızdan Silo uygulamasını açın."
+    }
+  ],
+  "web.auth.signInLink.noCodeAppKeysOff": [
+    {
+      "type": 0,
+      "value": "Silo uygulaması şu anda bu sunucuda oturum açamıyor, bu nedenle bu bağlantı yalnızca parola belirler."
+    }
+  ],
+  "web.auth.signInLink.passwordDescription": [
+    {
+      "type": 0,
+      "value": "Kaydettiğinizde bu hesabın tüm cihazlardaki oturumu kapatılır. Silo uygulamasıyla oturum açmış cihazlar kendiliğinden yeniden oturum açar."
+    }
+  ],
+  "web.auth.signInLink.passwordSet": [
+    {
+      "type": 0,
+      "value": "Parolanız kaydedildi. Bu parolayla oturum açın."
+    }
+  ],
+  "web.auth.signInLink.passwordSetLostDevices": [
+    {
+      "type": 0,
+      "value": "Silo uygulamasını kullanan kayıp cihazlar, siz kaldırana kadar oturum açmaya devam edebilir. Oturum açtıktan sonra bu cihazları hesap ayarlarınızdaki cihazlarınız listesinden kaldırın."
+    }
+  ],
+  "web.auth.signInLink.passwordTitle": [
+    {
+      "type": 0,
+      "value": "Bir parola seçin"
+    }
+  ],
+  "web.auth.signInLink.providerRequired": [
+    {
+      "type": 0,
+      "value": "Bu sunucu, kişilerin oturumunu kendi oturum açma sağlayıcısı üzerinden açar, bu nedenle bu bağlantı çalışmaz. Bunun yerine sağlayıcıyla oturum açın."
+    }
+  ],
+  "web.auth.signInLink.setPasswordInstead": [
+    {
+      "type": 0,
+      "value": "Bunun yerine parola belirle"
+    }
+  ],
+  "web.auth.signInLink.title": [
+    {
+      "type": 0,
+      "value": "Hesabınıza yeniden erişin"
+    }
+  ],
+  "web.auth.signInLink.unavailable": [
+    {
+      "type": 0,
+      "value": "Bu bağlantı zaten kullanılmış, daha yeni bir bağlantıyla değiştirilmiş veya süresi dolmuş. Bu sunucunun bir yöneticisinden yeni bir bağlantı isteyin."
     }
   ],
   "web.auth.signup.closed": [
@@ -132382,7 +134141,7 @@
   "web.settings.account.password.signOutOthersDescription": [
     {
       "type": 0,
-      "value": "Diğer tarayıcılar ve uygulamalar yeni parolayla yeniden oturum açmalıdır. Bu tarayıcıda oturum açık kalır ve API anahtarları çalışmaya devam eder."
+      "value": "Diğer tarayıcılarda ve uygulamalarda oturum kapatılır. Bu tarayıcıda oturum açık kalır ve API anahtarları çalışmaya devam eder."
     }
   ],
   "web.settings.account.password.title": [
@@ -133207,6 +134966,468 @@
     {
       "type": 0,
       "value": "Bu anahtarı kullanma"
+    }
+  ],
+  "web.settings.appKeys.actionFailed": [
+    {
+      "type": 0,
+      "value": "Değişiklik yapılamadı. Tekrar deneyin."
+    }
+  ],
+  "web.settings.appKeys.approveMainOnly": [
+    {
+      "type": 0,
+      "value": "Bir cihazı yalnızca hanenin ana profili onaylayabilir. Onaylamak için ana profile geçin."
+    }
+  ],
+  "web.settings.appKeys.approved": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " onaylandı"
+    }
+  ],
+  "web.settings.appKeys.confirm.approve": [
+    {
+      "type": 0,
+      "value": "Cihazı onayla"
+    }
+  ],
+  "web.settings.appKeys.confirm.approveDescription": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " cihazı, siz kaldırana kadar Silo uygulamasıyla hesabınızda oturum açabilecek. Yalnızca az önce kurduysanız onaylayın."
+    }
+  ],
+  "web.settings.appKeys.confirm.approveTitle": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " cihazı onaylansın mı?"
+    }
+  ],
+  "web.settings.appKeys.confirm.deny": [
+    {
+      "type": 0,
+      "value": "Cihazı reddet"
+    }
+  ],
+  "web.settings.appKeys.confirm.denyDescription": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " cihazı hesabınızda oturum açamayacak. Sizin cihazınızsa Silo uygulamasında yeniden ekleyin."
+    }
+  ],
+  "web.settings.appKeys.confirm.denyTitle": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " cihazı reddedilsin mi?"
+    }
+  ],
+  "web.settings.appKeys.confirm.remove": [
+    {
+      "type": 0,
+      "value": "Cihazı kaldır"
+    }
+  ],
+  "web.settings.appKeys.confirm.removeDescription": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " cihazını kaldırmak, oturumunu hemen kapatır ve anahtarını devre dışı bırakır: bu anahtarla bir daha oturum açamaz. Yeniden kullanmak için Silo uygulamasında tekrar ekleyin."
+    }
+  ],
+  "web.settings.appKeys.confirm.removeTitle": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " cihazı kaldırılsın mı?"
+    }
+  ],
+  "web.settings.appKeys.confirm.withdraw": [
+    {
+      "type": 0,
+      "value": "Onayı geri çek"
+    }
+  ],
+  "web.settings.appKeys.confirm.withdrawDescription": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " cihazı bu onayı kullanarak hesabınızda oturum açamayacak."
+    }
+  ],
+  "web.settings.appKeys.confirm.withdrawTitle": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " cihazı için verilen onay geri çekilsin mi?"
+    }
+  ],
+  "web.settings.appKeys.confirm.working": [
+    {
+      "type": 0,
+      "value": "Kaydediliyor…"
+    }
+  ],
+  "web.settings.appKeys.denied": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " reddedildi"
+    }
+  ],
+  "web.settings.appKeys.description": [
+    {
+      "type": 0,
+      "value": "Silo uygulamasıyla hesabınızda parola olmadan oturum açan cihazlar ve uygulamalar."
+    }
+  ],
+  "web.settings.appKeys.devices.title": [
+    {
+      "type": 0,
+      "value": "Cihazlar"
+    }
+  ],
+  "web.settings.appKeys.empty": [
+    {
+      "type": 0,
+      "value": "Hesabınızda Silo uygulamasını kullanan cihaz yok."
+    }
+  ],
+  "web.settings.appKeys.footnote": [
+    {
+      "type": 0,
+      "value": "Bir cihazı kaldırmak, oturumunu kapatır ve anahtarını devre dışı bırakır. Bir oturumu kapatmak cihazı kaldırmaz: cihaz anahtarıyla yeniden oturum açar."
+    }
+  ],
+  "web.settings.appKeys.loadFailed": [
+    {
+      "type": 0,
+      "value": "Cihazlarınız yüklenemedi."
+    }
+  ],
+  "web.settings.appKeys.loading": [
+    {
+      "type": 0,
+      "value": "Cihazlar yükleniyor…"
+    }
+  ],
+  "web.settings.appKeys.off": [
+    {
+      "type": 0,
+      "value": "Bu sunucuda Silo uygulamasıyla oturum açma kapalı; bu nedenle bu cihazlar oturum açamaz ve bekleyen cihazlar onaylanamaz. Yine de bunları kaldırabilirsiniz."
+    }
+  ],
+  "web.settings.appKeys.personKey.description": [
+    {
+      "type": 0,
+      "value": "Silo uygulamanız yeni cihazlarınızı eklemek için bu anahtarı kullanır. Kurulum: "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.settings.appKeys.personKey.none": [
+    {
+      "type": 0,
+      "value": "Hesap anahtarı yok. Silo uygulamanız, oturum açıkken bir sonraki cihaz eklediğinizde bir anahtar oluşturur."
+    }
+  ],
+  "web.settings.appKeys.personKey.title": [
+    {
+      "type": 0,
+      "value": "Hesap anahtarı"
+    }
+  ],
+  "web.settings.appKeys.pinDescription": [
+    {
+      "type": 0,
+      "value": "Bu cihazı onaylamak için ana profilin PIN’ini girin."
+    }
+  ],
+  "web.settings.appKeys.preapprovals.description": [
+    {
+      "type": 0,
+      "value": "Henüz bağlanmamış bir cihaz için onayladığınız oturum açma işlemleri."
+    }
+  ],
+  "web.settings.appKeys.preapprovals.loadFailed": [
+    {
+      "type": 0,
+      "value": "Önceden onaylanan oturum açma işlemleri yüklenemedi."
+    }
+  ],
+  "web.settings.appKeys.preapprovals.title": [
+    {
+      "type": 0,
+      "value": "Önceden onaylananlar"
+    }
+  ],
+  "web.settings.appKeys.refreshLabel": [
+    {
+      "type": 0,
+      "value": "Silo uygulaması cihazlarını yenile"
+    }
+  ],
+  "web.settings.appKeys.removed": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " kaldırıldı"
+    }
+  ],
+  "web.settings.appKeys.row.allowedBy": [
+    {
+      "type": 0,
+      "value": "İzin veren: "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "web.settings.appKeys.row.approve": [
+    {
+      "type": 0,
+      "value": "Onayla"
+    }
+  ],
+  "web.settings.appKeys.row.approveLabel": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " cihazını onayla"
+    }
+  ],
+  "web.settings.appKeys.row.deny": [
+    {
+      "type": 0,
+      "value": "Reddet"
+    }
+  ],
+  "web.settings.appKeys.row.denyLabel": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " cihazını reddet"
+    }
+  ],
+  "web.settings.appKeys.row.enrolledFrom": [
+    {
+      "type": 0,
+      "value": "Eklendiği adres: "
+    },
+    {
+      "type": 1,
+      "value": "address"
+    }
+  ],
+  "web.settings.appKeys.row.identityGone": [
+    {
+      "type": 0,
+      "value": "Oturum açamaz: oturum açma sağlayıcısı hesabının bağlantısı kaldırıldı"
+    }
+  ],
+  "web.settings.appKeys.row.kindApp": [
+    {
+      "type": 0,
+      "value": "Diğer uygulama"
+    }
+  ],
+  "web.settings.appKeys.row.kindDevice": [
+    {
+      "type": 0,
+      "value": "Silo uygulaması"
+    }
+  ],
+  "web.settings.appKeys.row.lastUsed": [
+    {
+      "type": 0,
+      "value": "Son oturum açma: "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.settings.appKeys.row.notUsed": [
+    {
+      "type": 0,
+      "value": "Henüz anahtarıyla oturum açmadı"
+    }
+  ],
+  "web.settings.appKeys.row.preapproval": [
+    {
+      "type": 0,
+      "value": "Önceden onaylandı · sona erme: "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.settings.appKeys.row.provider": [
+    {
+      "type": 0,
+      "value": "Oturum açma sağlayıcısıyla doğrulandı"
+    }
+  ],
+  "web.settings.appKeys.row.remove": [
+    {
+      "type": 0,
+      "value": "Kaldır"
+    }
+  ],
+  "web.settings.appKeys.row.removeLabel": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " cihazını kaldır"
+    }
+  ],
+  "web.settings.appKeys.row.viaAppCode": [
+    {
+      "type": 0,
+      "value": "Sunucunun web sayfasından alınan tek kullanımlık kodla eklendi"
+    }
+  ],
+  "web.settings.appKeys.row.viaPersonKey": [
+    {
+      "type": 0,
+      "value": "Başka bir cihazdaki Silo uygulaması tarafından eklendi"
+    }
+  ],
+  "web.settings.appKeys.row.viaSession": [
+    {
+      "type": 0,
+      "value": "Oturum açıkken eklendi"
+    }
+  ],
+  "web.settings.appKeys.row.waitingUntil": [
+    {
+      "type": 0,
+      "value": "Onay bekliyor · son tarih: "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.settings.appKeys.row.withdraw": [
+    {
+      "type": 0,
+      "value": "Geri çek"
+    }
+  ],
+  "web.settings.appKeys.row.withdrawLabel": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " cihazı için verilen onayı geri çek"
+    }
+  ],
+  "web.settings.appKeys.signsBackIn": [
+    {
+      "type": 0,
+      "value": "Silo uygulamasıyla oturum açmış cihazlar kendiliğinden yeniden oturum açar. Bunu durdurmak için "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "cihazı kaldırın"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.settings.appKeys.title": [
+    {
+      "type": 0,
+      "value": "Silo uygulaması cihazları"
+    }
+  ],
+  "web.settings.appKeys.unavailable": [
+    {
+      "type": 0,
+      "value": "Silo uygulamasıyla oturum açma bu sunucuda kullanılamıyor; bu nedenle bu cihazlar oturum açamaz. Yine de bunları kaldırabilirsiniz."
+    }
+  ],
+  "web.settings.appKeys.waiting.description": [
+    {
+      "type": 0,
+      "value": "Yeni bir cihaz, Silo uygulamasıyla hesabınızda oturum açmak istedi. Yalnızca az önce kurduysanız onaylayın."
+    }
+  ],
+  "web.settings.appKeys.waiting.title": [
+    {
+      "type": 0,
+      "value": "Onayınızı bekleyenler"
+    }
+  ],
+  "web.settings.appKeys.withdrawn": [
+    {
+      "type": 0,
+      "value": "Onay geri çekildi"
     }
   ],
   "web.settings.cardOverlay.adjust": [
@@ -138181,6 +140402,54 @@
       "value": "Çevrimdışı olduğunuz için bu değişiklik kaydedilmedi"
     }
   ],
+  "web.settings.openInSilo.action": [
+    {
+      "type": 0,
+      "value": "Silo uygulaması için kod al"
+    }
+  ],
+  "web.settings.openInSilo.codeInstructions": [
+    {
+      "type": 0,
+      "value": "Telefonunuzdaki veya tabletinizdeki Silo uygulamasında bu sunucuyu adresiyle ekleyin ve bu kodu yazın. Kodu bilen herkes bu hesapta oturum açabilir; bu yüzden kodu paylaşmayın."
+    }
+  ],
+  "web.settings.openInSilo.codeTitle": [
+    {
+      "type": 0,
+      "value": "Silo uygulaması için kod"
+    }
+  ],
+  "web.settings.openInSilo.description": [
+    {
+      "type": 0,
+      "value": "Telefonunuzdaki veya tabletinizdeki Silo uygulamasında parola olmadan bu hesapla oturum açın."
+    }
+  ],
+  "web.settings.openInSilo.loadFailed": [
+    {
+      "type": 0,
+      "value": "Bu tarayıcının Silo uygulaması için kod alıp alamayacağı denetlenemedi."
+    }
+  ],
+  "web.settings.openInSilo.mainProfileOnly": [
+    {
+      "type": 0,
+      "value": "Silo uygulaması için yalnızca hanenin ana profili kod alabilir. Ana profile geçip tekrar deneyin."
+    }
+  ],
+  "web.settings.openInSilo.pinDescription": [
+    {
+      "type": 0,
+      "value": "Silo uygulaması için kod almak üzere ana profilin PIN’ini girin."
+    }
+  ],
+  "web.settings.openInSilo.title": [
+    {
+      "type": 0,
+      "value": "Silo uygulaması"
+    }
+  ],
   "web.settings.overlays.accent.amber": [
     {
       "type": 0,
@@ -141081,6 +143350,12 @@
       "value": "Oturum açılma zamanı"
     }
   ],
+  "web.settings.sessions.row.signsBackIn": [
+    {
+      "type": 0,
+      "value": "Bu cihaz kendiliğinden yeniden oturum açar"
+    }
+  ],
   "web.settings.sessions.row.summary": [
     {
       "type": 8,
@@ -141163,6 +143438,24 @@
     {
       "type": 0,
       "value": "Ayarlar"
+    }
+  ],
+  "web.settings.signInAgain.action": [
+    {
+      "type": 0,
+      "value": "Yeniden oturum aç"
+    }
+  ],
+  "web.settings.signInAgain.manageDevices": [
+    {
+      "type": 0,
+      "value": "Cihazlarınızı yönetmek için yeniden oturum açın"
+    }
+  ],
+  "web.settings.signInAgain.useApp": [
+    {
+      "type": 0,
+      "value": "Cihazlarınızı Silo uygulamasında yönetin."
     }
   ],
   "web.settings.signedInSessions.loadFailed": [

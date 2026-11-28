@@ -11,13 +11,19 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/Silo-Server/silo-server/internal/bandwidthprobe"
+	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/streamtelemetry"
+	"github.com/Silo-Server/silo-server/internal/streamtoken"
 )
 
 const (
 	opGetPlaybackBandwidthProbe = "getPlaybackBandwidthProbe"
 	bandwidthProbeSizeParam     = "size"
 	bandwidthProbeDefaultSize   = 1_000_000
+	// playbackMediaTransportParam is the query parameter naming the transport a
+	// probe measures.
+	playbackMediaTransportParam = "media_transport"
+	playbackDeviceIDHeader      = "X-Silo-Device-Id"
 )
 
 // countingWriter counts the bytes written through it.
@@ -43,7 +49,8 @@ func registerPlaybackBandwidthProbe(reg *Registry) {
 		Description: "Number of bytes to send. A client may close the connection early once it has timed enough of the transfer.",
 		Schema:      &huma.Schema{Type: huma.TypeInteger, Format: playbackIntegerFormat, Minimum: new(float64(1)), Maximum: new(float64(bandwidthprobe.MaxSize)), Default: bandwidthProbeDefaultSize},
 	}}
-	headers := map[string]*huma.Param{playbackContentLength: {Schema: &huma.Schema{Type: huma.TypeInteger, Format: playbackIntegerFormat}}, playbackCacheControlHeader: {Schema: &huma.Schema{Type: huma.TypeString}}}
+	headers := map[string]*huma.Param{playbackContentLength: {Schema: &huma.Schema{Type: huma.TypeInteger, Format: playbackIntegerFormat}}, playbackCacheControlHeader: {Schema: &huma.Schema{Type: huma.TypeString}},
+		streamtoken.ConnectionReceiptHeader: {Description: "Sent when the request names a device. Names the account, the device and the connection class that carried the bytes: regular over TCP, direct over a direct path. A client sends it back as connection_receipt with the result.", Schema: &huma.Schema{Type: huma.TypeString}}}
 	responses := map[string]*huma.Response{
 		"307": {Description: "Selected media proxy; follow the short-lived probe URL", Headers: map[string]*huma.Param{locationHeader: {Schema: &huma.Schema{Type: huma.TypeString}}}},
 		"200": {Description: "Random bytes", Content: map[string]*huma.MediaType{playbackMediaBinary: {Schema: &huma.Schema{Type: huma.TypeString, Format: playbackBinaryFormat}}}, Headers: headers},
@@ -51,7 +58,11 @@ func registerPlaybackBandwidthProbe(reg *Registry) {
 	}
 	op := humaOp(http.MethodGet, Prefix+"/playback/bandwidth-probe", opGetPlaybackBandwidthProbe, playbackTag,
 		"Download random bytes to measure throughput to this server. Clients time the transfer and send the result as bandwidth_estimate_kbps; the bytes count as transfer egress, not playback. A server runs at most 4 probes at once; an account may run two of them and draw up to 2,000,000,000 bytes per 10 minutes. Beyond any limit the request gets 429 with Retry-After.")
-	op.Parameters = append(params, &huma.Param{Name: "media_path", In: playbackParamQuery, Description: "Use the client media egress route.", Schema: &huma.Schema{Type: huma.TypeBoolean}})
+	op.Parameters = append(params, &huma.Param{Name: "media_path", In: playbackParamQuery, Description: "Use the client media egress route.", Schema: &huma.Schema{Type: huma.TypeBoolean}},
+		&huma.Param{Name: playbackMediaTransportParam, In: playbackParamQuery, Description: "The transport the client asks the probe to measure: regular or direct. Omitted means regular.", Schema: &huma.Schema{Type: huma.TypeString, Enum: []any{playback.MediaTransportRegularV3, playback.MediaTransportDirectV3}}})
+	op.Parameters = append(op.Parameters, &huma.Param{Name: playbackDeviceIDHeader, In: playbackParamHeader,
+		Description: "The client's stable device identifier. A device the server holds a direct enrollment for names itself here so the probe is measured, and receipted, on the path its media takes. Optional.",
+		Schema:      &huma.Schema{Type: huma.TypeString, MaxLength: new(128)}})
 	op.Responses = responses
 	raw := RawOperation{Operation: Operation{Operation: op, Class: ClassAuthenticated}, Protocol: "bandwidth-probe",
 		Reason: "A throughput measurement needs an unbuffered, uncompressible byte stream the client can time and abandon mid-transfer."}
@@ -71,6 +82,11 @@ func registerPlaybackBandwidthProbe(reg *Registry) {
 			writeProblem(w, r, NewProblem(TypeAuthenticationRequired, "Authentication is required."))
 			return
 		}
+		transport := r.URL.Query().Get(playbackMediaTransportParam)
+		if transport != "" && transport != playback.MediaTransportRegularV3 && transport != playback.MediaTransportDirectV3 {
+			writeProblem(w, r, validationProblem("query."+playbackMediaTransportParam, codeInvalid, "Expected regular or direct."))
+			return
+		}
 		mediaPath := false
 		if value := r.URL.Query().Get("media_path"); value != "" {
 			parsed, err := strconv.ParseBool(value)
@@ -82,13 +98,13 @@ func registerPlaybackBandwidthProbe(reg *Registry) {
 		}
 		if mediaPath {
 			service, ok := reg.deps.Playback.(interface {
-				PlaybackProbeRedirect(context.Context, int, int) (string, error)
+				PlaybackProbeRedirect(ctx context.Context, user, size int, device, transport string) (string, error)
 			})
 			if !ok {
 				writeProblem(w, r, unavailable("media path probe"))
 				return
 			}
-			target, err := service.PlaybackProbeRedirect(r.Context(), claims.UserID, size)
+			target, err := service.PlaybackProbeRedirect(r.Context(), claims.UserID, size, r.Header.Get(playbackDeviceIDHeader), transport)
 			if err != nil {
 				writeProblem(w, r, playbackProblem(err))
 				return
@@ -108,6 +124,13 @@ func registerPlaybackBandwidthProbe(reg *Registry) {
 		defer func() { limiter.Release(claims.UserID, size-sent.n, window, time.Now()) }()
 		streamtelemetry.Attach(r.Context(), streamtelemetry.Attachment{Subject: streamtelemetry.UserSubject(claims.UserID),
 			StartedAtSource: streamtelemetry.StartedAtSourceFirstSeen, TokenIssuedAtSource: streamtelemetry.TokenIssuedAtSourceNone})
+		if receipter, ok := reg.deps.Playback.(interface {
+			ProbeConnectionReceipt(ctx context.Context, user int, device string) string
+		}); ok {
+			if receipt := receipter.ProbeConnectionReceipt(r.Context(), claims.UserID, r.Header.Get(playbackDeviceIDHeader)); receipt != "" {
+				w.Header().Set(streamtoken.ConnectionReceiptHeader, receipt)
+			}
+		}
 		w.Header().Set("Content-Type", playbackMediaBinary)
 		w.Header().Set(playbackContentLength, strconv.Itoa(size))
 		w.Header().Set(playbackCacheControlHeader, "no-store")

@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
@@ -158,5 +159,32 @@ func TestProxyCapabilityHashTracksTransformations(t *testing.T) {
 	if capableInfo.CapabilityHash == degradedInfo.CapabilityHash {
 		t.Fatalf("capability_hash = %s for both builds, but their transformations differ",
 			capableInfo.CapabilityHash)
+	}
+}
+
+// A proxy sends a connection receipt only when it can name itself, so it
+// advertises connection_receipt_v1 only then: the API never picks an unnamed
+// proxy for an enrolled device's probe.
+func TestProxyAdvertisesReceiptsOnlyWhenItKnowsItsNodeID(t *testing.T) {
+	const secret = "capability-secret"
+	server := newCapabilityProxyServer(t, secret)
+	for _, tc := range []struct {
+		name   string
+		nodeID func() (int, bool)
+		want   bool
+	}{
+		{"node ID unknown", func() (int, bool) { return 0, false }, false},
+		{"node ID known", func() (int, bool) { return 11, true }, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server.nodeRowID = tc.nodeID
+			info := fetchProxyCapabilities(t, server, secret)
+			if got := slices.Contains(info.TransportFeatures, playback.TransportFeatureConnectionReceiptV1); got != tc.want {
+				t.Fatalf("connection_receipt_v1 advertised = %v, want %v (features %v)", got, tc.want, info.TransportFeatures)
+			}
+			if !slices.Contains(info.TransportFeatures, playback.TransportFeatureBandwidthProbeV1) {
+				t.Fatalf("features %v lost bandwidth_probe_v1", info.TransportFeatures)
+			}
+		})
 	}
 }

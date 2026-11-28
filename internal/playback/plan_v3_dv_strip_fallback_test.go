@@ -62,8 +62,9 @@ func dvStripFallbackRegistryV3() *TransformationRegistryV3 {
 
 // HLS cannot carry TrueHD without an AAC conversion. When no HLS executor
 // offers one, that route is skipped rather than ending planning, so the
-// progressive HDR10 strip, which copies TrueHD, is still reached. The
-// conversion terminal is reported only once every remux recipe is exhausted.
+// progressive HDR10 strip, which converts TrueHD with the progressive
+// executor's AAC, is still reached. The conversion terminal is reported only
+// once every remux recipe is exhausted.
 func TestPlanPlaybackV3DV81StripFallbackSurvivesMissingHLSAudioConversion(t *testing.T) {
 	file, req := dv81NativeAndHDR10FixtureV3()
 	file.CodecAudio = "truehd"
@@ -87,8 +88,11 @@ func TestPlanPlaybackV3DV81StripFallbackSurvivesMissingHLSAudioConversion(t *tes
 			strip = append(strip, plan)
 		}
 	}
-	if len(strip) != 1 || strip[0].Delivery != DeliveryRemuxProgressiveV3 || strip[0].EffectiveRecipe.AudioCodec != "truehd" {
-		t.Fatalf("strip plans = %d, want one progressive remux copying TrueHD", len(strip))
+	// The client decodes TrueHD; only MP4 forced the conversion, so the 7.1
+	// track keeps 5.1 surround.
+	if len(strip) != 1 || strip[0].Delivery != DeliveryRemuxProgressiveV3 || strip[0].EffectiveRecipe.AudioCodec != audioCodecAACV3 ||
+		strip[0].EffectiveRecipe.AudioChannels == nil || *strip[0].EffectiveRecipe.AudioChannels != 6 {
+		t.Fatalf("strip plans = %d, want one progressive remux converting TrueHD to AAC 5.1", len(strip))
 	}
 	if terminal == nil || terminal.Reason != TerminalAudioConversionUnsupportedV3 {
 		t.Fatalf("terminal = %#v, want the audio conversion cause once every recipe is exhausted", terminal)

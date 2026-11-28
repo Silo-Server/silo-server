@@ -1738,8 +1738,25 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Discover direct-connection readiness operations and service configuration, independently of probe health and the hidden setting. */
+    /** Discover direct-connection readiness operations and service configuration, independently of probe health and the direct_connections.enabled setting. */
     get: operations["getAdminDirectConnectionsCapabilities"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/direct-connections/peers": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List the devices that have a direct path to the API host now, with their observed addresses and ports. Needs the acting administrator; no other caller sees an endpoint. */
+    get: operations["listAdminDirectConnectionPeers"];
     put?: never;
     post?: never;
     delete?: never;
@@ -1755,7 +1772,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Read the API host's direct-connection readiness. Network probes run only when the hidden setting is enabled. Refresh joins an in-flight check or starts a new one. The settings read and the check have separate fifteen-second bounds, so a request can take about thirty seconds. */
+    /** Read the API host's direct-connection readiness. Network probes run only when the direct_connections.enabled setting is on. Refresh joins an in-flight check or starts a new one. The settings read and the check have separate fifteen-second bounds, so a request can take about thirty seconds. */
     get: operations["getAdminDirectConnectionsStatus"];
     put?: never;
     post?: never;
@@ -6677,6 +6694,43 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/auth/demo": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Sign in to the public demo account of a server run as a public demo.
+     * @description Only a server whose operator runs it as a public demo offers this: demo mode (the demo.enabled setting) is on and the demo.username setting names an account that is not an administrator. Every other server answers 409 capability_disabled, or capability_not_configured on a demo server with no usable demo account; getDemoLoginCapability tells a client which before it offers the action. The session opened is the one a visitor gets by typing the demo account's password, restricted by demo mode in the same way. Send an empty JSON object as the body.
+     */
+    post: operations["demoLogin"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/auth/demo/capability": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Describe whether this server offers demo sign-in: available only on a public demo, disabled when demo mode is off, not_configured when no demo account is named. */
+    get: operations["getDemoLoginCapability"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/auth/device": {
     parameters: {
       query?: never;
@@ -7294,6 +7348,23 @@ export interface paths {
     };
     /** Upcoming and recent airings and releases in a window of the viewer's local days, grouped by day. */
     get: operations["getCalendar"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/capabilities/direct-connections": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Discover whether this server offers direct connections to the calling client, and the values its engine needs. */
+    get: operations["getDirectConnectionsCapability"];
     put?: never;
     post?: never;
     delete?: never;
@@ -8564,6 +8635,78 @@ export interface paths {
     put?: never;
     /** Consume a local upload session and ingest its diagnostics report without durable receipt replay. */
     post: operations["completeDiagnosticsUpload"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/direct-connections/enrollment": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Enroll the calling device's engine, or renew its enrollment, and return the ticket for the coordination operations. Needs a login session; an API key or a View as user session is refused.
+     * @description Enrolling the same device again with the same node key renews the lease. A new node key replaces the entry and ends the old ticket. 409 direct_device_limit means the account holds the most devices it may; show the limit. 409 direct_node_key_conflict means another device holds the node key; make a new key and enroll again. 409 capability_disabled means an administrator turned direct connections off.
+     */
+    post: operations["enrollDirectConnectionDevice"];
+    /** Withdraw the calling device's enrollment. Withdrawing a device that is not enrolled succeeds. */
+    delete: operations["withdrawDirectConnectionDevice"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/direct-connections/netmap": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Read the hosts this device can reach, holding the call while the netmap is unchanged. Authenticated by the enrollment ticket. */
+    get: operations["getDirectConnectionNetmap"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/direct-connections/registration": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Publish the calling engine's discovery key, endpoints and confirmations. Authenticated by the enrollment ticket. */
+    post: operations["registerDirectConnectionPeer"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/direct-connections/signal": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Open the calling engine's signaling stream. Authenticated by the enrollment ticket; the stream carries DERP frames as binary messages. */
+    get: operations["connectDirectConnectionSignal"];
+    put?: never;
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -16591,12 +16734,17 @@ export interface components {
     AdminChildStats: {
       /**
        * Format: double
+       * @description CPU of live owned FFmpeg children over the last sample window, on the same scale and capacity as system.cpu_pct. A lower bound: a child's last partial window and a child that starts and exits between two samples are missed. Omitted when the window was not measured, including a truncated pass.
+       */
+      cpu_pct?: number;
+      /**
+       * Format: double
        * @description Summed lifetime CPU seconds of currently live owned child processes. Decreases when a child exits; do not diff as a monotonic counter.
        */
       cpu_seconds: number;
       /**
        * Format: int64
-       * @description Summed resident memory (RSS) in bytes across sampled live owned child processes (transcodes, remuxes, trickplay, thumbnails, probes); may count shared pages more than once.
+       * @description Summed resident memory (RSS) in bytes across sampled live owned child processes (transcodes, remuxes, media analysis, trickplay and chapter thumbnails); may count shared pages more than once.
        */
       resident_bytes: number;
       /**
@@ -21583,6 +21731,8 @@ export interface components {
       device_platform?: string;
       /** @description Whole-session method: direct, remux, direct_stream (copied video, converted audio) or transcode; absent when unknown */
       effective_play_method?: string;
+      /** @description Viewer egress of the session, only when the list was read with include_egress=true. Absent when it is unknown: stream telemetry is off, its merged view is not built, its last refresh failed, the session's routes exceeded the telemetry route cap, a counting server's clock runs ahead of this server's beyond the telemetry tolerance, telemetry has no record of the session, or a proxy node served the session while telemetry is not shared between servers. Never present in session.* events. */
+      egress?: components["schemas"]["AdminPlaybackSessionEgress"];
       /**
        * Format: int64
        * @description Episode number; absent when not an episode
@@ -21761,6 +21911,8 @@ export interface components {
       device_identity: boolean;
       effective_play_method: boolean;
       effective_play_method_values: string[];
+      /** @description Stream telemetry is enabled: the list accepts include_egress and rows may then carry egress */
+      egress: boolean;
       is_jellyfin_client: boolean;
       /** @description The admin sessions channel carries session.started, session.paused, session.resumed and session.stopped, and rows may carry lifecycle_seq */
       lifecycle_events: boolean;
@@ -21787,6 +21939,20 @@ export interface components {
       tone_map_mode_values: string[];
       transcode_hw_accel: boolean;
       user_filter: boolean;
+    };
+    AdminPlaybackSessionEgress: {
+      /**
+       * Format: int64
+       * @description Bytes Silo has sent to the viewer for this playback session so far, summed across every API server and proxy node; hops between Silo's own nodes are not counted
+       */
+      bytes: number;
+      /**
+       * Format: date-time
+       * @description When the newest of the counting servers took its count, on that server's clock; the same on every API server for the same reports. Servers report about once a second and their clocks can differ slightly, so rates over short intervals jitter. Divide a change in bytes by the change in this, not by the time between polls
+       */
+      measured_at: string;
+      /** @description Opaque token naming the set of servers that make up bytes. Ignore an observation whose measured_at is not newer than the baseline's, whatever its series. Otherwise start a new baseline when series differs from the baseline's or bytes fell, and compare bytes only within one series */
+      series: string;
     };
     AdminPlaybackSessionMessageInputBody: {
       /**
@@ -22553,6 +22719,11 @@ export interface components {
       source: string;
     };
     AdminProcessStats: {
+      /**
+       * Format: double
+       * @description This process's CPU over the last sample window, on the same scale and capacity as system.cpu_pct. Omitted when the window was not measured; a measured idle process is 0.
+       */
+      cpu_pct?: number;
       /**
        * Format: double
        * @description Cumulative CPU time consumed by this Silo process in seconds (user + system).
@@ -23415,6 +23586,8 @@ export interface components {
       cgroup_resources: boolean;
       /** @description Responses include attribution.instance_id and per-metric scope and source metadata. */
       instance_attribution: boolean;
+      /** @description Responses may include attribution.process.cpu_pct and attribution.children.cpu_pct. */
+      process_cpu_percent: boolean;
       /** @description Responses may include attribution.process and attribution.children. */
       process_resources: boolean;
       /** @description Opaque revision of this document */
@@ -28063,6 +28236,18 @@ export interface components {
       sidecar_bitmap: boolean;
       sidecar_text: boolean;
     };
+    DemoLoginCapability: {
+      /** @description Whether the current principal may use the capability */
+      allowed?: boolean;
+      /** @description Opaque revision of this document */
+      revision: string;
+      /**
+       * @description Support and configuration state, not health
+       * @enum {string}
+       */
+      state: "available" | "disabled" | "not_configured" | "unsupported";
+    };
+    DemoLoginInputBody: Record<string, never>;
     DetectedBackend: {
       backend: string;
       device?: string;
@@ -28423,6 +28608,117 @@ export interface components {
        */
       manifest: string;
     };
+    DirectConnectionConfirmation: {
+      /** @description That node's discovery key at the pong */
+      disco_key: string;
+      /** @description The unicast UDP source of the pong, as host:port; not validated as a URI */
+      endpoint: string;
+      /** @description The node whose direct pong was received */
+      peer: string;
+    };
+    DirectConnectionEnrollment: {
+      /**
+       * Format: uri-reference
+       * @example /api/v2/direct-connections
+       */
+      coordination_url: string;
+      /**
+       * Format: date-time
+       * @description End of the enrollment lease and of the ticket
+       */
+      expires_at: string;
+      /** @description Secret credential for the coordination operations; send it in the Silo-Signaling-Ticket header and never log it */
+      ticket: string;
+    };
+    DirectConnectionEnrollmentRequest: {
+      /**
+       * @description The device's playback.connection_path setting
+       * @enum {string}
+       */
+      connection_path: "automatic" | "direct_only";
+      /** @description The engine's public node key */
+      node_key: string;
+    };
+    DirectConnectionHostEntry: {
+      /** @description The host's observation of the requesting device, when it has one */
+      confirmation?: components["schemas"]["DirectConnectionConfirmation"];
+      disco_key: string;
+      /** @description Unicast UDP endpoints as host:port */
+      endpoints: string[];
+      /**
+       * Format: int64
+       * @description Always 0: the device builds the signal URL from its base URL
+       */
+      home_region: number;
+      /** @description The host's label; the API host is api */
+      label: string;
+      node_key: string;
+      /** @description Never sent by this server */
+      origin?: string;
+    };
+    DirectConnectionNetmap: {
+      hosts: components["schemas"]["DirectConnectionHostEntry"][];
+      /** Format: int64 */
+      lease_seconds: number;
+      /** Format: int64 */
+      refresh_seconds: number;
+      /** @description Never sent by this server */
+      regions?: components["schemas"]["DirectConnectionRegion"][];
+      /** @description Opaque content hash; send it back as the version query to hold the call until the netmap changes */
+      version: string;
+    };
+    DirectConnectionPeer: {
+      /** @enum {string} */
+      address_family: "ipv4" | "ipv6";
+      /**
+       * @description The path class; only direct exists today. A client treats an unknown value as direct
+       * @enum {string}
+       */
+      class: "direct";
+      /**
+       * Format: date-time
+       * @description When the device's path last became direct
+       */
+      connected_at: string;
+      device_id: string;
+      /** @description Absent when the device has no registered name */
+      device_name?: string;
+      host: components["schemas"]["NetworkAccessHostRef"];
+      /**
+       * Format: int64
+       * @description The API host's UDP port
+       */
+      local_port: number;
+      /** @description The device's observed UDP address as host:port; not validated as a URI */
+      peer_endpoint: string;
+      /**
+       * @description Opaque identifier
+       * @example 1
+       */
+      user_id: string;
+      /** @description Empty when the account's name could not be read */
+      username: string;
+    };
+    DirectConnectionPeerCollection: {
+      items: components["schemas"]["DirectConnectionPeer"][];
+    };
+    DirectConnectionRegion: {
+      code: string;
+      /** Format: int64 */
+      id: number;
+      /** Format: uri */
+      url: string;
+    };
+    DirectConnectionRegistration: {
+      /** @description At most 64 observations of direct pongs, one per peer */
+      confirmations?: components["schemas"]["DirectConnectionConfirmation"][];
+      /** @description The engine's discovery key */
+      disco_key: string;
+      /** @description At most 64 unicast UDP endpoints as host:port */
+      endpoints: string[];
+      /** @description The engine's node key; it must equal the ticket's */
+      node_key: string;
+    };
     DirectConnectionsCapabilities: {
       /** @description Whether the current principal may use the capability */
       allowed: boolean;
@@ -28435,6 +28731,41 @@ export interface components {
        */
       state: "available" | "disabled" | "not_configured" | "unsupported";
       status: boolean;
+    };
+    DirectConnectionsCapability: {
+      /** @description true asks the client, which receives the media, to send fewer QUIC ACKs for application data on its direct connections to this server; false asks for the standard RFC 9000 rate. A local receiver setting that nothing negotiates; a client whose QUIC stack cannot change its ACK rate ignores it. Absent: keep the client default */
+      ack_decimation?: boolean;
+      /** @description Whether the current principal may use the capability */
+      allowed: boolean;
+      /**
+       * Format: uri-reference
+       * @description Base URL of the coordination operations. A value that starts with / is appended to the saved base URL, keeping its path; an absolute https URL is used as is
+       * @example /api/v2/direct-connections
+       */
+      coordination_url: string;
+      /** @description The hosts reachable directly; empty when the capability is disabled */
+      hosts: components["schemas"]["DirectConnectionsHost"][];
+      /**
+       * @description Opaque revision of the direct protocol between a client engine and the server. Compare it for exact equality with each revision the client supports; a client that does not know it does not enroll
+       * @example 1
+       */
+      protocol_revision: string;
+      /**
+       * Format: int64
+       * @description Largest flow-control receive window in MiB (1,048,576 bytes) the client grants to one QUIC stream on its direct connections to this server. It sets neither the initial stream window nor the connection window. A client that cannot set a stream window ignores it. Absent: keep the client default
+       */
+      receive_window_mib?: number;
+      /** @description Opaque revision of this document */
+      revision: string;
+      /**
+       * @description Support and configuration state, not health
+       * @enum {string}
+       */
+      state: "available" | "disabled" | "not_configured" | "unsupported";
+      /** @description STUN servers as host:port */
+      stun_servers: string[];
+      /** @description Base64 SHA-256 of the SubjectPublicKeyInfo the direct path and the local route present. It authenticates those two only, never coordination_url */
+      tls_pin: string;
     };
     DirectConnectionsFeature: {
       detail?: string;
@@ -28479,10 +28810,22 @@ export interface components {
         | "replica_lease_held"
         | "udp_port_invalid"
         | "udp_port_bind_failed"
-        | "engine_start_failed";
+        | "engine_start_failed"
+        | "state_store_unavailable";
       requested?: string;
       /** @enum {string} */
       state: "on" | "off" | "capped" | "fallback" | "degraded" | "unknown";
+    };
+    DirectConnectionsHost: {
+      /** @example api */
+      host_id: string;
+      /** @description The host's node key; the engine dials it */
+      node_key: string;
+      /**
+       * @description Whether the host can take direct connections now. A client treats an unknown state as unavailable
+       * @enum {string}
+       */
+      state: "available" | "unavailable" | "draining";
     };
     DirectConnectionsHostStatus: {
       /**
@@ -33827,6 +34170,11 @@ export interface components {
       effective_media_file_id: string;
       effective_recipe: components["schemas"]["EffectiveRecipeV3"];
       expires_at?: string;
+      /**
+       * @description The transport this plan's media uses. direct means the client carries the media requests it would send to its saved base URL through the direct path to the api host; regular means the saved base URL, or the local route.
+       * @enum {string}
+       */
+      media_transport: "regular" | "direct";
       plan_attempt_key: string;
       plan_id: string;
       /** Format: int64 */
@@ -33872,6 +34220,8 @@ export interface components {
     PlaybackProbeResultsInputBody: {
       /** Format: int64 */
       bytes: number;
+      /** @description The Silo-Connection-Receipt header value of the probe response this result measured. A device enrolled for direct connections must send it: without it the result is refused with 422 (code missing), and a receipt that is not the host's for this account and device is refused with 422 (code invalid). An expired receipt, or a direct receipt of a path that has since been replaced, is accepted and the result is not kept. */
+      connection_receipt?: string;
       /** Format: int64 */
       duration_ms: number;
       /**
@@ -33924,6 +34274,11 @@ export interface components {
       /** @enum {string} */
       learned_limit?: "ignore" | "clear";
       local_mutations?: string[];
+      /**
+       * @description The transport the client asks the media to use. direct asks for the direct path to this server; send it only when the local route is not active, the device is enrolled and the engine is up. Omitted means regular.
+       * @enum {string}
+       */
+      media_transport?: "regular" | "direct";
       /**
        * @deprecated
        * @description Deprecated; ignored. A client on a metered link sends its cellular quality as quality_preference and bandwidth_cap_kbps instead.
@@ -34440,6 +34795,11 @@ export interface components {
       installation_id: string;
       /** @enum {string} */
       learned_limit?: "ignore" | "clear";
+      /**
+       * @description The transport the client asks the media to use. direct asks for the direct path to this server; send it only when the local route is not active, the device is enrolled and the engine is up. Omitted means regular.
+       * @enum {string}
+       */
+      media_transport?: "regular" | "direct";
       /**
        * @deprecated
        * @description Deprecated; ignored. A client on a metered link sends its cellular quality as quality_preference and bandwidth_cap_kbps instead.
@@ -56515,6 +56875,112 @@ export interface operations {
         headers: {
           /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
           ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  listAdminDirectConnectionPeers: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DirectConnectionPeerCollection"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
           [name: string]: unknown;
         };
         content: {
@@ -88400,6 +88866,8 @@ export interface operations {
     parameters: {
       query?: {
         cursor?: string;
+        /** @description Add egress to the rows. Send it only when the capabilities report egress true. */
+        include_egress?: boolean;
         /** @description Page size; default 50, maximum 200 */
         limit?: number;
         /** @description Only live observations belonging to this login account */
@@ -100143,6 +100611,210 @@ export interface operations {
       };
     };
   };
+  demoLogin: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description The client's stable device identifier, recorded on the login session this sign-in opens */
+        "X-Silo-Device-Id"?: string;
+        /** @description Optional device name recorded on the login session (first 120 characters) */
+        "X-Silo-Device-Name"?: string;
+        /** @description Optional platform recorded on the login session (first 40 characters) */
+        "X-Silo-Device-Platform"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["DemoLoginInputBody"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TokenPair"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getDemoLoginCapability: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed. */
+        "If-Match"?: string;
+        "If-None-Match"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          "Cache-Control"?: string;
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DemoLoginCapability"];
+        };
+      };
+      /** @description The representation named by If-None-Match is current; no body. */
+      304: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Precondition Failed */
+      412: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
   getDeviceLogin: {
     parameters: {
       query?: {
@@ -103721,6 +104393,138 @@ export interface operations {
       /** @description Not Acceptable */
       406: {
         headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getDirectConnectionsCapability: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed. */
+        "If-Match"?: string;
+        "If-None-Match"?: string;
+        /** @description The household profile acting for this request; it must belong to the authenticated account. */
+        "X-Profile-Id": string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          "Cache-Control"?: string;
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DirectConnectionsCapability"];
+        };
+      };
+      /** @description The representation named by If-None-Match is current; no body. */
+      304: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Precondition Failed */
+      412: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -114864,6 +115668,568 @@ export interface operations {
         headers: {
           /** @description Delay after explicit quota/busy refusal; uncertain completion is not safe to replay. */
           "Retry-After"?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  enrollDirectConnectionDevice: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The household profile acting for this request; it must belong to the authenticated account. */
+        "X-Profile-Id": string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+        /** @description The client's stable device identifier */
+        "X-Silo-Device-Id": string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["DirectConnectionEnrollmentRequest"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DirectConnectionEnrollment"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  withdrawDirectConnectionDevice: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The household profile acting for this request; it must belong to the authenticated account. */
+        "X-Profile-Id": string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+        /** @description The client's stable device identifier */
+        "X-Silo-Device-Id": string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description No Content */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getDirectConnectionNetmap: {
+    parameters: {
+      query?: {
+        /** @description The version of the netmap the caller holds; an equal current version holds the call up to 25 seconds */
+        version?: string;
+      };
+      header?: {
+        /** @description The enrollment ticket; a missing or invalid one is 401. Never log it */
+        "Silo-Signaling-Ticket"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          "Cache-Control"?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DirectConnectionNetmap"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  registerDirectConnectionPeer: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description The enrollment ticket; a missing or invalid one is 401. Never log it */
+        "Silo-Signaling-Ticket"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["DirectConnectionRegistration"];
+      };
+    };
+    responses: {
+      /** @description No Content */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  connectDirectConnectionSignal: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description Offer derp. */
+        "Sec-WebSocket-Protocol": string;
+        /** @description The enrollment ticket; a missing or invalid one is 401 before any upgrade. Never log it. */
+        "Silo-Signaling-Ticket": string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Signaling stream established. */
+      101: {
+        headers: {
+          /** @description WebSocket handshake header. */
+          Connection?: string;
+          /** @description WebSocket handshake header. */
+          "Sec-WebSocket-Accept"?: string;
+          /** @description The selected subprotocol, always derp. */
+          "Sec-WebSocket-Protocol"?: string;
+          /** @description WebSocket handshake header. */
+          Upgrade?: string;
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Handshake refused. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "text/plain": string;
+        };
+      };
+      /** @description Handshake refused. */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Handshake refused. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Handshake refused. */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Handshake refused. */
+      503: {
+        headers: {
           [name: string]: unknown;
         };
         content: {
@@ -137093,10 +138459,15 @@ export interface operations {
       query?: {
         /** @description Use the client media egress route. */
         media_path?: boolean;
+        /** @description The transport the client asks the probe to measure: regular or direct. Omitted means regular. */
+        media_transport?: "regular" | "direct";
         /** @description Number of bytes to send. A client may close the connection early once it has timed enough of the transfer. */
         size?: number;
       };
-      header?: never;
+      header?: {
+        /** @description The client's stable device identifier. A device the server holds a direct enrollment for names itself here so the probe is measured, and receipted, on the path its media takes. Optional. */
+        "X-Silo-Device-Id"?: string;
+      };
       path?: never;
       cookie?: never;
     };
@@ -137107,6 +138478,8 @@ export interface operations {
         headers: {
           "Cache-Control"?: string;
           "Content-Length"?: number;
+          /** @description Sent when the request names a device. Names the account, the device and the connection class that carried the bytes: regular over TCP, direct over a direct path. A client sends it back as connection_receipt with the result. */
+          "Silo-Connection-Receipt"?: string;
           [name: string]: unknown;
         };
         content: {

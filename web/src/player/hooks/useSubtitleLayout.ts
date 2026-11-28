@@ -6,7 +6,7 @@ import { computeCoverCrop, NO_COVER_CROP, type CoverCrop } from "../utils/assFil
 
 export interface SubtitleLayout {
   positionStyle: CSSProperties;
-  /** Multiplier for cue font size so text scales with the rendered video. */
+  /** Multiplier for cue font size so text scales with the player window. */
   fontScale: number;
   /** Portion of the video hidden past each edge by Fill; zero in Fit. */
   coverCrop: CoverCrop;
@@ -68,7 +68,7 @@ export function useSubtitleLayout(
         videoAspect,
         videoFit,
       ),
-      fontScale: computeSubtitleFontScale(playerSize.w, playerSize.h, videoAspect, videoFit),
+      fontScale: computeSubtitleFontScale(playerSize.w, playerSize.h, videoFit),
       coverCrop:
         videoFit === "cover"
           ? computeCoverCrop(playerSize.w, playerSize.h, videoAspect)

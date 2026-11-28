@@ -24,8 +24,8 @@ import (
 )
 
 // Direct connection settings control the readiness self-check and the API host's
-// direct engine: enabling them starts the engine, and port mapping and the STUN
-// list are the engine's own configuration.
+// direct engine: the toggle starts and stops the engine, and port mapping and the
+// STUN list are the engine's own configuration.
 const (
 	DirectConnectionsEnabledSettingKey     = "direct_connections.enabled"
 	DirectConnectionsPortMappingSettingKey = "direct_connections.port_mapping"

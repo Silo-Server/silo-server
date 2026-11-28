@@ -49,3 +49,14 @@ func (e *ValidationError) Error() string {
 	}
 	return "validation failed"
 }
+
+// InvalidStateError is ErrInvalidState with a sentence for the admin on what
+// blocks the action and how to unblock it; the API layer sends it as the
+// conflict's detail.
+type InvalidStateError struct {
+	Detail string
+}
+
+func (e *InvalidStateError) Error() string { return e.Detail }
+
+func (e *InvalidStateError) Unwrap() error { return ErrInvalidState }

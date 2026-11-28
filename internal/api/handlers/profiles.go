@@ -70,6 +70,9 @@ type ProfileHandler struct {
 	EbookReaderPurger interface {
 		PurgeProfile(ctx context.Context, userID int, profileID string) error
 	}
+	// DirectRevoker, when set, withdraws the direct-connection enrollments a
+	// deleted profile made.
+	DirectRevoker DirectRevoker
 	// JellyfinSessionPurger signs out the Jellyfin-compatible sessions of a
 	// deleted profile, which live in Postgres whichever store holds it.
 	JellyfinSessionPurger interface {
@@ -884,6 +887,10 @@ func (h *ProfileHandler) DeleteProfile(ctx context.Context, cmd ProfileDeleteCom
 		}
 	}
 	forgetPlaybackConnections(ctx, h.Connections, registry, userID, devices)
+	// Like forgetting a device, deleting the profile ends the enrollments it made.
+	if h.DirectRevoker != nil {
+		h.DirectRevoker.RevokeProfile(ctx, userID, profileID)
+	}
 	if h.DroppedSeriesPurger != nil {
 		purgeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		defer cancel()

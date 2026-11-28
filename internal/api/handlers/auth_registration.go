@@ -193,6 +193,7 @@ func (h *AuthHandler) RevokeSessionChecked(ctx context.Context, sessionID string
 		}
 		return apiError(http.StatusInternalServerError, "internal_error", "An unexpected error occurred")
 	}
+	h.revokeDirect(ctx, userID, sessionID)
 	return nil
 }
 

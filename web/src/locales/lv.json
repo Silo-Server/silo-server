@@ -215,6 +215,12 @@
       "value": "Tas jau ir saistīts ar šo kontu."
     }
   ],
+  "error.app_code_invalid": [
+    {
+      "type": 0,
+      "value": "Šis kods nav zināms, jau ir izmantots vai tā derīguma termiņš ir beidzies. Iegūstiet jaunu kodu servera lapā."
+    }
+  ],
   "error.authentication_required": [
     {
       "type": 0,
@@ -333,6 +339,12 @@
     {
       "type": 0,
       "value": "Šai vērtībai ir nepareizs tips."
+    }
+  ],
+  "error.field.key_enrolled": [
+    {
+      "type": 0,
+      "value": "Šī atslēga jau tiek izmantota šajā serverī."
     }
   ],
   "error.field.malformed_form": [
@@ -2570,6 +2582,30 @@
     {
       "type": 0,
       "value": "Automātiski"
+    }
+  ],
+  "settingsManifest.playback.connection_path.description": [
+    {
+      "type": 0,
+      "value": "Opcija „Tikai tiešais savienojums” joprojām izmanto lokālā tīkla savienojumu, ja tāds ir pieejams."
+    }
+  ],
+  "settingsManifest.playback.connection_path.label": [
+    {
+      "type": 0,
+      "value": "Savienojuma ceļš"
+    }
+  ],
+  "settingsManifest.playback.connection_path.option.automatic": [
+    {
+      "type": 0,
+      "value": "Automātiski"
+    }
+  ],
+  "settingsManifest.playback.connection_path.option.direct_only": [
+    {
+      "type": 0,
+      "value": "Tikai tiešais savienojums"
     }
   ],
   "settingsManifest.playback.intro_skip_mode.description": [
@@ -26554,6 +26590,95 @@
       }
     }
   ],
+  "web.admin.common.adminUserSignIn.unlinkConfirm.text": [
+    {
+      "type": 5,
+      "value": "last_way",
+      "options": {
+        "yes": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Lietotājs "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " vairs nevarēs pierakstīties ar šo nodrošinātāja kontu. Lietotājs "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " nevarēs pierakstīties, līdz jūs iestatīsiet paroli vai atkal savienosiet nodrošinātāju."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Lietotājs "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " vairs nevarēs pierakstīties ar šo nodrošinātāja kontu."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 5,
+      "value": "keys",
+      "options": {
+        "yes": {
+          "value": [
+            {
+              "type": 0,
+              "value": " Lietotāja "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " Silo lietotnes atslēgas, kas piesaistītas šim nodrošinātāja kontam, tiks noņemtas, un šīs ierīces tiks izrakstītas."
+            }
+          ]
+        },
+        "unknown": {
+          "value": [
+            {
+              "type": 0,
+              "value": " Visas lietotāja "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " Silo lietotnes atslēgas, kas piesaistītas šim nodrošinātāja kontam (ja tādas ir), tiks noņemtas, un šīs ierīces tiks izrakstītas."
+            }
+          ]
+        },
+        "other": {
+          "value": []
+        }
+      }
+    }
+  ],
   "web.admin.common.adminUserSignIn.unlinkConfirm.title": [
     {
       "type": 0,
@@ -29042,6 +29167,18 @@
     {
       "type": 0,
       "value": "Izveido sīktēlus, ko atskaņotāji rāda pārtīšanas laikā, konfigurētajā publisko līdzekļu krātuvē. Faili tiek apstrādāti fonā ar zemu prioritāti. Izslēdzot šo opciju, bibliotēkas priekšskatījumi tiek dzēsti."
+    }
+  ],
+  "web.admin.common.libraryEditor.advanced.trickplayGenerate": [
+    {
+      "type": 0,
+      "value": "Ģenerēt trūkstošos priekšskatījumus ar FFmpeg"
+    }
+  ],
+  "web.admin.common.libraryEditor.advanced.trickplayGenerateDescription": [
+    {
+      "type": 0,
+      "value": "Vispirms tiek izmantoti esošie .trickplay un .bif blakusfaili, kas atrodas blakus multivides failiem. Izslēdziet šo opciju, lai importētu tikai blakusfailus un izlaistu ģenerēšanu ar FFmpeg."
     }
   ],
   "web.admin.common.libraryEditor.advanced.trickplayUnavailable": [
@@ -33624,6 +33761,52 @@
       "value": "Administratora lietotāji"
     }
   ],
+  "web.admin.common.trickplay.badge.awaitingSidecarCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " faili gaida blakusfailu"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " fails gaida blakusfailu"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " faili gaida blakusfailu"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.common.trickplay.badge.detail": [
     {
       "type": 0,
@@ -33790,6 +33973,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.common.trickplay.badge.sidecarsOnly": [
+    {
+      "type": 0,
+      "value": "tikai blakusfaili"
     }
   ],
   "web.admin.common.trickplay.badge.srDetail": [
@@ -33978,6 +34167,42 @@
     {
       "type": 0,
       "value": "Atskaņotāji izmanto pašreizējos priekšskatījumus, līdz jaunie ir gatavi."
+    }
+  ],
+  "web.admin.common.trickplay.sidecarStatus.awaiting_sidecar": [
+    {
+      "type": 0,
+      "value": "Gaida blakusfailu"
+    }
+  ],
+  "web.admin.common.trickplay.sidecarStatus.sidecar_invalid": [
+    {
+      "type": 0,
+      "value": "Nederīgs blakusfails"
+    }
+  ],
+  "web.admin.common.trickplay.sidecarStatus.sidecar_stale": [
+    {
+      "type": 0,
+      "value": "Novecojis blakusfails"
+    }
+  ],
+  "web.admin.common.trickplay.source.generated": [
+    {
+      "type": 0,
+      "value": "Ģenerēti"
+    }
+  ],
+  "web.admin.common.trickplay.source.sidecar_bif": [
+    {
+      "type": 0,
+      "value": "Blakusfails (.bif)"
+    }
+  ],
+  "web.admin.common.trickplay.source.sidecar_trickplay": [
+    {
+      "type": 0,
+      "value": "Blakusfails (.trickplay)"
     }
   ],
   "web.admin.common.trickplay.state.off": [
@@ -36042,7 +36267,7 @@
     },
     {
       "type": 0,
-      "value": " pierakstīšanās sesija. Citās ierīcēs šis konts paliks pierakstīts. Klients var vēlreiz pierakstīties ar konta paroli."
+      "value": " pierakstīšanās sesija. Citās ierīcēs šis konts paliks pierakstīts. Klients var pierakstīties vēlreiz."
     }
   ],
   "web.admin.dashboard.widgets.apiClients.confirmLabel": [
@@ -49911,6 +50136,12 @@
       "value": "Profils"
     }
   ],
+  "web.admin.history.column.progress": [
+    {
+      "type": 0,
+      "value": "Progress"
+    }
+  ],
   "web.admin.history.column.status": [
     {
       "type": 0,
@@ -49945,6 +50176,12 @@
     {
       "type": 0,
       "value": "Sesijas žurnāli"
+    }
+  ],
+  "web.admin.history.detail.backToPlay": [
+    {
+      "type": 0,
+      "value": "Atpakaļ uz apvienoto atskaņojumu"
     }
   ],
   "web.admin.history.detail.column.delivered": [
@@ -50055,6 +50292,12 @@
       "value": "Skatīšanās laiks"
     }
   ],
+  "web.admin.history.detail.inspectSitting": [
+    {
+      "type": 0,
+      "value": "Apskatīt"
+    }
+  ],
   "web.admin.history.detail.keyboardHint": [
     {
       "type": 0,
@@ -50139,6 +50382,12 @@
       "value": "Kāpēc netika izmantota tiešā atskaņošana"
     }
   ],
+  "web.admin.history.detail.section.sessions": [
+    {
+      "type": 0,
+      "value": "Sesijas šajā atskaņojumā"
+    }
+  ],
   "web.admin.history.detail.section.streams": [
     {
       "type": 0,
@@ -50149,6 +50398,110 @@
     {
       "type": 0,
       "value": "Laiks un skatīšanās progress"
+    }
+  ],
+  "web.admin.history.detail.sessionsCapped": [
+    {
+      "type": 0,
+      "value": "Tiek rādītas šī atskaņojuma pirmās sesijas: "
+    },
+    {
+      "type": 1,
+      "value": "shown"
+    },
+    {
+      "type": 0,
+      "value": " no "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.history.detail.sessionsNotice": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Šis atskaņojums aptver "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " sesijas. Tālāk norādītā straumes, ierīces un maršruta informācija attiecas uz tā primāro sesiju; atlasiet jebkuru sesiju tālāk, lai to apskatītu atsevišķi."
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Šim atskaņojumam ir "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " sesija. Tālāk norādītā straumes, ierīces un maršruta informācija attiecas uz to."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Šis atskaņojums aptver "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " sesijas. Tālāk norādītā straumes, ierīces un maršruta informācija attiecas uz tā primāro sesiju; atlasiet jebkuru sesiju tālāk, lai to apskatītu atsevišķi."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.ended": [
+    {
+      "type": 0,
+      "value": "Beigas"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.method": [
+    {
+      "type": 0,
+      "value": "Metode"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.started": [
+    {
+      "type": 0,
+      "value": "Sākums"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.watched": [
+    {
+      "type": 0,
+      "value": "Skatīts"
     }
   ],
   "web.admin.history.detail.subtitlesBurnIn": [
@@ -50377,6 +50730,12 @@
       "value": "Visi tīkli"
     }
   ],
+  "web.admin.history.filter.allMediaTypes": [
+    {
+      "type": 0,
+      "value": "Visa multivide"
+    }
+  ],
   "web.admin.history.filter.allMethods": [
     {
       "type": 0,
@@ -50413,6 +50772,24 @@
       "value": "Pabeigti"
     }
   ],
+  "web.admin.history.filter.episodes": [
+    {
+      "type": 0,
+      "value": "Epizodes"
+    }
+  ],
+  "web.admin.history.filter.hideShort": [
+    {
+      "type": 0,
+      "value": "Slēpt <30 s"
+    }
+  ],
+  "web.admin.history.filter.hideShortTitle": [
+    {
+      "type": 0,
+      "value": "Slēpt nepabeigtas sesijas, kas īsākas par 30 sekundēm"
+    }
+  ],
   "web.admin.history.filter.locationLocal": [
     {
       "type": 0,
@@ -50423,6 +50800,12 @@
     {
       "type": 0,
       "value": "Attālais"
+    }
+  ],
+  "web.admin.history.filter.movies": [
+    {
+      "type": 0,
+      "value": "Filmas"
     }
   ],
   "web.admin.history.filter.partial": [
@@ -50646,6 +51029,12 @@
       "value": "Nesenā atskaņošana"
     }
   ],
+  "web.admin.history.row.burnInBadgeTitle": [
+    {
+      "type": 0,
+      "value": "Subtitri iededzināti video"
+    }
+  ],
   "web.admin.history.row.completed": [
     {
       "type": 0,
@@ -50666,6 +51055,64 @@
     {
       "type": 0,
       "value": "Aplēsts (ierakstīts, pirms tika reģistrēts precīzs skatīšanās laiks)"
+    }
+  ],
+  "web.admin.history.row.groupedSessionsTitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Apvienots no "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " sesijām"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Apvienots no "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " sesijas"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Apvienots no "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " sesijām"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.history.row.meta": [
@@ -50698,6 +51145,12 @@
       "value": "Daļējs"
     }
   ],
+  "web.admin.history.row.progressLabel": [
+    {
+      "type": 0,
+      "value": "Atskaņošanas progress"
+    }
+  ],
   "web.admin.history.row.started": [
     {
       "type": 0,
@@ -50708,16 +51161,104 @@
       "value": "time"
     }
   ],
+  "web.admin.history.stats.accountsCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " konti"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " konts"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " konti"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.history.stats.completed": [
     {
       "type": 0,
       "value": "Pabeigti"
     }
   ],
+  "web.admin.history.stats.completionBreakdown": [
+    {
+      "type": 0,
+      "value": "Pabeigti: "
+    },
+    {
+      "type": 1,
+      "value": "completed"
+    },
+    {
+      "type": 0,
+      "value": " · daļēji: "
+    },
+    {
+      "type": 1,
+      "value": "partial"
+    }
+  ],
   "web.admin.history.stats.partial": [
     {
       "type": 0,
       "value": "Daļēji"
+    }
+  ],
+  "web.admin.history.stats.totalPlays": [
+    {
+      "type": 0,
+      "value": "Atskaņojumi kopā"
+    }
+  ],
+  "web.admin.history.stats.totalSessions": [
+    {
+      "type": 0,
+      "value": "Sesijas kopā"
+    }
+  ],
+  "web.admin.history.stats.uniqueProfiles": [
+    {
+      "type": 0,
+      "value": "Unikālie profili"
+    }
+  ],
+  "web.admin.history.stats.uniqueTitles": [
+    {
+      "type": 0,
+      "value": "Unikālie vienumi"
     }
   ],
   "web.admin.history.stats.visibleRows": [
@@ -50736,6 +51277,24 @@
     {
       "type": 0,
       "value": "Atskaņošanas vēsture"
+    }
+  ],
+  "web.admin.history.view.label": [
+    {
+      "type": 0,
+      "value": "Vēstures skats"
+    }
+  ],
+  "web.admin.history.view.plays": [
+    {
+      "type": 0,
+      "value": "Atskaņojumi"
+    }
+  ],
+  "web.admin.history.view.sessions": [
+    {
+      "type": 0,
+      "value": "Visas sesijas"
     }
   ],
   "web.admin.historyImport.conflict.message": [
@@ -95500,6 +96059,234 @@
       "value": ")"
     }
   ],
+  "web.admin.users.detail.appKeys.confirm.denyDescription": [
+    {
+      "type": 0,
+      "value": "Ierīce „"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "” nevarēs pierakstīties lietotāja "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " kontā. Ja tā ir šī lietotāja ierīce, lietotājs to var vēlreiz pievienot Silo lietotnē."
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKey": [
+    {
+      "type": 0,
+      "value": "Noņemt atslēgu"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKeyDescription": [
+    {
+      "type": 0,
+      "value": "Jau pierakstītās ierīces turpinās darboties, līdz jūs tās noņemsiet. Ar šo atslēgu vairs nevarēs pievienot jaunas ierīces, un tās pievienotās ierīces, kas vēl gaida, tiks noraidītas. Lietotāja "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " Silo lietotne iestatīs jaunu atslēgu, kad lietotājs pierakstīšanās sesijas laikā nākamreiz pievienos ierīci."
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKeyTitle": [
+    {
+      "type": 0,
+      "value": "Vai noņemt lietotāja "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " konta atslēgu?"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.removeDescription": [
+    {
+      "type": 0,
+      "value": "Noņemot ierīci „"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "”, tā tūlīt tiks izrakstīta no lietotāja "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " konta un tās atslēga tiks apturēta: ar to vairs nevarēs pierakstīties. Lai ierīci izmantotu atkal, lietotājam "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " tā vēlreiz jāpievieno Silo lietotnē."
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.withdrawDescription": [
+    {
+      "type": 0,
+      "value": "Ierīce „"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "” nevarēs izmantot šo apstiprinājumu, lai pierakstītos lietotāja "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " kontā."
+    }
+  ],
+  "web.admin.users.detail.appKeys.description": [
+    {
+      "type": 0,
+      "value": "Ierīces un lietotnes, kas pierakstās lietotāja "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " kontā ar Silo lietotni bez paroles."
+    }
+  ],
+  "web.admin.users.detail.appKeys.empty": [
+    {
+      "type": 0,
+      "value": "Šajā kontā Silo lietotne netiek izmantota nevienā ierīcē."
+    }
+  ],
+  "web.admin.users.detail.appKeys.loadFailed": [
+    {
+      "type": 0,
+      "value": "Neizdevās ielādēt ierīces."
+    }
+  ],
+  "web.admin.users.detail.appKeys.off": [
+    {
+      "type": 0,
+      "value": "Pierakstīšanās ar Silo lietotni šajā serverī ir izslēgta, tāpēc šīs ierīces nevar pierakstīties. Jūs joprojām varat tās noņemt."
+    }
+  ],
+  "web.admin.users.detail.appKeys.ownerOnly": [
+    {
+      "type": 0,
+      "value": "Tikai servera īpašnieks var mainīt cita administratora vai īpašnieka ierīces."
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.description": [
+    {
+      "type": 0,
+      "value": "Silo lietotne izmanto šo atslēgu, lai pievienotu lietotāja "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " jaunās ierīces. Iestatīta: "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.none": [
+    {
+      "type": 0,
+      "value": "Nav konta atslēgas. Lietotāja "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " Silo lietotne to iestatīs, kad lietotājs pierakstīšanās sesijas laikā nākamreiz pievienos ierīci."
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.remove": [
+    {
+      "type": 0,
+      "value": "Noņemt konta atslēgu"
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKeyRemoved": [
+    {
+      "type": 0,
+      "value": "Konta atslēga noņemta"
+    }
+  ],
+  "web.admin.users.detail.appKeys.preapprovals.description": [
+    {
+      "type": 0,
+      "value": "Pierakstīšanās, ko lietotājs "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " apstiprināja ierīcei, kas vēl nav izveidojusi savienojumu."
+    }
+  ],
+  "web.admin.users.detail.appKeys.waiting.description": [
+    {
+      "type": 0,
+      "value": "Jauna ierīce administratora kontā gaida, līdz lietotājs "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " to apstiprinās no ierīces, kurā šis konts ir pierakstīts. Šeit varat to noraidīt."
+    }
+  ],
+  "web.admin.users.detail.appKeys.waiting.title": [
+    {
+      "type": 0,
+      "value": "Gaida apstiprinājumu"
+    }
+  ],
   "web.admin.users.detail.common.allProfiles": [
     {
       "type": 0,
@@ -99376,6 +100163,12 @@
       "value": "Kontā ir sasniegts profilu skaita ierobežojums"
     }
   ],
+  "web.admin.users.detail.profiles.badge.changedHere": [
+    {
+      "type": 0,
+      "value": "Mainīts šeit"
+    }
+  ],
   "web.admin.users.detail.profiles.badge.kids": [
     {
       "type": 0,
@@ -99577,6 +100370,668 @@
     {
       "type": 0,
       "value": "Saglabāt PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowAgain": [
+    {
+      "type": 0,
+      "value": "Atļaut vēlreiz"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowAgainAria": [
+    {
+      "type": 0,
+      "value": "Ļaut profilam „"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "” atkal parādīties šajā serverī"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowDescription": [
+    {
+      "type": 0,
+      "value": "Lietotāja lietotne nākamajā sinhronizācijā var atkal pievienot profilu „"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "” kā jaunu profilu bez tā vēstures šajā serverī, ja lietotnes profilos joprojām ir profils „"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "” un šajā kontā ir vieta vēl vienam profilam."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowTitle": [
+    {
+      "type": 0,
+      "value": "Vai atkal atļaut profilu „"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "”?"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.alreadyCleared": [
+    {
+      "type": 0,
+      "value": "Šīs izmaiņas jau ir notīrītas vai "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " tās mainīja vēlreiz. Saraksts ir atjaunināts."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedBy": [
+    {
+      "type": 0,
+      "value": "Mainīja: "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedSinceOpened": [
+    {
+      "type": 0,
+      "value": "Šīs izmaiņas tika atjauninātas pēc tam, kad tās atvērāt, tāpēc nekas netika notīrīts. Vēlreiz izlasiet tās sarakstā un pēc tam notīriet, ja joprojām to vēlaties."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedWhileRunning": [
+    {
+      "type": 0,
+      "value": "Darbības laikā profili tika mainīti, tāpēc nekas netika mainīts. Saraksts ir atjaunināts; mēģiniet vēlreiz, ja joprojām to vēlaties."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clear": [
+    {
+      "type": 0,
+      "value": "Notīrīt"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearAndRemovePin": [
+    {
+      "type": 0,
+      "value": "Notīrīt un noņemt PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearAria": [
+    {
+      "type": 0,
+      "value": "Notīrīt lauka „"
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": "” izmaiņas profilā „"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "”"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearFailed": [
+    {
+      "type": 0,
+      "value": "Neizdevās notīrīt izmaiņas."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearInherit": [
+    {
+      "type": 0,
+      "value": "Lauks „"
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": "” profilā „"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "” atgriezīsies pie vērtības, ko profils „"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "” pašlaik manto, kā to pieprasa lietotāja lietotne. Izmaiņas no lietotāja lietotnes uz to atkal tiks attiecinātas."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearLater": [
+    {
+      "type": 0,
+      "value": "Lauks „"
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": "” paliks nemainīts, līdz lietotāja lietotne to nākamreiz nosūtīs. Pēc tam izmaiņas no lietotāja lietotnes uz to atkal tiks attiecinātas."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearNow": [
+    {
+      "type": 0,
+      "value": "Profils „"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "” tūlīt atgriezīsies pie vērtības no lietotāja lietotnes, un izmaiņas no lietotāja lietotnes uz to atkal tiks attiecinātas."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearNowValue": [
+    {
+      "type": 0,
+      "value": "Lauks „"
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": "” profilā „"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "” tūlīt atgriezīsies pie vērtības "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " no lietotāja lietotnes. Izmaiņas no lietotāja lietotnes uz to atkal tiks attiecinātas."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearPin": [
+    {
+      "type": 0,
+      "value": "Profilam „"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "” saglabāsies jūsu iestatītais PIN, līdz lietotāja lietotne nākamreiz nosūtīs PIN. Pēc tam izmaiņas no lietotāja lietotnes uz to atkal tiks attiecinātas."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearPinRemoves": [
+    {
+      "type": 0,
+      "value": "Lietotāja lietotne nosūta profilu „"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "” bez PIN, tāpēc notīrīšana tūlīt noņems jūsu iestatīto PIN. Pēc tam ikviens, kas izmanto šo kontu, varēs atvērt profilu „"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "” bez PIN."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearTitle": [
+    {
+      "type": 0,
+      "value": "Vai notīrīt lauka „"
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": "” izmaiņas profilā „"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "”?"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.deletedAccount": [
+    {
+      "type": 0,
+      "value": "dzēsts konts"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.description": [
+    {
+      "type": 0,
+      "value": "Šie profili nāk no lietotāja "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " lietotnes. Šeit veiktās izmaiņas paliek šajā serverī, līdz jūs tās notīrāt. Tā nav bloķēšana: "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " arī var šeit mainīt to pašu."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismiss": [
+    {
+      "type": 0,
+      "value": "Paslēpt"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismissAria": [
+    {
+      "type": 0,
+      "value": "Paslēpt piezīmi par lauku „"
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": "” profilā „"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "”"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismissFailed": [
+    {
+      "type": 0,
+      "value": "Neizdevās paslēpt piezīmi."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.isChild": [
+    {
+      "type": 0,
+      "value": "Bērnu profils"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.maxAdvisoryAge": [
+    {
+      "type": 0,
+      "value": "Vecuma ierobežojums"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.maxContentRating": [
+    {
+      "type": 0,
+      "value": "Satura vērtējuma ierobežojums"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.name": [
+    {
+      "type": 0,
+      "value": "Vārds"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.picture": [
+    {
+      "type": 0,
+      "value": "Attēls"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.pin": [
+    {
+      "type": 0,
+      "value": "PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.requests": [
+    {
+      "type": 0,
+      "value": "Pieprasījumi"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.requireAdvisoryAge": [
+    {
+      "type": 0,
+      "value": "Obligāts vecuma ierobežojums"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.fieldValue": [
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.hidden": [
+    {
+      "type": 0,
+      "value": "Šajā serverī noņēma: "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": ". Lietotāja lietotne to atkal nepievienos, līdz jūs to atļausiet."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.loadFailed": [
+    {
+      "type": 0,
+      "value": "Neizdevās ielādēt šajā serverī veiktās izmaiņas."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.nameTaken": [
+    {
+      "type": 0,
+      "value": "Profilam „"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "” nevar atjaunot vārdu „"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "” no lietotāja lietotnes, jo citam profilam šeit ir šāds vārds. Vispirms pārdēvējiet šo profilu, pēc tam vēlreiz notīriet šīs izmaiņas."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeHiddenNextSync": [
+    {
+      "type": 0,
+      "value": "Profils „"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "” var atgriezties nākamajā lietotāja "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " lietotnes sinhronizācijā, ja lietotnes profilos tas joprojām ir."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeHiddenWoken": [
+    {
+      "type": 0,
+      "value": "Profils „"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "” var atgriezties nākamajā lietotnes sinhronizācijā, ja lietotnes profilos tas joprojām ir. Lietotāja "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " tālrunim ir nosūtīts sinhronizācijas pieprasījums."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeNextSync": [
+    {
+      "type": 0,
+      "value": "Notīrīts. Izmaiņas nonāks lietotāja "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " lietotnē nākamajā sinhronizācijā."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeWoken": [
+    {
+      "type": 0,
+      "value": "Notīrīts. Lietotāja "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " tālrunim ir nosūtīts sinhronizācijas pieprasījums."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.removedBy": [
+    {
+      "type": 0,
+      "value": "Noņēma: "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.replacedOwner": [
+    {
+      "type": 0,
+      "value": "Tas aizstāja jūsu iestatīto vērtību."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.setBy": [
+    {
+      "type": 0,
+      "value": "Iestatīja: "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.settled": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " to mainīja "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "; jūsu iestatītā vērtība vairs nav spēkā."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.title": [
+    {
+      "type": 0,
+      "value": "Mainīts šajā serverī"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.inherited": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (mantots)"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.noPicture": [
+    {
+      "type": 0,
+      "value": "Nav attēla"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.none": [
+    {
+      "type": 0,
+      "value": "Nav"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.off": [
+    {
+      "type": 0,
+      "value": "Izslēgts"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.on": [
+    {
+      "type": 0,
+      "value": "Ieslēgts"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.picture": [
+    {
+      "type": 0,
+      "value": "Pielāgots attēls"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.pinNone": [
+    {
+      "type": 0,
+      "value": "Nav PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.pinSet": [
+    {
+      "type": 0,
+      "value": "PIN iestatīts"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.requestsAllowed": [
+    {
+      "type": 0,
+      "value": "Atļauti"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.requestsBlocked": [
+    {
+      "type": 0,
+      "value": "Bloķēti"
     }
   ],
   "web.admin.users.detail.profiles.setPin": [
@@ -100874,6 +102329,144 @@
     {
       "type": 0,
       "value": "Iestatīt paroli"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.action": [
+    {
+      "type": 0,
+      "value": "Izveidot pierakstīšanās saiti"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.actionHint": [
+    {
+      "type": 0,
+      "value": "Pazaudētas visas ierīces"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.description": [
+    {
+      "type": 0,
+      "value": "Vienreizējas lietošanas saite lietotājam "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": ", ja ir pazaudētas visas ierīces. Tā atver lapu, kurā var iegūt kodu Silo lietotnei vai izvēlēties paroli. Saite darbojas 24 stundas, un jauna saite aizstāj iepriekšējo."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailAction": [
+    {
+      "type": 0,
+      "value": "Nosūtīt pa e-pastu"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHint": [
+    {
+      "type": 0,
+      "value": "Izveidojiet saiti, lai to nokopētu un nosūtītu paši, vai nosūtiet to pa e-pastu uz adresi "
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHintNoAddress": [
+    {
+      "type": 0,
+      "value": "Izveidojiet saiti, pēc tam nokopējiet to un nosūtiet paši. Šim kontam nav e-pasta adreses, uz kuru to nosūtīt."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHintNoMail": [
+    {
+      "type": 0,
+      "value": "Izveidojiet saiti, pēc tam nokopējiet to un nosūtiet paši. Lai to nosūtītu no šejienes, iestatiet e-pastu sadaļā „Iestatījumi”."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailSent": [
+    {
+      "type": 0,
+      "value": "Saite nosūtīta uz adresi "
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": ". Tās derīguma termiņš beidzas "
+    },
+    {
+      "type": 1,
+      "value": "expires"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Pasta serveris neapstiprināja piegādi. Tālāk redzamā saite joprojām darbojas: nokopējiet to un nosūtiet citā veidā."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.failed": [
+    {
+      "type": 0,
+      "value": "Neizdevās izveidot pierakstīšanās saiti."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.linkShare": [
+    {
+      "type": 0,
+      "value": "Nosūtiet šo saiti tikai lietotājam "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": ". Ikviens, kam tā ir, var pierakstīties šajā kontā, līdz saite tiek izmantota vai tās derīguma termiņš beidzas "
+    },
+    {
+      "type": 1,
+      "value": "expires"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.providerRequired": [
+    {
+      "type": 0,
+      "value": "Lokālā pierakstīšanās ar paroli šajā serverī ir izslēgta, tāpēc pierakstīšanās saite apietu servera pierakstīšanās nodrošinātāju. Palūdziet lietotājam "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " pierakstīties ar nodrošinātāju šī servera vietnē un pēc tam konta iestatījumos izmantot opciju „Atvērt Silo”."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.title": [
+    {
+      "type": 0,
+      "value": "Pierakstīšanās saite lietotājam "
+    },
+    {
+      "type": 1,
+      "value": "username"
     }
   ],
   "web.audiobooks.chapter.fallbackTitle": [
@@ -102929,6 +104522,120 @@
       "value": "Apstiprināt pierakstīšanos"
     }
   ],
+  "web.auth.appCode.code": [
+    {
+      "type": 0,
+      "value": "Kods"
+    }
+  ],
+  "web.auth.appCode.codeCopied": [
+    {
+      "type": 0,
+      "value": "Kods nokopēts"
+    }
+  ],
+  "web.auth.appCode.copyCode": [
+    {
+      "type": 0,
+      "value": "Kopēt kodu"
+    }
+  ],
+  "web.auth.appCode.copyFailed": [
+    {
+      "type": 0,
+      "value": "Neizdevās nokopēt kodu. Atlasiet to un nokopējiet manuāli."
+    }
+  ],
+  "web.auth.appCode.expired": [
+    {
+      "type": 0,
+      "value": "Šī koda derīguma termiņš ir beidzies."
+    }
+  ],
+  "web.auth.appCode.failed": [
+    {
+      "type": 0,
+      "value": "Silo serverim neizdevās izveidot kodu. Mēģiniet vēlreiz."
+    }
+  ],
+  "web.auth.appCode.instructions": [
+    {
+      "type": 0,
+      "value": "Nospiediet pogu „Atvērt Silo”, lai turpinātu Silo lietotnē šajā ierīcē. Ja lietotne nav instalēta, instalējiet to, atgriezieties šajā cilnē un vēlreiz nospiediet pogu „Atvērt Silo”."
+    }
+  ],
+  "web.auth.appCode.noScanCode": [
+    {
+      "type": 0,
+      "value": "Šī servera adrese ir pārāk gara skenēšanas kodam. Ievadiet servera adresi un kodu Silo lietotnē vai nokopējiet kodu un ielīmējiet to tur."
+    }
+  ],
+  "web.auth.appCode.open": [
+    {
+      "type": 0,
+      "value": "Atvērt Silo"
+    }
+  ],
+  "web.auth.appCode.renew": [
+    {
+      "type": 0,
+      "value": "Iegūt jaunu kodu"
+    }
+  ],
+  "web.auth.appCode.scanCodeLabel": [
+    {
+      "type": 0,
+      "value": "Skenēšanas kods Silo lietotnei"
+    }
+  ],
+  "web.auth.appCode.scanCodeUnavailable": [
+    {
+      "type": 0,
+      "value": "Šim serverim nevar parādīt skenēšanas kodu. Ievadiet servera adresi un kodu Silo lietotnē vai nokopējiet kodu un ielīmējiet to tur."
+    }
+  ],
+  "web.auth.appCode.scanHint": [
+    {
+      "type": 0,
+      "value": "Noskenējiet šo ar Silo lietotnes skeneri vai tālāk ievadiet vai nokopējiet servera adresi un kodu."
+    }
+  ],
+  "web.auth.appCode.serverAddress": [
+    {
+      "type": 0,
+      "value": "Servera adrese"
+    }
+  ],
+  "web.auth.appCode.singleUse": [
+    {
+      "type": 0,
+      "value": "Šis kods darbojas vienu reizi, un tā derīguma termiņš beidzas pēc dažām minūtēm."
+    }
+  ],
+  "web.auth.appCode.title": [
+    {
+      "type": 0,
+      "value": "Atvērt Silo"
+    }
+  ],
+  "web.auth.appCode.typeInstructions": [
+    {
+      "type": 0,
+      "value": "Silo lietotnē savā tālrunī vai planšetdatorā pievienojiet šo serveri pēc tā adreses un ievadiet šo kodu, lai izveidotu kontu. Ikviens, kam ir šis kods, var pievienoties jūsu vietā, tāpēc nekopīgojiet to."
+    }
+  ],
+  "web.auth.appCode.typeTitle": [
+    {
+      "type": 0,
+      "value": "Pievienoties ar šo kodu"
+    }
+  ],
+  "web.auth.appCode.webLink": [
+    {
+      "type": 0,
+      "value": "Tā vietā atvērt ar siloserver.org saiti"
+    }
+  ],
   "web.auth.card.rememberedIt": [
     {
       "type": 0,
@@ -103131,10 +104838,50 @@
       ]
     }
   ],
+  "web.auth.invite.appAccountEmail": [
+    {
+      "type": 0,
+      "value": "Jūsu konts izmantos adresi "
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.auth.invite.appContinue": [
+    {
+      "type": 0,
+      "value": "Turpināt"
+    }
+  ],
+  "web.auth.invite.appEmailHint": [
+    {
+      "type": 0,
+      "value": "Ja norādīsiet e-pasta adresi, šis serveris varēs jums nosūtīt pierakstīšanās saiti, ja pazaudēsiet savas ierīces."
+    }
+  ],
   "web.auth.invite.appMissing": [
     {
       "type": 0,
       "value": "Nekas nenotiek? Lietotne nav instalēta – vienkārši turpiniet tālāk."
+    }
+  ],
+  "web.auth.invite.appProviderOnly": [
+    {
+      "type": 0,
+      "value": "Serveris "
+    },
+    {
+      "type": 1,
+      "value": "server"
+    },
+    {
+      "type": 0,
+      "value": " pievieno lietotājus, izmantojot savu pierakstīšanās nodrošinātāju. Pierakstieties ar to šajā vietnē un pēc tam atveriet Silo lietotni no sava konta iestatījumiem."
     }
   ],
   "web.auth.invite.created": [
@@ -103163,6 +104910,18 @@
       "value": "Ievadiet savu e-pasta adresi un izvēlieties paroli. Jūs pierakstīsieties ar savu e-pasta adresi."
     }
   ],
+  "web.auth.invite.descriptionWithApp": [
+    {
+      "type": 0,
+      "value": "Pievienojieties ar Silo lietotni savā tālrunī vai planšetdatorā vai izvēlieties paroli, lai pierakstītos."
+    }
+  ],
+  "web.auth.invite.emailOptional": [
+    {
+      "type": 0,
+      "value": "E-pasts (neobligāti)"
+    }
+  ],
   "web.auth.invite.emailPlaceholder": [
     {
       "type": 0,
@@ -103183,6 +104942,18 @@
     {
       "type": 1,
       "value": "inviter"
+    }
+  ],
+  "web.auth.invite.joinWithApp": [
+    {
+      "type": 0,
+      "value": "Pievienoties ar Silo lietotni"
+    }
+  ],
+  "web.auth.invite.joinWithAppInstead": [
+    {
+      "type": 0,
+      "value": "Tā vietā pievienoties ar Silo lietotni"
     }
   ],
   "web.auth.invite.loadFailed": [
@@ -103287,6 +105058,30 @@
     {
       "type": 0,
       "value": "Uzaicinājums nav pieejams"
+    }
+  ],
+  "web.auth.invite.usePassword": [
+    {
+      "type": 0,
+      "value": "Tā vietā izmantot paroli"
+    }
+  ],
+  "web.auth.invite.usernameIsAddress": [
+    {
+      "type": 0,
+      "value": "Lietotājvārdam ar @ ir jābūt e-pasta adresei, ko ievadāt tālāk."
+    }
+  ],
+  "web.auth.invite.usernameRequired": [
+    {
+      "type": 0,
+      "value": "Izvēlieties lietotājvārdu."
+    }
+  ],
+  "web.auth.invite.usernameTaken": [
+    {
+      "type": 0,
+      "value": "Šis lietotājvārds jau tiek izmantots. Izvēlieties citu."
     }
   ],
   "web.auth.languagePicker.label": [
@@ -104301,6 +106096,126 @@
     {
       "type": 0,
       "value": "Pierakstīties"
+    }
+  ],
+  "web.auth.signInLink.backToCode": [
+    {
+      "type": 0,
+      "value": "Atpakaļ pie koda"
+    }
+  ],
+  "web.auth.signInLink.codeExpired": [
+    {
+      "type": 0,
+      "value": "Lai iegūtu citu kodu, lūdziet šī servera administratoram jaunu saiti."
+    }
+  ],
+  "web.auth.signInLink.documentTitle": [
+    {
+      "type": 0,
+      "value": "Pierakstīšanās saite"
+    }
+  ],
+  "web.auth.signInLink.failed": [
+    {
+      "type": 0,
+      "value": "Silo neizdevās atvērt šo saiti. Mēģiniet vēlreiz."
+    }
+  ],
+  "web.auth.signInLink.installFirst": [
+    {
+      "type": 0,
+      "value": "Saite darbojas vienu reizi, un kods ir derīgs dažas minūtes. Vispirms instalējiet Silo lietotni savā tālrunī vai planšetdatorā un pēc tam nospiediet pogu „Turpināt”."
+    }
+  ],
+  "web.auth.signInLink.intro": [
+    {
+      "type": 0,
+      "value": "Administrators jums nosūtīja šo saiti, lai jūs varētu atkal pierakstīties. Turpiniet, lai iegūtu kodu Silo lietotnei vai izvēlētos paroli."
+    }
+  ],
+  "web.auth.signInLink.keepOpen": [
+    {
+      "type": 0,
+      "value": "Turiet šo lapu atvērtu, līdz viss ir paveikts. Saite ir izmantota, tāpēc, ielādējot lapu vēlreiz vai aizejot no tās, zaudēsiet to, ko saite jums deva."
+    }
+  ],
+  "web.auth.signInLink.leaveAction": [
+    {
+      "type": 0,
+      "value": "Aiziet"
+    }
+  ],
+  "web.auth.signInLink.leaveDescription": [
+    {
+      "type": 0,
+      "value": "Saite ir izmantota. Ja aiziesiet, kods Silo lietotnei un iespēja iestatīt paroli zudīs, un jums būs vajadzīga jauna saite."
+    }
+  ],
+  "web.auth.signInLink.leaveTitle": [
+    {
+      "type": 0,
+      "value": "Vai aiziet no šīs lapas?"
+    }
+  ],
+  "web.auth.signInLink.noCodeAdministrator": [
+    {
+      "type": 0,
+      "value": "Šis ir administratora konts, tāpēc ar šo saiti var tikai iestatīt paroli. Iestatiet to, pierakstieties šī servera vietnē un pēc tam atveriet Silo lietotni no sava konta iestatījumiem tajā vietnē."
+    }
+  ],
+  "web.auth.signInLink.noCodeAppKeysOff": [
+    {
+      "type": 0,
+      "value": "Silo lietotne pašlaik nevar pierakstīties šajā serverī, tāpēc ar šo saiti var tikai iestatīt paroli."
+    }
+  ],
+  "web.auth.signInLink.passwordDescription": [
+    {
+      "type": 0,
+      "value": "Pēc saglabāšanas šis konts tiks izrakstīts visās ierīcēs. Ierīces, kurās pierakstījāties ar Silo lietotni, atkal pierakstīsies automātiski."
+    }
+  ],
+  "web.auth.signInLink.passwordSet": [
+    {
+      "type": 0,
+      "value": "Jūsu parole ir saglabāta. Pierakstieties ar to."
+    }
+  ],
+  "web.auth.signInLink.passwordSetLostDevices": [
+    {
+      "type": 0,
+      "value": "Pazaudētās ierīces, kurās tika izmantota Silo lietotne, joprojām var pierakstīties, līdz tās noņemsiet. Pēc pierakstīšanās noņemiet tās no ierīču saraksta sava konta iestatījumos."
+    }
+  ],
+  "web.auth.signInLink.passwordTitle": [
+    {
+      "type": 0,
+      "value": "Izvēlieties paroli"
+    }
+  ],
+  "web.auth.signInLink.providerRequired": [
+    {
+      "type": 0,
+      "value": "Šajā serverī pierakstās, izmantojot tā pierakstīšanās nodrošinātāju, tāpēc šī saite nedarbojas. Tā vietā pierakstieties ar nodrošinātāju."
+    }
+  ],
+  "web.auth.signInLink.setPasswordInstead": [
+    {
+      "type": 0,
+      "value": "Tā vietā iestatīt paroli"
+    }
+  ],
+  "web.auth.signInLink.title": [
+    {
+      "type": 0,
+      "value": "Atgūt piekļuvi kontam"
+    }
+  ],
+  "web.auth.signInLink.unavailable": [
+    {
+      "type": 0,
+      "value": "Šī saite jau ir izmantota, aizstāta ar jaunāku vai tai beidzies derīguma termiņš. Lūdziet šī servera administratoram jaunu saiti."
     }
   ],
   "web.auth.signup.closed": [
@@ -147601,7 +149516,7 @@
   "web.settings.account.password.signOutOthersDescription": [
     {
       "type": 0,
-      "value": "Citos pārlūkos un lietotnēs būs atkārtoti jāpierakstās ar jauno paroli. Šajā pārlūkā jūs paliksiet pierakstīts, un API atslēgas turpinās darboties."
+      "value": "Citos pārlūkos un lietotnēs tiks veikta izrakstīšanās. Šajā pārlūkā pierakstīšanās saglabāsies, un API atslēgas turpinās darboties."
     }
   ],
   "web.settings.account.password.title": [
@@ -148494,6 +150409,528 @@
     {
       "type": 0,
       "value": "Kā lietot šo atslēgu"
+    }
+  ],
+  "web.settings.appKeys.actionFailed": [
+    {
+      "type": 0,
+      "value": "Neizdevās veikt šīs izmaiņas. Mēģiniet vēlreiz."
+    }
+  ],
+  "web.settings.appKeys.approveMainOnly": [
+    {
+      "type": 0,
+      "value": "Ierīci var apstiprināt tikai mājsaimniecības galvenais profils. Lai apstiprinātu, pārslēdzieties uz to."
+    }
+  ],
+  "web.settings.appKeys.approved": [
+    {
+      "type": 0,
+      "value": "Ierīce „"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "” ir apstiprināta"
+    }
+  ],
+  "web.settings.appKeys.confirm.approve": [
+    {
+      "type": 0,
+      "value": "Apstiprināt ierīci"
+    }
+  ],
+  "web.settings.appKeys.confirm.approveDescription": [
+    {
+      "type": 0,
+      "value": "Ierīce „"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "” varēs pierakstīties jūsu kontā ar Silo lietotni, līdz to noņemsiet. Apstipriniet to tikai tad, ja tikko to iestatījāt."
+    }
+  ],
+  "web.settings.appKeys.confirm.approveTitle": [
+    {
+      "type": 0,
+      "value": "Vai apstiprināt ierīci „"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "”?"
+    }
+  ],
+  "web.settings.appKeys.confirm.deny": [
+    {
+      "type": 0,
+      "value": "Noraidīt ierīci"
+    }
+  ],
+  "web.settings.appKeys.confirm.denyDescription": [
+    {
+      "type": 0,
+      "value": "Ierīce „"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "” nevarēs pierakstīties jūsu kontā. Ja tā bija jūsu ierīce, pievienojiet to vēlreiz Silo lietotnē."
+    }
+  ],
+  "web.settings.appKeys.confirm.denyTitle": [
+    {
+      "type": 0,
+      "value": "Vai noraidīt ierīci „"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "”?"
+    }
+  ],
+  "web.settings.appKeys.confirm.remove": [
+    {
+      "type": 0,
+      "value": "Noņemt ierīci"
+    }
+  ],
+  "web.settings.appKeys.confirm.removeDescription": [
+    {
+      "type": 0,
+      "value": "Noņemot ierīci „"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "”, tā tiek nekavējoties izrakstīta un tās atslēga pārstāj darboties: ierīce ar to vairs nevarēs pierakstīties. Lai to atkal izmantotu, pievienojiet to vēlreiz Silo lietotnē."
+    }
+  ],
+  "web.settings.appKeys.confirm.removeTitle": [
+    {
+      "type": 0,
+      "value": "Vai noņemt ierīci „"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "”?"
+    }
+  ],
+  "web.settings.appKeys.confirm.withdraw": [
+    {
+      "type": 0,
+      "value": "Atsaukt apstiprinājumu"
+    }
+  ],
+  "web.settings.appKeys.confirm.withdrawDescription": [
+    {
+      "type": 0,
+      "value": "Ierīce „"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "” nevarēs izmantot šo apstiprinājumu, lai pierakstītos jūsu kontā."
+    }
+  ],
+  "web.settings.appKeys.confirm.withdrawTitle": [
+    {
+      "type": 0,
+      "value": "Vai atsaukt apstiprinājumu ierīcei „"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "”?"
+    }
+  ],
+  "web.settings.appKeys.confirm.working": [
+    {
+      "type": 0,
+      "value": "Notiek saglabāšana…"
+    }
+  ],
+  "web.settings.appKeys.denied": [
+    {
+      "type": 0,
+      "value": "Ierīce „"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "” ir noraidīta"
+    }
+  ],
+  "web.settings.appKeys.description": [
+    {
+      "type": 0,
+      "value": "Ierīces un lietotnes, kas pierakstās jūsu kontā ar Silo lietotni bez paroles."
+    }
+  ],
+  "web.settings.appKeys.devices.title": [
+    {
+      "type": 0,
+      "value": "Ierīces"
+    }
+  ],
+  "web.settings.appKeys.empty": [
+    {
+      "type": 0,
+      "value": "Jūsu kontā neviena ierīce neizmanto Silo lietotni."
+    }
+  ],
+  "web.settings.appKeys.footnote": [
+    {
+      "type": 0,
+      "value": "Noņemot ierīci, tā tiek izrakstīta un tās atslēga pārstāj darboties. Izrakstot sesiju, ierīce netiek noņemta: tā atkal pierakstās ar savu atslēgu."
+    }
+  ],
+  "web.settings.appKeys.loadFailed": [
+    {
+      "type": 0,
+      "value": "Neizdevās ielādēt jūsu ierīces."
+    }
+  ],
+  "web.settings.appKeys.loading": [
+    {
+      "type": 0,
+      "value": "Notiek ierīču ielāde…"
+    }
+  ],
+  "web.settings.appKeys.off": [
+    {
+      "type": 0,
+      "value": "Šajā serverī pierakstīšanās ar Silo lietotni ir izslēgta, tāpēc šīs ierīces nevar pierakstīties un gaidošās ierīces nevar apstiprināt. Jūs joprojām varat tās noņemt."
+    }
+  ],
+  "web.settings.appKeys.personKey.description": [
+    {
+      "type": 0,
+      "value": "Jūsu Silo lietotne izmanto šo atslēgu, lai pievienotu jūsu jaunās ierīces. Iestatīta: "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.settings.appKeys.personKey.none": [
+    {
+      "type": 0,
+      "value": "Nav konta atslēgas. Jūsu Silo lietotne to iestatīs nākamreiz, kad pievienosiet ierīci pierakstītā sesijā."
+    }
+  ],
+  "web.settings.appKeys.personKey.title": [
+    {
+      "type": 0,
+      "value": "Konta atslēga"
+    }
+  ],
+  "web.settings.appKeys.pinDescription": [
+    {
+      "type": 0,
+      "value": "Ievadiet galvenā profila PIN, lai apstiprinātu šo ierīci."
+    }
+  ],
+  "web.settings.appKeys.preapprovals.description": [
+    {
+      "type": 0,
+      "value": "Pierakstīšanās, kuras apstiprinājāt ierīcei, kas vēl nav izveidojusi savienojumu."
+    }
+  ],
+  "web.settings.appKeys.preapprovals.loadFailed": [
+    {
+      "type": 0,
+      "value": "Neizdevās ielādēt iepriekš apstiprinātās pierakstīšanās."
+    }
+  ],
+  "web.settings.appKeys.preapprovals.title": [
+    {
+      "type": 0,
+      "value": "Iepriekš apstiprinātās"
+    }
+  ],
+  "web.settings.appKeys.refreshLabel": [
+    {
+      "type": 0,
+      "value": "Atsvaidzināt Silo lietotnes ierīces"
+    }
+  ],
+  "web.settings.appKeys.removed": [
+    {
+      "type": 0,
+      "value": "Ierīce „"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "” ir noņemta"
+    }
+  ],
+  "web.settings.appKeys.row.allowedBy": [
+    {
+      "type": 0,
+      "value": "Atļāva lietotājs "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "web.settings.appKeys.row.approve": [
+    {
+      "type": 0,
+      "value": "Apstiprināt"
+    }
+  ],
+  "web.settings.appKeys.row.approveLabel": [
+    {
+      "type": 0,
+      "value": "Apstiprināt ierīci „"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "”"
+    }
+  ],
+  "web.settings.appKeys.row.deny": [
+    {
+      "type": 0,
+      "value": "Noraidīt"
+    }
+  ],
+  "web.settings.appKeys.row.denyLabel": [
+    {
+      "type": 0,
+      "value": "Noraidīt ierīci „"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "”"
+    }
+  ],
+  "web.settings.appKeys.row.enrolledFrom": [
+    {
+      "type": 0,
+      "value": "No adreses "
+    },
+    {
+      "type": 1,
+      "value": "address"
+    }
+  ],
+  "web.settings.appKeys.row.identityGone": [
+    {
+      "type": 0,
+      "value": "Nevar pierakstīties: tās pierakstīšanās nodrošinātāja konts vairs nav saistīts"
+    }
+  ],
+  "web.settings.appKeys.row.kindApp": [
+    {
+      "type": 0,
+      "value": "Cita lietotne"
+    }
+  ],
+  "web.settings.appKeys.row.kindDevice": [
+    {
+      "type": 0,
+      "value": "Silo lietotne"
+    }
+  ],
+  "web.settings.appKeys.row.lastUsed": [
+    {
+      "type": 0,
+      "value": "Pēdējā pierakstīšanās: "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.settings.appKeys.row.notUsed": [
+    {
+      "type": 0,
+      "value": "Ar savu atslēgu vēl nav pierakstījusies"
+    }
+  ],
+  "web.settings.appKeys.row.preapproval": [
+    {
+      "type": 0,
+      "value": "Iepriekš apstiprināta · derīguma termiņš: "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.settings.appKeys.row.provider": [
+    {
+      "type": 0,
+      "value": "Pārbauda pierakstīšanās nodrošinātājs"
+    }
+  ],
+  "web.settings.appKeys.row.remove": [
+    {
+      "type": 0,
+      "value": "Noņemt"
+    }
+  ],
+  "web.settings.appKeys.row.removeLabel": [
+    {
+      "type": 0,
+      "value": "Noņemt ierīci „"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "”"
+    }
+  ],
+  "web.settings.appKeys.row.viaAppCode": [
+    {
+      "type": 0,
+      "value": "Pievienota ar vienreizēju kodu no servera tīmekļa lapas"
+    }
+  ],
+  "web.settings.appKeys.row.viaPersonKey": [
+    {
+      "type": 0,
+      "value": "Pievienota ar Silo lietotni citā ierīcē"
+    }
+  ],
+  "web.settings.appKeys.row.viaSession": [
+    {
+      "type": 0,
+      "value": "Pievienota pierakstītā sesijā"
+    }
+  ],
+  "web.settings.appKeys.row.waitingUntil": [
+    {
+      "type": 0,
+      "value": "Gaida apstiprinājumu līdz "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.settings.appKeys.row.withdraw": [
+    {
+      "type": 0,
+      "value": "Atsaukt"
+    }
+  ],
+  "web.settings.appKeys.row.withdrawLabel": [
+    {
+      "type": 0,
+      "value": "Atsaukt apstiprinājumu ierīcei „"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "”"
+    }
+  ],
+  "web.settings.appKeys.signsBackIn": [
+    {
+      "type": 0,
+      "value": "Ierīces, kas pierakstītas ar Silo lietotni, atkal pierakstās pašas. "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Noņemiet ierīci"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", lai to apturētu."
+    }
+  ],
+  "web.settings.appKeys.title": [
+    {
+      "type": 0,
+      "value": "Silo lietotnes ierīces"
+    }
+  ],
+  "web.settings.appKeys.unavailable": [
+    {
+      "type": 0,
+      "value": "Šajā serverī pierakstīšanās ar Silo lietotni nav pieejama, tāpēc šīs ierīces nevar pierakstīties. Jūs joprojām varat tās noņemt."
+    }
+  ],
+  "web.settings.appKeys.waiting.description": [
+    {
+      "type": 0,
+      "value": "Jauna ierīce lūdza atļauju pierakstīties jūsu kontā ar Silo lietotni. Apstipriniet to tikai tad, ja tikko to iestatījāt."
+    }
+  ],
+  "web.settings.appKeys.waiting.title": [
+    {
+      "type": 0,
+      "value": "Gaida jūsu apstiprinājumu"
+    }
+  ],
+  "web.settings.appKeys.withdrawn": [
+    {
+      "type": 0,
+      "value": "Apstiprinājums ir atsaukts"
     }
   ],
   "web.settings.cardOverlay.adjust": [
@@ -153842,6 +156279,54 @@
       "value": "Esat bezsaistē, tāpēc šīs izmaiņas netika saglabātas"
     }
   ],
+  "web.settings.openInSilo.action": [
+    {
+      "type": 0,
+      "value": "Saņemt kodu Silo lietotnei"
+    }
+  ],
+  "web.settings.openInSilo.codeInstructions": [
+    {
+      "type": 0,
+      "value": "Silo lietotnē savā tālrunī vai planšetdatorā pievienojiet šo serveri pēc tā adreses un ievadiet šo kodu. Ikviens, kam ir šis kods, var pierakstīties šajā kontā, tāpēc nekopīgojiet to."
+    }
+  ],
+  "web.settings.openInSilo.codeTitle": [
+    {
+      "type": 0,
+      "value": "Kods Silo lietotnei"
+    }
+  ],
+  "web.settings.openInSilo.description": [
+    {
+      "type": 0,
+      "value": "Pierakstieties šajā kontā Silo lietotnē savā tālrunī vai planšetdatorā bez paroles."
+    }
+  ],
+  "web.settings.openInSilo.loadFailed": [
+    {
+      "type": 0,
+      "value": "Neizdevās pārbaudīt, vai šī pārlūkprogramma var saņemt kodu Silo lietotnei."
+    }
+  ],
+  "web.settings.openInSilo.mainProfileOnly": [
+    {
+      "type": 0,
+      "value": "Kodu Silo lietotnei var saņemt tikai mājsaimniecības galvenais profils. Pārslēdzieties uz to un mēģiniet vēlreiz."
+    }
+  ],
+  "web.settings.openInSilo.pinDescription": [
+    {
+      "type": 0,
+      "value": "Ievadiet galvenā profila PIN, lai saņemtu kodu Silo lietotnei."
+    }
+  ],
+  "web.settings.openInSilo.title": [
+    {
+      "type": 0,
+      "value": "Silo lietotne"
+    }
+  ],
   "web.settings.overlays.accent.amber": [
     {
       "type": 0,
@@ -156997,6 +159482,12 @@
       "value": "Pierakstīšanās"
     }
   ],
+  "web.settings.sessions.row.signsBackIn": [
+    {
+      "type": 0,
+      "value": "Šī ierīce atkal pierakstās pati"
+    }
+  ],
   "web.settings.sessions.row.summary": [
     {
       "type": 8,
@@ -157083,6 +159574,24 @@
     {
       "type": 0,
       "value": "Iestatījumi"
+    }
+  ],
+  "web.settings.signInAgain.action": [
+    {
+      "type": 0,
+      "value": "Pierakstīties vēlreiz"
+    }
+  ],
+  "web.settings.signInAgain.manageDevices": [
+    {
+      "type": 0,
+      "value": "Pierakstieties vēlreiz, lai pārvaldītu savas ierīces"
+    }
+  ],
+  "web.settings.signInAgain.useApp": [
+    {
+      "type": 0,
+      "value": "Pārvaldiet savas ierīces Silo lietotnē."
     }
   ],
   "web.settings.signedInSessions.loadFailed": [

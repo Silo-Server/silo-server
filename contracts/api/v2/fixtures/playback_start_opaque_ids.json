@@ -173,6 +173,7 @@
       "audio_channels": 2,
       "audio_layout": "stereo"
     },
-    "subtitle_fidelity_policy": "allow_simplified_rendering"
+    "subtitle_fidelity_policy": "allow_simplified_rendering",
+    "media_transport": "regular"
   }
 }

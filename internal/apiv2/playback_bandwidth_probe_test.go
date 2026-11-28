@@ -1,12 +1,49 @@
 package apiv2
 
 import (
+	"context"
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/bandwidthprobe"
+	"github.com/Silo-Server/silo-server/internal/streamtoken"
 )
+
+// receiptPlaybackFake mints a fixed receipt and records whom it was asked for.
+type receiptPlaybackFake struct {
+	fakePlaybackService
+	receipt string
+	user    int
+	device  string
+}
+
+func (f *receiptPlaybackFake) ProbeConnectionReceipt(_ context.Context, user int, device string) string {
+	f.user, f.device = user, device
+	return f.receipt
+}
+
+// The API host sends the receipt its service minted for the caller and the
+// device header, and no header when the service mints none.
+func TestPlaybackBandwidthProbeSendsConnectionReceipt(t *testing.T) {
+	deps := parityDeps(false)
+	fake := &receiptPlaybackFake{receipt: "receipt-value"}
+	deps.Playback = fake
+	handler := NewHandler(deps)
+	path := Prefix + "/playback/bandwidth-probe?size=10"
+	headers := bearer(memberToken)
+	headers["X-Silo-Device-Id"] = "tv-1"
+	response := do(t, handler, http.MethodGet, path, "", headers)
+	if response.Code != http.StatusOK || response.Header().Get(streamtoken.ConnectionReceiptHeader) != "receipt-value" || fake.device != "tv-1" || fake.user <= 0 {
+		t.Fatalf("status %d, receipt %q, asked for user %d device %q", response.Code, response.Header().Get(streamtoken.ConnectionReceiptHeader), fake.user, fake.device)
+	}
+	fake.receipt = ""
+	response = do(t, handler, http.MethodGet, path, "", headers)
+	if response.Code != http.StatusOK || response.Header().Get(streamtoken.ConnectionReceiptHeader) != "" {
+		t.Fatalf("status %d, receipt %q, want none", response.Code, response.Header().Get(streamtoken.ConnectionReceiptHeader))
+	}
+}
 
 func TestPlaybackBandwidthProbe(t *testing.T) {
 	handler := NewHandler(parityDeps(false))
@@ -47,4 +84,29 @@ func TestPlaybackBandwidthProbe(t *testing.T) {
 			requireProblem(t, do(t, handler, http.MethodGet, path+"?size="+size, "", bearer(memberToken)), TypeValidationFailed)
 		})
 	}
+}
+
+func TestPlaybackBandwidthProbeDocumentsOptionalDeviceHeader(t *testing.T) {
+	spec, err := GenerateOpenAPI()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Paths map[string]map[string]struct {
+			Parameters []struct {
+				Name     string `json:"name"`
+				In       string `json:"in"`
+				Required bool   `json:"required"`
+			} `json:"parameters"`
+		} `json:"paths"`
+	}
+	if err := json.Unmarshal(spec, &doc); err != nil {
+		t.Fatal(err)
+	}
+	for _, param := range doc.Paths[Prefix+"/playback/bandwidth-probe"]["get"].Parameters {
+		if param.In == "header" && param.Name == "X-Silo-Device-Id" && !param.Required {
+			return
+		}
+	}
+	t.Fatal("bandwidth probe contract has no optional X-Silo-Device-Id request header")
 }

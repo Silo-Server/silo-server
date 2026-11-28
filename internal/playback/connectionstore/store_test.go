@@ -12,11 +12,12 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/clientip"
+	"github.com/Silo-Server/silo-server/internal/netaccess"
 )
 
 func TestConnectionIdentity(t *testing.T) {
 	key := func(ip, secret string) string {
-		k, _ := Key(clientip.SetContext(context.Background(), ip), secret)
+		k, _ := Key(clientip.SetContext(context.Background(), ip), secret, ClassRegular, "")
 		return k
 	}
 	if key("192.168.1.1", "secret") != "local" || key("::1", "secret") != "local" {
@@ -34,6 +35,36 @@ func TestConnectionIdentity(t *testing.T) {
 	}
 	if key("invalid", "secret") != "" || key("8.8.8.8", "") != "" {
 		t.Fatal("unknown identity must not share a key")
+	}
+}
+
+// The direct class keys a connection by the device's direct key and nothing
+// else; the regular class never reads the direct path, so an N4 request keys
+// like any other request from the same address.
+func TestConnectionKeyClasses(t *testing.T) {
+	ctx := clientip.SetContext(context.Background(), "203.0.113.7")
+	regular, label := Key(ctx, "secret", ClassRegular, "")
+	if !strings.HasPrefix(regular, "remote:") || label != labelRemote {
+		t.Fatalf("regular key = %q (%s)", regular, label)
+	}
+	viaDirect := netaccess.WithPath(ctx, netaccess.Path{Direct: &netaccess.DirectPath{HostID: "api", PeerKey: "nodekey:peer", UserID: 7, DeviceID: "tv-1", Class: "direct"}})
+	if got, gotLabel := Key(viaDirect, "secret", ClassRegular, "ignored"); got != regular || gotLabel != label {
+		t.Fatalf("a request on the direct path keyed %q (%s), want the regular key %q", got, gotLabel, regular)
+	}
+	// A LAN address stays local when the request also rides the direct path:
+	// the regular key never reads Path.Direct.
+	lan := clientip.SetContext(context.Background(), "192.168.1.10")
+	local, _ := Key(lan, "secret", ClassRegular, "")
+	lanDirect := netaccess.WithPath(lan, netaccess.Path{Direct: &netaccess.DirectPath{HostID: "api", PeerKey: "nodekey:peer", UserID: 7, DeviceID: "tv-1", Class: "direct"}})
+	if got, _ := Key(lanDirect, "secret", ClassRegular, ""); got != local || local != labelLocal {
+		t.Fatalf("a LAN request on the direct path keyed %q, want %q (plain LAN key %q)", got, labelLocal, local)
+	}
+	direct, label := Key(ctx, "secret", ClassDirect, "direct:abc")
+	if direct != "direct:abc" || label != labelDirect {
+		t.Fatalf("direct key = %q (%s)", direct, label)
+	}
+	if key, label := Key(ctx, "secret", ClassDirect, ""); key != "" || label != labelDirect {
+		t.Fatalf("an unresolved direct path got key %q (%s), want none", key, label)
 	}
 }
 

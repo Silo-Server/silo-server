@@ -102,6 +102,10 @@ func NewRegistry(cfg Config, store SnapshotStore, logger *slog.Logger) *Registry
 
 func (r *Registry) Enabled() bool { return r != nil && r.cfg.Enabled }
 
+// Distributed reports that snapshots are published and read through Redis, so
+// the merged view covers every process; otherwise it holds only this one.
+func (r *Registry) Distributed() bool { return r != nil && r.cfg.Distributed }
+
 // ViewTTL exposes the resolved bounded-staleness window so the view cache can be
 // built from the config this registry already parsed, rather than reading and
 // re-validating every SILO_STREAM_TELEMETRY_* variable a second time.
@@ -288,6 +292,9 @@ func (r *Registry) attach(obs *Observation, attachment Attachment) {
 	}
 	if obs.Capture.UserAgent != "" {
 		s.userAgents.add(obs.Capture.UserAgent)
+	}
+	if obs.Capture.Transport.PathKind != "" {
+		s.transports.add(obs.Capture.Transport)
 	}
 	if !incrementBounded(s.tokenIssuedSources, attachment.TokenIssuedAtSource) {
 		r.drop("telemetry token source metadata omitted")

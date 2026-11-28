@@ -215,6 +215,12 @@
       "value": "هذا مرتبط بالفعل بهذا الحساب."
     }
   ],
+  "error.app_code_invalid": [
+    {
+      "type": 0,
+      "value": "هذا الرمز غير معروف أو مستخدم أو منتهي الصلاحية. احصل على رمز جديد من صفحة الخادم."
+    }
+  ],
   "error.authentication_required": [
     {
       "type": 0,
@@ -333,6 +339,12 @@
     {
       "type": 0,
       "value": "نوع هذه القيمة غير صحيح."
+    }
+  ],
+  "error.field.key_enrolled": [
+    {
+      "type": 0,
+      "value": "هذا المفتاح مستخدم بالفعل على هذا الخادم."
     }
   ],
   "error.field.malformed_form": [
@@ -2635,6 +2647,30 @@
     {
       "type": 0,
       "value": "تلقائي"
+    }
+  ],
+  "settingsManifest.playback.connection_path.description": [
+    {
+      "type": 0,
+      "value": "لا يزال خيار «مباشر فقط» يستخدم اتصال الشبكة المحلية عند توفره."
+    }
+  ],
+  "settingsManifest.playback.connection_path.label": [
+    {
+      "type": 0,
+      "value": "مسار الاتصال"
+    }
+  ],
+  "settingsManifest.playback.connection_path.option.automatic": [
+    {
+      "type": 0,
+      "value": "تلقائي"
+    }
+  ],
+  "settingsManifest.playback.connection_path.option.direct_only": [
+    {
+      "type": 0,
+      "value": "مباشر فقط"
     }
   ],
   "settingsManifest.playback.intro_skip_mode.description": [
@@ -32721,6 +32757,95 @@
       }
     }
   ],
+  "web.admin.common.adminUserSignIn.unlinkConfirm.text": [
+    {
+      "type": 5,
+      "value": "last_way",
+      "options": {
+        "yes": {
+          "value": [
+            {
+              "type": 0,
+              "value": "لن يتمكن "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " بعد الآن من تسجيل الدخول بحساب هذا المزود. ولن يتمكن "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " من تسجيل الدخول حتى تعيّن كلمة مرور أو تربط مزودًا من جديد."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "لن يتمكن "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " بعد الآن من تسجيل الدخول بحساب هذا المزود."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 5,
+      "value": "keys",
+      "options": {
+        "yes": {
+          "value": [
+            {
+              "type": 0,
+              "value": " ستُزال مفاتيح تطبيق Silo الخاصة بـ "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " المرتبطة بحساب هذا المزود، وسيُسجَّل خروج تلك الأجهزة."
+            }
+          ]
+        },
+        "unknown": {
+          "value": [
+            {
+              "type": 0,
+              "value": " ستُزال أي مفاتيح لتطبيق Silo خاصة بـ "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " ومرتبطة بحساب هذا المزود، وسيُسجَّل خروج تلك الأجهزة."
+            }
+          ]
+        },
+        "other": {
+          "value": []
+        }
+      }
+    }
+  ],
   "web.admin.common.adminUserSignIn.unlinkConfirm.title": [
     {
       "type": 0,
@@ -35687,6 +35812,18 @@
     {
       "type": 0,
       "value": "ينشئ الصور المصغّرة التي تعرضها المشغّلات أثناء التقديم، في تخزين الأصول العامة المضبوط. تُعالج الملفات في الخلفية بأولوية منخفضة. يؤدي تعطيل هذا الخيار إلى حذف معاينات المكتبة."
+    }
+  ],
+  "web.admin.common.libraryEditor.advanced.trickplayGenerate": [
+    {
+      "type": 0,
+      "value": "إنشاء المعاينات الناقصة باستخدام FFmpeg"
+    }
+  ],
+  "web.admin.common.libraryEditor.advanced.trickplayGenerateDescription": [
+    {
+      "type": 0,
+      "value": "تُستخدم أولًا ملفات \u200E.trickplay و\u200E.bif الجانبية الموجودة بجوار ملفات الوسائط. عطّل هذا الخيار لاستيراد الملفات الجانبية فقط وتخطي الإنشاء باستخدام FFmpeg."
     }
   ],
   "web.admin.common.libraryEditor.advanced.trickplayUnavailable": [
@@ -41555,6 +41692,76 @@
       "value": "الإدارة: المستخدمون"
     }
   ],
+  "web.admin.common.trickplay.badge.awaitingSidecarCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 0,
+              "value": "لا ملفات بانتظار ملف جانبي"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ملف واحد بانتظار ملف جانبي"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ملفان بانتظار ملف جانبي"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ملفات بانتظار ملف جانبي"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ملفًا بانتظار ملف جانبي"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ملف بانتظار ملف جانبي"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.common.trickplay.badge.detail": [
     {
       "type": 0,
@@ -41831,6 +42038,12 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.common.trickplay.badge.sidecarsOnly": [
+    {
+      "type": 0,
+      "value": "ملفات جانبية فقط"
+    }
+  ],
   "web.admin.common.trickplay.badge.srDetail": [
     {
       "type": 0,
@@ -42085,6 +42298,42 @@
     {
       "type": 0,
       "value": "تحتفظ المشغّلات بالمعاينات الحالية حتى تجهز المعاينات الجديدة."
+    }
+  ],
+  "web.admin.common.trickplay.sidecarStatus.awaiting_sidecar": [
+    {
+      "type": 0,
+      "value": "بانتظار ملف جانبي"
+    }
+  ],
+  "web.admin.common.trickplay.sidecarStatus.sidecar_invalid": [
+    {
+      "type": 0,
+      "value": "ملف جانبي غير صالح"
+    }
+  ],
+  "web.admin.common.trickplay.sidecarStatus.sidecar_stale": [
+    {
+      "type": 0,
+      "value": "ملف جانبي قديم"
+    }
+  ],
+  "web.admin.common.trickplay.source.generated": [
+    {
+      "type": 0,
+      "value": "أنشأها Silo"
+    }
+  ],
+  "web.admin.common.trickplay.source.sidecar_bif": [
+    {
+      "type": 0,
+      "value": "ملف جانبي (\u200E.bif)"
+    }
+  ],
+  "web.admin.common.trickplay.source.sidecar_trickplay": [
+    {
+      "type": 0,
+      "value": "ملف جانبي (\u200E.trickplay)"
     }
   ],
   "web.admin.common.trickplay.state.off": [
@@ -44743,7 +44992,7 @@
     },
     {
       "type": 0,
-      "value": ". تبقى الأجهزة الأخرى لهذا الحساب مسجّلة الدخول. يمكن للعميل تسجيل الدخول مرة أخرى باستخدام كلمة مرور الحساب."
+      "value": ". تبقى الأجهزة الأخرى لهذا الحساب مسجّلة الدخول. يمكن للعميل تسجيل الدخول مرة أخرى."
     }
   ],
   "web.admin.dashboard.widgets.apiClients.confirmLabel": [
@@ -63779,6 +64028,12 @@
       "value": "الملف الشخصي"
     }
   ],
+  "web.admin.history.column.progress": [
+    {
+      "type": 0,
+      "value": "التقدم"
+    }
+  ],
   "web.admin.history.column.status": [
     {
       "type": 0,
@@ -63813,6 +64068,12 @@
     {
       "type": 0,
       "value": "سجلات الجلسة"
+    }
+  ],
+  "web.admin.history.detail.backToPlay": [
+    {
+      "type": 0,
+      "value": "العودة إلى عملية التشغيل المجمّعة"
     }
   ],
   "web.admin.history.detail.column.delivered": [
@@ -63923,6 +64184,12 @@
       "value": "مدة المشاهدة"
     }
   ],
+  "web.admin.history.detail.inspectSitting": [
+    {
+      "type": 0,
+      "value": "فحص"
+    }
+  ],
   "web.admin.history.detail.keyboardHint": [
     {
       "type": 0,
@@ -64007,6 +64274,12 @@
       "value": "سبب عدم التشغيل المباشر"
     }
   ],
+  "web.admin.history.detail.section.sessions": [
+    {
+      "type": 0,
+      "value": "الجلسات في عملية التشغيل هذه"
+    }
+  ],
   "web.admin.history.detail.section.streams": [
     {
       "type": 0,
@@ -64017,6 +64290,142 @@
     {
       "type": 0,
       "value": "التوقيت وتقدم المشاهدة"
+    }
+  ],
+  "web.admin.history.detail.sessionsCapped": [
+    {
+      "type": 0,
+      "value": "عرض أول "
+    },
+    {
+      "type": 1,
+      "value": "shown"
+    },
+    {
+      "type": 0,
+      "value": " من أصل "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": " جلسة في عملية التشغيل هذه."
+    }
+  ],
+  "web.admin.history.detail.sessionsNotice": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 0,
+              "value": "تضم عملية التشغيل هذه "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " جلسة. تعكس تفاصيل البث والجهاز والتوجيه أدناه جلستها الأساسية؛ اختر أي جلسة أدناه لفحصها على حدة."
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "تضم عملية التشغيل هذه جلسة واحدة. تعكس تفاصيل البث والجهاز والتوجيه أدناه هذه الجلسة."
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "تمتد عملية التشغيل هذه على جلستين. تعكس تفاصيل البث والجهاز والتوجيه أدناه جلستها الأساسية؛ اختر أي جلسة أدناه لفحصها على حدة."
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "تمتد عملية التشغيل هذه على "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " جلسات. تعكس تفاصيل البث والجهاز والتوجيه أدناه جلستها الأساسية؛ اختر أي جلسة أدناه لفحصها على حدة."
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "تمتد عملية التشغيل هذه على "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " جلسة. تعكس تفاصيل البث والجهاز والتوجيه أدناه جلستها الأساسية؛ اختر أي جلسة أدناه لفحصها على حدة."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "تمتد عملية التشغيل هذه على "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " جلسة. تعكس تفاصيل البث والجهاز والتوجيه أدناه جلستها الأساسية؛ اختر أي جلسة أدناه لفحصها على حدة."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.ended": [
+    {
+      "type": 0,
+      "value": "الانتهاء"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.method": [
+    {
+      "type": 0,
+      "value": "الطريقة"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.started": [
+    {
+      "type": 0,
+      "value": "البدء"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.watched": [
+    {
+      "type": 0,
+      "value": "مدة المشاهدة"
     }
   ],
   "web.admin.history.detail.subtitlesBurnIn": [
@@ -64245,6 +64654,12 @@
       "value": "كل الشبكات"
     }
   ],
+  "web.admin.history.filter.allMediaTypes": [
+    {
+      "type": 0,
+      "value": "كل الوسائط"
+    }
+  ],
   "web.admin.history.filter.allMethods": [
     {
       "type": 0,
@@ -64281,6 +64696,24 @@
       "value": "مكتمل"
     }
   ],
+  "web.admin.history.filter.episodes": [
+    {
+      "type": 0,
+      "value": "الحلقات"
+    }
+  ],
+  "web.admin.history.filter.hideShort": [
+    {
+      "type": 0,
+      "value": "إخفاء أقل من 30 ث"
+    }
+  ],
+  "web.admin.history.filter.hideShortTitle": [
+    {
+      "type": 0,
+      "value": "إخفاء الجلسات غير المكتملة التي تقل عن 30 ثانية"
+    }
+  ],
   "web.admin.history.filter.locationLocal": [
     {
       "type": 0,
@@ -64291,6 +64724,12 @@
     {
       "type": 0,
       "value": "عن بُعد"
+    }
+  ],
+  "web.admin.history.filter.movies": [
+    {
+      "type": 0,
+      "value": "الأفلام"
     }
   ],
   "web.admin.history.filter.partial": [
@@ -64570,6 +65009,12 @@
       "value": "التشغيل الأخير"
     }
   ],
+  "web.admin.history.row.burnInBadgeTitle": [
+    {
+      "type": 0,
+      "value": "الترجمة مدمجة في الفيديو"
+    }
+  ],
   "web.admin.history.row.completed": [
     {
       "type": 0,
@@ -64590,6 +65035,96 @@
     {
       "type": 0,
       "value": "تقديري (سُجّل قبل بدء تتبّع وقت المشاهدة الدقيق)"
+    }
+  ],
+  "web.admin.history.row.groupedSessionsTitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 0,
+              "value": "مجمّعة من "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " جلسة"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "مجمّعة من جلسة واحدة"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "مجمّعة من جلستين"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "مجمّعة من "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " جلسات"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "مجمّعة من "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " جلسة"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "مجمّعة من "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " جلسة"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.history.row.meta": [
@@ -64622,6 +65157,12 @@
       "value": "جزئي"
     }
   ],
+  "web.admin.history.row.progressLabel": [
+    {
+      "type": 0,
+      "value": "تقدم التشغيل"
+    }
+  ],
   "web.admin.history.row.started": [
     {
       "type": 0,
@@ -64632,16 +65173,128 @@
       "value": "time"
     }
   ],
+  "web.admin.history.stats.accountsCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 0,
+              "value": "لا حسابات"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "حساب واحد"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "حسابان"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " حسابات"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " حسابًا"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " حساب"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.history.stats.completed": [
     {
       "type": 0,
       "value": "مكتمل"
     }
   ],
+  "web.admin.history.stats.completionBreakdown": [
+    {
+      "type": 1,
+      "value": "completed"
+    },
+    {
+      "type": 0,
+      "value": " مكتمل · "
+    },
+    {
+      "type": 1,
+      "value": "partial"
+    },
+    {
+      "type": 0,
+      "value": " جزئي"
+    }
+  ],
   "web.admin.history.stats.partial": [
     {
       "type": 0,
       "value": "جزئي"
+    }
+  ],
+  "web.admin.history.stats.totalPlays": [
+    {
+      "type": 0,
+      "value": "إجمالي عمليات التشغيل"
+    }
+  ],
+  "web.admin.history.stats.totalSessions": [
+    {
+      "type": 0,
+      "value": "إجمالي الجلسات"
+    }
+  ],
+  "web.admin.history.stats.uniqueProfiles": [
+    {
+      "type": 0,
+      "value": "الملفات الشخصية الفريدة"
+    }
+  ],
+  "web.admin.history.stats.uniqueTitles": [
+    {
+      "type": 0,
+      "value": "العناوين الفريدة"
     }
   ],
   "web.admin.history.stats.visibleRows": [
@@ -64660,6 +65313,24 @@
     {
       "type": 0,
       "value": "سجل التشغيل"
+    }
+  ],
+  "web.admin.history.view.label": [
+    {
+      "type": 0,
+      "value": "عرض السجل"
+    }
+  ],
+  "web.admin.history.view.plays": [
+    {
+      "type": 0,
+      "value": "عمليات التشغيل"
+    }
+  ],
+  "web.admin.history.view.sessions": [
+    {
+      "type": 0,
+      "value": "كل الجلسات"
     }
   ],
   "web.admin.historyImport.conflict.message": [
@@ -115706,6 +116377,242 @@
       "value": ")"
     }
   ],
+  "web.admin.users.detail.appKeys.confirm.denyDescription": [
+    {
+      "type": 0,
+      "value": "لن يتمكن "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " من تسجيل الدخول إلى حساب "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": ". إذا كان الجهاز يخص "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "، فيمكن إضافته مرة أخرى من تطبيق Silo."
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKey": [
+    {
+      "type": 0,
+      "value": "إزالة المفتاح"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKeyDescription": [
+    {
+      "type": 0,
+      "value": "تستمر الأجهزة المسجّلة الدخول بالفعل في العمل حتى تزيلها. لن يمكن إضافة أي جهاز جديد بهذا المفتاح، وستُرفض الأجهزة التي أضافها ولا تزال في الانتظار. سيُعدّ تطبيق Silo لدى "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " مفتاحًا جديدًا في المرة التالية التي يُضاف فيها جهاز أثناء تسجيل الدخول."
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKeyTitle": [
+    {
+      "type": 0,
+      "value": "إزالة مفتاح حساب "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "؟"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.removeDescription": [
+    {
+      "type": 0,
+      "value": "تؤدي إزالة "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " إلى تسجيل خروجه من حساب "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " الآن وإيقاف مفتاحه: لن يتمكن من تسجيل الدخول به مرة أخرى. لاستخدامه من جديد، يجب على "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " إضافته مرة أخرى في تطبيق Silo."
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.withdrawDescription": [
+    {
+      "type": 0,
+      "value": "لن يتمكن "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " من استخدام هذه الموافقة لتسجيل الدخول إلى حساب "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.detail.appKeys.description": [
+    {
+      "type": 0,
+      "value": "الأجهزة والتطبيقات التي تسجّل الدخول إلى حساب "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " عبر تطبيق Silo، دون كلمة مرور."
+    }
+  ],
+  "web.admin.users.detail.appKeys.empty": [
+    {
+      "type": 0,
+      "value": "لا توجد أجهزة تستخدم تطبيق Silo على هذا الحساب."
+    }
+  ],
+  "web.admin.users.detail.appKeys.loadFailed": [
+    {
+      "type": 0,
+      "value": "تعذّر تحميل الأجهزة."
+    }
+  ],
+  "web.admin.users.detail.appKeys.off": [
+    {
+      "type": 0,
+      "value": "تسجيل الدخول بتطبيق Silo معطّل على هذا الخادم، لذا لا يمكن لهذه الأجهزة تسجيل الدخول. لا يزال بإمكانك إزالتها."
+    }
+  ],
+  "web.admin.users.detail.appKeys.ownerOnly": [
+    {
+      "type": 0,
+      "value": "لا يمكن تغيير أجهزة مسؤول آخر أو أجهزة المالك إلا لمالك الخادم."
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.description": [
+    {
+      "type": 0,
+      "value": "يستخدم تطبيق Silo هذا المفتاح لإضافة أجهزة "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " الجديدة. أُعدّ في "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.none": [
+    {
+      "type": 0,
+      "value": "لا يوجد مفتاح حساب. سيُعدّ تطبيق Silo لدى "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " مفتاحًا في المرة التالية التي يُضاف فيها جهاز أثناء تسجيل الدخول."
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.remove": [
+    {
+      "type": 0,
+      "value": "إزالة مفتاح الحساب"
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKeyRemoved": [
+    {
+      "type": 0,
+      "value": "أُزيل مفتاح الحساب"
+    }
+  ],
+  "web.admin.users.detail.appKeys.preapprovals.description": [
+    {
+      "type": 0,
+      "value": "عمليات تسجيل دخول وافق عليها "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " لجهاز لم يتصل بعد."
+    }
+  ],
+  "web.admin.users.detail.appKeys.waiting.description": [
+    {
+      "type": 0,
+      "value": "ينتظر أي جهاز جديد على حساب مسؤول حتى يوافق عليه "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " من جهاز مسجّل الدخول عليه. يمكنك رفضه هنا."
+    }
+  ],
+  "web.admin.users.detail.appKeys.waiting.title": [
+    {
+      "type": 0,
+      "value": "في انتظار الموافقة"
+    }
+  ],
   "web.admin.users.detail.common.allProfiles": [
     {
       "type": 0,
@@ -120280,6 +121187,12 @@
       "value": "بلغ الحساب الحد الأقصى للملفات الشخصية"
     }
   ],
+  "web.admin.users.detail.profiles.badge.changedHere": [
+    {
+      "type": 0,
+      "value": "تم التغيير هنا"
+    }
+  ],
   "web.admin.users.detail.profiles.badge.kids": [
     {
       "type": 0,
@@ -120477,6 +121390,664 @@
     {
       "type": 0,
       "value": "حفظ رمز PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowAgain": [
+    {
+      "type": 0,
+      "value": "السماح مجددًا"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowAgainAria": [
+    {
+      "type": 0,
+      "value": "السماح بعودة "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " على هذا الخادم"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowDescription": [
+    {
+      "type": 0,
+      "value": "يمكن لتطبيق المستخدم إعادة إضافة "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " عند المزامنة التالية، كملف شخصي جديد دون سجله على هذا الخادم، إذا كانت ملفات التطبيق الشخصية لا تزال تتضمن "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " وكان في هذا الحساب متسع لملف شخصي آخر."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowTitle": [
+    {
+      "type": 0,
+      "value": "السماح بـ "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " مجددًا؟"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.alreadyCleared": [
+    {
+      "type": 0,
+      "value": "سبق مسح هذا التغيير، أو غيّره "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " مرة أخرى. القائمة محدّثة."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedBy": [
+    {
+      "type": 0,
+      "value": "غيّره "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " في "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedSinceOpened": [
+    {
+      "type": 0,
+      "value": "حُدّث هذا التغيير بعد أن فتحته، لذا لم يُمسح شيء. اقرأه مرة أخرى في القائمة، ثم امسحه إن كنت لا تزال تريد ذلك."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedWhileRunning": [
+    {
+      "type": 0,
+      "value": "تغيّرت الملفات الشخصية أثناء التنفيذ، لذا لم يتغير شيء. القائمة محدّثة؛ حاول مرة أخرى إن كنت لا تزال تريد ذلك."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clear": [
+    {
+      "type": 0,
+      "value": "مسح"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearAndRemovePin": [
+    {
+      "type": 0,
+      "value": "مسح وإزالة رمز PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearAria": [
+    {
+      "type": 0,
+      "value": "مسح التغيير على "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " في "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearFailed": [
+    {
+      "type": 0,
+      "value": "تعذّر مسح التغيير."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearInherit": [
+    {
+      "type": 0,
+      "value": "يعود "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " في "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " إلى ما يرثه "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " الآن، كما يطلب تطبيق المستخدم. وتسري عليه التغييرات من تطبيق المستخدم مرة أخرى."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearLater": [
+    {
+      "type": 0,
+      "value": "يبقى "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " كما هو حتى يرسله تطبيق المستخدم في المرة القادمة. بعد ذلك، تسري عليه التغييرات من تطبيق المستخدم مرة أخرى."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearNow": [
+    {
+      "type": 0,
+      "value": "يعود "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " الآن إلى القيمة الواردة من تطبيق المستخدم، وتسري عليه التغييرات من تطبيق المستخدم مرة أخرى."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearNowValue": [
+    {
+      "type": 0,
+      "value": "يعود "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " في "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " الآن إلى "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": "، وهي القيمة الواردة من تطبيق المستخدم. وتسري عليه التغييرات من تطبيق المستخدم مرة أخرى."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearPin": [
+    {
+      "type": 0,
+      "value": "يحتفظ "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " برمز PIN الذي عيّنته حتى يرسل تطبيق المستخدم رمزًا في المرة القادمة. بعد ذلك، تسري عليه التغييرات من تطبيق المستخدم مرة أخرى."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearPinRemoves": [
+    {
+      "type": 0,
+      "value": "يرسل تطبيق المستخدم "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " دون رمز PIN، لذا يؤدي المسح إلى إزالة رمز PIN الذي عيّنته الآن. وبعدها يمكن لأي شخص يستخدم هذا الحساب فتح "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " دون رمز PIN."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearTitle": [
+    {
+      "type": 0,
+      "value": "مسح التغيير على "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " في "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "؟"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.deletedAccount": [
+    {
+      "type": 0,
+      "value": "حساب محذوف"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.description": [
+    {
+      "type": 0,
+      "value": "تأتي هذه الملفات الشخصية من تطبيق "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ". يبقى أي تغيير تجريه هنا على هذا الخادم حتى تمسحه. وهو ليس قفلًا: يمكن لـ "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " تغيير الشيء نفسه هنا أيضًا."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismiss": [
+    {
+      "type": 0,
+      "value": "تجاهل"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismissAria": [
+    {
+      "type": 0,
+      "value": "تجاهل الملاحظة حول "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " في "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismissFailed": [
+    {
+      "type": 0,
+      "value": "تعذّر تجاهل الملاحظة."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.isChild": [
+    {
+      "type": 0,
+      "value": "ملف شخصي للأطفال"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.maxAdvisoryAge": [
+    {
+      "type": 0,
+      "value": "حد العمر"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.maxContentRating": [
+    {
+      "type": 0,
+      "value": "حد تصنيف المحتوى"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.name": [
+    {
+      "type": 0,
+      "value": "الاسم"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.picture": [
+    {
+      "type": 0,
+      "value": "الصورة"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.pin": [
+    {
+      "type": 0,
+      "value": "رمز PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.requests": [
+    {
+      "type": 0,
+      "value": "الطلبات"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.requireAdvisoryAge": [
+    {
+      "type": 0,
+      "value": "اشتراط تصنيف عمري"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.fieldValue": [
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.hidden": [
+    {
+      "type": 0,
+      "value": "أزاله "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " على هذا الخادم في "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": ". لن يعيد تطبيق المستخدم إضافته حتى تسمح بذلك."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.loadFailed": [
+    {
+      "type": 0,
+      "value": "تعذّر تحميل التغييرات التي أُجريت على هذا الخادم."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.nameTaken": [
+    {
+      "type": 0,
+      "value": "لا يمكن أن يعود "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " إلى الاسم "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " الوارد من تطبيق المستخدم، لأن ملفًا شخصيًا آخر هنا يحمل هذا الاسم. أعد تسمية ذلك الملف الشخصي أولًا، ثم امسح هذا مرة أخرى."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeHiddenNextSync": [
+    {
+      "type": 0,
+      "value": "يمكن أن يعود "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " في المرة التالية التي يُزامن فيها تطبيق "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "، إذا كانت ملفاته الشخصية لا تزال تتضمنه."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeHiddenWoken": [
+    {
+      "type": 0,
+      "value": "يمكن أن يعود "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " عند المزامنة التالية لتطبيق المستخدم، إذا كانت ملفاته الشخصية لا تزال تتضمنه. طُلب من هاتف "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " إجراء مزامنة."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeNextSync": [
+    {
+      "type": 0,
+      "value": "تم المسح. سيصل التغيير إلى تطبيق "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " في المزامنة التالية."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeWoken": [
+    {
+      "type": 0,
+      "value": "تم المسح. طُلب من هاتف "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " إجراء مزامنة."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.removedBy": [
+    {
+      "type": 0,
+      "value": "أزاله "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " في "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.replacedOwner": [
+    {
+      "type": 0,
+      "value": "استبدل هذا القيمة التي عيّنتها."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.setBy": [
+    {
+      "type": 0,
+      "value": "عيّنه "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " في "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.settled": [
+    {
+      "type": 0,
+      "value": "غيّر "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " هذا في "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "؛ لم تعد القيمة التي عيّنتها سارية."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.title": [
+    {
+      "type": 0,
+      "value": "تغييرات على هذا الخادم"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.inherited": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (موروث)"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.noPicture": [
+    {
+      "type": 0,
+      "value": "لا توجد صورة"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.none": [
+    {
+      "type": 0,
+      "value": "لا يوجد"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.off": [
+    {
+      "type": 0,
+      "value": "معطّل"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.on": [
+    {
+      "type": 0,
+      "value": "مفعّل"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.picture": [
+    {
+      "type": 0,
+      "value": "صورة مخصصة"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.pinNone": [
+    {
+      "type": 0,
+      "value": "لا يوجد رمز PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.pinSet": [
+    {
+      "type": 0,
+      "value": "رمز PIN معيّن"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.requestsAllowed": [
+    {
+      "type": 0,
+      "value": "مسموح بها"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.requestsBlocked": [
+    {
+      "type": 0,
+      "value": "محظورة"
     }
   ],
   "web.admin.users.detail.profiles.setPin": [
@@ -121808,6 +123379,144 @@
     {
       "type": 0,
       "value": "تعيين كلمة مرور"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.action": [
+    {
+      "type": 0,
+      "value": "إنشاء رابط تسجيل الدخول"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.actionHint": [
+    {
+      "type": 0,
+      "value": "عند فقدان كل الأجهزة"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.description": [
+    {
+      "type": 0,
+      "value": "رابط للاستخدام مرة واحدة لـ "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " إذا فقد كل أجهزته. يفتح صفحة تمنحه رمزًا لتطبيق Silo، أو تتيح له اختيار كلمة مرور. يعمل لمدة 24 ساعة، ويحل الرابط الجديد محل الرابط السابق."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailAction": [
+    {
+      "type": 0,
+      "value": "إرساله بالبريد الإلكتروني"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHint": [
+    {
+      "type": 0,
+      "value": "أنشئ الرابط لنسخه وإرساله بنفسك، أو أرسله بالبريد الإلكتروني إلى "
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHintNoAddress": [
+    {
+      "type": 0,
+      "value": "أنشئ الرابط، ثم انسخه وأرسله بنفسك. لا يوجد لهذا الحساب عنوان بريد إلكتروني لإرساله إليه."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHintNoMail": [
+    {
+      "type": 0,
+      "value": "أنشئ الرابط، ثم انسخه وأرسله بنفسك. أعدّ البريد الإلكتروني في الإعدادات لإرساله من هنا."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailSent": [
+    {
+      "type": 0,
+      "value": "أُرسل الرابط إلى "
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": ". تنتهي صلاحيته في "
+    },
+    {
+      "type": 1,
+      "value": "expires"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailUnconfirmed": [
+    {
+      "type": 0,
+      "value": "لم يؤكد خادم البريد التسليم. لا يزال الرابط أدناه يعمل: انسخه وأرسله بطريقة أخرى."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.failed": [
+    {
+      "type": 0,
+      "value": "تعذّر إنشاء رابط تسجيل الدخول."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.linkShare": [
+    {
+      "type": 0,
+      "value": "لا ترسل هذا الرابط إلا إلى "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": ". يمكن لأي شخص يملكه تسجيل الدخول إلى هذا الحساب حتى يُستخدم أو تنتهي صلاحيته في "
+    },
+    {
+      "type": 1,
+      "value": "expires"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.providerRequired": [
+    {
+      "type": 0,
+      "value": "تسجيل الدخول بكلمة المرور المحلية معطّل على هذا الخادم، لذا سيتجاوز رابط تسجيل الدخول مزود تسجيل الدخول الخاص به. اطلب من "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " تسجيل الدخول بالمزود على موقع هذا الخادم، ثم استخدام «فتح في Silo» في إعدادات الحساب."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.title": [
+    {
+      "type": 0,
+      "value": "رابط تسجيل الدخول لـ "
+    },
+    {
+      "type": 1,
+      "value": "username"
     }
   ],
   "web.audiobooks.chapter.fallbackTitle": [
@@ -124519,6 +126228,120 @@
       "value": "الموافقة على تسجيل الدخول"
     }
   ],
+  "web.auth.appCode.code": [
+    {
+      "type": 0,
+      "value": "الرمز"
+    }
+  ],
+  "web.auth.appCode.codeCopied": [
+    {
+      "type": 0,
+      "value": "تم نسخ الرمز"
+    }
+  ],
+  "web.auth.appCode.copyCode": [
+    {
+      "type": 0,
+      "value": "نسخ الرمز"
+    }
+  ],
+  "web.auth.appCode.copyFailed": [
+    {
+      "type": 0,
+      "value": "تعذّر نسخ الرمز. حدّده وانسخه يدويًا."
+    }
+  ],
+  "web.auth.appCode.expired": [
+    {
+      "type": 0,
+      "value": "انتهت صلاحية هذا الرمز."
+    }
+  ],
+  "web.auth.appCode.failed": [
+    {
+      "type": 0,
+      "value": "تعذّر على Silo إنشاء رمز. حاول مرة أخرى."
+    }
+  ],
+  "web.auth.appCode.instructions": [
+    {
+      "type": 0,
+      "value": "اضغط على «فتح Silo» للمتابعة في تطبيق Silo على هذا الجهاز. إذا لم يكن التطبيق مثبّتًا، فثبّته ثم عد إلى علامة التبويب هذه واضغط على «فتح Silo» مرة أخرى."
+    }
+  ],
+  "web.auth.appCode.noScanCode": [
+    {
+      "type": 0,
+      "value": "عنوان هذا الخادم أطول من أن يتسع له رمز المسح. اكتب عنوان الخادم والرمز في تطبيق Silo، أو انسخ الرمز والصقه هناك."
+    }
+  ],
+  "web.auth.appCode.open": [
+    {
+      "type": 0,
+      "value": "فتح Silo"
+    }
+  ],
+  "web.auth.appCode.renew": [
+    {
+      "type": 0,
+      "value": "الحصول على رمز جديد"
+    }
+  ],
+  "web.auth.appCode.scanCodeLabel": [
+    {
+      "type": 0,
+      "value": "رمز المسح لتطبيق Silo"
+    }
+  ],
+  "web.auth.appCode.scanCodeUnavailable": [
+    {
+      "type": 0,
+      "value": "لا يمكن عرض رمز مسح لهذا الخادم. اكتب عنوان الخادم والرمز في تطبيق Silo، أو انسخ الرمز والصقه هناك."
+    }
+  ],
+  "web.auth.appCode.scanHint": [
+    {
+      "type": 0,
+      "value": "امسح هذا الرمز بالماسح في تطبيق Silo، أو اكتب عنوان الخادم والرمز أدناه أو انسخهما."
+    }
+  ],
+  "web.auth.appCode.serverAddress": [
+    {
+      "type": 0,
+      "value": "عنوان الخادم"
+    }
+  ],
+  "web.auth.appCode.singleUse": [
+    {
+      "type": 0,
+      "value": "يعمل هذا الرمز مرة واحدة وتنتهي صلاحيته بعد بضع دقائق."
+    }
+  ],
+  "web.auth.appCode.title": [
+    {
+      "type": 0,
+      "value": "فتح Silo"
+    }
+  ],
+  "web.auth.appCode.typeInstructions": [
+    {
+      "type": 0,
+      "value": "في تطبيق Silo على هاتفك أو جهازك اللوحي، أضف هذا الخادم بعنوانه واكتب هذا الرمز لإنشاء حسابك. يمكن لأي شخص لديه الرمز الانضمام بدلًا منك، لذا لا تشاركه."
+    }
+  ],
+  "web.auth.appCode.typeTitle": [
+    {
+      "type": 0,
+      "value": "الانضمام بهذا الرمز"
+    }
+  ],
+  "web.auth.appCode.webLink": [
+    {
+      "type": 0,
+      "value": "الفتح عبر رابط siloserver.org بدلًا من ذلك"
+    }
+  ],
   "web.auth.card.rememberedIt": [
     {
       "type": 0,
@@ -124721,10 +126544,50 @@
       ]
     }
   ],
+  "web.auth.invite.appAccountEmail": [
+    {
+      "type": 0,
+      "value": "سيستخدم حسابك "
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.auth.invite.appContinue": [
+    {
+      "type": 0,
+      "value": "متابعة"
+    }
+  ],
+  "web.auth.invite.appEmailHint": [
+    {
+      "type": 0,
+      "value": "إذا أدخلت عنوان بريد إلكتروني، يمكن لهذا الخادم أن يرسل إليك رابط تسجيل الدخول إذا فقدت أجهزتك."
+    }
+  ],
   "web.auth.invite.appMissing": [
     {
       "type": 0,
       "value": "لم يحدث شيء؟ التطبيق غير مثبّت — تابع أدناه فحسب."
+    }
+  ],
+  "web.auth.invite.appProviderOnly": [
+    {
+      "type": 0,
+      "value": "يضيف "
+    },
+    {
+      "type": 1,
+      "value": "server"
+    },
+    {
+      "type": 0,
+      "value": " الأشخاص عبر مزود تسجيل الدخول الخاص به. سجل الدخول به على هذا الموقع، ثم افتح Silo من إعدادات حسابك."
     }
   ],
   "web.auth.invite.created": [
@@ -124753,6 +126616,18 @@
       "value": "أدخل عنوان بريدك الإلكتروني واختر كلمة مرور. ستسجل الدخول باستخدام عنوان بريدك الإلكتروني."
     }
   ],
+  "web.auth.invite.descriptionWithApp": [
+    {
+      "type": 0,
+      "value": "انضم باستخدام تطبيق Silo على هاتفك أو جهازك اللوحي، أو اختر كلمة مرور لتسجيل الدخول."
+    }
+  ],
+  "web.auth.invite.emailOptional": [
+    {
+      "type": 0,
+      "value": "البريد الإلكتروني (اختياري)"
+    }
+  ],
   "web.auth.invite.emailPlaceholder": [
     {
       "type": 0,
@@ -124773,6 +126648,18 @@
     {
       "type": 1,
       "value": "inviter"
+    }
+  ],
+  "web.auth.invite.joinWithApp": [
+    {
+      "type": 0,
+      "value": "الانضمام باستخدام تطبيق Silo"
+    }
+  ],
+  "web.auth.invite.joinWithAppInstead": [
+    {
+      "type": 0,
+      "value": "الانضمام باستخدام تطبيق Silo بدلًا من ذلك"
     }
   ],
   "web.auth.invite.loadFailed": [
@@ -124873,6 +126760,30 @@
     {
       "type": 0,
       "value": "الدعوة غير متاحة"
+    }
+  ],
+  "web.auth.invite.usePassword": [
+    {
+      "type": 0,
+      "value": "استخدام كلمة مرور بدلًا من ذلك"
+    }
+  ],
+  "web.auth.invite.usernameIsAddress": [
+    {
+      "type": 0,
+      "value": "يجب أن يكون اسم المستخدم الذي يحتوي على @ هو عنوان البريد الإلكتروني الذي تدخله أدناه."
+    }
+  ],
+  "web.auth.invite.usernameRequired": [
+    {
+      "type": 0,
+      "value": "اختر اسم مستخدم."
+    }
+  ],
+  "web.auth.invite.usernameTaken": [
+    {
+      "type": 0,
+      "value": "اسم المستخدم هذا مستخدم بالفعل. اختر اسمًا آخر."
     }
   ],
   "web.auth.languagePicker.label": [
@@ -125993,6 +127904,126 @@
     {
       "type": 0,
       "value": "تسجيل الدخول"
+    }
+  ],
+  "web.auth.signInLink.backToCode": [
+    {
+      "type": 0,
+      "value": "العودة إلى الرمز"
+    }
+  ],
+  "web.auth.signInLink.codeExpired": [
+    {
+      "type": 0,
+      "value": "اطلب من مسؤول هذا الخادم رابطًا جديدًا للحصول على رمز آخر."
+    }
+  ],
+  "web.auth.signInLink.documentTitle": [
+    {
+      "type": 0,
+      "value": "رابط تسجيل الدخول"
+    }
+  ],
+  "web.auth.signInLink.failed": [
+    {
+      "type": 0,
+      "value": "تعذّر على Silo فتح هذا الرابط. حاول مرة أخرى."
+    }
+  ],
+  "web.auth.signInLink.installFirst": [
+    {
+      "type": 0,
+      "value": "يعمل الرابط مرة واحدة، ويبقى الرمز صالحًا لبضع دقائق. ثبّت تطبيق Silo على هاتفك أو جهازك اللوحي أولًا، ثم اضغط على «متابعة»."
+    }
+  ],
+  "web.auth.signInLink.intro": [
+    {
+      "type": 0,
+      "value": "أرسل إليك أحد المسؤولين هذا الرابط لتتمكن من تسجيل الدخول مجددًا. تابع للحصول على رمز لتطبيق Silo، أو لاختيار كلمة مرور."
+    }
+  ],
+  "web.auth.signInLink.keepOpen": [
+    {
+      "type": 0,
+      "value": "أبقِ هذه الصفحة مفتوحة حتى تنتهي. لقد استُخدم الرابط، لذا فإن إعادة التحميل أو المغادرة تُفقدك ما منحك إياه."
+    }
+  ],
+  "web.auth.signInLink.leaveAction": [
+    {
+      "type": 0,
+      "value": "مغادرة"
+    }
+  ],
+  "web.auth.signInLink.leaveDescription": [
+    {
+      "type": 0,
+      "value": "لقد استُخدم الرابط. إذا غادرت، فسيضيع رمز تطبيق Silo وفرصة تعيين كلمة مرور، وستحتاج إلى رابط جديد."
+    }
+  ],
+  "web.auth.signInLink.leaveTitle": [
+    {
+      "type": 0,
+      "value": "هل تريد مغادرة هذه الصفحة؟"
+    }
+  ],
+  "web.auth.signInLink.noCodeAdministrator": [
+    {
+      "type": 0,
+      "value": "هذا حساب مسؤول، لذا يعيّن هذا الرابط كلمة مرور فقط. عيّن كلمة مرور، ثم سجل الدخول على موقع هذا الخادم، ثم افتح تطبيق Silo من إعدادات حسابك هناك."
+    }
+  ],
+  "web.auth.signInLink.noCodeAppKeysOff": [
+    {
+      "type": 0,
+      "value": "لا يمكن لتطبيق Silo تسجيل الدخول على هذا الخادم حاليًا، لذا يعيّن هذا الرابط كلمة مرور فقط."
+    }
+  ],
+  "web.auth.signInLink.passwordDescription": [
+    {
+      "type": 0,
+      "value": "يؤدي الحفظ إلى تسجيل خروج هذا الحساب من كل الأجهزة. الأجهزة المسجّلة الدخول بتطبيق Silo تعيد تسجيل الدخول تلقائيًا."
+    }
+  ],
+  "web.auth.signInLink.passwordSet": [
+    {
+      "type": 0,
+      "value": "تم حفظ كلمة المرور. سجل الدخول بها."
+    }
+  ],
+  "web.auth.signInLink.passwordSetLostDevices": [
+    {
+      "type": 0,
+      "value": "لا يزال بإمكان الأجهزة المفقودة التي استخدمت تطبيق Silo تسجيل الدخول حتى تزيلها. بعد تسجيل الدخول، أزلها من أجهزتك في إعدادات حسابك."
+    }
+  ],
+  "web.auth.signInLink.passwordTitle": [
+    {
+      "type": 0,
+      "value": "اختر كلمة مرور"
+    }
+  ],
+  "web.auth.signInLink.providerRequired": [
+    {
+      "type": 0,
+      "value": "يسجّل هذا الخادم دخول الأشخاص عبر مزود تسجيل الدخول الخاص به، لذا لا يعمل هذا الرابط. سجل الدخول عبر المزود بدلًا من ذلك."
+    }
+  ],
+  "web.auth.signInLink.setPasswordInstead": [
+    {
+      "type": 0,
+      "value": "تعيين كلمة مرور بدلًا من ذلك"
+    }
+  ],
+  "web.auth.signInLink.title": [
+    {
+      "type": 0,
+      "value": "استعد الوصول إلى حسابك"
+    }
+  ],
+  "web.auth.signInLink.unavailable": [
+    {
+      "type": 0,
+      "value": "هذا الرابط استُخدم بالفعل، أو استُبدل برابط أحدث، أو انتهت صلاحيته. اطلب رابطًا جديدًا من مسؤول هذا الخادم."
     }
   ],
   "web.auth.signup.closed": [
@@ -177612,7 +179643,7 @@
   "web.settings.account.password.signOutOthersDescription": [
     {
       "type": 0,
-      "value": "يجب على المتصفحات والتطبيقات الأخرى تسجيل الدخول مجددًا بكلمة المرور الجديدة. يبقى هذا المتصفح مسجّل الدخول، وتستمر مفاتيح API في العمل."
+      "value": "يتم تسجيل الخروج من المتصفحات والتطبيقات الأخرى. يبقى هذا المتصفح مسجّل الدخول، وتستمر مفاتيح API في العمل."
     }
   ],
   "web.settings.account.password.title": [
@@ -178517,6 +180548,500 @@
     {
       "type": 0,
       "value": "كيفية استخدام هذا المفتاح"
+    }
+  ],
+  "web.settings.appKeys.actionFailed": [
+    {
+      "type": 0,
+      "value": "تعذّر إجراء هذا التغيير. حاول مرة أخرى."
+    }
+  ],
+  "web.settings.appKeys.approveMainOnly": [
+    {
+      "type": 0,
+      "value": "لا يمكن إلا للملف الشخصي الرئيسي للأسرة الموافقة على جهاز. بدّل إليه للموافقة."
+    }
+  ],
+  "web.settings.appKeys.approved": [
+    {
+      "type": 0,
+      "value": "تمت الموافقة على "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.confirm.approve": [
+    {
+      "type": 0,
+      "value": "الموافقة على الجهاز"
+    }
+  ],
+  "web.settings.appKeys.confirm.approveDescription": [
+    {
+      "type": 0,
+      "value": "سيتمكن "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " من تسجيل الدخول إلى حسابك باستخدام تطبيق Silo حتى تزيله. وافق عليه فقط إذا كنت قد أعددته للتو."
+    }
+  ],
+  "web.settings.appKeys.confirm.approveTitle": [
+    {
+      "type": 0,
+      "value": "الموافقة على "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "؟"
+    }
+  ],
+  "web.settings.appKeys.confirm.deny": [
+    {
+      "type": 0,
+      "value": "رفض الجهاز"
+    }
+  ],
+  "web.settings.appKeys.confirm.denyDescription": [
+    {
+      "type": 0,
+      "value": "لن يتمكن "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " من تسجيل الدخول إلى حسابك. إذا كان جهازك، فأضفه مجددًا في تطبيق Silo."
+    }
+  ],
+  "web.settings.appKeys.confirm.denyTitle": [
+    {
+      "type": 0,
+      "value": "رفض "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "؟"
+    }
+  ],
+  "web.settings.appKeys.confirm.remove": [
+    {
+      "type": 0,
+      "value": "إزالة الجهاز"
+    }
+  ],
+  "web.settings.appKeys.confirm.removeDescription": [
+    {
+      "type": 0,
+      "value": "تؤدي إزالة "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " إلى تسجيل خروجه الآن وإيقاف مفتاحه: لن يتمكن من تسجيل الدخول به مجددًا. لاستخدامه مرة أخرى، أضفه مجددًا في تطبيق Silo."
+    }
+  ],
+  "web.settings.appKeys.confirm.removeTitle": [
+    {
+      "type": 0,
+      "value": "إزالة "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "؟"
+    }
+  ],
+  "web.settings.appKeys.confirm.withdraw": [
+    {
+      "type": 0,
+      "value": "سحب الموافقة"
+    }
+  ],
+  "web.settings.appKeys.confirm.withdrawDescription": [
+    {
+      "type": 0,
+      "value": "لن يتمكن "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " من استخدام هذه الموافقة لتسجيل الدخول إلى حسابك."
+    }
+  ],
+  "web.settings.appKeys.confirm.withdrawTitle": [
+    {
+      "type": 0,
+      "value": "سحب الموافقة على "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "؟"
+    }
+  ],
+  "web.settings.appKeys.confirm.working": [
+    {
+      "type": 0,
+      "value": "جارٍ الحفظ…"
+    }
+  ],
+  "web.settings.appKeys.denied": [
+    {
+      "type": 0,
+      "value": "تم رفض "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.description": [
+    {
+      "type": 0,
+      "value": "الأجهزة والتطبيقات التي تسجّل الدخول إلى حسابك باستخدام تطبيق Silo، دون كلمة مرور."
+    }
+  ],
+  "web.settings.appKeys.devices.title": [
+    {
+      "type": 0,
+      "value": "الأجهزة"
+    }
+  ],
+  "web.settings.appKeys.empty": [
+    {
+      "type": 0,
+      "value": "لا توجد أجهزة تستخدم تطبيق Silo على حسابك."
+    }
+  ],
+  "web.settings.appKeys.footnote": [
+    {
+      "type": 0,
+      "value": "تؤدي إزالة جهاز إلى تسجيل خروجه وإيقاف عمل مفتاحه. لا يزيل تسجيل الخروج من جلسة الجهاز: إذ يعيد تسجيل الدخول بمفتاحه."
+    }
+  ],
+  "web.settings.appKeys.loadFailed": [
+    {
+      "type": 0,
+      "value": "تعذّر تحميل أجهزتك."
+    }
+  ],
+  "web.settings.appKeys.loading": [
+    {
+      "type": 0,
+      "value": "جارٍ تحميل الأجهزة…"
+    }
+  ],
+  "web.settings.appKeys.off": [
+    {
+      "type": 0,
+      "value": "تسجيل الدخول عبر تطبيق Silo معطّل على هذا الخادم، لذا لا يمكن لهذه الأجهزة تسجيل الدخول ولا يمكن الموافقة على الأجهزة المنتظرة. لا يزال بإمكانك إزالتها."
+    }
+  ],
+  "web.settings.appKeys.personKey.description": [
+    {
+      "type": 0,
+      "value": "يستخدم تطبيق Silo هذا المفتاح لإضافة أجهزتك الجديدة. تاريخ الإعداد: "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.settings.appKeys.personKey.none": [
+    {
+      "type": 0,
+      "value": "لا يوجد مفتاح حساب. سيُعدّ تطبيق Silo مفتاحًا في المرة التالية التي تضيف فيها جهازًا وأنت مسجّل الدخول."
+    }
+  ],
+  "web.settings.appKeys.personKey.title": [
+    {
+      "type": 0,
+      "value": "مفتاح الحساب"
+    }
+  ],
+  "web.settings.appKeys.pinDescription": [
+    {
+      "type": 0,
+      "value": "أدخل PIN الملف الشخصي الرئيسي للموافقة على هذا الجهاز."
+    }
+  ],
+  "web.settings.appKeys.preapprovals.description": [
+    {
+      "type": 0,
+      "value": "عمليات تسجيل دخول وافقت عليها لجهاز لم يتصل بعد."
+    }
+  ],
+  "web.settings.appKeys.preapprovals.loadFailed": [
+    {
+      "type": 0,
+      "value": "تعذّر تحميل عمليات تسجيل الدخول الموافق عليها مسبقًا."
+    }
+  ],
+  "web.settings.appKeys.preapprovals.title": [
+    {
+      "type": 0,
+      "value": "الموافقة المسبقة"
+    }
+  ],
+  "web.settings.appKeys.refreshLabel": [
+    {
+      "type": 0,
+      "value": "تحديث أجهزة تطبيق Silo"
+    }
+  ],
+  "web.settings.appKeys.removed": [
+    {
+      "type": 0,
+      "value": "تمت إزالة "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.row.allowedBy": [
+    {
+      "type": 0,
+      "value": "سمح به "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "web.settings.appKeys.row.approve": [
+    {
+      "type": 0,
+      "value": "موافقة"
+    }
+  ],
+  "web.settings.appKeys.row.approveLabel": [
+    {
+      "type": 0,
+      "value": "الموافقة على "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.row.deny": [
+    {
+      "type": 0,
+      "value": "رفض"
+    }
+  ],
+  "web.settings.appKeys.row.denyLabel": [
+    {
+      "type": 0,
+      "value": "رفض "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.row.enrolledFrom": [
+    {
+      "type": 0,
+      "value": "من "
+    },
+    {
+      "type": 1,
+      "value": "address"
+    }
+  ],
+  "web.settings.appKeys.row.identityGone": [
+    {
+      "type": 0,
+      "value": "يتعذّر تسجيل الدخول: لم يعد حساب مزود تسجيل الدخول الخاص به مرتبطًا"
+    }
+  ],
+  "web.settings.appKeys.row.kindApp": [
+    {
+      "type": 0,
+      "value": "تطبيق آخر"
+    }
+  ],
+  "web.settings.appKeys.row.kindDevice": [
+    {
+      "type": 0,
+      "value": "تطبيق Silo"
+    }
+  ],
+  "web.settings.appKeys.row.lastUsed": [
+    {
+      "type": 0,
+      "value": "آخر تسجيل دخول: "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.settings.appKeys.row.notUsed": [
+    {
+      "type": 0,
+      "value": "لم يسجّل الدخول بمفتاحه بعد"
+    }
+  ],
+  "web.settings.appKeys.row.preapproval": [
+    {
+      "type": 0,
+      "value": "موافق عليه مسبقًا · تنتهي الصلاحية: "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.settings.appKeys.row.provider": [
+    {
+      "type": 0,
+      "value": "تم التحقق عبر مزود تسجيل الدخول"
+    }
+  ],
+  "web.settings.appKeys.row.remove": [
+    {
+      "type": 0,
+      "value": "إزالة"
+    }
+  ],
+  "web.settings.appKeys.row.removeLabel": [
+    {
+      "type": 0,
+      "value": "إزالة "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.row.viaAppCode": [
+    {
+      "type": 0,
+      "value": "أُضيف باستخدام رمز لمرة واحدة من صفحة الويب الخاصة بالخادم"
+    }
+  ],
+  "web.settings.appKeys.row.viaPersonKey": [
+    {
+      "type": 0,
+      "value": "أضافه تطبيق Silo على جهاز آخر"
+    }
+  ],
+  "web.settings.appKeys.row.viaSession": [
+    {
+      "type": 0,
+      "value": "أُضيف أثناء تسجيل الدخول"
+    }
+  ],
+  "web.settings.appKeys.row.waitingUntil": [
+    {
+      "type": 0,
+      "value": "في انتظار الموافقة حتى "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.settings.appKeys.row.withdraw": [
+    {
+      "type": 0,
+      "value": "سحب"
+    }
+  ],
+  "web.settings.appKeys.row.withdrawLabel": [
+    {
+      "type": 0,
+      "value": "سحب الموافقة على "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.signsBackIn": [
+    {
+      "type": 0,
+      "value": "تعيد الأجهزة المسجّل دخولها عبر تطبيق Silo تسجيل الدخول تلقائيًا. "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "أزل الجهاز"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " لإيقاف ذلك."
+    }
+  ],
+  "web.settings.appKeys.title": [
+    {
+      "type": 0,
+      "value": "أجهزة تطبيق Silo"
+    }
+  ],
+  "web.settings.appKeys.unavailable": [
+    {
+      "type": 0,
+      "value": "تسجيل الدخول عبر تطبيق Silo غير متاح على هذا الخادم، لذا لا يمكن لهذه الأجهزة تسجيل الدخول. لا يزال بإمكانك إزالتها."
+    }
+  ],
+  "web.settings.appKeys.waiting.description": [
+    {
+      "type": 0,
+      "value": "طلب جهاز جديد تسجيل الدخول إلى حسابك باستخدام تطبيق Silo. وافق عليه فقط إذا كنت قد أعددته للتو."
+    }
+  ],
+  "web.settings.appKeys.waiting.title": [
+    {
+      "type": 0,
+      "value": "في انتظار موافقتك"
+    }
+  ],
+  "web.settings.appKeys.withdrawn": [
+    {
+      "type": 0,
+      "value": "تم سحب الموافقة"
     }
   ],
   "web.settings.cardOverlay.adjust": [
@@ -184475,6 +187000,54 @@
       "value": "أنت غير متصل بالإنترنت، لذا لم يُحفظ هذا التغيير"
     }
   ],
+  "web.settings.openInSilo.action": [
+    {
+      "type": 0,
+      "value": "الحصول على رمز لتطبيق Silo"
+    }
+  ],
+  "web.settings.openInSilo.codeInstructions": [
+    {
+      "type": 0,
+      "value": "في تطبيق Silo على هاتفك أو جهازك اللوحي، أضف هذا الخادم بعنوانه واكتب هذا الرمز. يمكن لأي شخص لديه الرمز تسجيل الدخول إلى هذا الحساب، لذا لا تشاركه."
+    }
+  ],
+  "web.settings.openInSilo.codeTitle": [
+    {
+      "type": 0,
+      "value": "رمز تطبيق Silo"
+    }
+  ],
+  "web.settings.openInSilo.description": [
+    {
+      "type": 0,
+      "value": "سجّل الدخول إلى هذا الحساب في تطبيق Silo على هاتفك أو جهازك اللوحي، دون كلمة مرور."
+    }
+  ],
+  "web.settings.openInSilo.loadFailed": [
+    {
+      "type": 0,
+      "value": "تعذّر التحقق مما إذا كان بإمكان هذا المتصفح الحصول على رمز لتطبيق Silo."
+    }
+  ],
+  "web.settings.openInSilo.mainProfileOnly": [
+    {
+      "type": 0,
+      "value": "لا يمكن إلا للملف الشخصي الرئيسي للأسرة الحصول على رمز لتطبيق Silo. بدّل إليه وحاول مرة أخرى."
+    }
+  ],
+  "web.settings.openInSilo.pinDescription": [
+    {
+      "type": 0,
+      "value": "أدخل PIN الملف الشخصي الرئيسي للحصول على رمز لتطبيق Silo."
+    }
+  ],
+  "web.settings.openInSilo.title": [
+    {
+      "type": 0,
+      "value": "تطبيق Silo"
+    }
+  ],
   "web.settings.overlays.accent.amber": [
     {
       "type": 0,
@@ -188034,6 +190607,12 @@
       "value": "تسجيل الدخول"
     }
   ],
+  "web.settings.sessions.row.signsBackIn": [
+    {
+      "type": 0,
+      "value": "يعيد هذا الجهاز تسجيل الدخول تلقائيًا"
+    }
+  ],
   "web.settings.sessions.row.summary": [
     {
       "type": 8,
@@ -188120,6 +190699,24 @@
     {
       "type": 0,
       "value": "الإعدادات"
+    }
+  ],
+  "web.settings.signInAgain.action": [
+    {
+      "type": 0,
+      "value": "إعادة تسجيل الدخول"
+    }
+  ],
+  "web.settings.signInAgain.manageDevices": [
+    {
+      "type": 0,
+      "value": "سجّل الدخول مجددًا لإدارة أجهزتك"
+    }
+  ],
+  "web.settings.signInAgain.useApp": [
+    {
+      "type": 0,
+      "value": "أدر أجهزتك في تطبيق Silo."
     }
   ],
   "web.settings.signedInSessions.loadFailed": [

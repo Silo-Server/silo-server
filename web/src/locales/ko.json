@@ -215,6 +215,12 @@
       "value": "이미 이 계정에 연결되어 있어요."
     }
   ],
+  "error.app_code_invalid": [
+    {
+      "type": 0,
+      "value": "알 수 없거나 이미 사용했거나 만료된 코드예요. 서버 페이지에서 새 코드를 받으세요."
+    }
+  ],
   "error.authentication_required": [
     {
       "type": 0,
@@ -333,6 +339,12 @@
     {
       "type": 0,
       "value": "값의 유형이 올바르지 않아요."
+    }
+  ],
+  "error.field.key_enrolled": [
+    {
+      "type": 0,
+      "value": "이 키는 이미 이 서버에서 사용 중이에요."
     }
   ],
   "error.field.malformed_form": [
@@ -2496,6 +2508,30 @@
     {
       "type": 0,
       "value": "자동"
+    }
+  ],
+  "settingsManifest.playback.connection_path.description": [
+    {
+      "type": 0,
+      "value": "직접 연결만 옵션에서도 로컬 네트워크 연결을 사용할 수 있으면 그대로 사용해요."
+    }
+  ],
+  "settingsManifest.playback.connection_path.label": [
+    {
+      "type": 0,
+      "value": "연결 경로"
+    }
+  ],
+  "settingsManifest.playback.connection_path.option.automatic": [
+    {
+      "type": 0,
+      "value": "자동"
+    }
+  ],
+  "settingsManifest.playback.connection_path.option.direct_only": [
+    {
+      "type": 0,
+      "value": "직접 연결만"
     }
   ],
   "settingsManifest.playback.intro_skip_mode.description": [
@@ -21552,6 +21588,87 @@
       }
     }
   ],
+  "web.admin.common.adminUserSignIn.unlinkConfirm.text": [
+    {
+      "type": 5,
+      "value": "last_way",
+      "options": {
+        "yes": {
+          "value": [
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " 계정은 더 이상 이 제공자 계정으로 로그인할 수 없어요. 비밀번호를 설정하거나 제공자를 다시 연결할 때까지 "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " 계정은 로그인할 수 없어요."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " 계정은 더 이상 이 제공자 계정으로 로그인할 수 없어요."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 5,
+      "value": "keys",
+      "options": {
+        "yes": {
+          "value": [
+            {
+              "type": 0,
+              "value": " 이 제공자 계정에 연결된 "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": "님의 Silo 앱 키가 제거되고, 해당 기기는 로그아웃돼요."
+            }
+          ]
+        },
+        "unknown": {
+          "value": [
+            {
+              "type": 0,
+              "value": " 이 제공자 계정에 연결된 "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": "님의 Silo 앱 키가 있으면 모두 제거되고, 해당 기기는 로그아웃돼요."
+            }
+          ]
+        },
+        "other": {
+          "value": []
+        }
+      }
+    }
+  ],
   "web.admin.common.adminUserSignIn.unlinkConfirm.title": [
     {
       "type": 1,
@@ -23668,6 +23785,18 @@
     {
       "type": 0,
       "value": "탐색할 때 플레이어에 표시되는 썸네일을 설정된 공개 에셋 저장소에 만들어요. 파일은 백그라운드에서 낮은 우선순위로 처리돼요. 이 옵션을 끄면 라이브러리의 미리보기가 삭제돼요."
+    }
+  ],
+  "web.admin.common.libraryEditor.advanced.trickplayGenerate": [
+    {
+      "type": 0,
+      "value": "없는 미리보기를 FFmpeg으로 생성"
+    }
+  ],
+  "web.admin.common.libraryEditor.advanced.trickplayGenerateDescription": [
+    {
+      "type": 0,
+      "value": "미디어 파일 옆에 있는 기존 .trickplay 및 .bif 사이드카 파일을 먼저 사용해요. 사이드카 파일만 가져오고 FFmpeg 생성을 건너뛰려면 끄세요."
     }
   ],
   "web.admin.common.libraryEditor.advanced.trickplayUnavailable": [
@@ -27286,6 +27415,32 @@
       "value": "관리자 사용자"
     }
   ],
+  "web.admin.common.trickplay.badge.awaitingSidecarCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "사이드카 대기 중 "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "개"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.common.trickplay.badge.detail": [
     {
       "type": 0,
@@ -27380,6 +27535,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.common.trickplay.badge.sidecarsOnly": [
+    {
+      "type": 0,
+      "value": "사이드카만"
     }
   ],
   "web.admin.common.trickplay.badge.srDetail": [
@@ -27524,6 +27685,42 @@
     {
       "type": 0,
       "value": "새 미리보기가 준비될 때까지 플레이어는 현재 미리보기를 계속 사용해요."
+    }
+  ],
+  "web.admin.common.trickplay.sidecarStatus.awaiting_sidecar": [
+    {
+      "type": 0,
+      "value": "사이드카 대기 중"
+    }
+  ],
+  "web.admin.common.trickplay.sidecarStatus.sidecar_invalid": [
+    {
+      "type": 0,
+      "value": "잘못된 사이드카"
+    }
+  ],
+  "web.admin.common.trickplay.sidecarStatus.sidecar_stale": [
+    {
+      "type": 0,
+      "value": "오래된 사이드카"
+    }
+  ],
+  "web.admin.common.trickplay.source.generated": [
+    {
+      "type": 0,
+      "value": "생성됨"
+    }
+  ],
+  "web.admin.common.trickplay.source.sidecar_bif": [
+    {
+      "type": 0,
+      "value": "사이드카 (.bif)"
+    }
+  ],
+  "web.admin.common.trickplay.source.sidecar_trickplay": [
+    {
+      "type": 0,
+      "value": "사이드카 (.trickplay)"
     }
   ],
   "web.admin.common.trickplay.state.off": [
@@ -29154,7 +29351,7 @@
     },
     {
       "type": 0,
-      "value": "의 로그인 세션 하나를 종료해요. 다른 기기는 로그인 상태로 유지돼요. 클라이언트는 계정 비밀번호로 다시 로그인할 수 있어요."
+      "value": "의 로그인 세션 하나를 종료해요. 다른 기기는 로그인 상태로 유지돼요. 클라이언트는 다시 로그인할 수 있어요."
     }
   ],
   "web.admin.dashboard.widgets.apiClients.confirmLabel": [
@@ -39135,6 +39332,12 @@
       "value": "프로필"
     }
   ],
+  "web.admin.history.column.progress": [
+    {
+      "type": 0,
+      "value": "진행률"
+    }
+  ],
   "web.admin.history.column.status": [
     {
       "type": 0,
@@ -39169,6 +39372,12 @@
     {
       "type": 0,
       "value": "세션 로그"
+    }
+  ],
+  "web.admin.history.detail.backToPlay": [
+    {
+      "type": 0,
+      "value": "통합 재생으로 돌아가기"
     }
   ],
   "web.admin.history.detail.column.delivered": [
@@ -39279,6 +39488,12 @@
       "value": "시청 시간"
     }
   ],
+  "web.admin.history.detail.inspectSitting": [
+    {
+      "type": 0,
+      "value": "자세히 보기"
+    }
+  ],
   "web.admin.history.detail.keyboardHint": [
     {
       "type": 0,
@@ -39363,6 +39578,12 @@
       "value": "다이렉트 재생되지 않은 이유"
     }
   ],
+  "web.admin.history.detail.section.sessions": [
+    {
+      "type": 0,
+      "value": "이 재생의 세션"
+    }
+  ],
   "web.admin.history.detail.section.streams": [
     {
       "type": 0,
@@ -39373,6 +39594,78 @@
     {
       "type": 0,
       "value": "시간 및 시청 진행률"
+    }
+  ],
+  "web.admin.history.detail.sessionsCapped": [
+    {
+      "type": 0,
+      "value": "이 재생의 세션 "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "개 중 처음 "
+    },
+    {
+      "type": 1,
+      "value": "shown"
+    },
+    {
+      "type": 0,
+      "value": "개를 표시하고 있어요."
+    }
+  ],
+  "web.admin.history.detail.sessionsNotice": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "이 재생은 "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "개 세션으로 이루어져 있어요. 아래의 스트림, 기기 및 경로 세부 정보는 기본 세션 기준이에요. 세션을 개별적으로 확인하려면 아래에서 선택하세요."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.ended": [
+    {
+      "type": 0,
+      "value": "종료"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.method": [
+    {
+      "type": 0,
+      "value": "방식"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.started": [
+    {
+      "type": 0,
+      "value": "시작"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.watched": [
+    {
+      "type": 0,
+      "value": "시청 시간"
     }
   ],
   "web.admin.history.detail.subtitlesBurnIn": [
@@ -39601,6 +39894,12 @@
       "value": "모든 네트워크"
     }
   ],
+  "web.admin.history.filter.allMediaTypes": [
+    {
+      "type": 0,
+      "value": "모든 미디어"
+    }
+  ],
   "web.admin.history.filter.allMethods": [
     {
       "type": 0,
@@ -39637,6 +39936,24 @@
       "value": "완료"
     }
   ],
+  "web.admin.history.filter.episodes": [
+    {
+      "type": 0,
+      "value": "에피소드"
+    }
+  ],
+  "web.admin.history.filter.hideShort": [
+    {
+      "type": 0,
+      "value": "30초 미만 숨기기"
+    }
+  ],
+  "web.admin.history.filter.hideShortTitle": [
+    {
+      "type": 0,
+      "value": "30초 미만의 미완료 세션 숨기기"
+    }
+  ],
   "web.admin.history.filter.locationLocal": [
     {
       "type": 0,
@@ -39647,6 +39964,12 @@
     {
       "type": 0,
       "value": "원격"
+    }
+  ],
+  "web.admin.history.filter.movies": [
+    {
+      "type": 0,
+      "value": "영화"
     }
   ],
   "web.admin.history.filter.partial": [
@@ -39816,6 +40139,12 @@
       "value": "최근 재생"
     }
   ],
+  "web.admin.history.row.burnInBadgeTitle": [
+    {
+      "type": 0,
+      "value": "자막이 비디오에 번인됨"
+    }
+  ],
   "web.admin.history.row.completed": [
     {
       "type": 0,
@@ -39836,6 +40165,28 @@
     {
       "type": 0,
       "value": "추정값(정확한 시청 시간 측정 전에 기록됨)"
+    }
+  ],
+  "web.admin.history.row.groupedSessionsTitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "개 세션 통합"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.history.row.meta": [
@@ -39868,6 +40219,12 @@
       "value": "일부"
     }
   ],
+  "web.admin.history.row.progressLabel": [
+    {
+      "type": 0,
+      "value": "재생 진행률"
+    }
+  ],
   "web.admin.history.row.started": [
     {
       "type": 1,
@@ -39878,16 +40235,80 @@
       "value": " 시작"
     }
   ],
+  "web.admin.history.stats.accountsCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "개 계정"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.history.stats.completed": [
     {
       "type": 0,
       "value": "완료"
     }
   ],
+  "web.admin.history.stats.completionBreakdown": [
+    {
+      "type": 0,
+      "value": "완료 "
+    },
+    {
+      "type": 1,
+      "value": "completed"
+    },
+    {
+      "type": 0,
+      "value": " · 일부 "
+    },
+    {
+      "type": 1,
+      "value": "partial"
+    }
+  ],
   "web.admin.history.stats.partial": [
     {
       "type": 0,
       "value": "일부"
+    }
+  ],
+  "web.admin.history.stats.totalPlays": [
+    {
+      "type": 0,
+      "value": "총 재생 수"
+    }
+  ],
+  "web.admin.history.stats.totalSessions": [
+    {
+      "type": 0,
+      "value": "총 세션 수"
+    }
+  ],
+  "web.admin.history.stats.uniqueProfiles": [
+    {
+      "type": 0,
+      "value": "고유 프로필"
+    }
+  ],
+  "web.admin.history.stats.uniqueTitles": [
+    {
+      "type": 0,
+      "value": "고유 작품"
     }
   ],
   "web.admin.history.stats.visibleRows": [
@@ -39906,6 +40327,24 @@
     {
       "type": 0,
       "value": "재생 기록"
+    }
+  ],
+  "web.admin.history.view.label": [
+    {
+      "type": 0,
+      "value": "기록 보기"
+    }
+  ],
+  "web.admin.history.view.plays": [
+    {
+      "type": 0,
+      "value": "재생"
+    }
+  ],
+  "web.admin.history.view.sessions": [
+    {
+      "type": 0,
+      "value": "모든 세션"
     }
   ],
   "web.admin.historyImport.conflict.message": [
@@ -79292,6 +79731,218 @@
       "value": "개 모두 표시"
     }
   ],
+  "web.admin.users.detail.appKeys.confirm.denyDescription": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " 기기는 "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "님의 계정에 로그인할 수 없게 돼요. 본인의 기기였다면 Silo 앱에서 다시 추가하면 돼요."
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKey": [
+    {
+      "type": 0,
+      "value": "키 제거"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKeyDescription": [
+    {
+      "type": 0,
+      "value": "이미 로그인한 기기는 제거할 때까지 계속 작동해요. 이 키로는 새 기기를 추가할 수 없고, 이 키로 추가되어 아직 대기 중인 기기는 거부돼요. "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "님이 로그인한 상태에서 다음에 기기를 추가하면 Silo 앱이 새 키를 설정해요."
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKeyTitle": [
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "님의 계정 키를 제거할까요?"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.removeDescription": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " 기기를 제거하면 지금 "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "님의 계정에서 로그아웃되고 키가 중지되어, 이 키로 다시 로그인할 수 없어요. 다시 사용하려면 "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "님이 Silo 앱에서 기기를 다시 추가해야 해요."
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.withdrawDescription": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " 기기는 이 승인으로 "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "님의 계정에 로그인할 수 없게 돼요."
+    }
+  ],
+  "web.admin.users.detail.appKeys.description": [
+    {
+      "type": 0,
+      "value": "비밀번호 없이 Silo 앱으로 "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "님의 계정에 로그인하는 기기와 앱이에요."
+    }
+  ],
+  "web.admin.users.detail.appKeys.empty": [
+    {
+      "type": 0,
+      "value": "이 계정에서 Silo 앱을 사용하는 기기가 없어요."
+    }
+  ],
+  "web.admin.users.detail.appKeys.loadFailed": [
+    {
+      "type": 0,
+      "value": "기기를 불러올 수 없어요."
+    }
+  ],
+  "web.admin.users.detail.appKeys.off": [
+    {
+      "type": 0,
+      "value": "이 서버에서 Silo 앱 로그인이 꺼져 있어서 이 기기는 로그인할 수 없어요. 그래도 제거할 수는 있어요."
+    }
+  ],
+  "web.admin.users.detail.appKeys.ownerOnly": [
+    {
+      "type": 0,
+      "value": "다른 관리자나 소유자의 기기는 서버 소유자만 변경할 수 있어요."
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.description": [
+    {
+      "type": 0,
+      "value": "Silo 앱은 이 키로 "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "님의 새 기기를 추가해요. 설정 일시: "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.none": [
+    {
+      "type": 0,
+      "value": "계정 키가 없어요. "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "님이 로그인한 상태에서 다음에 기기를 추가하면 Silo 앱이 키를 설정해요."
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.remove": [
+    {
+      "type": 0,
+      "value": "계정 키 제거"
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKeyRemoved": [
+    {
+      "type": 0,
+      "value": "계정 키를 제거했어요"
+    }
+  ],
+  "web.admin.users.detail.appKeys.preapprovals.description": [
+    {
+      "type": 0,
+      "value": "아직 연결되지 않은 기기에 대해 "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "님이 미리 승인한 로그인이에요."
+    }
+  ],
+  "web.admin.users.detail.appKeys.waiting.description": [
+    {
+      "type": 0,
+      "value": "관리자 계정의 새 기기는 "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "님이 로그인된 기기에서 승인할 때까지 대기해요. 여기에서 거부할 수 있어요."
+    }
+  ],
+  "web.admin.users.detail.appKeys.waiting.title": [
+    {
+      "type": 0,
+      "value": "승인 대기 중"
+    }
+  ],
   "web.admin.users.detail.common.allProfiles": [
     {
       "type": 0,
@@ -82508,6 +83159,12 @@
       "value": "이 계정은 프로필 한도에 도달했어요"
     }
   ],
+  "web.admin.users.detail.profiles.badge.changedHere": [
+    {
+      "type": 0,
+      "value": "여기에서 변경됨"
+    }
+  ],
   "web.admin.users.detail.profiles.badge.kids": [
     {
       "type": 0,
@@ -82697,6 +83354,620 @@
     {
       "type": 0,
       "value": "PIN 저장"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowAgain": [
+    {
+      "type": 0,
+      "value": "다시 허용"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowAgainAria": [
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " 프로필이 이 서버에 다시 추가되도록 허용"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowDescription": [
+    {
+      "type": 0,
+      "value": "앱의 프로필에 여전히 "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " 프로필이 있고 이 계정에 프로필을 더 추가할 수 있으면, 다음 동기화 때 앱이 "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " 프로필을 다시 추가할 수 있어요. 이 서버의 기록이 없는 새 프로필로 추가돼요."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowTitle": [
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " 프로필을 다시 허용할까요?"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.alreadyCleared": [
+    {
+      "type": 0,
+      "value": "이미 지워진 변경이거나 "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "님이 다시 변경했어요. 목록은 최신 상태예요."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedBy": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "님이 "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "에 변경"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedSinceOpened": [
+    {
+      "type": 0,
+      "value": "연 후에 이 변경이 업데이트되어 아무것도 지우지 않았어요. 목록에서 다시 확인한 후 필요하면 지우세요."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedWhileRunning": [
+    {
+      "type": 0,
+      "value": "실행 중에 프로필이 변경되어 아무것도 변경하지 않았어요. 목록은 최신 상태예요. 필요하면 다시 시도해 주세요."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clear": [
+    {
+      "type": 0,
+      "value": "지우기"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearAndRemovePin": [
+    {
+      "type": 0,
+      "value": "지우고 PIN 제거"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearAria": [
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " 프로필의 "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " 변경 지우기"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearFailed": [
+    {
+      "type": 0,
+      "value": "변경을 지울 수 없어요."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearInherit": [
+    {
+      "type": 0,
+      "value": "앱의 요청에 따라 "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " 프로필의 "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " 항목은 지금 상속되는 값으로 돌아가요. 앱의 변경 사항이 다시 적용돼요."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearLater": [
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " 항목은 앱에서 다음에 값을 보낼 때까지 그대로 유지돼요. 그 후에는 앱의 변경 사항이 다시 적용돼요."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearNow": [
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " 프로필은 지금 앱의 값으로 돌아가고, 앱의 변경 사항이 다시 적용돼요."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearNowValue": [
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " 프로필의 "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " 항목이 지금 앱의 값("
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": ")으로 돌아가요. 앱의 변경 사항이 다시 적용돼요."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearPin": [
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " 프로필은 앱에서 다음에 PIN을 보낼 때까지 설정한 PIN을 유지해요. 그 후에는 앱의 변경 사항이 다시 적용돼요."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearPinRemoves": [
+    {
+      "type": 0,
+      "value": "앱에서 "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " 프로필을 PIN 없이 보내므로, 지우면 설정한 PIN이 지금 제거돼요. 그러면 이 계정을 사용하는 누구나 PIN 없이 "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " 프로필을 열 수 있어요."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearTitle": [
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " 프로필의 "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " 변경을 지울까요?"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.deletedAccount": [
+    {
+      "type": 0,
+      "value": "삭제된 계정"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.description": [
+    {
+      "type": 0,
+      "value": "이 프로필은 "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "님의 앱에서 가져온 거예요. 여기에서 변경한 내용은 지울 때까지 이 서버에 유지돼요. 잠금은 아니어서 "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "님도 여기에서 같은 항목을 변경할 수 있어요."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismiss": [
+    {
+      "type": 0,
+      "value": "닫기"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismissAria": [
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " 프로필의 "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " 관련 알림 닫기"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismissFailed": [
+    {
+      "type": 0,
+      "value": "알림을 닫을 수 없어요."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.isChild": [
+    {
+      "type": 0,
+      "value": "어린이 프로필"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.maxAdvisoryAge": [
+    {
+      "type": 0,
+      "value": "연령 제한"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.maxContentRating": [
+    {
+      "type": 0,
+      "value": "관람 등급 제한"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.name": [
+    {
+      "type": 0,
+      "value": "이름"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.picture": [
+    {
+      "type": 0,
+      "value": "사진"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.pin": [
+    {
+      "type": 0,
+      "value": "PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.requests": [
+    {
+      "type": 0,
+      "value": "요청"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.requireAdvisoryAge": [
+    {
+      "type": 0,
+      "value": "연령 등급 필수"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.fieldValue": [
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.hidden": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "님이 "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "에 이 서버에서 제거했어요. 허용할 때까지 앱에서 다시 추가하지 않아요."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.loadFailed": [
+    {
+      "type": 0,
+      "value": "이 서버에서 변경한 내용을 불러올 수 없어요."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.nameTaken": [
+    {
+      "type": 0,
+      "value": "여기의 다른 프로필이 이미 같은 이름을 사용하고 있어서 "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " 프로필은 앱의 이름("
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ")으로 돌아갈 수 없어요. 먼저 해당 프로필의 이름을 바꾼 후 다시 지우세요."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeHiddenNextSync": [
+    {
+      "type": 0,
+      "value": "앱의 프로필에 여전히 있으면 다음에 "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "님의 앱이 동기화할 때 "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " 프로필이 다시 추가될 수 있어요."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeHiddenWoken": [
+    {
+      "type": 0,
+      "value": "앱의 프로필에 여전히 있으면 다음 동기화 때 "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " 프로필이 다시 추가될 수 있어요. "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "님의 휴대폰에 동기화를 요청했어요."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeNextSync": [
+    {
+      "type": 0,
+      "value": "지웠어요. 다음에 "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "님의 앱이 동기화할 때 반영돼요."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeWoken": [
+    {
+      "type": 0,
+      "value": "지웠어요. "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "님의 휴대폰에 동기화를 요청했어요."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.removedBy": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "님이 "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "에 제거"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.replacedOwner": [
+    {
+      "type": 0,
+      "value": "설정한 값을 대체했어요."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.setBy": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "님이 "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "에 설정"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.settled": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "님이 "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "에 변경해서 설정한 값은 더 이상 적용되지 않아요."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.title": [
+    {
+      "type": 0,
+      "value": "이 서버에서 변경됨"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.inherited": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (상속됨)"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.noPicture": [
+    {
+      "type": 0,
+      "value": "사진 없음"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.none": [
+    {
+      "type": 0,
+      "value": "없음"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.off": [
+    {
+      "type": 0,
+      "value": "끔"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.on": [
+    {
+      "type": 0,
+      "value": "켬"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.picture": [
+    {
+      "type": 0,
+      "value": "사용자 지정 사진"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.pinNone": [
+    {
+      "type": 0,
+      "value": "PIN 없음"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.pinSet": [
+    {
+      "type": 0,
+      "value": "PIN 설정됨"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.requestsAllowed": [
+    {
+      "type": 0,
+      "value": "허용됨"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.requestsBlocked": [
+    {
+      "type": 0,
+      "value": "차단됨"
     }
   ],
   "web.admin.users.detail.profiles.setPin": [
@@ -83890,6 +85161,136 @@
     {
       "type": 0,
       "value": "비밀번호 설정"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.action": [
+    {
+      "type": 0,
+      "value": "로그인 링크 만들기"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.actionHint": [
+    {
+      "type": 0,
+      "value": "모든 기기 분실"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.description": [
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "님이 모든 기기를 잃어버렸을 때 쓰는 일회용 링크예요. 링크를 열면 Silo 앱용 코드를 받거나 비밀번호를 정할 수 있는 페이지가 열려요. 24시간 동안 유효하고, 새 링크를 만들면 이전 링크는 대체돼요."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailAction": [
+    {
+      "type": 0,
+      "value": "이메일로 보내기"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHint": [
+    {
+      "type": 0,
+      "value": "링크를 만들어 복사한 후 직접 보내거나 "
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": " 주소로 이메일을 보내세요."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHintNoAddress": [
+    {
+      "type": 0,
+      "value": "링크를 만든 후 복사해서 직접 보내세요. 이 계정에는 보낼 이메일 주소가 없어요."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHintNoMail": [
+    {
+      "type": 0,
+      "value": "링크를 만든 후 복사해서 직접 보내세요. 여기에서 보내려면 설정에서 이메일을 설정하세요."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailSent": [
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": " 주소로 링크를 보냈어요. 만료: "
+    },
+    {
+      "type": 1,
+      "value": "expires"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailUnconfirmed": [
+    {
+      "type": 0,
+      "value": "메일 서버에서 전송을 확인하지 않았어요. 아래 링크는 계속 사용할 수 있으니 복사해서 다른 방법으로 보내세요."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.failed": [
+    {
+      "type": 0,
+      "value": "로그인 링크를 만들 수 없어요."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.linkShare": [
+    {
+      "type": 0,
+      "value": "이 링크는 "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "님에게만 보내세요. 링크를 사용하거나 "
+    },
+    {
+      "type": 1,
+      "value": "expires"
+    },
+    {
+      "type": 0,
+      "value": "에 만료될 때까지 링크를 가진 누구나 이 계정에 로그인할 수 있어요."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.providerRequired": [
+    {
+      "type": 0,
+      "value": "이 서버에서 로컬 비밀번호 로그인이 꺼져 있어서 로그인 링크를 사용하면 로그인 제공자를 거치지 않게 돼요. "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "님에게 이 서버의 사이트에서 제공자로 로그인한 후 계정 설정의 Silo에서 열기를 사용하라고 요청하세요."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.title": [
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "님의 로그인 링크"
     }
   ],
   "web.audiobooks.chapter.fallbackTitle": [
@@ -85487,6 +86888,120 @@
       "value": "로그인 승인"
     }
   ],
+  "web.auth.appCode.code": [
+    {
+      "type": 0,
+      "value": "코드"
+    }
+  ],
+  "web.auth.appCode.codeCopied": [
+    {
+      "type": 0,
+      "value": "코드를 복사했어요"
+    }
+  ],
+  "web.auth.appCode.copyCode": [
+    {
+      "type": 0,
+      "value": "코드 복사"
+    }
+  ],
+  "web.auth.appCode.copyFailed": [
+    {
+      "type": 0,
+      "value": "코드를 복사할 수 없어요. 코드를 선택해서 직접 복사하세요."
+    }
+  ],
+  "web.auth.appCode.expired": [
+    {
+      "type": 0,
+      "value": "이 코드는 만료됐어요."
+    }
+  ],
+  "web.auth.appCode.failed": [
+    {
+      "type": 0,
+      "value": "Silo에서 코드를 만들지 못했어요. 다시 시도해 주세요."
+    }
+  ],
+  "web.auth.appCode.instructions": [
+    {
+      "type": 0,
+      "value": "이 기기의 Silo 앱에서 계속하려면 Silo 열기를 누르세요. 앱이 설치되어 있지 않다면 앱을 설치한 후 이 탭으로 돌아와서 Silo 열기를 다시 누르세요."
+    }
+  ],
+  "web.auth.appCode.noScanCode": [
+    {
+      "type": 0,
+      "value": "이 서버의 주소가 너무 길어서 스캔 코드를 만들 수 없어요. Silo 앱에 서버 주소와 코드를 입력하거나, 코드를 복사해서 앱에 붙여 넣으세요."
+    }
+  ],
+  "web.auth.appCode.open": [
+    {
+      "type": 0,
+      "value": "Silo 열기"
+    }
+  ],
+  "web.auth.appCode.renew": [
+    {
+      "type": 0,
+      "value": "새 코드 받기"
+    }
+  ],
+  "web.auth.appCode.scanCodeLabel": [
+    {
+      "type": 0,
+      "value": "Silo 앱용 스캔 코드"
+    }
+  ],
+  "web.auth.appCode.scanCodeUnavailable": [
+    {
+      "type": 0,
+      "value": "이 서버에서는 스캔 코드를 표시할 수 없어요. Silo 앱에 서버 주소와 코드를 입력하거나, 코드를 복사해서 앱에 붙여 넣으세요."
+    }
+  ],
+  "web.auth.appCode.scanHint": [
+    {
+      "type": 0,
+      "value": "Silo 앱의 스캐너로 이 코드를 스캔하거나, 아래의 서버 주소와 코드를 입력하거나 복사하세요."
+    }
+  ],
+  "web.auth.appCode.serverAddress": [
+    {
+      "type": 0,
+      "value": "서버 주소"
+    }
+  ],
+  "web.auth.appCode.singleUse": [
+    {
+      "type": 0,
+      "value": "이 코드는 한 번만 사용할 수 있고 몇 분 후에 만료돼요."
+    }
+  ],
+  "web.auth.appCode.title": [
+    {
+      "type": 0,
+      "value": "Silo 열기"
+    }
+  ],
+  "web.auth.appCode.typeInstructions": [
+    {
+      "type": 0,
+      "value": "휴대폰이나 태블릿의 Silo 앱에서 주소로 이 서버를 추가하고 이 코드를 입력해 계정을 만드세요. 코드가 있으면 누구나 대신 가입할 수 있으니 공유하지 마세요."
+    }
+  ],
+  "web.auth.appCode.typeTitle": [
+    {
+      "type": 0,
+      "value": "이 코드로 가입"
+    }
+  ],
+  "web.auth.appCode.webLink": [
+    {
+      "type": 0,
+      "value": "대신 siloserver.org 링크로 열기"
+    }
+  ],
   "web.auth.card.rememberedIt": [
     {
       "type": 0,
@@ -85685,10 +87200,46 @@
       ]
     }
   ],
+  "web.auth.invite.appAccountEmail": [
+    {
+      "type": 0,
+      "value": "계정에는 "
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": " 주소가 사용돼요."
+    }
+  ],
+  "web.auth.invite.appContinue": [
+    {
+      "type": 0,
+      "value": "계속"
+    }
+  ],
+  "web.auth.invite.appEmailHint": [
+    {
+      "type": 0,
+      "value": "이메일 주소가 있으면 기기를 잃어버렸을 때 이 서버에서 로그인 링크를 보내 줄 수 있어요."
+    }
+  ],
   "web.auth.invite.appMissing": [
     {
       "type": 0,
       "value": "아무 반응이 없나요? 앱이 설치되지 않은 거예요. 아래에서 계속하세요."
+    }
+  ],
+  "web.auth.invite.appProviderOnly": [
+    {
+      "type": 1,
+      "value": "server"
+    },
+    {
+      "type": 0,
+      "value": " 서버는 로그인 제공자를 통해 사용자를 추가해요. 이 사이트에서 로그인 제공자로 로그인한 다음 계정 설정에서 Silo를 여세요."
     }
   ],
   "web.auth.invite.created": [
@@ -85717,6 +87268,18 @@
       "value": "이메일 주소를 입력하고 비밀번호를 정하세요. 로그인할 때는 이메일 주소를 사용해요."
     }
   ],
+  "web.auth.invite.descriptionWithApp": [
+    {
+      "type": 0,
+      "value": "휴대폰이나 태블릿의 Silo 앱으로 가입하거나, 로그인에 사용할 비밀번호를 정하세요."
+    }
+  ],
+  "web.auth.invite.emailOptional": [
+    {
+      "type": 0,
+      "value": "이메일(선택 사항)"
+    }
+  ],
   "web.auth.invite.emailPlaceholder": [
     {
       "type": 0,
@@ -85737,6 +87300,18 @@
     {
       "type": 0,
       "value": "님의 초대"
+    }
+  ],
+  "web.auth.invite.joinWithApp": [
+    {
+      "type": 0,
+      "value": "Silo 앱으로 가입"
+    }
+  ],
+  "web.auth.invite.joinWithAppInstead": [
+    {
+      "type": 0,
+      "value": "대신 Silo 앱으로 가입"
     }
   ],
   "web.auth.invite.loadFailed": [
@@ -85837,6 +87412,30 @@
     {
       "type": 0,
       "value": "초대를 사용할 수 없음"
+    }
+  ],
+  "web.auth.invite.usePassword": [
+    {
+      "type": 0,
+      "value": "대신 비밀번호 사용"
+    }
+  ],
+  "web.auth.invite.usernameIsAddress": [
+    {
+      "type": 0,
+      "value": "@가 포함된 사용자 이름은 아래에 입력하는 이메일 주소와 같아야 해요."
+    }
+  ],
+  "web.auth.invite.usernameRequired": [
+    {
+      "type": 0,
+      "value": "사용자 이름을 정하세요."
+    }
+  ],
+  "web.auth.invite.usernameTaken": [
+    {
+      "type": 0,
+      "value": "이미 사용 중인 사용자 이름이에요. 다른 이름을 정하세요."
     }
   ],
   "web.auth.languagePicker.label": [
@@ -86699,6 +88298,126 @@
     {
       "type": 0,
       "value": "로그인"
+    }
+  ],
+  "web.auth.signInLink.backToCode": [
+    {
+      "type": 0,
+      "value": "코드로 돌아가기"
+    }
+  ],
+  "web.auth.signInLink.codeExpired": [
+    {
+      "type": 0,
+      "value": "다른 코드를 받으려면 이 서버의 관리자에게 새 링크를 요청하세요."
+    }
+  ],
+  "web.auth.signInLink.documentTitle": [
+    {
+      "type": 0,
+      "value": "로그인 링크"
+    }
+  ],
+  "web.auth.signInLink.failed": [
+    {
+      "type": 0,
+      "value": "Silo에서 이 링크를 열지 못했어요. 다시 시도해 주세요."
+    }
+  ],
+  "web.auth.signInLink.installFirst": [
+    {
+      "type": 0,
+      "value": "링크는 한 번만 사용할 수 있고, 코드는 몇 분 동안만 유효해요. 먼저 휴대폰이나 태블릿에 Silo 앱을 설치한 다음 계속을 누르세요."
+    }
+  ],
+  "web.auth.signInLink.intro": [
+    {
+      "type": 0,
+      "value": "다시 로그인할 수 있도록 관리자가 이 링크를 보냈어요. 계속하면 Silo 앱용 코드를 받거나 비밀번호를 정할 수 있어요."
+    }
+  ],
+  "web.auth.signInLink.keepOpen": [
+    {
+      "type": 0,
+      "value": "완료할 때까지 이 페이지를 열어 두세요. 링크는 이미 사용됐기 때문에 새로고침하거나 페이지를 나가면 받은 내용이 사라져요."
+    }
+  ],
+  "web.auth.signInLink.leaveAction": [
+    {
+      "type": 0,
+      "value": "나가기"
+    }
+  ],
+  "web.auth.signInLink.leaveDescription": [
+    {
+      "type": 0,
+      "value": "링크는 이미 사용됐어요. 페이지를 나가면 Silo 앱용 코드와 비밀번호를 설정할 기회가 사라지고, 새 링크가 필요해요."
+    }
+  ],
+  "web.auth.signInLink.leaveTitle": [
+    {
+      "type": 0,
+      "value": "이 페이지에서 나갈까요?"
+    }
+  ],
+  "web.auth.signInLink.noCodeAdministrator": [
+    {
+      "type": 0,
+      "value": "관리자 계정이므로 이 링크로는 비밀번호만 설정할 수 있어요. 비밀번호를 설정하고 이 서버의 사이트에서 로그인한 다음, 그곳의 계정 설정에서 Silo 앱을 여세요."
+    }
+  ],
+  "web.auth.signInLink.noCodeAppKeysOff": [
+    {
+      "type": 0,
+      "value": "지금은 이 서버에서 Silo 앱으로 로그인할 수 없어서 이 링크로는 비밀번호만 설정할 수 있어요."
+    }
+  ],
+  "web.auth.signInLink.passwordDescription": [
+    {
+      "type": 0,
+      "value": "저장하면 모든 기기에서 이 계정이 로그아웃돼요. Silo 앱으로 로그인한 기기는 자동으로 다시 로그인돼요."
+    }
+  ],
+  "web.auth.signInLink.passwordSet": [
+    {
+      "type": 0,
+      "value": "비밀번호를 저장했어요. 이 비밀번호로 로그인하세요."
+    }
+  ],
+  "web.auth.signInLink.passwordSetLostDevices": [
+    {
+      "type": 0,
+      "value": "Silo 앱을 사용하던 분실 기기는 제거하기 전까지 계속 로그인할 수 있어요. 로그인한 후 계정 설정의 기기 목록에서 제거하세요."
+    }
+  ],
+  "web.auth.signInLink.passwordTitle": [
+    {
+      "type": 0,
+      "value": "비밀번호 정하기"
+    }
+  ],
+  "web.auth.signInLink.providerRequired": [
+    {
+      "type": 0,
+      "value": "이 서버는 로그인 제공자를 통해 로그인하므로 이 링크를 사용할 수 없어요. 대신 제공자로 로그인하세요."
+    }
+  ],
+  "web.auth.signInLink.setPasswordInstead": [
+    {
+      "type": 0,
+      "value": "대신 비밀번호 설정"
+    }
+  ],
+  "web.auth.signInLink.title": [
+    {
+      "type": 0,
+      "value": "계정에 다시 로그인하기"
+    }
+  ],
+  "web.auth.signInLink.unavailable": [
+    {
+      "type": 0,
+      "value": "이 링크는 이미 사용됐거나, 새 링크로 대체됐거나, 만료됐어요. 이 서버의 관리자에게 새 링크를 요청하세요."
     }
   ],
   "web.auth.signup.closed": [
@@ -122760,7 +124479,7 @@
   "web.settings.account.password.signOutOthersDescription": [
     {
       "type": 0,
-      "value": "다른 브라우저와 앱에서는 새 비밀번호로 다시 로그인해야 해요. 이 브라우저는 로그인 상태가 유지되고, API 키도 계속 작동해요."
+      "value": "다른 브라우저와 앱에서는 로그아웃돼요. 이 브라우저는 로그인 상태가 유지되고, API 키도 계속 작동해요."
     }
   ],
   "web.settings.account.password.title": [
@@ -123593,6 +125312,468 @@
     {
       "type": 0,
       "value": "이 키 사용 방법"
+    }
+  ],
+  "web.settings.appKeys.actionFailed": [
+    {
+      "type": 0,
+      "value": "변경할 수 없어요. 다시 시도해 주세요."
+    }
+  ],
+  "web.settings.appKeys.approveMainOnly": [
+    {
+      "type": 0,
+      "value": "가구의 기본 프로필만 기기를 승인할 수 있어요. 승인하려면 기본 프로필로 전환하세요."
+    }
+  ],
+  "web.settings.appKeys.approved": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " 기기를 승인했어요"
+    }
+  ],
+  "web.settings.appKeys.confirm.approve": [
+    {
+      "type": 0,
+      "value": "기기 승인"
+    }
+  ],
+  "web.settings.appKeys.confirm.approveDescription": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " 기기는 제거할 때까지 Silo 앱으로 계정에 로그인할 수 있어요. 방금 설정한 기기일 때만 승인하세요."
+    }
+  ],
+  "web.settings.appKeys.confirm.approveTitle": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " 기기를 승인할까요?"
+    }
+  ],
+  "web.settings.appKeys.confirm.deny": [
+    {
+      "type": 0,
+      "value": "기기 거부"
+    }
+  ],
+  "web.settings.appKeys.confirm.denyDescription": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " 기기는 계정에 로그인할 수 없게 돼요. 본인 기기였다면 Silo 앱에서 다시 추가하세요."
+    }
+  ],
+  "web.settings.appKeys.confirm.denyTitle": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " 기기를 거부할까요?"
+    }
+  ],
+  "web.settings.appKeys.confirm.remove": [
+    {
+      "type": 0,
+      "value": "기기 제거"
+    }
+  ],
+  "web.settings.appKeys.confirm.removeDescription": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " 기기를 제거하면 지금 로그아웃되고 키가 중지돼요. 이 키로 다시 로그인할 수 없어요. 다시 사용하려면 Silo 앱에서 다시 추가하세요."
+    }
+  ],
+  "web.settings.appKeys.confirm.removeTitle": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " 기기를 제거할까요?"
+    }
+  ],
+  "web.settings.appKeys.confirm.withdraw": [
+    {
+      "type": 0,
+      "value": "승인 철회"
+    }
+  ],
+  "web.settings.appKeys.confirm.withdrawDescription": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " 기기는 이 승인으로 계정에 로그인할 수 없게 돼요."
+    }
+  ],
+  "web.settings.appKeys.confirm.withdrawTitle": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " 기기의 승인을 철회할까요?"
+    }
+  ],
+  "web.settings.appKeys.confirm.working": [
+    {
+      "type": 0,
+      "value": "저장하는 중…"
+    }
+  ],
+  "web.settings.appKeys.denied": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " 기기를 거부했어요"
+    }
+  ],
+  "web.settings.appKeys.description": [
+    {
+      "type": 0,
+      "value": "비밀번호 없이 Silo 앱으로 계정에 로그인하는 기기와 앱이에요."
+    }
+  ],
+  "web.settings.appKeys.devices.title": [
+    {
+      "type": 0,
+      "value": "기기"
+    }
+  ],
+  "web.settings.appKeys.empty": [
+    {
+      "type": 0,
+      "value": "이 계정에서 Silo 앱을 사용하는 기기가 없어요."
+    }
+  ],
+  "web.settings.appKeys.footnote": [
+    {
+      "type": 0,
+      "value": "기기를 제거하면 로그아웃되고 키가 더 이상 작동하지 않아요. 세션을 로그아웃해도 기기는 제거되지 않고, 기기가 키로 다시 로그인해요."
+    }
+  ],
+  "web.settings.appKeys.loadFailed": [
+    {
+      "type": 0,
+      "value": "기기를 불러올 수 없어요."
+    }
+  ],
+  "web.settings.appKeys.loading": [
+    {
+      "type": 0,
+      "value": "기기를 불러오는 중…"
+    }
+  ],
+  "web.settings.appKeys.off": [
+    {
+      "type": 0,
+      "value": "이 서버에서 Silo 앱 로그인이 꺼져 있어서 이 기기들은 로그인할 수 없고 대기 중인 기기를 승인할 수 없어요. 기기 제거는 계속 할 수 있어요."
+    }
+  ],
+  "web.settings.appKeys.personKey.description": [
+    {
+      "type": 0,
+      "value": "Silo 앱은 이 키로 새 기기를 추가해요. 설정 일시: "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.settings.appKeys.personKey.none": [
+    {
+      "type": 0,
+      "value": "계정 키가 없어요. 다음에 로그인한 상태로 기기를 추가하면 Silo 앱이 키를 설정해요."
+    }
+  ],
+  "web.settings.appKeys.personKey.title": [
+    {
+      "type": 0,
+      "value": "계정 키"
+    }
+  ],
+  "web.settings.appKeys.pinDescription": [
+    {
+      "type": 0,
+      "value": "이 기기를 승인하려면 기본 프로필의 PIN을 입력하세요."
+    }
+  ],
+  "web.settings.appKeys.preapprovals.description": [
+    {
+      "type": 0,
+      "value": "아직 연결되지 않은 기기에 대해 승인한 로그인이에요."
+    }
+  ],
+  "web.settings.appKeys.preapprovals.loadFailed": [
+    {
+      "type": 0,
+      "value": "사전 승인된 로그인을 불러올 수 없어요."
+    }
+  ],
+  "web.settings.appKeys.preapprovals.title": [
+    {
+      "type": 0,
+      "value": "사전 승인됨"
+    }
+  ],
+  "web.settings.appKeys.refreshLabel": [
+    {
+      "type": 0,
+      "value": "Silo 앱 기기 새로고침"
+    }
+  ],
+  "web.settings.appKeys.removed": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " 기기를 제거했어요"
+    }
+  ],
+  "web.settings.appKeys.row.allowedBy": [
+    {
+      "type": 0,
+      "value": "허용한 사용자: "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "web.settings.appKeys.row.approve": [
+    {
+      "type": 0,
+      "value": "승인"
+    }
+  ],
+  "web.settings.appKeys.row.approveLabel": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " 기기 승인"
+    }
+  ],
+  "web.settings.appKeys.row.deny": [
+    {
+      "type": 0,
+      "value": "거부"
+    }
+  ],
+  "web.settings.appKeys.row.denyLabel": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " 기기 거부"
+    }
+  ],
+  "web.settings.appKeys.row.enrolledFrom": [
+    {
+      "type": 0,
+      "value": "추가한 위치: "
+    },
+    {
+      "type": 1,
+      "value": "address"
+    }
+  ],
+  "web.settings.appKeys.row.identityGone": [
+    {
+      "type": 0,
+      "value": "로그인할 수 없음: 로그인 제공자 계정이 더 이상 연결되어 있지 않음"
+    }
+  ],
+  "web.settings.appKeys.row.kindApp": [
+    {
+      "type": 0,
+      "value": "다른 앱"
+    }
+  ],
+  "web.settings.appKeys.row.kindDevice": [
+    {
+      "type": 0,
+      "value": "Silo 앱"
+    }
+  ],
+  "web.settings.appKeys.row.lastUsed": [
+    {
+      "type": 0,
+      "value": "마지막 로그인: "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.settings.appKeys.row.notUsed": [
+    {
+      "type": 0,
+      "value": "아직 키로 로그인하지 않음"
+    }
+  ],
+  "web.settings.appKeys.row.preapproval": [
+    {
+      "type": 0,
+      "value": "사전 승인됨 · 만료: "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.settings.appKeys.row.provider": [
+    {
+      "type": 0,
+      "value": "로그인 제공자로 확인됨"
+    }
+  ],
+  "web.settings.appKeys.row.remove": [
+    {
+      "type": 0,
+      "value": "제거"
+    }
+  ],
+  "web.settings.appKeys.row.removeLabel": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " 기기 제거"
+    }
+  ],
+  "web.settings.appKeys.row.viaAppCode": [
+    {
+      "type": 0,
+      "value": "서버 웹페이지의 일회용 코드로 추가됨"
+    }
+  ],
+  "web.settings.appKeys.row.viaPersonKey": [
+    {
+      "type": 0,
+      "value": "다른 기기의 Silo 앱으로 추가됨"
+    }
+  ],
+  "web.settings.appKeys.row.viaSession": [
+    {
+      "type": 0,
+      "value": "로그인한 상태에서 추가됨"
+    }
+  ],
+  "web.settings.appKeys.row.waitingUntil": [
+    {
+      "type": 0,
+      "value": "승인 대기 중 · 기한: "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.settings.appKeys.row.withdraw": [
+    {
+      "type": 0,
+      "value": "철회"
+    }
+  ],
+  "web.settings.appKeys.row.withdrawLabel": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " 기기의 승인 철회"
+    }
+  ],
+  "web.settings.appKeys.signsBackIn": [
+    {
+      "type": 0,
+      "value": "Silo 앱으로 로그인한 기기는 자동으로 다시 로그인돼요. 중지하려면 "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "기기를 제거"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "하세요."
+    }
+  ],
+  "web.settings.appKeys.title": [
+    {
+      "type": 0,
+      "value": "Silo 앱 기기"
+    }
+  ],
+  "web.settings.appKeys.unavailable": [
+    {
+      "type": 0,
+      "value": "이 서버에서는 Silo 앱 로그인을 사용할 수 없어서 이 기기들은 로그인할 수 없어요. 기기 제거는 계속 할 수 있어요."
+    }
+  ],
+  "web.settings.appKeys.waiting.description": [
+    {
+      "type": 0,
+      "value": "새 기기가 Silo 앱으로 계정에 로그인하려고 요청했어요. 방금 설정한 기기일 때만 승인하세요."
+    }
+  ],
+  "web.settings.appKeys.waiting.title": [
+    {
+      "type": 0,
+      "value": "승인 대기 중"
+    }
+  ],
+  "web.settings.appKeys.withdrawn": [
+    {
+      "type": 0,
+      "value": "승인을 철회했어요"
     }
   ],
   "web.settings.cardOverlay.adjust": [
@@ -128385,6 +130566,54 @@
       "value": "오프라인 상태라 변경 사항을 저장하지 못했어요."
     }
   ],
+  "web.settings.openInSilo.action": [
+    {
+      "type": 0,
+      "value": "Silo 앱용 코드 받기"
+    }
+  ],
+  "web.settings.openInSilo.codeInstructions": [
+    {
+      "type": 0,
+      "value": "휴대폰이나 태블릿의 Silo 앱에서 주소로 이 서버를 추가하고 이 코드를 입력하세요. 코드가 있으면 누구나 이 계정에 로그인할 수 있으니 공유하지 마세요."
+    }
+  ],
+  "web.settings.openInSilo.codeTitle": [
+    {
+      "type": 0,
+      "value": "Silo 앱용 코드"
+    }
+  ],
+  "web.settings.openInSilo.description": [
+    {
+      "type": 0,
+      "value": "비밀번호 없이 휴대폰이나 태블릿의 Silo 앱을 이 계정에 로그인하세요."
+    }
+  ],
+  "web.settings.openInSilo.loadFailed": [
+    {
+      "type": 0,
+      "value": "이 브라우저에서 Silo 앱용 코드를 받을 수 있는지 확인할 수 없어요."
+    }
+  ],
+  "web.settings.openInSilo.mainProfileOnly": [
+    {
+      "type": 0,
+      "value": "가구의 기본 프로필만 Silo 앱용 코드를 받을 수 있어요. 기본 프로필로 전환한 후 다시 시도해 주세요."
+    }
+  ],
+  "web.settings.openInSilo.pinDescription": [
+    {
+      "type": 0,
+      "value": "Silo 앱용 코드를 받으려면 기본 프로필의 PIN을 입력하세요."
+    }
+  ],
+  "web.settings.openInSilo.title": [
+    {
+      "type": 0,
+      "value": "Silo 앱"
+    }
+  ],
   "web.settings.overlays.accent.amber": [
     {
       "type": 0,
@@ -131142,6 +133371,12 @@
       "value": "로그인"
     }
   ],
+  "web.settings.sessions.row.signsBackIn": [
+    {
+      "type": 0,
+      "value": "이 기기는 자동으로 다시 로그인돼요"
+    }
+  ],
   "web.settings.sessions.row.summary": [
     {
       "type": 8,
@@ -131224,6 +133459,24 @@
     {
       "type": 0,
       "value": "설정"
+    }
+  ],
+  "web.settings.signInAgain.action": [
+    {
+      "type": 0,
+      "value": "다시 로그인"
+    }
+  ],
+  "web.settings.signInAgain.manageDevices": [
+    {
+      "type": 0,
+      "value": "기기를 관리하려면 다시 로그인하세요"
+    }
+  ],
+  "web.settings.signInAgain.useApp": [
+    {
+      "type": 0,
+      "value": "Silo 앱에서 기기를 관리하세요."
     }
   ],
   "web.settings.signedInSessions.loadFailed": [

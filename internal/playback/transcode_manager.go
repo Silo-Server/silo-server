@@ -865,6 +865,8 @@ func (m *TranscodeManager) reconstructSession(ctx context.Context, sessionID str
 		RoutingExecutionNodeID:        card.RoutingExecutionNodeID,
 		RoutingEgress:                 card.RoutingEgress,
 		RoutingEgressNodeID:           card.RoutingEgressNodeID,
+		MediaTransport:                card.MediaTransport,
+		PathGeneration:                card.PathGeneration,
 		AudioTrackIndex:               card.AudioTrackIndex,
 		TranscodeAudio:                card.TranscodeAudio,
 		RemuxDVMode:                   card.RemuxDVMode,

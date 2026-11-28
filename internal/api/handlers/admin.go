@@ -220,6 +220,9 @@ type AdminHandler struct {
 	// RecWorker is told when an account update changes its profiles' access
 	// scope, so their recommendations are rebuilt. Optional.
 	RecWorker AccountsScopeNotifier
+	// DirectRevoker, when set, withdraws the direct-connection entry of a login
+	// session that an administrator ends on its own.
+	DirectRevoker DirectRevoker
 	// ProfileAvatars resolves the avatar on admin profile listings the way
 	// the profile endpoints do. Nil leaves uploaded avatars without a URL.
 	ProfileAvatars interface {
@@ -583,22 +586,31 @@ func (h *AdminHandler) sweepWatchlistTitles(ctx context.Context, userID int) {
 }
 
 // updateMayRequireSessionRevocation is updateRequiresSessionRevocation without
-// the current account to compare against: any credential or enabled change
-// might sign the user out.
+// the current account to compare against: any credential or enabled change,
+// or a role set to admin, might sign the user out.
 func updateMayRequireSessionRevocation(input models.UpdateUserInput) bool {
 	return input.Password != nil ||
-		input.Enabled != nil
+		input.Enabled != nil ||
+		(input.Role != nil && *input.Role == roleAdmin)
 }
 
 // updateRequiresSessionRevocation reports whether an account update signs the
-// user out everywhere: a new password or an enabled change.
+// user out everywhere: a new password, an enabled change, or a promotion to
+// admin.
+//
+// A promotion signs the account out because a session may have been opened by
+// someone the operator never meant to make an administrator: on a public demo,
+// every visitor holds a session on the shared account, and on any server a
+// session opened before the promotion was authorized for an ordinary account.
+// Every session starts again under the new role, as provider role mapping and
+// owner recovery already do.
 //
 // Policy changes (permissions, playback-quality override, access group) do
 // not; they bump access_policy_revision, every request resolves the current
-// policy, and connected realtime sockets tell their clients to refresh. A role
-// change does not either: RequireAuth refuses access tokens minted under the
-// old role with token_refresh_required, and a refresh issues the new role.
-// The impersonation sessions a demoted admin started end in the same
+// policy, and connected realtime sockets tell their clients to refresh.
+// A demotion does not either: RequireAuth refuses access tokens minted under
+// the old role with token_refresh_required, and a refresh issues the lower
+// role. The impersonation sessions a demoted admin started end in the same
 // transaction (auth.UserRepository.MutateAdminAccount).
 func updateRequiresSessionRevocation(current *models.User, input models.UpdateUserInput) bool {
 	if input.Password != nil {
@@ -608,6 +620,9 @@ func updateRequiresSessionRevocation(current *models.User, input models.UpdateUs
 		return updateMayRequireSessionRevocation(input)
 	}
 	if input.Enabled != nil && *input.Enabled != current.Enabled {
+		return true
+	}
+	if input.Role != nil && *input.Role == roleAdmin && current.Role != roleAdmin {
 		return true
 	}
 	return false
