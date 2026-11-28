@@ -124,6 +124,7 @@
 
 # A finished regular episode does not push a half-watched special off Continue Watching.
 ./internal/catalog TestSupersededSpecialsNeedALaterSpecialPostgres
+./internal/catalog TestSupersededPastCompletedHistoryCapPostgres
 
 # A failed play-target read returns its error and the pool reuses its connection.
 ./internal/catalog TestPlayableTargetQueryFailureKeepsConnection

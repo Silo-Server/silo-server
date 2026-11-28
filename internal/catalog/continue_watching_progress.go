@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -104,7 +105,15 @@ func (f *ContinueWatchingProgressFilter) SupersededEpisodeProgressIDsCached(ctx 
 		}
 	}
 
-	completed, err := cache.snapshots(ctx, store, profileID, oldestInProgress)
+	var completed []ProgressSnapshot
+	// A store that can read progress by item (every userstore.UserStore)
+	// checks only the later episodes of the in-progress series instead of
+	// walking the completed history newest first.
+	if lister, ok := store.(PlayableTargetProgressStore); ok {
+		completed, err = f.laterEpisodeCompletions(ctx, lister, profileID, inProgress, oldestInProgress, cache)
+	} else {
+		completed, err = cache.snapshots(ctx, store, profileID, oldestInProgress)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -133,6 +142,102 @@ func (f *ContinueWatchingProgressFilter) SupersededEpisodeProgressIDsCached(ctx 
 		return nil, fmt.Errorf("iterating superseded episode progress: %w", err)
 	}
 	return superseded, nil
+}
+
+// laterEpisodeIDsChunk bounds one ListProgressByMediaItems batch.
+const laterEpisodeIDsChunk = 5000
+
+// laterEpisodeCompletions returns the completed progress, updated after
+// notBefore, of every episode that sits after an in-progress episode in the
+// same series. Those are the only rows the superseded query can match, so
+// reading them by item replaces the newest-first walk of the whole completed
+// history and its row cap: how much history a profile has no longer decides
+// whether an old resume point is checked.
+//
+// A cache for the same profile keeps each item's answer, so a later
+// Continue Watching page reads progress only for items no earlier page asked
+// about. A nil cache, or one bound to another profile, reads fresh.
+func (f *ContinueWatchingProgressFilter) laterEpisodeCompletions(ctx context.Context, lister PlayableTargetProgressStore, profileID string, inProgress []ProgressSnapshot, notBefore time.Time, cache *CompletedProgressCache) ([]ProgressSnapshot, error) {
+	ids, _ := splitProgressSnapshots(inProgress)
+	rows, err := f.pool.Query(ctx, buildLaterEpisodesQuery(), ids)
+	if err != nil {
+		return nil, fmt.Errorf("querying later episodes of in-progress series: %w", err)
+	}
+	later, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("scanning later episodes of in-progress series: %w", err)
+	}
+
+	if cache == nil || (cache.profileID != "" && cache.profileID != profileID) {
+		cache = &CompletedProgressCache{}
+	}
+	cache.profileID = profileID
+	if cache.byItem == nil {
+		cache.byItem = make(map[string]*ProgressSnapshot)
+	}
+
+	unread := make([]string, 0, len(later))
+	for _, id := range later {
+		if _, ok := cache.byItem[id]; !ok {
+			unread = append(unread, id)
+		}
+	}
+	for start := 0; start < len(unread); start += laterEpisodeIDsChunk {
+		batch := unread[start:min(start+laterEpisodeIDsChunk, len(unread))]
+		progress, err := lister.ListProgressByMediaItems(ctx, profileID, batch)
+		if err != nil {
+			return nil, fmt.Errorf("listing completed progress for superseded episodes: %w", err)
+		}
+		for _, id := range batch {
+			cache.byItem[id] = nil
+		}
+		entries := make([]userstore.WatchProgress, 0, len(progress))
+		for _, entry := range progress {
+			if entry.Completed {
+				entries = append(entries, entry)
+			}
+		}
+		for _, snapshot := range ProgressSnapshots(entries) {
+			cache.byItem[snapshot.ContentID] = &snapshot
+		}
+	}
+
+	var completed []ProgressSnapshot
+	for _, id := range later {
+		if snapshot := cache.byItem[id]; snapshot != nil && snapshot.UpdatedAt.After(notBefore) {
+			completed = append(completed, *snapshot)
+		}
+	}
+	return completed, nil
+}
+
+// buildLaterEpisodesQuery lists the episodes that could supersede one of the
+// in-progress episodes in $1: same series, a later (season, episode), and the
+// same specials side, as in buildSupersededEpisodeProgressQuery. For each
+// series it starts from that series' earliest in-progress episode, so the
+// result holds each candidate once. The lateral subquery reads each series as
+// one range of episodes_series_season_episode_key; OFFSET 0 keeps the planner
+// from flattening it into a hash join over the whole episodes table, which it
+// picks when the in-progress series hold a large share of a small catalog.
+func buildLaterEpisodesQuery() string {
+	return `
+		WITH first_in_progress AS (
+			SELECT DISTINCT ON (ip.series_id, ip.season_number = 0)
+			       ip.series_id, ip.season_number, ip.episode_number
+			FROM episodes ip
+			WHERE ip.content_id = ANY($1::text[])
+			ORDER BY ip.series_id, ip.season_number = 0, ip.season_number, ip.episode_number
+		)
+		SELECT done.content_id
+		FROM first_in_progress ip
+		CROSS JOIN LATERAL (
+			SELECT d.content_id
+			FROM episodes d
+			WHERE d.series_id = ip.series_id
+			  AND (d.season_number, d.episode_number) > (ip.season_number, ip.episode_number)
+			  AND (d.season_number = 0) = (ip.season_number = 0)
+			OFFSET 0
+		) done`
 }
 
 // episodeSnapshots keeps the snapshots whose content is an episode. Callers
@@ -202,6 +307,10 @@ type CompletedProgressCache struct {
 	// snaps then holds every completed row after it (up to the row cap).
 	readSinceAt time.Time
 	sinceValid  bool
+	// byItem holds the by-item lookup's answers: an item's completed
+	// snapshot, or nil when it has no completed progress. An item is present
+	// once it has been read.
+	byItem map[string]*ProgressSnapshot
 }
 
 // NewCompletedProgressCache returns a cache for one request.

@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/userstore"
+	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 )
 
 // TestSupersededCutoffIgnoresInProgressMoviesPostgres pins that only episodes
@@ -128,4 +129,114 @@ func TestSupersededSpecialsNeedALaterSpecialPostgres(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestSupersededPastCompletedHistoryCapPostgres pins #5090: an episode left in
+// progress long ago, then superseded by a later episode completed before more
+// than supersededProgressMaxRows newer completions, still leaves Continue
+// Watching. The old newest-first walk stopped at the row cap and kept it.
+func TestSupersededPastCompletedHistoryCapPostgres(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := t.Context()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	const prefix = "cwcap-5090"
+	cleanup := func() {
+		bg := context.Background()
+		_, _ = pool.Exec(bg, `DELETE FROM user_watch_progress WHERE profile_id = $1`, prefix+"-profile")
+		_, _ = pool.Exec(bg, `DELETE FROM user_profiles WHERE id = $1`, prefix+"-profile")
+		_, _ = pool.Exec(bg, `DELETE FROM users WHERE username = $1`, prefix)
+		_, _ = pool.Exec(bg, `DELETE FROM episodes WHERE content_id LIKE 'cwcap-%'`)
+		_, _ = pool.Exec(bg, `DELETE FROM media_items WHERE content_id LIKE 'cwcap-%'`)
+	}
+	cleanup()
+	t.Cleanup(cleanup)
+
+	var userID int
+	if err := pool.QueryRow(ctx, `INSERT INTO users(username,role) VALUES($1,'user') RETURNING id`, prefix).Scan(&userID); err != nil {
+		t.Fatal(err)
+	}
+	profileID := prefix + "-profile"
+	if _, err := pool.Exec(ctx, `
+ INSERT INTO media_items(content_id,type,title) VALUES ('cwcap-series','series','Series'), ('cwcap-other','series','Other');
+ INSERT INTO episodes(content_id,series_id,season_number,episode_number,title) VALUES
+ ('cwcap-e1','cwcap-series',1,1,'One'),
+ ('cwcap-e2','cwcap-series',1,2,'Two'),
+ ('cwcap-o1','cwcap-other',1,1,'Other one'),
+ ('cwcap-o2','cwcap-other',1,2,'Other two');`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO user_profiles(id,user_id,name) VALUES($1,$2,'cap')`, profileID, userID); err != nil {
+		t.Fatal(err)
+	}
+
+	startedAt := time.Date(2023, 9, 20, 12, 0, 0, 0, time.UTC)
+	fill := supersededProgressMaxRows + 500
+	if _, err := pool.Exec(ctx, `
+ INSERT INTO user_watch_progress(user_id,profile_id,media_item_id,position_seconds,completed,updated_at) VALUES
+ ($1,$2,'cwcap-e1',600,false,$3),
+ ($1,$2,'cwcap-e2',0,true,$3::timestamptz + interval '1 day'),
+ ($1,$2,'cwcap-o2',600,false,$3::timestamptz + interval '2 days'),
+ ($1,$2,'cwcap-o1',0,true,$3::timestamptz + interval '3 days')`, userID, profileID, startedAt); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+ INSERT INTO user_watch_progress(user_id,profile_id,media_item_id,position_seconds,completed,updated_at)
+ SELECT $1,$2,'cwcap-fill-'||n,0,true,$3::timestamptz + interval '10 days' + n * interval '1 minute'
+ FROM generate_series(1,$4::int) AS n;`, userID, profileID, startedAt, fill); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := pgstore.NewPostgresProvider(pool).ForUser(ctx, userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inProgress, err := store.ListProgress(ctx, profileID, "in_progress", 100, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(inProgress) != 2 {
+		t.Fatalf("in-progress rows = %v, want cwcap-o2 and cwcap-e1", inProgress)
+	}
+	counting := &countingItemsLister{UserStore: store}
+	cache := NewCompletedProgressCache()
+	filter := NewContinueWatchingProgressFilter(pool)
+	superseded, err := filter.SupersededEpisodeProgressIDsCached(ctx, counting, profileID, inProgress, cache)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A second Continue Watching page with the same cache reads no item twice.
+	read := counting.items
+	again, err := filter.SupersededEpisodeProgressIDsCached(ctx, counting, profileID, inProgress[1:], cache)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if counting.items != read {
+		t.Fatalf("second page read %d more items, want 0", counting.items-read)
+	}
+	if _, ok := again["cwcap-e1"]; !ok || len(again) != 1 {
+		t.Fatalf("second page superseded = %v, want only cwcap-e1", again)
+	}
+	// cwcap-e1 is superseded by cwcap-e2, finished a day later and followed by
+	// more completions than the cap. cwcap-o2 is in progress after its earlier
+	// episode was finished, so it stays.
+	if _, ok := superseded["cwcap-e1"]; !ok || len(superseded) != 1 {
+		t.Fatalf("superseded = %v, want only cwcap-e1", superseded)
+	}
+}
+
+type countingItemsLister struct {
+	userstore.UserStore
+	items int
+}
+
+func (c *countingItemsLister) ListProgressByMediaItems(ctx context.Context, profileID string, ids []string) (map[string]userstore.WatchProgress, error) {
+	c.items += len(ids)
+	return c.UserStore.ListProgressByMediaItems(ctx, profileID, ids)
 }
