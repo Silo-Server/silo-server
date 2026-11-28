@@ -540,13 +540,15 @@ func candidateDetailScore(candidate MatchCandidate) int {
 // SearchAndNormalize is a convenience method that calls SearchProviders and
 // normalizes the results into MatchCandidates. Plugin-prefixed image URLs
 // (e.g. "metadb://...") are resolved to presigned HTTP URLs before returning.
-func (s *MetadataService) SearchAndNormalize(ctx context.Context, query SearchQuery, folderID int) ([]MatchCandidate, error) {
+// Providers whose search failed are returned keyed by slug, as SearchProviders
+// reports them.
+func (s *MetadataService) SearchAndNormalize(ctx context.Context, query SearchQuery, folderID int) ([]MatchCandidate, map[string]error, error) {
 	if strings.TrimSpace(query.Language) == "" {
 		query.Language = s.resolveFolderLanguage(ctx, folderID)
 	}
-	results, err := s.SearchProviders(ctx, query, folderID)
+	results, failed, err := s.SearchProviders(ctx, query, folderID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	candidates := NormalizeCandidatesForLanguage(results, query.ContentType, query.Language)
 	for i := range candidates {
@@ -564,7 +566,7 @@ func (s *MetadataService) SearchAndNormalize(ctx context.Context, query SearchQu
 		}
 	}
 
-	return candidates, nil
+	return candidates, failed, nil
 }
 
 func scoreMatchCandidate(hints *MatchHints, candidate MatchCandidate) float64 {

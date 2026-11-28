@@ -5720,7 +5720,12 @@ func mergedImageThumbhash(previousPath, previousThumbhash, nextPath, nextThumbha
 }
 
 // SearchProviders runs only the search phase and returns results for the UI.
-func (s *MetadataService) SearchProviders(ctx context.Context, query SearchQuery, folderID int) ([]SearchResult, error) {
+// A provider whose search fails does not stop the others: its error is
+// returned keyed by provider slug, so callers can tell an outage from a miss.
+// A provider that answers a search by provider ID with "not found" has no
+// such ID: that is a miss and is not reported (see searchMissedID).
+// The error result is non-nil only when the provider chain cannot be resolved.
+func (s *MetadataService) SearchProviders(ctx context.Context, query SearchQuery, folderID int) ([]SearchResult, map[string]error, error) {
 	if strings.TrimSpace(query.Language) == "" && folderID > 0 {
 		query.Language = s.resolveFolderLanguage(ctx, folderID)
 	}
@@ -5730,22 +5735,50 @@ func (s *MetadataService) SearchProviders(ctx context.Context, query SearchQuery
 	contentLevel := providerChainContentLevel(query.ContentType)
 	chain, err := s.resolveChainCached(ctx, folderID, contentLevel)
 	if err != nil {
-		return nil, fmt.Errorf("resolving provider chain: %w", err)
+		return nil, nil, fmt.Errorf("resolving provider chain: %w", err)
 	}
 
 	var allResults []SearchResult
+	var failed map[string]error
 	for _, p := range chain {
 		sp, ok := p.(SearchProvider)
 		if !ok {
 			continue
 		}
 		results, err := sp.Search(ctx, query)
+		if searchMissedID(query, err) {
+			slog.InfoContext(ctx, "metadata: match search provider has no such ID", "component", "metadata",
+				"provider", p.Slug(), "error", logredact.SanitizeText(err.Error()))
+			continue
+		}
 		if err != nil {
+			slog.WarnContext(ctx, "metadata: match search provider error", "component", "metadata",
+				"provider", p.Slug(), "error", logredact.SanitizeText(err.Error()))
+			if failed == nil {
+				failed = map[string]error{}
+			}
+			failed[p.Slug()] = err
 			continue
 		}
 		allResults = append(allResults, results...)
 	}
-	return allResults, nil
+	return allResults, failed, nil
+}
+
+// searchMissedID reports a search error that says the provider has no such
+// ID: an HTTP 404 or a plugin NotFound status on a search that sent it a
+// provider ID. Plugins are not sent work-level book IDs, so a search carrying
+// only those is a title search, where "not found" is a failure.
+func searchMissedID(query SearchQuery, err error) bool {
+	if !providerDoesNotKnow(err) {
+		return false
+	}
+	for _, id := range pluginRequestProviderIDs(query.ContentType, query.ProviderIDs) {
+		if strings.TrimSpace(id) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // ResolveSeriesTVDBID asks the enabled series providers for the TVDB ID of a

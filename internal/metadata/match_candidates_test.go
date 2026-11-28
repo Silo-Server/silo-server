@@ -2,8 +2,13 @@
 package metadata
 
 import (
+	"context"
 	"errors"
 	"testing"
+	"time"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -190,5 +195,57 @@ func TestSelectRefreshMatchCandidate_TrustedIDCoverage(t *testing.T) {
 				t.Fatalf("expected candidate to be rejected, got %+v", winner)
 			}
 		})
+	}
+}
+
+func TestSearchAndNormalizeReportsFailedProviders(t *testing.T) {
+	t.Parallel()
+
+	down := &idSearchProvider{slug: "tmdb", err: errors.New("tmdb: server error 503 after 3 retries")}
+	// A provider's 404 for the looked-up ID is a miss, not an outage.
+	missing := &idSearchProvider{slug: "omdb", err: errors.New("rpc error: code = Unknown desc = omdb: HTTP 404: not found")}
+	// A plugin can say the same with a NotFound status.
+	unknown := &idSearchProvider{slug: "anidb", err: status.Error(codes.NotFound, "no such id")}
+	up := &idSearchProvider{slug: "tvdb", results: map[string][]SearchResult{
+		"imdb:tt0113277": {{Name: "Heat", Year: 1995, ProviderIDs: map[string]string{"imdb": "tt0113277", "tvdb": "81"}, Provider: "tvdb"}},
+	}}
+	svc := &MetadataService{
+		chainCache: map[string]chainCacheEntry{
+			"0:movie":     {providers: []Provider{down, missing, unknown, up}, expiresAt: time.Now().Add(time.Hour)},
+			"0:audiobook": {providers: []Provider{missing}, expiresAt: time.Now().Add(time.Hour)},
+		},
+		chainCacheTTL: time.Hour,
+	}
+
+	candidates, failed, err := svc.SearchAndNormalize(context.Background(), SearchQuery{
+		Title: "Heat", Year: 1995, ContentType: "movie", Language: "en",
+		ProviderIDs: map[string]string{"imdb": "tt0113277"},
+	}, 0)
+	if err != nil {
+		t.Fatalf("SearchAndNormalize error = %v", err)
+	}
+	if len(candidates) != 1 || candidates[0].ProviderIDs["tvdb"] != "81" {
+		t.Fatalf("candidates = %+v, want the working provider's result", candidates)
+	}
+	if len(failed) != 1 || failed["tmdb"] == nil {
+		t.Fatalf("provider errors = %v, want only tmdb", failed)
+	}
+
+	// Without an ID to look up, a 404 says nothing about the title: it fails.
+	_, failed, err = svc.SearchAndNormalize(context.Background(), SearchQuery{
+		Title: "Heat", Year: 1995, ContentType: "movie", Language: "en",
+	}, 0)
+	if err != nil || len(failed) != 3 || failed["omdb"] == nil || failed["anidb"] == nil {
+		t.Fatalf("title search provider errors = %v, err = %v, want tmdb, omdb and anidb", failed, err)
+	}
+
+	// Plugins are not sent work-level book IDs, so a search carrying only one
+	// is a title search too.
+	_, failed, err = svc.SearchAndNormalize(context.Background(), SearchQuery{
+		Title: "Dune", ContentType: "audiobook", Language: "en",
+		ProviderIDs: map[string]string{"openlibrary_work": "OL893415W"},
+	}, 0)
+	if err != nil || failed["omdb"] == nil {
+		t.Fatalf("work-ID search provider errors = %v, err = %v, want omdb", failed, err)
 	}
 }

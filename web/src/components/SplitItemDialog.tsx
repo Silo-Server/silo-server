@@ -21,6 +21,7 @@ import type {
   SplitHistoryMode,
 } from "@/api/types";
 import { ItemLibraryPicker } from "@/components/ItemLibraryPicker";
+import { MatchSearchProviderErrors } from "@/components/MatchSearchProviderErrors";
 import { PathText } from "@/components/PathText";
 import { useItemFiles, useSearchItemMatchCandidates, useSplitItem } from "@/hooks/queries/items";
 import { codeNumber, useT, type MessageKey } from "@/i18n";
@@ -76,6 +77,8 @@ export default function SplitItemDialog({ item, open, onOpenChange }: SplitItemD
   const searchMutation = useSearchItemMatchCandidates(item.content_id);
   const splitMutation = useSplitItem();
   const candidates = searchMutation.data?.candidates ?? [];
+  // Providers whose search failed: an outage, not a missing title.
+  const failedProviders = Object.keys(searchMutation.data?.provider_errors ?? {});
 
   // Monotonic token so a slow dry-run response for an outdated plan can't
   // overwrite the preview of the current one.
@@ -404,11 +407,14 @@ export default function SplitItemDialog({ item, open, onOpenChange }: SplitItemD
                 })}
               </div>
             )}
-            {searchMutation.isSuccess && candidates.length === 0 && (
-              <p className="text-muted-foreground text-center text-sm">
-                {t("web.item.dialog.noCandidates")}
-              </p>
-            )}
+            <MatchSearchProviderErrors providers={failedProviders} />
+            {searchMutation.isSuccess &&
+              candidates.length === 0 &&
+              failedProviders.length === 0 && (
+                <p className="text-muted-foreground text-center text-sm">
+                  {t("web.item.dialog.noCandidates")}
+                </p>
+              )}
 
             <label className="flex cursor-pointer items-center gap-2 text-sm">
               <input
