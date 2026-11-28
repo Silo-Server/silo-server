@@ -3,6 +3,7 @@ package mediasample
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"image"
@@ -10,6 +11,7 @@ import (
 	"io"
 	"math"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -338,5 +340,90 @@ func TestRunSheetsRejectsBrokenOutput(t *testing.T) {
 		if !errors.As(err, &runErr) || runErr.Reason != tt.want {
 			t.Errorf("%s: error %v, want reason %s", name, err, tt.want)
 		}
+	}
+}
+
+// mp4Box encodes an ISO BMFF box of kind around payload.
+func mp4Box(kind string, payload ...[]byte) []byte {
+	body := bytes.Join(payload, nil)
+	box := binary.BigEndian.AppendUint32(nil, uint32(8+len(body)))
+	return append(append(box, kind...), body...)
+}
+
+// mp4FullBox encodes a version 0 full box whose fields are 32-bit values.
+func mp4FullBox(kind string, fields ...uint32) []byte {
+	payload := make([]byte, 4)
+	for _, field := range fields {
+		payload = binary.BigEndian.AppendUint32(payload, field)
+	}
+	return mp4Box(kind, payload)
+}
+
+// mp4Track is a track of handler with samples in its sample table, stss
+// as its sync sample table if not nil, and more boxes in that table.
+func mp4Track(handler string, samples uint32, stss []byte, more ...[]byte) []byte {
+	hdlr := mp4Box("hdlr", make([]byte, 8), []byte(handler), make([]byte, 13))
+	stbl := [][]byte{mp4FullBox("stsz", 0, samples)}
+	if stss != nil {
+		stbl = append(stbl, stss)
+	}
+	stbl = append(stbl, more...)
+	return mp4Box("trak", mp4Box("mdia", hdlr, mp4Box("minf", mp4Box("stbl", stbl...))))
+}
+
+// writeMP4 writes an MP4 file of moov's tracks, the movie data after it.
+func writeMP4(t *testing.T, tracks ...[]byte) string {
+	t.Helper()
+	file := bytes.Join([][]byte{
+		mp4Box("ftyp", []byte("isom\x00\x00\x02\x00isomiso2avc1mp41")),
+		mp4Box("moov", tracks...),
+		mp4Box("mdat", make([]byte, 64)),
+	}, nil)
+	path := filepath.Join(t.TempDir(), "a.mp4")
+	if err := os.WriteFile(path, file, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// TestRunSheetsReadsAnMP4WithoutSyncSamplesAsAWindow reads an MP4 whose
+// video sync sample table lists none of its samples as one window: ffmpeg
+// then indexes only the first sample as a keyframe, so every list entry
+// would decode from the start of the file. MP4s that list their sync
+// samples, leave the table out (every sample is one), or keep their samples
+// in fragments still read through a list.
+func TestRunSheetsReadsAnMP4WithoutSyncSamplesAsAWindow(t *testing.T) {
+	audio := mp4Track("soun", 500, mp4FullBox("stss", 0))
+	for _, tc := range []struct {
+		name   string
+		tracks [][]byte
+		window bool
+	}{
+		{"empty sync sample table", [][]byte{audio, mp4Track("vide", 1200, mp4FullBox("stss", 0))}, true},
+		{"listed sync samples", [][]byte{mp4Track("vide", 1200, mp4FullBox("stss", 2, 1, 31))}, false},
+		{"no sync sample table", [][]byte{mp4Track("vide", 1200, nil)}, false},
+		{"fragmented", [][]byte{mp4Track("vide", 0, mp4FullBox("stss", 0)), mp4Box("mvex")}, false},
+		{"empty table on an audio track only", [][]byte{audio, mp4Track("vide", 1200, nil)}, false},
+		{"random access sample group", [][]byte{mp4Track("vide", 1200, mp4FullBox("stss", 0), mp4FullBox("sbgp", binary.BigEndian.Uint32([]byte("rap ")), 1, 1200, 1))}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := sheetsRequest([]float64{5, 15, 25, 35}, 2, 2)
+			req.Input = writeMP4(t, tc.tracks...)
+			fake := &fakeSheets{format: "mov,mp4,m4a,3gp,3g2,mj2", frames: []fakeSheetFrame{tagged(10, 5), tagged(20, 15), tagged(30, 25), tagged(40, 35)}}
+			if tc.window {
+				fake.frames = []fakeSheetFrame{timed(10, "5"), timed(20, "15"), timed(30, "25"), timed(40, "35")}
+				fake.packetEnd = 40
+			}
+			_, err := (Runner{Exec: fake.exec}).Run(t.Context(), req)
+			if len(fake.calls) < 2 {
+				t.Fatalf("want a probe and a read, got %q", fake.calls)
+			}
+			if list := slices.Contains(fake.calls[1], "concat"); list == tc.window {
+				t.Fatalf("read %q, want window=%t", fake.calls[1], tc.window)
+			}
+			if err != nil || len(fake.calls) != 2 {
+				t.Fatalf("error %v after %d runs, want one read", err, len(fake.calls))
+			}
+		})
 	}
 }

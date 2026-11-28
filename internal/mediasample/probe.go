@@ -67,6 +67,11 @@ func (i inputInfo) seeksToKeyframes() bool {
 	return false
 }
 
+// isMP4 reports whether the probe found an ISO BMFF (MP4 or QuickTime) input.
+func (i inputInfo) isMP4() bool {
+	return slices.Contains(i.Formats, "mov") || slices.Contains(i.Formats, "mp4")
+}
+
 // probeArgs are the arguments of a Samples request's probe.
 func probeArgs(input string) []string {
 	return append(quietArgs("info"), "-i", input, "-map", "0:V:0", "-c", "copy", "-t", "0", "-f", "null", "-")
