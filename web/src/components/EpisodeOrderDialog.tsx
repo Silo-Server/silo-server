@@ -3,7 +3,8 @@
 // are laid out: as the order lists them, as one absolute list, or arranged by
 // hand. Opened from the series page's Manage → Arrange Show (admins and
 // metadata curators).
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { History, Loader2 } from "lucide-react";
 import { V2ProblemError } from "@/api/v2/request";
@@ -125,10 +126,26 @@ function Editor({
   // The stored arrangement opens when it was made from the chosen order;
   // another order, or a start over, builds a fresh one from its seasons.
   const arrangerOn = custom || arrangerEdited;
-  // Both load while the dialog is open, so switching layouts shows them at
-  // once: the stored arrangement, and the chosen order's own seasons, which
-  // the read-only layouts show and a fresh arrangement starts from.
-  const stored = useCustomSeasons(contentId, true, null);
+  // The chosen order's own seasons load with the dialog: the read-only
+  // layouts show them and a fresh arrangement starts from them. The stored
+  // arrangement loads once Custom is in view, or about to be (hover, focus).
+  const [storedWanted, setStoredWanted] = useState(state?.choice.layout === "custom");
+  const stored = useCustomSeasons(contentId, storedWanted || custom, null);
+  // Switched to Custom before the stored arrangement arrived: it reopens on
+  // its own order when it does, unless the order changed meanwhile.
+  const [reopenPending, setReopenPending] = useState(false);
+  if (reopenPending && stored.data) {
+    setReopenPending(false);
+    if (stored.data.saved && draft?.layout === "custom" && !arrangerEdited)
+      setEdited({ ...draftOf(stored.data.choice, libraryProvider), layout: "custom" });
+  }
+  // Cached arrangements carry the revision of when they loaded; a later
+  // opening loads them again.
+  const queryClient = useQueryClient();
+  useEffect(
+    () => () => queryClient.removeQueries({ queryKey: ["custom-seasons", contentId] }),
+    [queryClient, contentId],
+  );
   const orderBase: EpisodeOrderChoice | null = choice ? { ...choice, layout: "custom" } : null;
   const fresh = useCustomSeasons(contentId, orderBase !== null, orderBase);
   const startFrom =
@@ -153,8 +170,10 @@ function Editor({
     let next = { ...draft, ...patch };
     // Switching to Custom reopens a saved arrangement on the order it was
     // made from; changing Based on afterwards starts over.
-    if (patch.layout === "custom" && draft.layout !== "custom" && stored.data?.saved)
+    const toCustom = patch.layout === "custom" && draft.layout !== "custom";
+    if (toCustom && stored.data?.saved)
       next = { ...draftOf(stored.data.choice, libraryProvider), layout: "custom" };
+    setReopenPending(toCustom && !stored.data);
     const baseChanged = !!choice && !sameBase(choiceOf(next, libraryProvider), choice);
     if (arrangerEdited && baseChanged) setConfirm({ kind: "draft", next });
     else setEdited(next);
@@ -240,6 +259,7 @@ function Editor({
                 layout={draft.layout}
                 structure={structure}
                 onChange={(layout) => update({ layout })}
+                onCustomIntent={() => setStoredWanted(true)}
               />
             </div>
           )}

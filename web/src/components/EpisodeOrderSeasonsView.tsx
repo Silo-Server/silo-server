@@ -189,7 +189,10 @@ export function EpisodeOrderSeasonsView({
         </span>
         {preview && preview.file_count > 0 && (
           <span
-            className={cn("font-medium", missingFiles === 0 ? "text-green-500" : "text-amber-500")}
+            className={cn(
+              "font-medium",
+              missingFiles === 0 ? "text-success-label" : "text-warning-label",
+            )}
           >
             {t("web.item.episodeOrder.preview.files", {
               matched: preview.matched_files,

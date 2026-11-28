@@ -229,7 +229,7 @@ function FitBadge({ matched, total }: { matched: number; total: number }) {
     <span
       className={cn(
         "rounded-full px-1.5 py-px text-[0.6875rem] font-semibold whitespace-nowrap",
-        all ? "bg-green-500/15 text-green-500" : "bg-amber-500/15 text-amber-500",
+        all ? "bg-success/15 text-success-label" : "bg-warning/15 text-warning-label",
       )}
     >
       {all
@@ -293,10 +293,13 @@ export function LayoutSwitch({
   layout,
   structure,
   onChange,
+  onCustomIntent,
 }: {
   layout: Layout;
   structure: Provider;
   onChange: (layout: Layout) => void;
+  /** The pointer or focus is on Custom: its arrangement can start loading. */
+  onCustomIntent: () => void;
 }) {
   const t = useT();
   const options: { value: Layout; label: string; help: string }[] = [
@@ -330,6 +333,8 @@ export function LayoutSwitch({
           aria-checked={layout === o.value}
           title={o.help}
           onClick={() => onChange(o.value)}
+          onPointerEnter={o.value === "custom" ? onCustomIntent : undefined}
+          onFocus={o.value === "custom" ? onCustomIntent : undefined}
           className={cn(
             "min-h-9 flex-1 rounded-lg px-3.5 text-sm font-semibold sm:flex-none",
             layout === o.value
