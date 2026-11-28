@@ -21,15 +21,27 @@ type movingEpisodeRepo struct {
 	move func(ctx context.Context) error
 }
 
+func (r *movingEpisodeRepo) runMove(ctx context.Context) error {
+	if r.move == nil {
+		return nil
+	}
+	move := r.move
+	r.move = nil
+	return move(ctx)
+}
+
 func (r *movingEpisodeRepo) GetBySeriesAndNumber(ctx context.Context, seriesID string, season, episode int) (*models.Episode, error) {
-	if r.move != nil {
-		move := r.move
-		r.move = nil
-		if err := move(ctx); err != nil {
-			return nil, err
-		}
+	if err := r.runMove(ctx); err != nil {
+		return nil, err
 	}
 	return r.metadataEpisodeRepo.GetBySeriesAndNumber(ctx, seriesID, season, episode)
+}
+
+func (r *movingEpisodeRepo) GetBySeriesAndFileNumber(ctx context.Context, seriesID string, season, episode int) (*models.Episode, error) {
+	if err := r.runMove(ctx); err != nil {
+		return nil, err
+	}
+	return r.metadataEpisodeRepo.GetBySeriesAndFileNumber(ctx, seriesID, season, episode)
 }
 
 // TestEpisodeLinkFollowsSameTitleMoveDB checks the episode linker when a scan

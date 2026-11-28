@@ -254,3 +254,5 @@ replace github.com/zishang520/webtransport-go => ./internal/compat/zishang520-we
 replace github.com/quic-go/quic-go => github.com/darthShadow/quic-go v0.64.1-shunpike.2
 
 replace tailscale.com => github.com/darthShadow/tailscale v1.104.2-shunpike.2
+
+replace github.com/Silo-Server/silo-plugin-sdk => github.com/Rhainland/silo-plugin-sdk v0.10.1-0.20261127135000-6835c0926dd6

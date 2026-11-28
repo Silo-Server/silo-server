@@ -1240,6 +1240,49 @@
       "body_file": "admin_collection_template_job_accepted.json"
     },
     {
+      "name": "admin_custom_seasons_read",
+      "operation_id": "getAdminCustomSeasons",
+      "scenario": "A curator reads the arranged seasons with each episode's key and file.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/items/item-1/custom-seasons",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Content-Type": "application/json",
+        "ETag": "\"19db14412ea53425b548bb89.1xu7zqbpzqo1p\""
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminCustomSeasons",
+      "body_file": "admin_custom_seasons_read.json"
+    },
+    {
+      "name": "admin_custom_seasons_saved",
+      "operation_id": "setAdminCustomSeasons",
+      "scenario": "Saving stores the arrangement and queues the refresh that renumbers the series.",
+      "request": {
+        "method": "PUT",
+        "path": "/api/v2/admin/items/item-1/custom-seasons",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "If-Match": "\"19db14412ea53425b548bb89.1xu7zqbpzqo1n\""
+        },
+        "body": "{\"provider\":\"tvdb\",\"order_id\":\"\",\"file_order\":\"\",\"seasons\":[{\"number\":1,\"title\":\"Arc one\",\"overview\":\"\",\"episodes\":[\"tvdb:85173\"]},{\"number\":0,\"title\":\"\",\"overview\":\"\",\"episodes\":[]}]}"
+      },
+      "expected_status": 202,
+      "response_headers": {
+        "Content-Type": "application/json",
+        "Location": "/api/v2/admin/jobs/item-refresh-1",
+        "Retry-After": "5"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminTaskJob",
+      "body_file": "admin_custom_seasons_saved.json"
+    },
+    {
       "name": "admin_dashboard_layout_unsaved",
       "operation_id": "getAdminDashboardLayout",
       "scenario": "An account with no saved layout reads null for both members and still gets a validator for its first save.",
@@ -1670,6 +1713,69 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/AdminEpisodeMarkersStatus",
       "body_file": "admin_episode_markers_refresh.json"
+    },
+    {
+      "name": "admin_episode_order_previewed",
+      "operation_id": "previewAdminEpisodeOrder",
+      "scenario": "A preview reports the order's seasons and the files it would not place.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/admin/items/item-1/episode-order/preview",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        },
+        "body": "{\"provider\":\"tvdb\",\"order_id\":\"dvd\",\"file_order\":\"\",\"layout\":\"seasons\"}"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminEpisodeOrderPreview",
+      "body_file": "admin_episode_order_previewed.json"
+    },
+    {
+      "name": "admin_episode_order_read",
+      "operation_id": "getAdminEpisodeOrder",
+      "scenario": "A curator reads a series' episode order with the orders each provider offers.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/items/item-1/episode-order",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Content-Type": "application/json",
+        "ETag": "\"19db14412ea53425b548bb89.1xu7zqbpzqo1n\""
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminEpisodeOrder",
+      "body_file": "admin_episode_order_read.json"
+    },
+    {
+      "name": "admin_episode_order_saved",
+      "operation_id": "setAdminEpisodeOrder",
+      "scenario": "Saving stores the order and queues the refresh that renumbers the series.",
+      "request": {
+        "method": "PUT",
+        "path": "/api/v2/admin/items/item-1/episode-order",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "If-Match": "\"19db14412ea53425b548bb89.1xu7zqbpzqo1n\""
+        },
+        "body": "{\"provider\":\"tvdb\",\"order_id\":\"dvd\",\"file_order\":\"\",\"layout\":\"seasons\"}"
+      },
+      "expected_status": 202,
+      "response_headers": {
+        "Content-Type": "application/json",
+        "Location": "/api/v2/admin/jobs/item-refresh-1",
+        "Retry-After": "5"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminTaskJob",
+      "body_file": "admin_episode_order_saved.json"
     },
     {
       "name": "admin_filesystem_browse",

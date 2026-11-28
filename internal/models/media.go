@@ -48,6 +48,8 @@ type MediaFolder struct {
 	ScanWarningAt         *time.Time
 	AllowEmptyCleanupOnce bool
 	SortOrder             int
+	// EpisodeOrderProvider ("tvdb", "tmdb") numbers the shows; empty: first enabled remote Episodes provider.
+	EpisodeOrderProvider string
 }
 
 // MediaFile represents a row in the media_files table.
@@ -903,6 +905,10 @@ type Episode struct {
 	SortTitle     string
 	OriginalTitle string
 	Tagline       string
+	// ProviderSeasonNumber and ProviderEpisodeNumber are the episode's numbers in its
+	// provider's default order when the series shows another; nil means the same.
+	ProviderSeasonNumber  *int
+	ProviderEpisodeNumber *int
 }
 
 // MediaItemRoot represents a row in the media_item_roots table.

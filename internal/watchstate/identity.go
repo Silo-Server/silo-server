@@ -56,8 +56,7 @@ func (r *StableIdentityResolver) ResolveHistoryIdentity(ctx context.Context, med
 			if len(episodeIDs) == 0 && len(seriesIDs) == 0 {
 				return userstore.WatchIdentity{}
 			}
-			seasonNumber := episode.SeasonNumber
-			episodeNumber := episode.EpisodeNumber
+			seasonNumber, episodeNumber := episode.ProviderNumbers()
 			return userstore.WatchIdentity{
 				StableType:        "episode",
 				ProviderIDs:       episodeIDs,
@@ -164,8 +163,7 @@ func (r *StableIdentityResolver) ResolveHistoryIdentities(ctx context.Context, m
 			if len(episodeIDs) == 0 && len(seriesProviderIDs) == 0 {
 				continue
 			}
-			seasonNumber := episode.SeasonNumber
-			episodeNumber := episode.EpisodeNumber
+			seasonNumber, episodeNumber := episode.ProviderNumbers()
 			result[mediaItemID] = userstore.WatchIdentity{
 				StableType:        "episode",
 				ProviderIDs:       episodeIDs,

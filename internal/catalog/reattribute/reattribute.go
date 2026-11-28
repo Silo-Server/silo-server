@@ -186,6 +186,21 @@ var intentTables = []struct {
 	{"profile_series_notification_mutes", colSeriesID, []string{colUserID, colProfileID}},
 }
 
+// MovePairs moves all episode-level user state for each pair on the caller's
+// transaction, for episodes merged within one series (an episode order
+// change finding two rows for one episode). Run covers moves between items.
+func MovePairs(ctx context.Context, tx pgx.Tx, pairs []IDPair) (*Report, error) {
+	report := &Report{}
+	if len(pairs) == 0 {
+		return report, nil
+	}
+	if err := movePairs(ctx, tx, pairs, report); err != nil {
+		return nil, err
+	}
+	report.EpisodePairsMoved = len(pairs)
+	return report, nil
+}
+
 // movePairs moves ALL state rows for each (from,to) pair: the whole-item path
 // used for merges and for per-episode moves during series splits.
 func movePairs(ctx context.Context, tx pgx.Tx, pairs []IDPair, report *Report) (err error) {

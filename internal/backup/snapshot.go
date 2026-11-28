@@ -203,6 +203,12 @@ func referencedBlobs(ctx context.Context, q queryer, includeSubtitles bool) ([]b
 			sql: `SELECT DISTINCT backdrop_url FROM public.library_collections WHERE ` + cached("backdrop_url")},
 		query{table: "user_personal_collections", source: "personal collection poster", store: storeAssets, ladder: true,
 			sql: `SELECT DISTINCT poster_url FROM public.user_personal_collections WHERE ` + cached("poster_url")},
+		// Posters uploaded for arranged seasons (episode ordering), held even
+		// while no season row shows them.
+		query{table: "series_custom_seasons", source: "arranged season poster", store: storeAssets, ladder: true,
+			sql: `SELECT DISTINCT poster_path FROM public.series_custom_seasons WHERE ` + cached("poster_path")},
+		query{table: "series_custom_season_uploads", source: "arranged season poster upload", store: storeAssets, ladder: true,
+			sql: `SELECT DISTINCT path FROM public.series_custom_season_uploads WHERE ` + cached("path")},
 		query{table: "media_folders", source: sourceLibraryPoster, store: storeAssets,
 			sql: `SELECT DISTINCT poster_path FROM public.media_folders WHERE ` + cached("poster_path")},
 		// An uploaded card overlay image is its row: the ref names the object.

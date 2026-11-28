@@ -398,6 +398,12 @@ func artworkSweepSurfaces() []artworkSweepSurface {
 		{name: "user collection posters", table: "user_personal_collections", keyCols: []artworkSweepKey{textSweepKey("id")}, pathCol: "poster_url", clearSet: `poster_url = '', poster_thumbhash = '', updated_at = NOW()`, alwaysVerify: true},
 		{name: "user collection collages", table: "user_personal_collection_poster_variants", keyCols: []artworkSweepKey{int64SweepKey("user_id"), textSweepKey("collection_id"), textSweepKey("variant_key")}, pathCol: "poster_path", clearSet: `poster_path = '', poster_thumbhash = ''`, alwaysVerify: true},
 		{name: "library posters", table: "media_folders", keyCols: []artworkSweepKey{int64SweepKey("id")}, pathCol: posterPathColumn, clearSet: `poster_path = ''`, alwaysVerify: true},
+		// Posters uploaded for arranged seasons (episode ordering): held by the
+		// arrangement and its uploads even while no season row shows them,
+		// such as when the series uses another layout. A cleared upload must
+		// be uploaded again.
+		{name: "arranged season posters", table: "series_custom_seasons", keyCols: []artworkSweepKey{textSweepKey("series_id"), int64SweepKey("number")}, pathCol: posterPathColumn, clearSet: `poster_path = '', poster_source = '', poster_thumbhash = ''`, alwaysVerify: true},
+		{name: "arranged season poster uploads", table: "series_custom_season_uploads", keyCols: []artworkSweepKey{textSweepKey("series_id"), textSweepKey("source")}, pathCol: "path", clearSet: `path = '', thumbhash = ''`, alwaysVerify: true},
 	}
 }
 

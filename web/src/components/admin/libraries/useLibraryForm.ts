@@ -215,6 +215,8 @@ export function useLibraryForm({
   const [realtimeMonitoring, setRealtimeMonitoring] = useState(
     library?.realtime_monitoring ?? true,
   );
+  const savedEpisodeOrderProvider = library?.episode_order_provider ?? "";
+  const [episodeOrderChoice, setEpisodeOrderProvider] = useState(savedEpisodeOrderProvider);
   const [levelChains, setLevelChains] = useState<Record<string, LevelChainItem[]>>({});
   const [chainDirty, setChainDirty] = useState(false);
   const [submitAttempted, setSubmitAttempted] = useState(false);
@@ -373,6 +375,15 @@ export function useLibraryForm({
       body.box_sets_in_search = boxSetsInSearch;
     }
 
+    // Update only, and only when it changes: a change renumbers the library.
+    if (
+      library &&
+      settingSupport.episodeOrder &&
+      episodeOrderChoice !== savedEpisodeOrderProvider
+    ) {
+      body.episode_order_provider = episodeOrderChoice;
+    }
+
     if (library) {
       updateMutation.mutate(
         { id: library.id, body },
@@ -447,6 +458,12 @@ export function useLibraryForm({
     toggleTrailerKind,
     realtimeMonitoring,
     setRealtimeMonitoring,
+    // The order shows follow: the saved choice, else the first remote
+    // provider the episode chain runs (what the server falls back to).
+    episodeOrderProvider:
+      episodeOrderChoice || episodeChainProvider(remoteChains["episode"] ?? []) || "tvdb",
+    episodeOrderChanged: !!library && episodeOrderChoice !== savedEpisodeOrderProvider,
+    setEpisodeOrderProvider,
     contentLevels: contentLevelsForType(type),
     activeLevelChains,
     remoteLevelChains: remoteChains,
@@ -466,3 +483,16 @@ export function useLibraryForm({
 }
 
 export type LibraryFormController = ReturnType<typeof useLibraryForm>;
+
+/**
+ * The episode order provider a chain follows when the library sets none: its
+ * first enabled TVDB or TMDB entry, as the server resolves it.
+ */
+function episodeChainProvider(chain: LevelChainItem[]): "tvdb" | "tmdb" | "" {
+  for (const item of chain) {
+    if (!item.enabled) continue;
+    const slug = item.provider_slug.toLowerCase();
+    if (slug === "tvdb" || slug === "tmdb") return slug;
+  }
+  return "";
+}

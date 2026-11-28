@@ -3244,6 +3244,15 @@ func newChiRouter(deps Dependencies) chi.Router {
 	v2deps.AdminResourceSampler = deps.ResourceSampler
 	v2deps.AdminCatalogSearch = adminHandler
 	v2deps.AdminItemMetadata = adminHandler
+	if orders, ok := deps.MetadataService.(apiv2.AdminEpisodeOrderService); ok {
+		v2deps.AdminEpisodeOrders = orders
+	}
+	if seasons, ok := deps.MetadataService.(apiv2.AdminCustomSeasonsService); ok {
+		v2deps.AdminCustomSeasons = seasons
+	}
+	if detailSvc != nil {
+		v2deps.AdminImagePresigner = detailSvc
+	}
 	if adminHandler != nil {
 		v2deps.AdminUnmatchedFiles = adminHandler
 	}

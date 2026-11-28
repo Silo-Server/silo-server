@@ -35,7 +35,10 @@ type Client struct {
 func (c *Client) StartSeq() uint64 { return c.startSeq }
 
 type MetadataProviderClient struct {
-	client  pluginv1.MetadataProviderClient
+	client pluginv1.MetadataProviderClient
+	// orders serves ListEpisodeOrders; nil when the capability does not
+	// declare the episode_orders metadata key.
+	orders  pluginv1.EpisodeOrdersClient
 	timeout time.Duration
 }
 
@@ -156,10 +159,17 @@ func (c *Client) MetadataProvider(capabilityID string) (*MetadataProviderClient,
 	if err := c.requireCapability("metadata_provider.v1", capabilityID); err != nil {
 		return nil, err
 	}
-	return &MetadataProviderClient{
+	client := &MetadataProviderClient{
 		client:  c.rpc.MetadataProvider(),
 		timeout: DefaultMetadataTimeout,
-	}, nil
+	}
+	c.mu.RLock()
+	descriptor := c.capabilities[capabilityKey("metadata_provider.v1", capabilityID)]
+	c.mu.RUnlock()
+	if sdkmanifest.MetadataProviderSupportsEpisodeOrders(descriptor) {
+		client.orders = c.rpc.EpisodeOrders()
+	}
+	return client, nil
 }
 
 func (c *Client) ImageResolver(capabilityID string) (*ImageResolverClient, error) {
@@ -359,6 +369,21 @@ func (c *MetadataProviderClient) GetSeasons(ctx context.Context, req *pluginv1.G
 	callCtx, cancel := ensureDeadline(ctx, c.timeout)
 	defer cancel()
 	return c.client.GetSeasons(callCtx, req)
+}
+
+// SupportsEpisodeOrders reports whether the provider lists episode orders
+// and serves the ordering field of GetSeasons and GetEpisodes.
+func (c *MetadataProviderClient) SupportsEpisodeOrders() bool { return c.orders != nil }
+
+// ListEpisodeOrders lists the series' episode orders. A provider without
+// the capability answers ErrCapabilityNotFound.
+func (c *MetadataProviderClient) ListEpisodeOrders(ctx context.Context, req *pluginv1.ListEpisodeOrdersRequest) (*pluginv1.ListEpisodeOrdersResponse, error) {
+	if c.orders == nil {
+		return nil, fmt.Errorf("%w: %s", ErrCapabilityNotFound, sdkmanifest.EpisodeOrdersKey)
+	}
+	callCtx, cancel := ensureDeadline(ctx, c.timeout)
+	defer cancel()
+	return c.orders.ListEpisodeOrders(callCtx, req)
 }
 
 func (c *MetadataProviderClient) GetEpisodes(ctx context.Context, req *pluginv1.GetEpisodesRequest) (*pluginv1.GetEpisodesResponse, error) {

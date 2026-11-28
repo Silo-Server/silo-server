@@ -65,6 +65,21 @@ files are queued for matching again.
 The mark lives on the item, and an unmatched item's `local-` ID comes from its file
 path, so a renamed or moved file comes back as a new unmatched item.
 
+## Episode order
+
+The library resource carries `episode_order_provider`: `tvdb` or `tmdb`, the
+provider whose seasons and episode numbers the library's shows follow, or empty
+for the first remote provider of the library's Episodes chain. It is an
+optional, non-nullable member of the `updateLibrary` body; a change queues a full
+metadata refresh of the library, which renumbers its shows. While a refresh of
+the library is queued or running, a change answers `409` (`conflict`): retry
+when it finishes. A show the provider
+has no episodes for follows the other enabled provider. A show can override the
+library (see [admin-catalog-api.md](admin-catalog-api.md#episode-order)); the
+rules are in [architecture/episode-ordering.md](architecture/episode-ordering.md).
+`getLibraryCapabilities` reports `episode_ordering` when the server supports
+the setting and the series operations.
+
 ## Real-time monitoring
 
 The library resource carries `realtime_monitoring`, the library's real-time

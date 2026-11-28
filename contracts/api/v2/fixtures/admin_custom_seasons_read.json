@@ -1,0 +1,37 @@
+{
+  "saved": true,
+  "choice": {
+    "provider": "tvdb",
+    "order_id": "",
+    "file_order": "",
+    "layout": "custom"
+  },
+  "structure_provider": "tvdb",
+  "seasons": [
+    {
+      "number": 1,
+      "title": "Arc one",
+      "overview": "",
+      "provider_title": "Season 1",
+      "provider_overview": "",
+      "episodes": [
+        {
+          "key": "tvdb:85173",
+          "title": "Children of the Gods",
+          "provider_season": 1,
+          "provider_episode": 1,
+          "file": "Stargate SG-1 - S01E01.mkv",
+          "placed_automatically": false
+        }
+      ]
+    },
+    {
+      "number": 0,
+      "title": "",
+      "overview": "",
+      "provider_title": "Specials",
+      "provider_overview": "",
+      "episodes": []
+    }
+  ]
+}

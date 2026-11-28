@@ -54,6 +54,7 @@ export function libraryFromV2(library: LibraryV2): Library {
     box_sets_in_search: library.box_sets_in_search,
     trailer_kinds: library.trailer_kinds,
     realtime_monitoring: library.realtime_monitoring,
+    episode_order_provider: library.episode_order_provider,
     sort_order: library.sort_order,
     poster_url: library.poster_url,
     last_scanned_at: library.last_scanned_at ?? null,

@@ -394,6 +394,7 @@ type PlaybackVariantPart struct {
 type CatalogItemDetail struct {
 	Themes *ThemeSongSet `json:"themes,omitempty"`
 	CatalogItem
+	EpisodeOrder                    *SeriesEpisodeOrder                  `json:"episode_order,omitempty" doc:"The episode order an admin chose for this series; absent while it follows its library"`
 	PlaySeasonNumber                *int                                 `json:"play_season_number,omitempty" doc:"The season of play_content_id when it is an episode, so a client can open that season without fetching the episode; absent otherwise"`
 	SortTitle                       string                               `json:"sort_title,omitempty"`
 	OriginalTitle                   string                               `json:"original_title,omitempty"`
@@ -1490,6 +1491,12 @@ func catalogItemDetailOf(d *catalogpkg.ItemDetail, sel ratingsources.Selection) 
 	if d.HasEffectiveShowForcedSubtitles {
 		out.EffectiveShowForcedSubtitles = &d.EffectiveShowForcedSubtitles
 	}
+	if o := d.EpisodeOrder; o != nil {
+		out.EpisodeOrder = &SeriesEpisodeOrder{
+			Provider: o.Provider, OrderID: o.OrderID, OrderName: o.OrderName, Layout: o.Layout,
+			FileOrder: o.FileOrder, CustomArrangement: o.CustomArrangement,
+		}
+	}
 	return out
 }
 
@@ -1532,4 +1539,15 @@ func detailCardAirDate(d *catalogpkg.ItemDetail) *string {
 		return nil
 	}
 	return datePtr(calendarDate(*d.AirDate))
+}
+
+// SeriesEpisodeOrder names the episode order a series shows, so a client can
+// label it ("TVDB DVD Order · Absolute").
+type SeriesEpisodeOrder struct {
+	Provider          string `json:"provider" doc:"tvdb or tmdb; empty follows the library's provider" example:"tvdb"`
+	OrderID           string `json:"order_id" doc:"The provider's order; empty is its default" example:"dvd"`
+	OrderName         string `json:"order_name" doc:"The order's name as the provider gave it; empty for the default order" example:"DVD Order"`
+	Layout            string `json:"layout" doc:"seasons, absolute or custom; treat an unknown value as seasons" example:"seasons"`
+	FileOrder         string `json:"file_order" doc:"tvdb or tmdb when the files are named in another provider's order than the series follows; empty otherwise" example:""`
+	CustomArrangement bool   `json:"custom_arrangement" doc:"Arranged seasons place an episode elsewhere than the provider's default order does; false for seasons that were only renamed or described" example:"false"`
 }

@@ -267,6 +267,8 @@ type updateLibraryRequest struct {
 	BoxSetsEnabled  *bool `json:"-"`
 	BoxSetMinMovies *int  `json:"-"`
 	BoxSetsInSearch *bool `json:"-"`
+	// EpisodeOrderProvider is set only by the v2 updateLibrary operation.
+	EpisodeOrderProvider *string `json:"-"`
 }
 
 // affectsTrickplay reports whether the update can change which of the
@@ -323,6 +325,8 @@ type libraryResponse struct {
 	BoxSetsEnabled  bool `json:"-"`
 	BoxSetMinMovies int  `json:"-"`
 	BoxSetsInSearch bool `json:"-"`
+	// EpisodeOrderProvider is read by the v2 library view only.
+	EpisodeOrderProvider string `json:"-"`
 }
 
 type libraryMountCheckRootResponse struct {
@@ -462,6 +466,7 @@ func toLibraryResponse(f *models.MediaFolder) libraryResponse {
 		BoxSetsEnabled:             f.BoxSetsEnabled,
 		BoxSetMinMovies:            f.BoxSetMinMovies,
 		BoxSetsInSearch:            f.BoxSetsInSearch,
+		EpisodeOrderProvider:       f.EpisodeOrderProvider,
 	}
 }
 

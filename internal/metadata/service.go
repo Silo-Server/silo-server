@@ -197,6 +197,7 @@ type metadataSkippedRootRepo interface {
 type metadataEpisodeRepo interface {
 	GetByID(ctx context.Context, contentID string) (*models.Episode, error)
 	GetBySeriesAndNumber(ctx context.Context, seriesID string, season, episode int) (*models.Episode, error)
+	GetBySeriesAndFileNumber(ctx context.Context, seriesID string, season, episode int) (*models.Episode, error)
 	ListBySeriesAndAirDates(ctx context.Context, seriesID string, airDates []string) (map[string][]*models.Episode, error)
 	ListBySeriesAndNumbers(ctx context.Context, seriesID string, seasonNumbers, episodeNumbers []int32) ([]*models.Episode, error)
 	ListBySeries(ctx context.Context, seriesID string) ([]*models.Episode, error)
@@ -2264,7 +2265,13 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		if err != nil {
 			return nil, err
 		}
-		seasonResults := make(map[int]*SeasonResult)
+		// Each provider's seasons and episodes are kept apart until both are
+		// fetched: one provider numbers the series (mergeSeriesStructure).
+		structures := newProviderStructures()
+		episodeOrder, err := s.seriesEpisodeOrder(ctx, req.ContentID)
+		if err != nil {
+			return nil, err
+		}
 		seasonsComplete := true
 		for _, p := range seasonChain {
 			ep, ok := p.(EpisodeProvider)
@@ -2281,6 +2288,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 				ProviderIDs:          accumulatedIDs,
 				ContentType:          contentType,
 				Language:             req.Language,
+				Ordering:             episodeOrder.orderingFor(p.Slug()),
 				SeriesRootPaths:      childCtx.seriesRootPaths,
 				SeasonDirectoryPaths: childCtx.seasonDirectoryPaths,
 				ShowFilePaths:        showFilePaths(childCtx.episodeFilePaths),
@@ -2303,6 +2311,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 				slog.WarnContext(ctx, "metadata: season provider error", "component", "metadata",
 					"provider", p.Slug(), "error", err)
 				if !errors.Is(err, ErrLocalMetadataUnavailable) {
+					structures.of(p.Slug(), isIdentityHinter).failed = true
 					continue
 				}
 				// A fill-empty pass keeps the seasons the local provider could read.
@@ -2314,9 +2323,9 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 			if isIdentityHinter {
 				localArtworkSearched |= localArtworkSeason
 			}
-			accumulateSeasonResults(seasonResults, seasons, req.Language)
+			structure := structures.of(p.Slug(), isIdentityHinter)
+			structure.seasons = append(structure.seasons, seasons...)
 		}
-		allSeasons = flattenSeasonResults(seasonResults)
 		ctx = withSeasonBackdropAuthority(ctx, seasonBackdropAuthorityFor(req.Mode, seasonsComplete))
 
 		// Phase 4b: Episodes — resolve with "episode" content level. The
@@ -2324,10 +2333,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		// derived on-disk seasons, so local episode NFOs are read even when
 		// no provider returned their season (persist then creates the
 		// implicit "Season N" rows).
-		episodeSeasonNumbers := make([]int, 0, len(allSeasons)+len(childCtx.episodeFilePaths))
-		for _, season := range allSeasons {
-			episodeSeasonNumbers = append(episodeSeasonNumbers, season.SeasonNumber)
-		}
+		episodeSeasonNumbers := structures.seasonNumbers()
 		for seasonNumber := range childCtx.episodeFilePaths {
 			if !slices.Contains(episodeSeasonNumbers, seasonNumber) {
 				episodeSeasonNumbers = append(episodeSeasonNumbers, seasonNumber)
@@ -2339,7 +2345,9 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 			if err != nil {
 				return nil, err
 			}
-			episodeResults := make(map[episodeResultKey]*EpisodeResult)
+			for _, p := range episodeChain {
+				structures.episodeChain = append(structures.episodeChain, p.Slug())
+			}
 			showFiles := showFilePaths(childCtx.episodeFilePaths)
 			for _, seasonNumber := range episodeSeasonNumbers {
 				for _, p := range episodeChain {
@@ -2357,6 +2365,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 						ProviderIDs:      accumulatedIDs,
 						SeasonNumber:     seasonNumber,
 						Language:         req.Language,
+						Ordering:         episodeOrder.orderingFor(p.Slug()),
 						SeriesRootPaths:  childCtx.seriesRootPaths,
 						EpisodeFilePaths: childCtx.episodeFilePaths[seasonNumber],
 						ShowFilePaths:    showFiles,
@@ -2374,6 +2383,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 						slog.WarnContext(ctx, "metadata: episode provider error", "component", "metadata",
 							"provider", p.Slug(), "season", seasonNumber, "error", err)
 						if !errors.Is(err, ErrLocalMetadataUnavailable) {
+							structures.of(p.Slug(), isIdentityHinter).failed = true
 							continue
 						}
 						// A fill-empty pass keeps the episodes the local provider could read.
@@ -2386,10 +2396,17 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 						localArtworkSearched |= localArtworkEpisode
 						markLocalEpisodeTitles(episodes)
 					}
-					accumulateEpisodeResults(episodeResults, episodes, req.Language)
+					structure := structures.of(p.Slug(), isIdentityHinter)
+					structure.episodes = append(structure.episodes, episodes...)
 				}
 			}
-			allEpisodes = flattenEpisodeResults(episodeResults)
+		}
+		var structureSlug string
+		allSeasons, allEpisodes, structureSlug = mergeSeriesStructure(structures.list, structures.episodeChain, episodeOrder.Provider, req.Language)
+		if slices.Contains(renumberIDKeys, structureSlug) {
+			var fileNumbersKnown bool
+			allSeasons, allEpisodes, fileNumbersKnown = applyEpisodeOrder(episodeOrder, allSeasons, allEpisodes, structureSlug, structures.list)
+			ctx = withEpisodeStructure(ctx, episodeStructure{provider: structureSlug, fileNumbers: fileNumbersKnown})
 		}
 	}
 	// Phase 5: Merge & Persist.
@@ -4807,9 +4824,24 @@ func (s *MetadataService) refreshSeriesChildTarget(
 	} else if ignored {
 		return ErrMetadataNotFound
 	}
+	unscopedCtx := ctx
 	ctx, err = s.withItemChainScope(ctx, seriesID, folderID)
 	if err != nil {
 		return err
+	}
+	// A season or episode fetch asks providers for the shown numbers in
+	// their default order and merges the answers by number. A series shown
+	// in another order would get another episode's data, so it refreshes
+	// whole: only the series pipeline knows its order.
+	if reordered, err := s.seriesShowsOtherNumbering(ctx, seriesID, folderID); err != nil {
+		return err
+	} else if reordered {
+		if reset != nil {
+			// A reset clears one target's locks from its provider's answer,
+			// which a reordered series cannot fetch for one target.
+			return ErrResetReorderedChild
+		}
+		return s.refreshItemTarget(unscopedCtx, seriesID, folderID, mode, false, false)
 	}
 
 	languages, err := s.resolveProcessLanguages(ctx, ProcessRequest{
@@ -5396,13 +5428,20 @@ func accumulateEpisodeResults(accumulator map[episodeResultKey]*EpisodeResult, e
 			continue
 		}
 
-		foldEpisodeTitle(existing, episode, language)
-		preferRequestedLanguageText(&existing.Overview, &existing.OverviewLanguage, episode.Overview, episode.OverviewLanguage, language)
-
-		recordEpisodeStillFallback(existing, episode)
-		preferLocalEpisodeStill(existing, &episode)
-		MergeEpisodeResult(&episode, existing, MergeFillEmpty)
+		mergeEpisodeInto(existing, episode, language)
 	}
+}
+
+// mergeEpisodeInto folds a later provider's episode into one an earlier
+// provider returned: text in the requested language wins, other fields fill
+// only where existing is empty.
+func mergeEpisodeInto(existing *EpisodeResult, episode EpisodeResult, language string) {
+	foldEpisodeTitle(existing, episode, language)
+	preferRequestedLanguageText(&existing.Overview, &existing.OverviewLanguage, episode.Overview, episode.OverviewLanguage, language)
+
+	recordEpisodeStillFallback(existing, episode)
+	preferLocalEpisodeStill(existing, &episode)
+	MergeEpisodeResult(&episode, existing, MergeFillEmpty)
 }
 
 func flattenEpisodeResults(accumulator map[episodeResultKey]*EpisodeResult) []EpisodeResult {
@@ -6045,6 +6084,19 @@ func (s *MetadataService) persistSeasonAndEpisodeRows(
 		return s.seasonRepo.GetBySeriesAndNumber(ctx, seriesID, seasonNumber)
 	}
 
+	// Posters uploaded for arranged seasons, by source: a season that drops
+	// one goes back to the provider's poster.
+	customUploads := map[string]bool{}
+	if s.dbPool != nil {
+		uploads, err := customSeasonUploads(ctx, s.dbPool, seriesID)
+		if err != nil {
+			slog.WarnContext(ctx, "metadata: loading uploaded season posters failed", "component", "metadata",
+				"series_id", seriesID, "error", err)
+		}
+		for source := range uploads {
+			customUploads[source] = true
+		}
+	}
 	prepareExplicitSeason := func(season SeasonResult, forcePointRead bool) (preparedSeasonWrite, bool) {
 		existingSeason, err := loadSeason(season.SeasonNumber, forcePointRead)
 		if err != nil && !errors.Is(err, catalog.ErrSeasonNotFound) {
@@ -6089,6 +6141,21 @@ func (s *MetadataService) persistSeasonAndEpisodeRows(
 			if providerSeason.PosterPath != "" {
 				providerSeason.PosterThumbhash = fallbackThumbhash
 			}
+		}
+		// An arranged season's uploaded poster is already in artwork
+		// storage; its upload:// source keeps the image cache from
+		// replacing it. A season that loses it takes the provider's poster
+		// again, which the cache then fetches over the stored copy.
+		switch custom := season.customPoster; {
+		case imagesLocked:
+		case custom != nil:
+			providerSeason.PosterPath, providerSeason.PosterSourcePath, providerSeason.PosterThumbhash =
+				custom.Path, custom.Source, custom.Thumbhash
+		case existingSeason != nil && customUploads[existingSeason.PosterSourcePath]:
+			// The season dropped an arranged season's upload: it takes the
+			// provider's poster, or none, rather than keeping the upload.
+			providerSeason.PosterPath, providerSeason.PosterSourcePath = splitProviderImagePath(season.PosterPath)
+			providerSeason.PosterThumbhash = season.PosterThumbhash
 		}
 		dbSeason := &models.Season{
 			SeriesID:                seriesID,
@@ -6423,6 +6490,20 @@ func (s *MetadataService) persistSeasonAndEpisodeRows(
 		s.clearOmittedSeasonBackdrops(ctx, seriesID, seasons, episodes)
 	}
 
+	// Phase 3a: a full refresh first moves stored rows to the numbers the
+	// structure provider gives them, so the writes below land on the right
+	// episodes. If that fails, writing by number would put one episode's data
+	// on another's row, so this refresh leaves the episodes alone.
+	if isCanonicalWrite && len(episodes) > 0 {
+		if structureKey := episodeStructureOf(ctx).provider; structureKey != "" {
+			if err := s.renumberSeriesEpisodes(ctx, seriesID, seasons, episodes, structureKey); err != nil {
+				slog.WarnContext(ctx, "metadata: renumbering episodes failed; episodes left as stored", "component", "metadata",
+					"series_id", seriesID, "error", err)
+				episodes = nil
+			}
+		}
+	}
+
 	// Phase 3: Prefetch the requested episode rows, including provider-only rows
 	// without episode_libraries membership, then persist the prepared models as
 	// one transaction-backed batch.
@@ -6705,9 +6786,18 @@ func (s *MetadataService) persistSeasonAndEpisodeRows(
 				finishEpisodes(successfulWrites)
 			}
 		}
+		// Rows created above take their file numbers too; the renumber gave
+		// the existing rows theirs.
+		if structure := episodeStructureOf(ctx); structure.provider != "" && structure.fileNumbers {
+			if err := s.storeEpisodeFileNumbers(ctx, seriesID, episodes); err != nil {
+				slog.WarnContext(ctx, "metadata: storing episode file numbers failed", "component", "metadata",
+					"series_id", seriesID, "error", err)
+			}
+		}
 	}
 
 	s.enqueueSeriesChildImages(ctx, seriesID, imageJobs)
+	s.pruneCustomSeasonUploads(ctx, seriesID)
 	return true
 }
 
@@ -6843,6 +6933,36 @@ func (s *MetadataService) synthesizeFallbackSeriesStructure(ctx context.Context,
 	}
 
 	seasonIDs := make(map[int]string)
+	seasonFor := func(seasonNum int) (string, error) {
+		if seasonID, ok := seasonIDs[seasonNum]; ok {
+			return seasonID, nil
+		}
+		existingSeason, err := s.seasonRepo.GetBySeriesAndNumber(ctx, seriesID, seasonNum)
+		switch {
+		case err == nil:
+			seasonIDs[seasonNum] = existingSeason.ContentID
+			return existingSeason.ContentID, nil
+		case errors.Is(err, catalog.ErrSeasonNotFound):
+			seasonID, err := deriveSeasonContentID(seriesID, seasonNum)
+			if err != nil {
+				return "", fmt.Errorf("generating fallback season id: %w", err)
+			}
+			season := &models.Season{
+				ContentID:      seasonID,
+				SeriesID:       seriesID,
+				SeasonNumber:   seasonNum,
+				Title:          fallbackSeasonTitle(seasonNum),
+				MetadataSource: "scanner_fallback",
+			}
+			if err := s.seasonRepo.Upsert(ctx, season); err != nil {
+				return "", fmt.Errorf("upserting fallback season: %w", err)
+			}
+			seasonIDs[seasonNum] = season.ContentID
+			return season.ContentID, nil
+		default:
+			return "", fmt.Errorf("loading fallback season: %w", err)
+		}
+	}
 	for _, file := range files {
 		if file == nil {
 			continue
@@ -6852,38 +6972,18 @@ func (s *MetadataService) synthesizeFallbackSeriesStructure(ctx context.Context,
 			continue
 		}
 
-		seasonID, ok := seasonIDs[seasonNum]
-		if !ok {
-			existingSeason, err := s.seasonRepo.GetBySeriesAndNumber(ctx, seriesID, seasonNum)
-			switch {
-			case err == nil:
-				seasonID = existingSeason.ContentID
-				seasonIDs[seasonNum] = seasonID
-			case errors.Is(err, catalog.ErrSeasonNotFound):
-				seasonID, err = deriveSeasonContentID(seriesID, seasonNum)
-				if err != nil {
-					return fmt.Errorf("generating fallback season id: %w", err)
-				}
-				season := &models.Season{
-					ContentID:      seasonID,
-					SeriesID:       seriesID,
-					SeasonNumber:   seasonNum,
-					Title:          fallbackSeasonTitle(seasonNum),
-					MetadataSource: "scanner_fallback",
-				}
-				if err := s.seasonRepo.Upsert(ctx, season); err != nil {
-					return fmt.Errorf("upserting fallback season: %w", err)
-				}
-				seasonID = season.ContentID
-				seasonIDs[seasonNum] = seasonID
-			default:
-				return fmt.Errorf("loading fallback season: %w", err)
-			}
-		}
-
-		existingEpisode, err := s.episodeRepo.GetBySeriesAndNumber(ctx, seriesID, seasonNum, episodeNum)
+		existingEpisode, err := s.episodeAtFileNumber(ctx, seriesID, seasonNum, episodeNum)
 		switch {
 		case err == nil:
+			// An episode found by its file numbers in another order keeps
+			// its own season.
+			if existingEpisode.SeasonNumber != seasonNum || existingEpisode.EpisodeNumber != episodeNum {
+				continue
+			}
+			seasonID, err := seasonFor(seasonNum)
+			if err != nil {
+				return err
+			}
 			if existingEpisode.SeasonID == seasonID {
 				continue
 			}
@@ -6891,8 +6991,16 @@ func (s *MetadataService) synthesizeFallbackSeriesStructure(ctx context.Context,
 			if err := s.episodeRepo.Upsert(ctx, existingEpisode); err != nil {
 				return fmt.Errorf("updating fallback episode season link: %w", err)
 			}
-			continue
 		case errors.Is(err, catalog.ErrEpisodeNotFound):
+			// No episode has these file numbers, but one may show them in
+			// another order: a placeholder must not take its slot.
+			if _, slotErr := s.episodeRepo.GetBySeriesAndNumber(ctx, seriesID, seasonNum, episodeNum); slotErr == nil {
+				continue
+			}
+			seasonID, err := seasonFor(seasonNum)
+			if err != nil {
+				return err
+			}
 			episodeID, err := deriveEpisodeContentID(seriesID, seasonNum, episodeNum)
 			if err != nil {
 				return fmt.Errorf("generating fallback episode id: %w", err)
@@ -6920,6 +7028,13 @@ func (s *MetadataService) synthesizeFallbackSeriesStructure(ctx context.Context,
 	}
 	s.refreshSeriesEpisodeMetadataState(ctx, seriesID, time.Now())
 	return nil
+}
+
+// episodeAtFileNumber returns the episode a file named season, episode
+// belongs to, reading the numbers in the order the series' files follow
+// (catalog.EpisodeRepository.GetBySeriesAndFileNumber).
+func (s *MetadataService) episodeAtFileNumber(ctx context.Context, seriesID string, season, episode int) (*models.Episode, error) {
+	return s.episodeRepo.GetBySeriesAndFileNumber(ctx, seriesID, season, episode)
 }
 
 func (s *MetadataService) linkSeriesFilesToEpisodes(ctx context.Context, seriesID string) {
@@ -6975,7 +7090,7 @@ func (s *MetadataService) ensureSeriesEpisodeLinksCore(ctx context.Context, seri
 		if !ok {
 			continue
 		}
-		if _, err := s.episodeRepo.GetBySeriesAndNumber(ctx, seriesID, seasonNum, episodeNum); errors.Is(err, catalog.ErrEpisodeNotFound) {
+		if _, err := s.episodeAtFileNumber(ctx, seriesID, seasonNum, episodeNum); errors.Is(err, catalog.ErrEpisodeNotFound) {
 			needsSynthesis = true
 			break
 		}
@@ -7080,7 +7195,18 @@ func (s *MetadataService) linkSeriesFilesToEpisodesWithOptions(ctx context.Conte
 		if err != nil {
 			return fmt.Errorf("loading episodes for unseasoned file matching: %w", err)
 		}
-		unseasonedEpisodes = newUnseasonedEpisodeIndex(seriesEpisodes)
+		// A series whose order an admin chose reads bare numbers through
+		// the whole order; others only where both readings agree.
+		order, err := s.seriesEpisodeOrder(ctx, seriesID)
+		if err != nil {
+			return err
+		}
+		if order.Override {
+			if seriesEpisodes, err = s.episodesOfCurrentNumbering(ctx, seriesID, seriesEpisodes); err != nil {
+				return err
+			}
+		}
+		unseasonedEpisodes = newUnseasonedEpisodeIndex(seriesEpisodes, order.Override)
 	}
 
 	episodesByAirDate := map[string][]*models.Episode{}
@@ -7154,7 +7280,7 @@ func (s *MetadataService) linkSeriesFilesToEpisodesWithOptions(ctx context.Conte
 			episodeNum = episode.EpisodeNumber
 		} else {
 			var err error
-			episode, err = s.episodeRepo.GetBySeriesAndNumber(ctx, seriesID, seasonNum, episodeNum)
+			episode, err = s.episodeAtFileNumber(ctx, seriesID, seasonNum, episodeNum)
 			if err != nil {
 				if suppressMissing && errors.Is(err, catalog.ErrEpisodeNotFound) {
 					continue

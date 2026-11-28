@@ -216,6 +216,7 @@ var restoredFlagColumns = map[string]string{
 	"episode_catalog_entries.has_hdr":                         whyFacts,
 	"episode_catalog_entries.has_non_dolby_vision":            whyFacts,
 	"episode_catalog_entries.has_non_hdr":                     whyFacts,
+	"episodes.unlisted":                                       whyFacts,
 	"item_videos.is_official":                                 whyFacts,
 	"library_collections.featured":                            whyShown,
 	"library_collections.poster_auto_generated":               whyShown,

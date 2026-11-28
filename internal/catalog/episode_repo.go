@@ -40,7 +40,8 @@ const episodeColumns = `content_id, series_id, season_id, season_number, episode
 	still_path, still_source_path, still_thumbhash,
 	metadata_s3_path, metadata_etag, metadata_source,
 	created_at, updated_at, locked_fields,
-	sort_title, original_title, tagline`
+	sort_title, original_title, tagline,
+	provider_season_number, provider_episode_number`
 
 // refreshSeriesAirDatesSQL maintains the denormalized media_items columns
 // last_air_date_at (newest regular episode aired on or before today) and
@@ -139,6 +140,12 @@ func refreshSeriesAirDates(ctx context.Context, tx itemExecer, seriesIDs []strin
 		return fmt.Errorf("refresh series air dates: %w", err)
 	}
 	return nil
+}
+
+// RefreshSeriesAirDates is refreshSeriesAirDates for writers outside this
+// package, such as an episode order change that deletes duplicate rows.
+func RefreshSeriesAirDates(ctx context.Context, tx itemExecer, seriesIDs []string) error {
+	return refreshSeriesAirDates(ctx, tx, seriesIDs)
 }
 
 // dueSeriesAirDatesSQL claims up to $1 series whose next known episode has
@@ -245,6 +252,8 @@ func scanEpisode(row pgx.Row) (*models.Episode, error) {
 		&ep.SortTitle,
 		&ep.OriginalTitle,
 		&ep.Tagline,
+		&ep.ProviderSeasonNumber,
+		&ep.ProviderEpisodeNumber,
 	)
 	if seasonID != nil {
 		ep.SeasonID = *seasonID
@@ -332,6 +341,8 @@ func scanEpisodes(rows pgx.Rows) ([]*models.Episode, error) {
 			&ep.SortTitle,
 			&ep.OriginalTitle,
 			&ep.Tagline,
+			&ep.ProviderSeasonNumber,
+			&ep.ProviderEpisodeNumber,
 		)
 		if seasonID != nil {
 			ep.SeasonID = *seasonID
@@ -768,6 +779,24 @@ func (r *EpisodeRepository) GetBySeriesAndNumber(ctx context.Context, seriesID s
 		FROM episodes
 		WHERE series_id = $1 AND season_number = $2 AND episode_number = $3`
 	return scanEpisode(r.pool.QueryRow(ctx, query, seriesID, season, episode))
+}
+
+// GetBySeriesAndFileNumber returns the episode a file named season, episode
+// belongs to: the row whose file numbers are those (episodes in another order
+// than the files record them), else the row with those numbers and no file
+// numbers of its own.
+func (r *EpisodeRepository) GetBySeriesAndFileNumber(ctx context.Context, seriesID string, season, episode int) (*models.Episode, error) {
+	// Two exact probes, each on its own index, in one round trip, instead
+	// of one OR that would read every episode of the series per file.
+	return scanEpisode(r.pool.QueryRow(ctx, `SELECT `+episodeColumns+` FROM (
+		(SELECT 0 AS probe, `+episodeColumns+` FROM episodes
+		 WHERE series_id = $1 AND file_season_number = $2 AND file_episode_number = $3
+		 LIMIT 1)
+		UNION ALL
+		(SELECT 1 AS probe, `+episodeColumns+` FROM episodes
+		 WHERE series_id = $1 AND season_number = $2 AND episode_number = $3
+		   AND file_season_number IS NULL)
+	) e ORDER BY probe LIMIT 1`, seriesID, season, episode))
 }
 
 // ListBySeriesAndAirDates retrieves provider episode rows for a series keyed by

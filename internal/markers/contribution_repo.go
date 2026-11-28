@@ -119,12 +119,12 @@ var currentAmendHashSQL = `left(encode(sha256(convert_to(
 	    || '|' || COALESCE(mf.duration, 0) * 1000
 	    || '|' || COALESCE(
 	        (SELECT 'episode|' || COALESCE(si.tmdb_id, '') || '|' || COALESCE(si.imdb_id, '') || '|' || COALESCE(si.tvdb_id, '')
-	                || '|' || COALESCE(NULLIF(CASE WHEN COALESCE(e.season_number, 0) < 0 THEN COALESCE(mf.season_number, 0)
-	                                               ELSE COALESCE(e.season_number, 0) END, 0)::text, '')
-	                || '|' || COALESCE(NULLIF(CASE WHEN COALESCE(e.episode_number, 0) <= 0 THEN COALESCE(mf.episode_number, 0)
-	                                               ELSE e.episode_number END, 0)::text, '')
+	                || '|' || COALESCE(NULLIF(CASE WHEN COALESCE(` + providerSeasonSQL + `, 0) < 0 THEN COALESCE(mf.season_number, 0)
+	                                               ELSE COALESCE(` + providerSeasonSQL + `, 0) END, 0)::text, '')
+	                || '|' || COALESCE(NULLIF(CASE WHEN COALESCE(` + providerEpisodeSQL + `, 0) <= 0 THEN COALESCE(mf.episode_number, 0)
+	                                               ELSE ` + providerEpisodeSQL + ` END, 0)::text, '')
 	                || '|' || COALESCE(BTRIM(e.tmdb_id), '') || '|' || COALESCE(BTRIM(e.imdb_id), '') || '|' || COALESCE(BTRIM(e.tvdb_id), '')
-	                || '|' || ` + episodeNumberingSQL("mf.media_folder_id") + `
+	                || '|' || ` + providerNumberingSQL("mf.media_folder_id") + `
 	         FROM episodes e
 	         LEFT JOIN media_items si ON si.content_id = e.series_id
 	         WHERE e.content_id = NULLIF(BTRIM(mf.episode_id), '')),
@@ -425,7 +425,8 @@ func (s *ContributionStore) CandidateLocalMarkerFiles(ctx context.Context, kind 
 		  AND seg.source = $1
 		  AND seg.start_s IS NOT NULL AND seg.end_s IS NOT NULL
 		  AND seg.confidence >= $2
-		  AND e.season_number > 0 AND e.episode_number > 0
+		  AND `+providerSeasonSQL+` > 0
+		  AND `+providerEpisodeSQL+` > 0
 		  AND series_ids.ids <> '{}'::jsonb
 		  AND (seg.confidence, -mf.id) < ($3::double precision, -$4::integer)
 		  AND EXISTS (
@@ -446,7 +447,8 @@ func (s *ContributionStore) CandidateLocalMarkerFiles(ctx context.Context, kind 
 		                      'tmdb:' || (series_ids.ids ->> 'tmdb'),
 		                      'tvdb:' || (series_ids.ids ->> 'tvdb'),
 		                      'imdb:' || (series_ids.ids ->> 'imdb')
-		                  ) || '|' || e.season_number || '|' || e.episode_number END
+		                  ) || '|' || `+providerSeasonSQL+`
+		                    || '|' || `+providerEpisodeSQL+` END
 		              AND NOT (mc.status = $7 AND mc.updated_at < now() - ($8 * interval '1 second'))
 		              AND NOT (mc.status = $9 AND mc.updated_at < now() - ($10 * interval '1 second'))
 		              AND (NOT p.amend OR mc.status = $7 OR mc.content_hash = `+currentAmendHashSQL+`)

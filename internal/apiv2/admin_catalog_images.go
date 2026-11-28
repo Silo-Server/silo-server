@@ -183,21 +183,12 @@ func registerAdminCatalogImages(reg *Registry) {
 			return nil, unavailable("image selection")
 		}
 		form := in.RawBody.Data()
-		if form == nil || !form.Image.IsSet {
-			return nil, NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
-				WithErrors(ProblemError{Location: "body.image", Code: codeRequired, Detail: detailImageFileRequired})
+		if form == nil {
+			return nil, validationProblem(locationBodyImage, codeRequired, detailImageFileRequired)
 		}
-		defer func() { _ = form.Image.Close() }()
-		tooLarge := NewProblem(TypePayloadTooLarge, "The image exceeds 10 MiB.")
-		if form.Image.Size > metadata.MaxUploadedImageBytes {
-			return nil, tooLarge
-		}
-		data, err := io.ReadAll(io.LimitReader(form.Image, metadata.MaxUploadedImageBytes+1))
-		if err != nil {
-			return nil, NewProblem(TypeInternalError, "Could not read the image.")
-		}
-		if len(data) > metadata.MaxUploadedImageBytes {
-			return nil, tooLarge
+		data, problem := readUploadedImage(form.Image)
+		if problem != nil {
+			return nil, problem
 		}
 		out, err := reg.deps.AdminCatalogImages.UploadAdminItemImage(ctx, in.ID, form.Type, data)
 		if err != nil {
@@ -224,4 +215,25 @@ type CurrentImages struct {
 	PosterURL   string `json:"poster_url,omitempty" doc:"Stored artwork reference (storage key, plugin path, or URL), not a fetchable URL; not validated as a URI"`
 	BackdropURL string `json:"backdrop_url,omitempty" doc:"Stored artwork reference (storage key, plugin path, or URL), not a fetchable URL; not validated as a URI"`
 	LogoURL     string `json:"logo_url,omitempty" doc:"Stored artwork reference (storage key, plugin path, or URL), not a fetchable URL; not validated as a URI"`
+}
+
+// readUploadedImage reads an upload form's image part, at most
+// metadata.MaxUploadedImageBytes, and closes it.
+func readUploadedImage(image huma.FormFile) ([]byte, *Problem) {
+	if !image.IsSet {
+		return nil, validationProblem(locationBodyImage, codeRequired, detailImageFileRequired)
+	}
+	defer func() { _ = image.Close() }()
+	tooLarge := NewProblem(TypePayloadTooLarge, "The image exceeds 10 MiB.")
+	if image.Size > metadata.MaxUploadedImageBytes {
+		return nil, tooLarge
+	}
+	data, err := io.ReadAll(io.LimitReader(image, metadata.MaxUploadedImageBytes+1))
+	if err != nil {
+		return nil, NewProblem(TypeInternalError, "Could not read the image.")
+	}
+	if len(data) > metadata.MaxUploadedImageBytes {
+		return nil, tooLarge
+	}
+	return data, nil
 }

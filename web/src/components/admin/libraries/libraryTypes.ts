@@ -110,6 +110,8 @@ export function librarySettingSupport(type: string) {
     movieCreditsDetection: kind === "movies" || kind === "mixed",
     // Box sets group movies, so only libraries that hold movies offer them.
     boxSets: ["movie", "movies", "mixed"].includes(kind),
+    // Only libraries that hold shows have an episode order.
+    episodeOrder: ["series", "tv", "show", "tvshows", "mixed"].includes(kind),
   };
 }
 

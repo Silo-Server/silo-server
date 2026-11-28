@@ -521,6 +521,7 @@ func (p *PluginProvider) GetSeasons(ctx context.Context, req SeasonsRequest) ([]
 		SeriesProviderId: providerID,
 		ProviderIds:      providerIDs,
 		Language:         req.Language,
+		Ordering:         req.Ordering,
 	})
 	if err != nil {
 		return nil, err
@@ -565,6 +566,7 @@ func (p *PluginProvider) GetEpisodes(ctx context.Context, req EpisodesRequest) (
 		SeasonNumber:     int32(req.SeasonNumber),
 		ProviderIds:      providerIDs,
 		Language:         req.Language,
+		Ordering:         req.Ordering,
 	})
 	if err != nil {
 		return nil, err
@@ -587,6 +589,11 @@ func (p *PluginProvider) GetEpisodes(ctx context.Context, req EpisodesRequest) (
 			Ratings:          ratingsFromStruct(episode.GetRatings(), p.declaredRatingSources),
 			StillPath:        p.remoteArtwork(ctx, episode.GetStillPath()),
 		})
+		if episode.DefaultSeasonNumber != nil && episode.DefaultEpisodeNumber != nil {
+			season, number := int(episode.GetDefaultSeasonNumber()), int(episode.GetDefaultEpisodeNumber())
+			episodes[len(episodes)-1].DefaultSeasonNumber = &season
+			episodes[len(episodes)-1].DefaultEpisodeNumber = &number
+		}
 	}
 	return episodes, nil
 }

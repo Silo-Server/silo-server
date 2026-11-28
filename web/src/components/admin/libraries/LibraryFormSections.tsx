@@ -29,6 +29,7 @@ import { Switch } from "@/components/ui/switch";
 import { useLibraryRealtimeMonitoring } from "@/hooks/queries/admin/libraries";
 import { numberText, useAppLanguage, useT, type Translate } from "@/i18n";
 import { cn } from "@/lib/utils";
+import { asProvider, otherProvider, providerLabel, PROVIDERS } from "@/lib/episodeOrder";
 import { extraKindGroupLabel, PROVIDER_TRAILER_KINDS } from "@/lib/extraKinds";
 import { languageOptions } from "@/player/utils/languageNames";
 
@@ -477,6 +478,74 @@ function BoxSetFields({ form }: { form: LibraryFormController }) {
   );
 }
 
+function EpisodeOrderField({ form }: { form: LibraryFormController }) {
+  const t = useT();
+  const current = form.episodeOrderProvider;
+  const provider = providerLabel(current);
+  const fallback = otherProvider(asProvider(current));
+  const other = providerLabel(fallback);
+  const episodeChain = form.remoteLevelChains["episode"] ?? [];
+  const fallbackOn =
+    episodeChain.length === 0 ||
+    episodeChain.some((item) => item.enabled && item.provider_slug.toLowerCase() === fallback);
+  return (
+    <div className="border-border bg-surface rounded-xl border p-3.5">
+      <div className="min-w-0 space-y-2.5">
+        <div className="space-y-1">
+          <Label id="episode-order-label">
+            {t("web.admin.common.libraryEditor.metadata.episodeOrder")}
+          </Label>
+          <p className="text-muted-foreground text-xs leading-relaxed">
+            {t("web.admin.common.libraryEditor.metadata.episodeOrderHelp")}
+          </p>
+        </div>
+        <div
+          role="radiogroup"
+          aria-labelledby="episode-order-label"
+          className="border-border inline-flex gap-0.5 rounded-full border p-0.5"
+        >
+          {PROVIDERS.map((option) => {
+            const selected = current === option;
+            return (
+              <button
+                key={option}
+                type="button"
+                role="radio"
+                aria-checked={selected}
+                onClick={() => form.setEpisodeOrderProvider(option)}
+                className={cn(
+                  "min-h-11 min-w-16 rounded-full px-3 py-0.5 text-xs font-medium transition-colors sm:min-h-0",
+                  selected
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {providerLabel(option)}
+              </button>
+            );
+          })}
+        </div>
+        <ul className="text-muted-foreground space-y-1 text-xs leading-relaxed">
+          <li>
+            {t(
+              fallbackOn
+                ? "web.admin.common.libraryEditor.metadata.episodeOrderFallback"
+                : "web.admin.common.libraryEditor.metadata.episodeOrderNoFallback",
+              { provider, other },
+            )}
+          </li>
+          <li>{t("web.admin.common.libraryEditor.metadata.episodeOrderOverride")}</li>
+          {form.episodeOrderChanged && (
+            <li className="text-foreground">
+              {t("web.admin.common.libraryEditor.metadata.episodeOrderChange")}
+            </li>
+          )}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
 export function MetadataFields({ form }: { form: LibraryFormController }) {
   const t = useT();
   return (
@@ -516,6 +585,7 @@ export function MetadataFields({ form }: { form: LibraryFormController }) {
         />
       </div>
       {form.library && <LibraryTranslatePanel libraryId={form.library.id} />}
+      {form.library && form.settingSupport.episodeOrder && <EpisodeOrderField form={form} />}
       {form.settingSupport.boxSets && <BoxSetFields form={form} />}
       {form.settingSupport.trailers && (
         <div className="space-y-1.5">

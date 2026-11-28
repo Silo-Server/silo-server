@@ -299,7 +299,10 @@ type ItemDetail struct {
 	// EpisodeLabels is the series' models.EpisodeLabelsAirDate choice, on the
 	// series and on its seasons and episodes. Not part of the frozen v1
 	// contract; apiv2 emits it.
-	EpisodeLabels string `json:"-"`
+	// EpisodeOrder names a series' own episode order; nil while it follows
+	// its library. Not part of the frozen v1 contract.
+	EpisodeOrder  *EpisodeOrderSummary `json:"-"`
+	EpisodeLabels string               `json:"-"`
 	// EpisodeMetadataIncomplete is the series row's flag that some episodes
 	// still lack metadata, so item detail can request a refresh without
 	// reading the row again. Not part of any JSON contract.
@@ -1784,6 +1787,11 @@ func (s *DetailService) GetItemDetailWithOptions(ctx context.Context, contentID 
 			return nil, err
 		}
 		s.attachExtraBackdrops(ctx, []*ItemDetail{detail}, filter.Artwork(), true)
+		// Only a series' own detail page names its episode order; batch
+		// detail lists leave it out.
+		if detail.Type == AdminCatalogTypeSeries {
+			detail.EpisodeOrder = s.episodeOrderSummary(ctx, detail.ContentID)
+		}
 		return detail, nil
 	case target.season != nil:
 		return s.buildSeasonDetail(ctx, target.season, filter)
@@ -5582,4 +5590,40 @@ func cachedImageVariantKey(imageType, size string) string {
 		}
 		return "w500"
 	}
+}
+
+// EpisodeOrderSummary names the episode order an admin chose for a series.
+type EpisodeOrderSummary struct {
+	Provider  string
+	OrderID   string
+	OrderName string
+	Layout    string
+	FileOrder string
+	// CustomArrangement is true when arranged seasons place an episode
+	// elsewhere than its provider's default order does, not for a renamed
+	// season alone.
+	CustomArrangement bool
+}
+
+// episodeOrderSummary reads the series' own episode order; nil while it
+// follows its library or on a read failure, which only hides the label. The
+// WHERE clause is metadata.EpisodeOrderSettings.isDefault negated.
+func (s *DetailService) episodeOrderSummary(ctx context.Context, seriesID string) *EpisodeOrderSummary {
+	if s.itemRepo == nil || s.itemRepo.pool == nil {
+		return nil
+	}
+	var o EpisodeOrderSummary
+	err := s.itemRepo.pool.QueryRow(ctx, `
+		SELECT o.provider, o.order_id, o.order_name, o.layout, o.file_order,
+		       o.layout = 'custom' AND EXISTS (
+		           SELECT 1 FROM episodes e
+		           WHERE e.series_id = o.series_id AND e.provider_season_number IS NOT NULL)
+		FROM series_episode_orders o
+		WHERE o.series_id = $1
+		  AND (o.provider <> '' OR o.order_id <> '' OR o.file_order <> '' OR o.layout <> 'seasons')`, seriesID).
+		Scan(&o.Provider, &o.OrderID, &o.OrderName, &o.Layout, &o.FileOrder, &o.CustomArrangement)
+	if err != nil {
+		return nil
+	}
+	return &o
 }

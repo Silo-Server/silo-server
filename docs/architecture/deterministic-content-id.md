@@ -133,6 +133,11 @@ movie-tmdb-228064         →   movie-tmdb-228064   (movies/series: unchanged)
 This is relied on by the hot watch-history query (§5). The format must never
 break it. (`contentid.SeriesIDFromContentID` is the canonical transform.)
 
+The numbers are the ones the series shows. When an admin changes its episode
+order, episode rows keep their identity and their content IDs are renamed to
+the new numbers, user state following the rename
+([episode-ordering.md](episode-ordering.md)).
+
 ### Where the anchor comes from
 
 For tagged libraries the IDs are in the folder/file name

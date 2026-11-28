@@ -5,6 +5,7 @@
 # Library visibility, rating ceilings, mixed catalogs, and section results.
 ./internal/catalog TestDualLibraryItemDeniedByDisabledLibraryDB
 ./internal/catalog TestEpisodeOpensUnderEveryLibraryOfItsSeriesDB
+./internal/catalog TestGetBySeriesAndFileNumberDB
 ./internal/catalog TestCatalogQueryRequestedLibraryOutsideAccessDB
 ./internal/catalog TestCatalogSearchSortsByProfilePlaysDB
 ./internal/catalog TestCatalogQuerySortsDateViewedUnwatchedLastDB
@@ -49,6 +50,7 @@
 ./internal/sections TestRuleRowsReadTheViewersWatchStatePostgres
 ./internal/sections TestSmartCollectionRowWithDisplayFilterReadsTheViewersWatchStatePostgres
 ./internal/scanner TestFileRepositoryPreservesFirstSeenScanProvenance
+./internal/scanner TestBulkLinkEpisodesByFileNumbersDB
 ./internal/scanner TestMultiEpisodeFileServesSpannedEpisodesDB
 ./internal/scanner TestScannedGroupForItemDB
 ./internal/scanner TestShortenDurationOnlyForTheFileTheRunReadDB
@@ -513,6 +515,12 @@
 
 # Local sidecar change detection lists scanned items and stores fingerprints.
 ./internal/metadata TestLocalSidecarRepositoryDB
+./internal/metadata TestApplyEpisodeRenumberDB
+./internal/metadata TestApplyEpisodeMergesDB
+./internal/metadata TestApplyEpisodeRenumberTakenIDDB
+./internal/metadata TestRelinkSeriesFilesDB
+./internal/metadata TestSaveCustomSeasonsDB
+./internal/metadata TestEpisodesOfCurrentNumberingDB
 
 # The process that discovers local artwork copies it, other drains wait out the
 # discovery hold, and a server without the library mount leaves local jobs to
@@ -1607,6 +1615,7 @@
 
 # Turning a library off or on sends catalog.library.changed, so catalog mirrors re-list.
 ./internal/api/handlers TestLibraryEnabledTogglePublishesCatalogLibraryChangedDB
+./internal/api/handlers TestLibraryEpisodeOrderChangeWaitsForRunningRefreshDB
 ./internal/api/handlers TestLibraryDisableAfterConcurrentEnablePublishesDB
 
 # A book's work ids are claims many editions may share, kept out of the

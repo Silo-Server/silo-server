@@ -549,6 +549,9 @@ type SeasonsRequest struct {
 	ProviderIDs map[string]string
 	ContentType string
 	Language    string
+	// Ordering names one of the provider's episode orders (ListEpisodeOrders);
+	// empty is its default order.
+	Ordering string
 	// Local sidecar context (additive, internal — mirrors MetadataRequest).
 	// SeriesRootPaths are directories already validated as safe for
 	// directory-level sidecars (the series root); SeasonDirectoryPaths maps
@@ -566,6 +569,8 @@ type EpisodesRequest struct {
 	ProviderIDs  map[string]string
 	SeasonNumber int
 	Language     string
+	// Ordering as on SeasonsRequest; SeasonNumber is a season of that order.
+	Ordering string
 	// Local sidecar context (additive, internal). SeriesRootPaths as on
 	// SeasonsRequest; EpisodeFilePaths maps each filename-derived episode
 	// number within SeasonNumber to that episode's media file paths.
@@ -602,6 +607,9 @@ type SeasonResult struct {
 	// this provider poster instead.
 	remotePosterPath      string
 	remotePosterThumbhash string
+	// customPoster is an admin's uploaded poster for an arranged season
+	// (applyCustomLayout); it replaces the provider's poster on the row.
+	customPoster *CustomSeasonPoster
 }
 
 // EpisodeResult carries episode data from a provider.
@@ -621,6 +629,23 @@ type EpisodeResult struct {
 	StillPath        string
 	StillSourcePath  string
 	StillThumbhash   string
+	// DefaultSeasonNumber and DefaultEpisodeNumber place the episode in the
+	// provider's default order when it was fetched in another order; nil
+	// when the provider did not say.
+	DefaultSeasonNumber  *int
+	DefaultEpisodeNumber *int
+	// FileSeasonNumber and FileEpisodeNumber are the numbers a file name
+	// gives this episode, in the order the series' files are named in;
+	// FileNumbered is false when that order does not have the episode.
+	// Set by assignFileNumbers before persisting.
+	FileSeasonNumber  int
+	FileEpisodeNumber int
+	FileNumbered      bool
+	// ProviderSeasonNumber and ProviderEpisodeNumber place the episode in
+	// its structure provider's default order, for services that address
+	// episodes by number. Set by assignProviderNumbers before a layout.
+	ProviderSeasonNumber  int
+	ProviderEpisodeNumber int
 
 	// stillFallback is the remote still a local one displaced while results
 	// merged; the episode shows it until the local copy is cached.

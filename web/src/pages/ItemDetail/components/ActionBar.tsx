@@ -31,6 +31,7 @@ import {
   MoreVertical,
   Play,
   RefreshCw,
+  ListOrdered,
   Scissors,
   RotateCcw,
   Shuffle,
@@ -255,6 +256,7 @@ export interface ActionBarProps {
   onEditMetadata?: () => void;
   onMatchItem?: () => void;
   onSplitItem?: () => void;
+  onArrangeSeries?: () => void;
   onShowMediaInfo?: () => void;
   isAdmin?: boolean;
   canCurateMetadata?: boolean;
@@ -354,6 +356,7 @@ export default function ActionBar({
   onEditMetadata,
   onMatchItem,
   onSplitItem,
+  onArrangeSeries,
   onShowMediaInfo,
   isAdmin = false,
   canCurateMetadata = false,
@@ -975,6 +978,16 @@ export default function ActionBar({
         <DetailOverflowMenuItem key="split" closeMenu={closeOverflowMenu} onAction={onSplitItem}>
           <Scissors className="size-4" />
           {t("web.detail.actions.splitVersions")}
+        </DetailOverflowMenuItem>
+      ),
+      canCurateMetadata && onArrangeSeries && (
+        <DetailOverflowMenuItem
+          key="arrange-series"
+          closeMenu={closeOverflowMenu}
+          onAction={onArrangeSeries}
+        >
+          <ListOrdered className="size-4" />
+          {t("web.detail.actions.arrangeSeries")}
         </DetailOverflowMenuItem>
       ),
     ],
