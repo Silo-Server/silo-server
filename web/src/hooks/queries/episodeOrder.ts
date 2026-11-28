@@ -1,6 +1,12 @@
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type QueryClient,
+} from "@tanstack/react-query";
 import { withETag } from "@/api/v2/etag";
-import { v2 } from "@/api/v2/request";
+import { v2, V2ProblemError } from "@/api/v2/request";
 import type { V2Body, V2Result } from "@/api/v2/request";
 
 export type EpisodeOrderState = V2Result<"GET /api/v2/admin/items/{id}/episode-order">;
@@ -17,7 +23,7 @@ const episodeOrderKey = (contentId: string, withOrders: boolean) =>
  * provider which orders it offers, which the dialog needs and the series page
  * note does not.
  */
-export function useEpisodeOrder(contentId: string, enabled: boolean, withOrders: boolean) {
+export function useEpisodeOrder(contentId: string, withOrders: boolean) {
   return useQuery({
     queryKey: episodeOrderKey(contentId, withOrders),
     // The ETag guards the next save of the order or the arranged seasons.
@@ -28,7 +34,6 @@ export function useEpisodeOrder(contentId: string, enabled: boolean, withOrders:
       });
       return { ...body, etag };
     },
-    enabled,
     staleTime: withOrders ? 5 * 60_000 : 30_000,
   });
 }
@@ -56,6 +61,18 @@ export function useEpisodeOrderPreview(
   });
 }
 
+/** Someone else saved the order or the seasons since they were loaded. */
+export const isEpisodeOrderConflict = (err: unknown) =>
+  err instanceof V2ProblemError && err.status === 412;
+
+/** A saved order or arrangement changes the order, its previews and the arrangements. */
+function invalidateEpisodeOrder(queryClient: QueryClient, contentId: string) {
+  void queryClient.invalidateQueries({ queryKey: ["episode-order", contentId] });
+  void queryClient.invalidateQueries({ queryKey: ["episode-order-preview", contentId] });
+  // Cached arrangements carry the revision a save moves past.
+  void queryClient.invalidateQueries({ queryKey: ["custom-seasons", contentId] });
+}
+
 export function useSaveEpisodeOrder(contentId: string) {
   const queryClient = useQueryClient();
   return useMutation({
@@ -66,12 +83,7 @@ export function useSaveEpisodeOrder(contentId: string) {
         headers: { "If-Match": etag },
         body,
       }),
-    onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: ["episode-order", contentId] });
-      void queryClient.invalidateQueries({ queryKey: ["episode-order-preview", contentId] });
-      // Cached arrangements carry the revision this save moves past.
-      void queryClient.invalidateQueries({ queryKey: ["custom-seasons", contentId] });
-    },
+    onSettled: () => invalidateEpisodeOrder(queryClient, contentId),
   });
 }
 
@@ -130,11 +142,7 @@ export function useSaveCustomSeasons(contentId: string) {
         headers: { "If-Match": etag },
         body,
       }),
-    onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: ["episode-order", contentId] });
-      void queryClient.invalidateQueries({ queryKey: ["episode-order-preview", contentId] });
-      void queryClient.invalidateQueries({ queryKey: ["custom-seasons", contentId] });
-    },
+    onSettled: () => invalidateEpisodeOrder(queryClient, contentId),
   });
 }
 

@@ -29,7 +29,7 @@ import { Switch } from "@/components/ui/switch";
 import { useLibraryRealtimeMonitoring } from "@/hooks/queries/admin/libraries";
 import { numberText, useAppLanguage, useT, type Translate } from "@/i18n";
 import { cn } from "@/lib/utils";
-import { providerLabel } from "@/lib/episodeOrder";
+import { asProvider, otherProvider, providerLabel, PROVIDERS } from "@/lib/episodeOrder";
 import { extraKindGroupLabel, PROVIDER_TRAILER_KINDS } from "@/lib/extraKinds";
 import { languageOptions } from "@/player/utils/languageNames";
 
@@ -478,18 +478,16 @@ function BoxSetFields({ form }: { form: LibraryFormController }) {
   );
 }
 
-const EPISODE_ORDER_PROVIDERS = ["tvdb", "tmdb"] as const;
-
 function EpisodeOrderField({ form }: { form: LibraryFormController }) {
   const t = useT();
   const current = form.episodeOrderProvider;
   const provider = providerLabel(current);
-  const otherProvider = current === "tmdb" ? "tvdb" : "tmdb";
-  const other = providerLabel(otherProvider);
+  const fallback = otherProvider(asProvider(current));
+  const other = providerLabel(fallback);
   const episodeChain = form.remoteLevelChains["episode"] ?? [];
   const fallbackOn =
     episodeChain.length === 0 ||
-    episodeChain.some((item) => item.enabled && item.provider_slug.toLowerCase() === otherProvider);
+    episodeChain.some((item) => item.enabled && item.provider_slug.toLowerCase() === fallback);
   return (
     <div className="border-border bg-surface rounded-xl border p-3.5">
       <div className="min-w-0 space-y-2.5">
@@ -506,7 +504,7 @@ function EpisodeOrderField({ form }: { form: LibraryFormController }) {
           aria-labelledby="episode-order-label"
           className="border-border inline-flex gap-0.5 rounded-full border p-0.5"
         >
-          {EPISODE_ORDER_PROVIDERS.map((option) => {
+          {PROVIDERS.map((option) => {
             const selected = current === option;
             return (
               <button
@@ -529,15 +527,12 @@ function EpisodeOrderField({ form }: { form: LibraryFormController }) {
         </div>
         <ul className="text-muted-foreground space-y-1 text-xs leading-relaxed">
           <li>
-            {fallbackOn
-              ? t("web.admin.common.libraryEditor.metadata.episodeOrderFallback", {
-                  provider,
-                  other,
-                })
-              : t("web.admin.common.libraryEditor.metadata.episodeOrderNoFallback", {
-                  provider,
-                  other,
-                })}
+            {t(
+              fallbackOn
+                ? "web.admin.common.libraryEditor.metadata.episodeOrderFallback"
+                : "web.admin.common.libraryEditor.metadata.episodeOrderNoFallback",
+              { provider, other },
+            )}
           </li>
           <li>{t("web.admin.common.libraryEditor.metadata.episodeOrderOverride")}</li>
           {form.episodeOrderChanged && (

@@ -7,7 +7,6 @@ import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { History, Loader2 } from "lucide-react";
-import { V2ProblemError } from "@/api/v2/request";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { EpisodeOrderSeasonsView } from "@/components/EpisodeOrderSeasonsView";
 import {
@@ -27,6 +26,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  isEpisodeOrderConflict,
   useCustomSeasons,
   useEpisodeOrder,
   useEpisodeOrderPreview,
@@ -36,21 +36,22 @@ import {
 import { useT } from "@/i18n";
 import { asProvider, type Provider } from "@/lib/episodeOrder";
 
+/** The provider that numbers the series under draft. */
+function structureOf(draft: Pick<Draft, "source">, libraryProvider: Provider): Provider {
+  return draft.source === "library" ? libraryProvider : draft.source;
+}
+
 function draftOf(choice: EpisodeOrderChoice, libraryProvider: Provider): Draft {
   const source: Source =
     choice.provider === "tvdb" || choice.provider === "tmdb" ? choice.provider : "library";
-  const structure = source === "library" ? libraryProvider : source;
   return {
     source,
     orderId: choice.order_id,
-    files: choice.file_order ? asProvider(choice.file_order) : structure,
+    files: choice.file_order
+      ? asProvider(choice.file_order)
+      : structureOf({ source }, libraryProvider),
     layout: choice.layout === "absolute" || choice.layout === "custom" ? choice.layout : "seasons",
   };
-}
-
-/** The provider that numbers the series under draft. */
-function structureOf(draft: Draft, libraryProvider: Provider): Provider {
-  return draft.source === "library" ? libraryProvider : draft.source;
 }
 
 function choiceOf(draft: Draft, libraryProvider: Provider): EpisodeOrderChoice {
@@ -93,7 +94,7 @@ function Editor({
   onClose: () => void;
 }) {
   const t = useT();
-  const stateQuery = useEpisodeOrder(contentId, true, true);
+  const stateQuery = useEpisodeOrder(contentId, true);
   const state = stateQuery.data;
   const [edited, setEdited] = useState<Draft | null>(null);
   const libraryProvider = asProvider(state?.library_provider);
@@ -116,10 +117,9 @@ function Editor({
   >(null);
   const [restarts, setRestarts] = useState(0);
 
-  // The previewed choice; the Custom layout previews its base order for the
-  // file fits.
-  const previewChoice =
-    choice && (choice.layout === "custom" ? { ...choice, layout: "seasons" as const } : choice);
+  // The previewed choice. Only its file counts and fits are shown, and those
+  // do not depend on the layout, so every layout shares the Seasons preview.
+  const previewChoice = choice && { ...choice, layout: "seasons" as const };
   const preview = useEpisodeOrderPreview(contentId, previewChoice, true);
   const save = useSaveEpisodeOrder(contentId);
 
@@ -219,7 +219,7 @@ function Editor({
         onError: (err) => {
           // Someone saved in between: close so the next opening starts from
           // their choice instead of saving over it.
-          if (err instanceof V2ProblemError && err.status === 412) {
+          if (isEpisodeOrderConflict(err)) {
             toast.error(t("web.item.episodeOrder.conflict"));
             onClose();
             return;

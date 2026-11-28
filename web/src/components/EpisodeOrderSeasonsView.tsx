@@ -1,7 +1,7 @@
 // The episode order dialog's Seasons and Absolute layouts: the show as the
 // chosen order lays it out, read-only, with the file Silo links to each
 // episode. Moving episodes or renaming seasons happens in the Custom layout.
-import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { FileSearch, Info, Loader2, TriangleAlert } from "lucide-react";
 import { EpisodeSummary, VirtualEpisodeList } from "@/components/ArrangeSeasonsRows";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,7 @@ import {
   type EpisodeOrderChoice,
   type EpisodeOrderPreview,
 } from "@/hooks/queries/episodeOrder";
+import { usePaneScrollElement } from "@/hooks/usePaneScrollElement";
 import { useT } from "@/i18n";
 import { joinList } from "@/lib/appLocale";
 import {
@@ -22,7 +23,7 @@ import {
   type Provider,
 } from "@/lib/episodeOrder";
 import { cn } from "@/lib/utils";
-import { seasonDisplayName } from "@/pages/ItemDetail/itemDetailLayout";
+import { seasonLabel } from "@/lib/arrangeSeasons";
 
 /** A season as the read-only layouts show it. */
 interface ShownSeason {
@@ -92,14 +93,7 @@ export function EpisodeOrderSeasonsView({
   const absolute = choice.layout === "absolute";
   const seasons = useMemo(() => (data ? shownSeasons(data, absolute) : []), [data, absolute]);
   const [seasonNumber, setSeasonNumber] = useState<number | null>(null);
-  // The episode list scrolls in the details pane on wide screens and with
-  // the whole body on narrow ones; the virtual list follows whichever.
-  const paneRef = useRef<HTMLElement>(null);
-  const bodyRef = useRef<HTMLDivElement>(null);
-  const scrollElement = useCallback(() => {
-    const pane = paneRef.current;
-    return pane && getComputedStyle(pane).overflowY !== "visible" ? pane : bodyRef.current;
-  }, []);
+  const { paneRef, bodyRef, scrollElement } = usePaneScrollElement();
   const regular = seasons.filter((s) => s.number !== 0);
   const specials = seasons.find((s) => s.number === 0);
   const shown =
@@ -138,13 +132,7 @@ export function EpisodeOrderSeasonsView({
     );
   }
 
-  const nameOf = (s: ShownSeason) => {
-    const plain = seasonDisplayName(s.number);
-    const named = seasonDisplayName(s.number, s.title);
-    return s.number === 0 || named === plain
-      ? plain
-      : t("web.item.arrangeSeasons.seasonTitled", { number: s.number, title: named });
-  };
+  const nameOf = (s: ShownSeason) => seasonLabel(t, s.number, s.title);
   const seasonButton = (s: ShownSeason) => {
     const onDisk = s.episodes.filter((e) => e.file).length;
     const meta = [t("web.item.arrangeSeasons.episodeCount", { count: s.episodes.length })];

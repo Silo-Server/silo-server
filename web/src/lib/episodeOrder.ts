@@ -4,6 +4,12 @@ import type { Translate } from "@/i18n";
 /** A provider that numbers a series' episodes. */
 export type Provider = "tvdb" | "tmdb";
 
+/** The providers that can number a series' episodes, in picker order. */
+export const PROVIDERS: Provider[] = ["tvdb", "tmdb"];
+
+/** The provider a series falls back to when the other has no episodes. */
+export const otherProvider = (p: Provider): Provider => (p === "tvdb" ? "tmdb" : "tvdb");
+
 /** Reads a stored provider value; anything but "tmdb" is TVDB. */
 export const asProvider = (v: string | undefined): Provider => (v === "tmdb" ? "tmdb" : "tvdb");
 

@@ -1,5 +1,7 @@
-// Shared state shapes of the season arranger (ArrangeSeasonsDialog).
+// Shared state shapes of the season arranger (SeasonArranger).
 import type { CustomSeason, CustomSeasons } from "@/hooks/queries/episodeOrder";
+import type { Translate } from "@/i18n";
+import { seasonDisplayName } from "@/pages/ItemDetail/itemDetailLayout";
 
 export const SPECIALS = "specials";
 
@@ -46,4 +48,13 @@ export function arrangedOf(data: CustomSeasons): { seasons: ArrangedSeason[]; sp
       });
   }
   return { seasons, specials };
+}
+
+/** A season's name in the arranger: "Season 2", or "Season 2 · Abydos Arc" when titled. */
+export function seasonLabel(t: Translate, number: number, title?: string): string {
+  const plain = seasonDisplayName(number);
+  const named = seasonDisplayName(number, title);
+  return number === 0 || named === plain
+    ? plain
+    : t("web.item.arrangeSeasons.seasonTitled", { number, title: named });
 }

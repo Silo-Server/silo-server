@@ -488,7 +488,7 @@ export type LibraryFormController = ReturnType<typeof useLibraryForm>;
  * The episode order provider a chain follows when the library sets none: its
  * first enabled TVDB or TMDB entry, as the server resolves it.
  */
-export function episodeChainProvider(chain: LevelChainItem[]): "tvdb" | "tmdb" | "" {
+function episodeChainProvider(chain: LevelChainItem[]): "tvdb" | "tmdb" | "" {
   for (const item of chain) {
     if (!item.enabled) continue;
     const slug = item.provider_slug.toLowerCase();

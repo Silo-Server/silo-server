@@ -124029,12 +124029,6 @@
       "value": "Your changes are lost, and the seasons start again from the order."
     }
   ],
-  "web.item.arrangeSeasons.title": [
-    {
-      "type": 0,
-      "value": "Arrange seasons"
-    }
-  ],
   "web.item.arrangeSeasons.titleLabel": [
     {
       "type": 0,
@@ -124773,16 +124767,6 @@
       "value": "File naming"
     }
   ],
-  "web.item.episodeOrder.files.suggestion": [
-    {
-      "type": 0,
-      "value": "Your files look like "
-    },
-    {
-      "type": 1,
-      "value": "order"
-    }
-  ],
   "web.item.episodeOrder.files.tmdb": [
     {
       "type": 0,
@@ -124793,12 +124777,6 @@
     {
       "type": 0,
       "value": "TVDB aired order"
-    }
-  ],
-  "web.item.episodeOrder.files.useSuggestion": [
-    {
-      "type": 0,
-      "value": "Use it"
     }
   ],
   "web.item.episodeOrder.footer": [
@@ -125017,66 +124995,10 @@
       "value": "This provider's plugin offers only its default order."
     }
   ],
-  "web.item.episodeOrder.preview.colEpisode": [
-    {
-      "type": 0,
-      "value": "Episode"
-    }
-  ],
-  "web.item.episodeOrder.preview.colFile": [
-    {
-      "type": 0,
-      "value": "File on disk"
-    }
-  ],
-  "web.item.episodeOrder.preview.colFileNumber": [
-    {
-      "type": 0,
-      "value": "File no."
-    }
-  ],
-  "web.item.episodeOrder.preview.colNumber": [
-    {
-      "type": 0,
-      "value": "No."
-    }
-  ],
   "web.item.episodeOrder.preview.empty": [
     {
       "type": 0,
       "value": "Neither TVDB nor TMDB returned episodes for this series, so it keeps the numbers from its file names."
-    }
-  ],
-  "web.item.episodeOrder.preview.episodes": [
-    {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " episode"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " episodes"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
     }
   ],
   "web.item.episodeOrder.preview.failed": [
@@ -125153,42 +125075,6 @@
       "value": "Loading the preview…"
     }
   ],
-  "web.item.episodeOrder.preview.moreEpisodes": [
-    {
-      "type": 0,
-      "value": "and "
-    },
-    {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " more episode"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " more episodes"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
   "web.item.episodeOrder.preview.moreFiles": [
     {
       "type": 1,
@@ -125229,12 +125115,6 @@
       "pluralType": "cardinal"
     }
   ],
-  "web.item.episodeOrder.preview.notOnDisk": [
-    {
-      "type": 0,
-      "value": "Not on disk"
-    }
-  ],
   "web.item.episodeOrder.preview.onDisk": [
     {
       "type": 1,
@@ -125253,38 +125133,6 @@
     {
       "type": 1,
       "value": "order"
-    }
-  ],
-  "web.item.episodeOrder.preview.seasons": [
-    {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " season"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " seasons"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
     }
   ],
   "web.item.episodeOrder.preview.unmatchedBody": [

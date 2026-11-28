@@ -16,7 +16,9 @@ import {
   episodeOrderLabel,
   fileOrderLabel,
   filesPlacedBy,
+  otherProvider,
   providerLabel,
+  PROVIDERS,
   type Provider,
 } from "@/lib/episodeOrder";
 import { cn } from "@/lib/utils";
@@ -32,9 +34,6 @@ export interface Draft {
   files: Provider;
   layout: Layout;
 }
-
-const PROVIDERS: Provider[] = ["tvdb", "tmdb"];
-const otherProvider = (p: Provider): Provider => (p === "tvdb" ? "tmdb" : "tvdb");
 
 const KIND_KEY: Record<string, MessageKey> = {
   aired: "web.item.episodeOrder.kind.aired",

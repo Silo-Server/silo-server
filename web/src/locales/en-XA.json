@@ -134821,12 +134821,6 @@
       "value": "⟦Ýöûŕ çĥåñĝéš åŕé ļöšţ, åñđ ţĥé šéåšöñš šţåŕţ åĝåîñ ƒŕöɱ ţĥé öŕđéŕ.~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
-  "web.item.arrangeSeasons.title": [
-    {
-      "type": 0,
-      "value": "⟦Åŕŕåñĝé šéåšöñš~~~~~~⟧"
-    }
-  ],
   "web.item.arrangeSeasons.titleLabel": [
     {
       "type": 0,
@@ -135617,20 +135611,6 @@
       "value": "⟦Ƒîļé ñåɱîñĝ~~~~~⟧"
     }
   ],
-  "web.item.episodeOrder.files.suggestion": [
-    {
-      "type": 0,
-      "value": "⟦Ýöûŕ ƒîļéš ļööķ ļîķé "
-    },
-    {
-      "type": 1,
-      "value": "order"
-    },
-    {
-      "type": 0,
-      "value": "~~~~~~~~~⟧"
-    }
-  ],
   "web.item.episodeOrder.files.tmdb": [
     {
       "type": 0,
@@ -135641,12 +135621,6 @@
     {
       "type": 0,
       "value": "⟦ŢṼĐƁ åîŕéđ öŕđéŕ~~~~~~~⟧"
-    }
-  ],
-  "web.item.episodeOrder.files.useSuggestion": [
-    {
-      "type": 0,
-      "value": "⟦Ûšé îţ~~~⟧"
     }
   ],
   "web.item.episodeOrder.footer": [
@@ -135885,74 +135859,10 @@
       "value": "⟦Ţĥîš þŕöṽîđéŕ'š þļûĝîñ öƒƒéŕš öñļý îţš đéƒåûļţ öŕđéŕ.~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
-  "web.item.episodeOrder.preview.colEpisode": [
-    {
-      "type": 0,
-      "value": "⟦Éþîšöđé~~~⟧"
-    }
-  ],
-  "web.item.episodeOrder.preview.colFile": [
-    {
-      "type": 0,
-      "value": "⟦Ƒîļé öñ đîšķ~~~~~⟧"
-    }
-  ],
-  "web.item.episodeOrder.preview.colFileNumber": [
-    {
-      "type": 0,
-      "value": "⟦Ƒîļé ñö.~~~~⟧"
-    }
-  ],
-  "web.item.episodeOrder.preview.colNumber": [
-    {
-      "type": 0,
-      "value": "⟦Ñö.~~⟧"
-    }
-  ],
   "web.item.episodeOrder.preview.empty": [
     {
       "type": 0,
       "value": "⟦Ñéîţĥéŕ ŢṼĐƁ ñöŕ ŢṀĐƁ ŕéţûŕñéđ éþîšöđéš ƒöŕ ţĥîš šéŕîéš, šö îţ ķééþš ţĥé ñûɱƀéŕš ƒŕöɱ îţš ƒîļé ñåɱéš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
-    }
-  ],
-  "web.item.episodeOrder.preview.episodes": [
-    {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "⟦"
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " éþîšöđé~~~~⟧"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "⟦"
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " éþîšöđéš~~~~⟧"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
     }
   ],
   "web.item.episodeOrder.preview.failed": [
@@ -136037,46 +135947,6 @@
       "value": "⟦Ļöåđîñĝ ţĥé þŕéṽîéŵ…~~~~~~~~⟧"
     }
   ],
-  "web.item.episodeOrder.preview.moreEpisodes": [
-    {
-      "type": 0,
-      "value": "⟦åñđ "
-    },
-    {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " ɱöŕé éþîšöđé"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " ɱöŕé éþîšöđéš"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    },
-    {
-      "type": 0,
-      "value": "~~~~~~~~⟧"
-    }
-  ],
   "web.item.episodeOrder.preview.moreFiles": [
     {
       "type": 0,
@@ -136125,12 +135995,6 @@
       "value": "~~~~⟧"
     }
   ],
-  "web.item.episodeOrder.preview.notOnDisk": [
-    {
-      "type": 0,
-      "value": "⟦Ñöţ öñ đîšķ~~~~~⟧"
-    }
-  ],
   "web.item.episodeOrder.preview.onDisk": [
     {
       "type": 0,
@@ -136157,46 +136021,6 @@
     {
       "type": 0,
       "value": "~~~~~~⟧"
-    }
-  ],
-  "web.item.episodeOrder.preview.seasons": [
-    {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "⟦"
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " šéåšöñ~~~⟧"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "⟦"
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " šéåšöñš~~~~⟧"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
     }
   ],
   "web.item.episodeOrder.preview.unmatchedBody": [

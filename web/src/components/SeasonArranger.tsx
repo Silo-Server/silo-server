@@ -1,7 +1,7 @@
 // The episode order dialog's Custom layout: add, rename, reorder and delete
 // seasons, and move episodes between them by drag and drop or selection. Only
 // Silo's catalog changes; files on disk are never touched.
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import {
@@ -15,7 +15,6 @@ import {
 } from "@dnd-kit/core";
 import { SortableContext, arrayMove, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { EyeOff, GripVertical, History, Loader2, Plus, RotateCcw, X } from "lucide-react";
-import { V2ProblemError } from "@/api/v2/request";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Button } from "@/components/ui/button";
 import {
@@ -26,11 +25,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  isEpisodeOrderConflict,
   useEpisodeOrder,
   useSaveCustomSeasons,
   type CustomSeasonEpisode,
   type CustomSeasons,
 } from "@/hooks/queries/episodeOrder";
+import { usePaneScrollElement } from "@/hooks/usePaneScrollElement";
 import { useGripDragSensors, useMotionSafeOverlay } from "@/hooks/useSortableList";
 import { useT } from "@/i18n";
 import { joinList } from "@/lib/appLocale";
@@ -42,6 +43,7 @@ import {
   SPECIALS,
   arrangedOf,
   newId,
+  seasonLabel,
   withoutKeys,
   type ArrangedSeason,
   type ProviderSeason,
@@ -100,7 +102,7 @@ export function SeasonArranger({
       });
     return map;
   }, [data]);
-  const orders = useEpisodeOrder(contentId, true, true).data;
+  const orders = useEpisodeOrder(contentId, true).data;
   const save = useSaveCustomSeasons(contentId);
   const provider = providerLabel(data.structure_provider);
 
@@ -113,37 +115,26 @@ export function SeasonArranger({
   const [dragging, setDragging] = useState<string | null>(null);
   // Saveable: edited, or a fresh arrangement. Edited alone asks before the
   // dialog drops it.
-  const [dirty, setDirty] = useState(dirtyFromStart || !data.saved);
+  const [dirtyAtStart] = useState(dirtyFromStart || !data.saved);
   const [edited, setEdited] = useState(false);
+  const dirty = dirtyAtStart || edited;
   useEffect(() => onDirtyChange(edited), [edited, onDirtyChange]);
   const sensors = useGripDragSensors();
   const overlayMotion = useMotionSafeOverlay();
-  // The episode list scrolls in the details pane on wide screens and with
-  // the whole dialog body on narrow ones; the virtual list follows whichever.
-  const bodyRef = useRef<HTMLDivElement>(null);
-  const paneRef = useRef<HTMLElement>(null);
-  const scrollElement = useCallback(() => {
-    const pane = paneRef.current;
-    return pane && getComputedStyle(pane).overflowY !== "visible" ? pane : bodyRef.current;
-  }, []);
+  const { paneRef, bodyRef, scrollElement } = usePaneScrollElement();
 
   const activeIndex = seasons.findIndex((s) => s.id === activeId);
   const activeSeason = seasons[activeIndex];
   const activeEpisodes = activeId === SPECIALS ? specials : (activeSeason?.episodeKeys ?? []);
-  const touch = () => {
-    setDirty(true);
-    setEdited(true);
+  const touch = () => setEdited(true);
+  /** Changes one season's own fields. */
+  const patchSeason = (id: string, patch: Partial<ArrangedSeason>) => {
+    setSeasons((all) => all.map((x) => (x.id === id ? { ...x, ...patch } : x)));
+    touch();
   };
 
-  const seasonName = (index: number) => {
-    const season = seasons[index];
-    const number = index + 1;
-    const named = seasonDisplayName(number, season?.title || providerSeasons.get(number)?.title);
-    const plain = seasonDisplayName(number);
-    return named === plain
-      ? plain
-      : t("web.item.arrangeSeasons.seasonTitled", { number, title: named });
-  };
+  const seasonName = (index: number) =>
+    seasonLabel(t, index + 1, seasons[index]?.title || providerSeasons.get(index + 1)?.title);
   const nameOf = (id: string) =>
     id === SPECIALS ? seasonDisplayName(0) : seasonName(seasons.findIndex((s) => s.id === id));
 
@@ -248,7 +239,7 @@ export function SeasonArranger({
         onError: (err) => {
           // Someone saved in between: close so the next opening starts from
           // their seasons instead of saving over them.
-          if (err instanceof V2ProblemError && err.status === 412) {
+          if (isEpisodeOrderConflict(err)) {
             toast.error(t("web.item.episodeOrder.conflict"));
             onDone();
             return;
@@ -411,12 +402,7 @@ export function SeasonArranger({
                       setActiveId(s.id);
                       setSelected(new Set());
                     }}
-                    onRename={(value) => {
-                      setSeasons((all) =>
-                        all.map((x) => (x.id === s.id ? { ...x, title: value } : x)),
-                      );
-                      touch();
-                    }}
+                    onRename={(value) => patchSeason(s.id, { title: value })}
                     onEdit={(on) => setEditing(on ? s.id : null)}
                     onDelete={() => (s.episodeKeys.length === 0 ? deleteSeason(s) : setDeleting(s))}
                   />
@@ -476,25 +462,13 @@ export function SeasonArranger({
                 provider={provider}
                 inherited={providerSeasons.get(activeIndex + 1)}
                 contentId={contentId}
-                onPoster={(poster) => {
-                  setSeasons((all) =>
-                    all.map((x) => (x.id === activeSeason.id ? { ...x, poster } : x)),
-                  );
-                  touch();
-                }}
+                onPoster={(poster) => patchSeason(activeSeason.id, { poster })}
                 onTitle={(value) => {
-                  if (value === activeSeason.title) return;
-                  setSeasons((all) =>
-                    all.map((x) => (x.id === activeSeason.id ? { ...x, title: value } : x)),
-                  );
-                  touch();
+                  if (value !== activeSeason.title) patchSeason(activeSeason.id, { title: value });
                 }}
                 onOverview={(value) => {
-                  if (value === activeSeason.overview) return;
-                  setSeasons((all) =>
-                    all.map((x) => (x.id === activeSeason.id ? { ...x, overview: value } : x)),
-                  );
-                  touch();
+                  if (value !== activeSeason.overview)
+                    patchSeason(activeSeason.id, { overview: value });
                 }}
               />
             )}

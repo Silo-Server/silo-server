@@ -15,7 +15,7 @@ export default function EpisodeOrderSummary({
   onChange: () => void;
 }) {
   const t = useT();
-  const { data } = useEpisodeOrder(contentId, true, false);
+  const { data } = useEpisodeOrder(contentId, false);
   if (!data) return null;
   const { choice } = data;
   const provider = asProvider(choice.provider || data.library_provider);
