@@ -339,17 +339,10 @@ function DeviceDetail({
   // The server value reasserts itself whenever the panel is (re)opened.
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   const appearanceSetting = settings[SETTING_KEYS.PLAYBACK_SUBTITLE_APPEARANCE];
-  // Keyed like the admin editor, so a detail view remounted for this device
-  // (another device picked, then this one again) joins a save or reset still
-  // in flight instead of racing it.
+  // Keyed like the admin editor's draft, so a remounted view joins a reset in flight.
   const appearance = useAutosavedDraft(
     parseSubtitleAppearance(appearanceSetting?.value),
-    JSON.stringify([
-      adminAuthorityScope(),
-      device.profile_id ?? "",
-      device.device_id,
-      SETTING_KEYS.PLAYBACK_SUBTITLE_APPEARANCE,
-    ]),
+    JSON.stringify([adminAuthorityScope(), device.profile_id, device.device_id, "appearance"]),
   );
   const appearanceAuthority = useRef<ProfileRequestContextSnapshot | null>(null);
   const appearanceChangedHere = appearanceSetting?.scope === "profile_device";
@@ -651,8 +644,7 @@ function DeviceDetail({
                   throw error;
                 }
               }
-              // Edits queued behind the reset build on this read, so a failed
-              // read fails the clear rather than leave them on the old override.
+              // Queued edits build on this read, so a failed read fails the clear.
               await queryClient.refetchQueries(
                 { queryKey: effective, exact: true },
                 { throwOnError: true },
