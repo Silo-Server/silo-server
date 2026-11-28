@@ -115,11 +115,11 @@ func (p *JellyfinProvider) emitWatched(ctx context.Context, page []jellyfinItem,
 	}
 	records := make([]Record, 0, len(page))
 	for _, item := range page {
-		record := normalizeJellyfinItem(item, meta[item.SeriesID])
+		expanded := jellyfinWatchedRecords(item, meta[item.SeriesID])
 		if progress, ok := held.take(item.ID); ok {
-			record = mergeRecords(record, normalizeJellyfinItem(progress, meta[progress.SeriesID]))
+			expanded = mergeWatchedRecords(expanded, jellyfinWatchedRecords(progress, meta[progress.SeriesID]))
 		}
-		records = append(records, record)
+		records = append(records, expanded...)
 	}
 	return sink(RecordBatch{Records: records, Resume: resume})
 }
@@ -152,6 +152,11 @@ func (p *JellyfinProvider) streamFavorites(ctx context.Context, from *StreamPosi
 			record := normalizeJellyfinItem(item, meta[item.SeriesID])
 			record.Favorite = true
 			record.FavoriteOnly = true
+			if item.IndexNumberEnd > item.IndexNumber {
+				// The watch records own a multi-episode file's runtime: its full
+				// runtime must not replace the first episode's share.
+				record.DurationSeconds = 0
+			}
 			// A lookback may have skipped this item's play, so only a full read
 			// has already counted it.
 			record.RepeatOfWatch = p.playedSince == nil && repeatsWatch(record, item.UserData.Played, item.UserData.PlaybackPositionTicks)
@@ -205,6 +210,12 @@ func (p *JellyfinProvider) resolveSeries(ctx context.Context, items []jellyfinIt
 		result[item.ID] = item
 	}
 	return result, nil
+}
+
+// jellyfinWatchedRecords expands a played multi-episode file (S01E04-E05)
+// into one record per episode, as Emby's import does (episodeRangeRecords).
+func jellyfinWatchedRecords(item jellyfinItem, series jellyfinItem) []Record {
+	return episodeRangeRecords(normalizeJellyfinItem(item, series), item.ID, item.IndexNumber, item.IndexNumberEnd)
 }
 
 func normalizeJellyfinItem(item jellyfinItem, series jellyfinItem) Record {
