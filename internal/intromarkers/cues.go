@@ -40,7 +40,13 @@ const (
 	cuesPreferredLanguages = "eng,en"
 	// cueExtractionParams shape a cues payload. Changing them discards every
 	// cached cue list.
-	cueExtractionParams = "lang=" + cuesPreferredLanguages + ";format=srt;whole-file"
+	//
+	// track=ordinal marks the payload's track selection. Cue lists cached
+	// before it were read from the stream whose container index was taken as
+	// an ordinal -- a different subtitle track, often another language -- and
+	// a stored list is not re-read until its identity or these parameters
+	// change, so the marker is what retires them.
+	cueExtractionParams = "lang=" + cuesPreferredLanguages + ";format=srt;whole-file;track=ordinal"
 )
 
 // cuesDetailNoTrack marks a file with no text subtitle track to read.

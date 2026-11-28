@@ -32,6 +32,10 @@ const (
 	// cueDialogRunSeconds is how far back from a bound its supporting dialog
 	// is counted.
 	cueDialogRunSeconds = 60.0
+	// cueNonDialogMinimum is how many non-dialog cues a window must hold before
+	// the track counts as one carrying the music. A single [door slams] near
+	// the last line is a sound effect in a dialog track, not a song.
+	cueNonDialogMinimum = 3
 	// cueDialogRunMinimum is how many dialog cues must end inside that window
 	// before a bound on a track that also carries non-dialog text is taken. A
 	// song over the credits is transcribed with its lyrics, and a machine
@@ -42,7 +46,7 @@ const (
 	// and still be read as a line the placement cut off.
 	//
 	// The hint exists for the placement that landed inside the last line of
-	// dialogue, so the line it reads is one already running when the credits
+	// dialog, so the line it reads is one already running when the credits
 	// begin, or one within this lead of it. A cue that starts later is inside
 	// the credits: on-screen credit text, or the closing song's lyrics. Moving
 	// the start to the end of one moves it into the credits picture, which is
@@ -52,15 +56,15 @@ const (
 	creditCueMaxLeadSeconds = 10.0
 )
 
-// cueBoundIsDialogue reports whether the cue ending at end is dialogue, rather
+// cueBoundIsDialogue reports whether the cue ending at end is dialog, rather
 // than content inside the credits. The caller has already bounded the search to
 // cues that begin close enough to the placed start to be a line it cut off.
 func cueBoundIsDialogue(cues []subtitleCue, segment Segment, end float64) bool {
-	// A track carries the music as well as the dialogue when its cues run into
+	// A track carries the music as well as the dialog when its cues run into
 	// the song, and a machine transcript writes a song's lyrics as ordinary
 	// lines. On such a track one line ending after the placed start is not
-	// dialogue that ran late; it needs a run of dialogue behind it.
-	if cueNonDialogNear(cues, segment.Start, end, creditCueSearchSeconds) &&
+	// dialog that ran late; it needs a run of dialog behind it.
+	if cueNonDialogCount(cues, segment.Start, end, creditCueSearchSeconds) >= cueNonDialogMinimum &&
 		cueDialogRun(cues, end, cueDialogRunSeconds) < cueDialogRunMinimum {
 		return false
 	}
@@ -92,10 +96,11 @@ func cueDialogRun(cues []subtitleCue, end, window float64) int {
 	return run
 }
 
-// cueNonDialogNear reports whether the track holds non-dialog text between
-// from-window and to: the mark of a track that carries the music as well as
-// the speech.
-func cueNonDialogNear(cues []subtitleCue, from, to, window float64) bool {
+// cueNonDialogCount counts the non-dialog cues between from-window and to: the
+// lyrics and sound tags of a track that carries the music as well as the
+// speech.
+func cueNonDialogCount(cues []subtitleCue, from, to, window float64) int {
+	count := 0
 	for _, cue := range cues {
 		if cue.Start < from-window || cue.Start > to {
 			continue
@@ -104,10 +109,10 @@ func cueNonDialogNear(cues []subtitleCue, from, to, window float64) bool {
 			continue
 		}
 		if cueNonDialogPattern.MatchString(cue.Text) {
-			return true
+			count++
 		}
 	}
-	return false
+	return count
 }
 
 // cueRecap returns the recap a file's cues mark: the cues saying "previously
@@ -216,7 +221,10 @@ func applyCreditCueHint(segment Segment, cues []subtitleCue) Segment {
 // applyIntroCueHints moves an intro start that fell inside the recap a cue
 // announces to the recap's end, and leaves everything else alone.
 func applyIntroCueHints(candidate Candidate, segment Segment, cues []subtitleCue) Segment {
-	if recap, ok := cueRecap(cues, candidate.DurationSeconds); ok && segment.Start < recap.End && recap.End < segment.End {
+	// Only a start that fell inside the recap moves: an opening that begins
+	// before the recap and runs through it keeps its opening.
+	if recap, ok := cueRecap(cues, candidate.DurationSeconds); ok &&
+		segment.Start >= recap.Start && segment.Start < recap.End && recap.End < segment.End {
 		segment.Start = recap.End
 	}
 	return segment

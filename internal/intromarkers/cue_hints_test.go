@@ -58,6 +58,12 @@ func TestApplyIntroCueHintsStartsAfterTheRecap(t *testing.T) {
 	if got := applyIntroCueHints(candidate, segment, cues); got.Start != 95 {
 		t.Fatalf("start moved to %.2f with no recap in the way", got.Start)
 	}
+	// One that opens before the recap and runs through it keeps its opening:
+	// only a start that fell inside the recap was misplaced.
+	segment = Segment{Start: 20, End: 120, Algorithm: LevelAlgorithm, Confidence: 0.9}
+	if got := applyIntroCueHints(candidate, segment, cues); got.Start != 20 {
+		t.Fatalf("start moved to %.2f from before the recap at 30", got.Start)
+	}
 }
 
 func TestCueRecapBoundsTheRecapWithItsFirstAndLastCue(t *testing.T) {
@@ -113,8 +119,8 @@ func TestApplyCreditCueHintMovesALateCreditsStart(t *testing.T) {
 
 func TestApplyCreditCueHintIgnoresTheSongInsideTheCredits(t *testing.T) {
 	// The closing song's lines, written as ordinary text, start inside the
-	// credits. The last of them is not dialogue the placement cut off: the
-	// dialogue it cut off is the line ending at 2594, and moving the start to
+	// credits. The last of them is not dialog the placement cut off: the
+	// dialog it cut off is the line ending at 2594, and moving the start to
 	// the song would put it 26 seconds into the credits.
 	cues := []subtitleCue{
 		testCue(2588, 2594, "Goodbye, then."),
@@ -124,6 +130,19 @@ func TestApplyCreditCueHintIgnoresTheSongInsideTheCredits(t *testing.T) {
 	segment := Segment{Start: 2590, End: 3004, Confidence: 0.9, Algorithm: CreditsAudioAlgorithm}
 	if got := applyCreditCueHint(segment, cues); math.Abs(got.Start-2594.2) > 0.01 {
 		t.Fatalf("credits start %.2f, want 2594.20: the song begins 16 seconds into the credits", got.Start)
+	}
+}
+
+func TestApplyCreditCueHintKeepsASoundEffectFromBlockingTheBound(t *testing.T) {
+	// One [door slams] between the placed start and the last line, with sparse
+	// dialog: a sound effect is not a song, so the line still bounds the start.
+	cues := []subtitleCue{
+		testCue(2590.5, 2591.5, "[door slams]"),
+		testCue(2592, 2595, "You have to go."),
+	}
+	segment := Segment{Start: 2590, End: 3004, Confidence: 0.9, Algorithm: CreditsAudioAlgorithm}
+	if got := applyCreditCueHint(segment, cues); math.Abs(got.Start-2595.2) > 0.01 {
+		t.Fatalf("credits start %.2f, want 2595.20: the dialog ran past the placement", got.Start)
 	}
 }
 
