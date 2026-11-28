@@ -202,13 +202,14 @@ func (r *WebhookRepository) DeleteAllForProfile(ctx context.Context, userID int,
 
 // lockForFinish locks a webhook before a send's outcome is recorded, in the
 // order a delete takes its locks (the webhook, then its attempts by cascade),
-// so the two can't deadlock. It reports whether the webhook still exists.
-func (r *WebhookRepository) lockForFinish(ctx context.Context, tx pgx.Tx, webhookID string) (bool, error) {
-	tag, err := tx.Exec(ctx, `SELECT 1 FROM notification_webhooks WHERE id = $1 FOR NO KEY UPDATE`, webhookID)
-	if err != nil {
-		return false, err
+// so the two can't deadlock. It reports whether the webhook still exists and
+// its URL ciphertext as it stands under the lock.
+func (r *WebhookRepository) lockForFinish(ctx context.Context, tx pgx.Tx, webhookID string) (urlCiphertext string, exists bool, err error) {
+	err = tx.QueryRow(ctx, `SELECT url_ciphertext FROM notification_webhooks WHERE id = $1 FOR NO KEY UPDATE`, webhookID).Scan(&urlCiphertext)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", false, nil
 	}
-	return tag.RowsAffected() == 1, nil
+	return urlCiphertext, err == nil, err
 }
 
 // RecordSuccess resets the failure and rejection streaks after a delivered

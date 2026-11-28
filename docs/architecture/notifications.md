@@ -572,6 +572,15 @@ excluded from webhook dispatch so a broken webhook cannot loop. The disable
 and its notice commit with the attempt's outcome and the streaks, and only
 the worker that turns the webhook off writes the notice.
 
+A send updates the streaks, `last_failure_*`, and auto-disable only when the
+webhook's `url_ciphertext`, read under the row lock, still matches the
+ciphertext the send used. If the owner saved a new URL during the send, the
+attempt is finalized with its own outcome and the webhook row is left alone,
+so the old URL's result never counts against the new one. This relies on
+every URL save encrypting the URL with a fresh nonce and resetting the streaks
+in the same write. Any new writer of `url_ciphertext` must keep the two
+together.
+
 A claimed attempt carries a 90-second lease. Only the worker that still
 holds the claim records the send's outcome, so a send that outlived its lease
 and was reclaimed counts once. A worker starts a send only with at least 25
