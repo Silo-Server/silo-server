@@ -3054,11 +3054,52 @@ func (h *PlaybackHandler) prepareTransportTimelineV3(ctx context.Context, sessio
 		return preparedTimelineV3{seekSeconds: requested, streamOriginSeconds: origin, startSegmentNumber: startSegment, copySeekAnchorResolved: true}, nil
 	case playback.DeliveryTranscodeHLSV3:
 		sourceMetadata := sourceExecutionMetadataV3(file, result)
+		h.moveTailStartToLastVideoSegmentV3(ctx, session, file, result.Plan, sourceMetadata.DurationSeconds)
 		seekSeconds, startSegment := configureHLSTimelineV3(result.Plan, result.TargetVideoCodec, playback.DefaultSegmentDuration, sourceMetadata.DurationSeconds)
 		return preparedTimelineV3{seekSeconds: seekSeconds, streamOriginSeconds: result.Plan.Timeline.StreamOriginSeconds, startSegmentNumber: startSegment}, nil
 	default:
 		return preparedTimelineV3{}, nil
 	}
+}
+
+// moveTailStartToLastVideoSegmentV3 moves an encoded transcode's start that
+// lies past the end of the file's video (its stored duration runs longer) to
+// the last segment that holds video; see playback.ResolveTranscodeStart. Only
+// a start near the stored duration's end is probed, so other starts read
+// nothing (playback.TranscodeStartNearStoredEnd). A
+// probe that fails leaves the start as requested: it is how every start
+// behaved before, and playback past the end still ends the stream.
+func (h *PlaybackHandler) moveTailStartToLastVideoSegmentV3(ctx context.Context, session *playback.Session, file *models.MediaFile, plan *playback.PlanV3, durationSeconds float64) {
+	requested := plan.Timeline.SourceStartSeconds
+	if !playback.TranscodeStartNearStoredEnd(requested, durationSeconds) ||
+		file == nil || strings.TrimSpace(file.FilePath) == "" || file.IsAudioOnly() {
+		return
+	}
+	resolver := h.transcodeStart
+	if resolver == nil {
+		resolver = playback.ResolveTranscodeStart
+	}
+	start, err := resolver(ctx, h.playbackConfig().FFmpegPath, file.FilePath, requested, durationSeconds, playback.DefaultSegmentDuration)
+	if err != nil {
+		slog.WarnContext(ctx, "could not check whether a transcode starts past the end of its video",
+			"component", "api",
+			"playback_session_id", session.ID,
+			"requested_seek_seconds", requested,
+			"error", err,
+		)
+		return
+	}
+	if start >= requested {
+		return
+	}
+	slog.InfoContext(ctx, "transcode start past the end of its video moved to the last video segment",
+		"component", "api",
+		"playback_session_id", session.ID,
+		"requested_seek_seconds", requested,
+		"start_seconds", start,
+		"stored_duration_seconds", durationSeconds,
+	)
+	plan.Timeline.SourceStartSeconds = start
 }
 
 // planRequiresServerTransformationsV3 reports whether the plan carries any
