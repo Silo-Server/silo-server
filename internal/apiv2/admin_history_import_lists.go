@@ -13,7 +13,7 @@ import (
 type AdminHistoryImportListInput struct {
 	LimitParam
 	Cursor   string `query:"cursor"`
-	SourceID ID     `query:"source_id" pattern:"^[1-9][0-9]*$"`
+	SourceID ID     `query:"source_id" pattern:"^[1-9][0-9]*$" doc:"Only this source's entries; omitted, every source's are listed"`
 }
 type AdminHistoryImportSourceCollectionOutput struct {
 	Body Collection[AdminHistoryImportSource]
@@ -65,6 +65,37 @@ func adminHistoryConfigPage[T any](c *Cursors, scope CursorScope, cursor string,
 	}
 	return Paginated(items, next), nil
 }
+
+// adminHistoryMappings reads one source's mappings, or every source's when
+// sourceID is empty: the spec marks source_id optional. Mapping IDs are unique
+// across sources, so the combined set pages on the same key.
+func adminHistoryMappings(ctx context.Context, s AdminHistoryImportService, sourceID ID) ([]historyimport.UserMapping, error) {
+	if sourceID != "" {
+		source, p := adminHistoryID(sourceID)
+		if p != nil {
+			return nil, p
+		}
+		rows, err := s.ListMappings(ctx, source)
+		if err != nil {
+			return nil, adminHistoryProblem(err)
+		}
+		return rows, nil
+	}
+	sources, err := s.ListAdminSources(ctx)
+	if err != nil {
+		return nil, adminHistoryProblem(err)
+	}
+	var rows []historyimport.UserMapping
+	for i := range sources {
+		part, err := s.ListMappings(ctx, sources[i].ID)
+		if err != nil {
+			return nil, adminHistoryProblem(err)
+		}
+		rows = append(rows, part...)
+	}
+	return rows, nil
+}
+
 func registerAdminHistoryImportLists(reg *Registry, op func(string, string, string, bool) Operation) {
 	cursors := NewCursors(reg.deps.CursorSecret)
 	Register(reg, op(http.MethodGet, "/admin/history-import-sources", "listAdminHistoryImportSources", false), func(ctx context.Context, in *CursorListInput) (*AdminHistoryImportSourceCollectionOutput, error) {
@@ -91,13 +122,9 @@ func registerAdminHistoryImportLists(reg *Registry, op func(string, string, stri
 		if p != nil {
 			return nil, p
 		}
-		source, p := adminHistoryID(in.SourceID)
-		if p != nil {
-			return nil, p
-		}
-		rows, err := s.ListMappings(ctx, source)
+		rows, err := adminHistoryMappings(ctx, s, in.SourceID)
 		if err != nil {
-			return nil, adminHistoryProblem(err)
+			return nil, err
 		}
 		page, err := adminHistoryConfigPage(cursors, adminHistoryCursorScope(ctx, "listAdminHistoryImportMappings", string(in.SourceID)), in.Cursor, in.Limit, rows, func(m historyimport.UserMapping) int { return m.ID })
 		if err != nil {

@@ -92697,12 +92697,12 @@
             }
           },
           {
-            "description": "Opaque identifier",
+            "description": "Only this source's entries; omitted, every source's are listed",
             "explode": false,
             "in": "query",
             "name": "source_id",
             "schema": {
-              "description": "Opaque identifier",
+              "description": "Only this source's entries; omitted, every source's are listed",
               "examples": [
                 "1"
               ],
@@ -94114,12 +94114,12 @@
             }
           },
           {
-            "description": "Opaque identifier",
+            "description": "Only this source's entries; omitted, every source's are listed",
             "explode": false,
             "in": "query",
             "name": "source_id",
             "schema": {
-              "description": "Opaque identifier",
+              "description": "Only this source's entries; omitted, every source's are listed",
               "examples": [
                 "1"
               ],

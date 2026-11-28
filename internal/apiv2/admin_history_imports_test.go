@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -158,8 +159,51 @@ func TestAdminHistoryListCursorAndAuthority(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodGet, Prefix+"/admin/history-imports/mappings?source_id=1&cursor="+page.Page.NextCursor, "", actingRequestAdmin), TypeInvalidCursor)
 }
 
-func (f *fakeAdminHistoryImports) ListMappings(context.Context, int) ([]historyimport.UserMapping, error) {
-	return []historyimport.UserMapping{f.mapping}, nil
+func (f *fakeAdminHistoryImports) ListMappings(_ context.Context, sourceID int) ([]historyimport.UserMapping, error) {
+	switch sourceID {
+	case f.mapping.SourceID:
+		return []historyimport.UserMapping{f.mapping}, nil
+	case 4:
+		return []historyimport.UserMapping{{ID: 1, SourceID: 4, ExternalUserID: "other", ExternalUserName: "Other", SiloUserID: 3, SiloProfileID: "profile", Revision: 1}}, nil
+	}
+	return nil, nil
+}
+
+// The spec marks source_id optional: omitted, the list covers every source and
+// pages on the mapping ID across them; named, it stays to that source.
+func TestAdminHistoryMappingsSourceOptional(t *testing.T) {
+	h := adminHistoryHandler(fixtureAdminHistoryImports())
+	path := Prefix + "/admin/history-imports/mappings"
+	ids := func(r *httptest.ResponseRecorder) (string, Collection[AdminHistoryImportMapping]) {
+		t.Helper()
+		if r.Code != 200 {
+			t.Fatal(r.Code, r.Body.String())
+		}
+		var page Collection[AdminHistoryImportMapping]
+		if err := json.Unmarshal(r.Body.Bytes(), &page); err != nil {
+			t.Fatal(err)
+		}
+		got := make([]string, 0, len(page.Items))
+		for _, m := range page.Items {
+			got = append(got, string(m.ID))
+		}
+		return strings.Join(got, ","), page
+	}
+	if got, _ := ids(do(t, h, http.MethodGet, path, "", actingRequestAdmin)); got != "1,2" {
+		t.Fatal("all sources", got)
+	}
+	if got, _ := ids(do(t, h, http.MethodGet, path+"?source_id=1", "", actingRequestAdmin)); got != "2" {
+		t.Fatal("one source", got)
+	}
+	got, page := ids(do(t, h, http.MethodGet, path+"?limit=1", "", actingRequestAdmin))
+	if got != "1" || !page.Page.HasMore {
+		t.Fatal("first page", got, page.Page)
+	}
+	if got, _ := ids(do(t, h, http.MethodGet, path+"?limit=1&cursor="+page.Page.NextCursor, "", actingRequestAdmin)); got != "2" {
+		t.Fatal("second page", got)
+	}
+	requireProblem(t, do(t, h, http.MethodGet, path+"?source_id=1&cursor="+page.Page.NextCursor, "", actingRequestAdmin), TypeInvalidCursor)
+	requireProblem(t, do(t, h, http.MethodGet, path, "", requestOwner), TypePermissionDenied)
 }
 
 func (f *fakeAdminHistoryImports) CancelAdminRun(context.Context, string) error {
