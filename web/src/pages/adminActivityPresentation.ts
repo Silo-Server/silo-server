@@ -289,16 +289,18 @@ export function formatToneMapSummary(session: AdminSession): ToneMapSummary | nu
   }
 }
 
-// Bitrate units (Mbps, kbps) are written the same way in every language. A
-// no-break space keeps the unit on its number's line when a narrow cell wraps.
+// The catalog spells the unit per language ("12,2 Mbit/s" in French). Its
+// spaces become no-break spaces so a narrow cell never leaves the unit alone
+// on a line.
 export function formatSessionBitrate(kbps?: number | null): string | null {
   if (!kbps || kbps <= 0) {
     return null;
   }
-  if (kbps >= 1000) {
-    return `${formatDecimal(kbps / 1000, 1)}\u00a0Mbps`;
-  }
-  return `${Math.round(kbps)}\u00a0kbps`;
+  const label =
+    kbps >= 1000
+      ? t("web.common.format.bitrate.mbps", { rate: formatDecimal(kbps / 1000, 1) })
+      : t("web.common.format.bitrate.kbps", { rate: String(Math.round(kbps)) });
+  return label.replace(/ /g, "\u00a0");
 }
 
 export interface SessionBitrate {
