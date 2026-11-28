@@ -36,6 +36,35 @@ func TestApplyEpisodeCatalogAccessFilterRejectsAnyDisabledMembership(t *testing.
 	}
 }
 
+// Short pages and seeks fence the parent-series checks so a small library or a
+// maturity limit cannot push the planner off the sort index. Totals and deep
+// reads keep them flattenable so the planner can still use hash joins.
+func TestEpisodeCatalogReadWhereFencesOnlyShortReads(t *testing.T) {
+	var whereParts []string
+	var args []any
+	argIdx := 2
+	parentChecks := applyEpisodeCatalogAccessFilter(5, AccessFilter{MaxContentRating: "PG"}, &whereParts, &args, &argIdx)
+	q := episodeCatalogQuery{
+		where:       "WHERE " + strings.Join(whereParts, " AND "),
+		fencedWhere: episodeCatalogFencedWhere(whereParts, parentChecks),
+	}
+
+	if short := q.readWhere(21); strings.Count(short, " OFFSET 0)") != 2 {
+		t.Fatalf("a short read must fence exactly the 2 parent checks: %s", short)
+	}
+	for _, i := range parentChecks {
+		if check := whereParts[i]; !strings.HasPrefix(check, "EXISTS (") || strings.Contains(check, "OFFSET 0") {
+			t.Fatalf("parent check %d = %q, want an unfenced EXISTS", i, check)
+		}
+	}
+	if deep := q.readWhere(episodeCatalogFencedRowLimit + 1); strings.Contains(deep, "OFFSET 0") {
+		t.Fatalf("a read past the fence limit must stay unfenced: %s", deep)
+	}
+	if strings.Contains(q.where, "OFFSET 0") {
+		t.Fatalf("total WHERE must stay unfenced: %s", q.where)
+	}
+}
+
 func TestEpisodeCatalogEntryQueryFallsBackForSameFileTechnicalAnd(t *testing.T) {
 	group := QueryGroup{
 		Match: "all",
