@@ -197,6 +197,7 @@ type metadataSkippedRootRepo interface {
 type metadataEpisodeRepo interface {
 	GetByID(ctx context.Context, contentID string) (*models.Episode, error)
 	GetBySeriesAndNumber(ctx context.Context, seriesID string, season, episode int) (*models.Episode, error)
+	GetBySeriesAndFileNumber(ctx context.Context, seriesID string, season, episode int) (*models.Episode, error)
 	ListBySeriesAndAirDates(ctx context.Context, seriesID string, airDates []string) (map[string][]*models.Episode, error)
 	ListBySeriesAndNumbers(ctx context.Context, seriesID string, seasonNumbers, episodeNumbers []int32) ([]*models.Episode, error)
 	ListBySeries(ctx context.Context, seriesID string) ([]*models.Episode, error)
@@ -2403,12 +2404,9 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		var structureSlug string
 		allSeasons, allEpisodes, structureSlug = mergeSeriesStructure(structures.list, structures.episodeChain, episodeOrder.Provider, req.Language)
 		if slices.Contains(renumberIDKeys, structureSlug) {
-			ctx = withEpisodeStructure(ctx, structureSlug)
 			var fileNumbersKnown bool
 			allSeasons, allEpisodes, fileNumbersKnown = applyEpisodeOrder(episodeOrder, allSeasons, allEpisodes, structureSlug, structures.list)
-			if fileNumbersKnown {
-				ctx = withEpisodeFileNumbers(ctx)
-			}
+			ctx = withEpisodeStructure(ctx, episodeStructure{provider: structureSlug, fileNumbers: fileNumbersKnown})
 		}
 	}
 	// Phase 5: Merge & Persist.
@@ -6497,7 +6495,7 @@ func (s *MetadataService) persistSeasonAndEpisodeRows(
 	// episodes. If that fails, writing by number would put one episode's data
 	// on another's row, so this refresh leaves the episodes alone.
 	if isCanonicalWrite && len(episodes) > 0 {
-		if structureKey := episodeStructureOf(ctx); structureKey != "" {
+		if structureKey := episodeStructureOf(ctx).provider; structureKey != "" {
 			if err := s.renumberSeriesEpisodes(ctx, seriesID, seasons, episodes, structureKey); err != nil {
 				slog.WarnContext(ctx, "metadata: renumbering episodes failed; episodes left as stored", "component", "metadata",
 					"series_id", seriesID, "error", err)
@@ -6790,7 +6788,7 @@ func (s *MetadataService) persistSeasonAndEpisodeRows(
 		}
 		// Rows created above take their file numbers too; the renumber gave
 		// the existing rows theirs.
-		if episodeStructureOf(ctx) != "" && episodeFileNumbersOf(ctx) {
+		if structure := episodeStructureOf(ctx); structure.provider != "" && structure.fileNumbers {
 			if err := s.storeEpisodeFileNumbers(ctx, seriesID, episodes); err != nil {
 				slog.WarnContext(ctx, "metadata: storing episode file numbers failed", "component", "metadata",
 					"series_id", seriesID, "error", err)
@@ -7036,12 +7034,7 @@ func (s *MetadataService) synthesizeFallbackSeriesStructure(ctx context.Context,
 // belongs to, reading the numbers in the order the series' files follow
 // (catalog.EpisodeRepository.GetBySeriesAndFileNumber).
 func (s *MetadataService) episodeAtFileNumber(ctx context.Context, seriesID string, season, episode int) (*models.Episode, error) {
-	if repo, ok := s.episodeRepo.(interface {
-		GetBySeriesAndFileNumber(ctx context.Context, seriesID string, season, episode int) (*models.Episode, error)
-	}); ok {
-		return repo.GetBySeriesAndFileNumber(ctx, seriesID, season, episode)
-	}
-	return s.episodeRepo.GetBySeriesAndNumber(ctx, seriesID, season, episode)
+	return s.episodeRepo.GetBySeriesAndFileNumber(ctx, seriesID, season, episode)
 }
 
 func (s *MetadataService) linkSeriesFilesToEpisodes(ctx context.Context, seriesID string) {

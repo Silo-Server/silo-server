@@ -91,10 +91,7 @@ func absoluteEpisodePositions(episodes []*models.Episode) map[int]*models.Episod
 		if episode == nil || strings.EqualFold(strings.TrimSpace(episode.MetadataSource), "scanner_fallback") {
 			continue
 		}
-		season, number := episode.SeasonNumber, episode.EpisodeNumber
-		if episode.ProviderSeasonNumber != nil && episode.ProviderEpisodeNumber != nil {
-			season, number = *episode.ProviderSeasonNumber, *episode.ProviderEpisodeNumber
-		}
+		season, number := episode.ProviderNumbers()
 		if season <= 0 || number <= 0 {
 			continue
 		}

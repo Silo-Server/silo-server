@@ -10,7 +10,6 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
-	"github.com/Silo-Server/silo-server/internal/contentid"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -205,19 +204,6 @@ func (s *MetadataService) seriesEpisodeOrder(ctx context.Context, contentID stri
 	return settings, nil
 }
 
-type episodeFileNumbersKey struct{}
-
-// withEpisodeFileNumbers marks a refresh whose structure episodes carry
-// their file numbers (assignFileNumbers), so persisting writes them.
-func withEpisodeFileNumbers(ctx context.Context) context.Context {
-	return context.WithValue(ctx, episodeFileNumbersKey{}, true)
-}
-
-func episodeFileNumbersOf(ctx context.Context) bool {
-	known, _ := ctx.Value(episodeFileNumbersKey{}).(bool)
-	return known
-}
-
 // noFileNumber is the file number of an episode the file order lacks.
 var noFileNumber int32 = -1
 
@@ -302,11 +288,13 @@ func markListedEpisodes(ctx context.Context, tx pgx.Tx, seriesID, structureSlug 
 		WITH listed AS (SELECT s, n, ps FROM unnest($2::int[], $3::int[], $4::int[]) AS v(s, n, ps)),
 		marks AS (
 			SELECT e.content_id,
-			       EXISTS (SELECT 1 FROM listed WHERE s = e.season_number AND n = e.episode_number) AS at_target,
+			       t.s IS NOT NULL AS at_target,
 			       CASE WHEN e.provider_numbering = $5 THEN COALESCE(e.provider_season_number, e.season_number)
 			            ELSE e.season_number END IN (SELECT ps FROM listed)
 			       OR NOT (e.season_number = ANY($6::int[])) AS loaded
-			FROM episodes e WHERE e.series_id = $1)
+			FROM episodes e
+			LEFT JOIN (SELECT DISTINCT s, n FROM listed) t ON t.s = e.season_number AND t.n = e.episode_number
+			WHERE e.series_id = $1)
 		UPDATE episodes e SET unlisted = NOT m.at_target
 		FROM marks m
 		WHERE e.content_id = m.content_id AND (m.at_target OR m.loaded) AND e.unlisted = m.at_target`,
@@ -352,7 +340,7 @@ func (s *MetadataService) storeEpisodeFileNumbers(ctx context.Context, seriesID 
 		return nil
 	}
 	return pgx.BeginFunc(ctx, s.dbPool, func(tx pgx.Tx) error {
-		return writeEpisodeFileNumbers(ctx, tx, seriesID, episodeStructureOf(ctx), targets)
+		return writeEpisodeFileNumbers(ctx, tx, seriesID, episodeStructureOf(ctx).provider, targets)
 	})
 }
 
@@ -522,10 +510,8 @@ func (s *MetadataService) seriesShowsOtherNumbering(ctx context.Context, seriesI
 	if err != nil {
 		return false, err
 	}
-	for _, p := range chain {
-		if slug := p.Slug(); slug == contentid.ProviderTVDB || slug == contentid.ProviderTMDB {
-			return slug != order.Provider, nil
-		}
+	if first := firstEpisodeOrderProvider(chain); first != "" {
+		return first != order.Provider, nil
 	}
 	return false, nil
 }

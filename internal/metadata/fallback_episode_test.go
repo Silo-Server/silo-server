@@ -55,6 +55,12 @@ func (r *fakeEpisodeRepo) GetBySeriesAndNumber(_ context.Context, seriesID strin
 	return nil, catalog.ErrEpisodeNotFound
 }
 
+// GetBySeriesAndFileNumber matches by shown numbers: the fake keeps no file
+// numbers.
+func (r *fakeEpisodeRepo) GetBySeriesAndFileNumber(ctx context.Context, seriesID string, season, episode int) (*models.Episode, error) {
+	return r.GetBySeriesAndNumber(ctx, seriesID, season, episode)
+}
+
 func (r *fakeEpisodeRepo) GetByID(_ context.Context, contentID string) (*models.Episode, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

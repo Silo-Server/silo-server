@@ -56,7 +56,7 @@ func (r *StableIdentityResolver) ResolveHistoryIdentity(ctx context.Context, med
 			if len(episodeIDs) == 0 && len(seriesIDs) == 0 {
 				return userstore.WatchIdentity{}
 			}
-			seasonNumber, episodeNumber := providerEpisodeNumbers(episode)
+			seasonNumber, episodeNumber := episode.ProviderNumbers()
 			return userstore.WatchIdentity{
 				StableType:        "episode",
 				ProviderIDs:       episodeIDs,
@@ -163,7 +163,7 @@ func (r *StableIdentityResolver) ResolveHistoryIdentities(ctx context.Context, m
 			if len(episodeIDs) == 0 && len(seriesProviderIDs) == 0 {
 				continue
 			}
-			seasonNumber, episodeNumber := providerEpisodeNumbers(episode)
+			seasonNumber, episodeNumber := episode.ProviderNumbers()
 			result[mediaItemID] = userstore.WatchIdentity{
 				StableType:        "episode",
 				ProviderIDs:       episodeIDs,
@@ -318,14 +318,4 @@ func providerIDMap(rows []*models.MediaItemProviderID) map[string]string {
 		result[provider] = providerID
 	}
 	return result
-}
-
-// providerEpisodeNumbers are the numbers watch services know the episode by:
-// its provider's default order, which a series shown in another order keeps
-// apart from the numbers it shows.
-func providerEpisodeNumbers(episode *models.Episode) (int, int) {
-	if episode.ProviderSeasonNumber != nil && episode.ProviderEpisodeNumber != nil {
-		return *episode.ProviderSeasonNumber, *episode.ProviderEpisodeNumber
-	}
-	return episode.SeasonNumber, episode.EpisodeNumber
 }

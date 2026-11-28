@@ -194,13 +194,13 @@ func (s *MetadataService) EpisodeOrderState(ctx context.Context, seriesID string
 	if err != nil {
 		return state, err
 	}
+	if state.LibraryProvider == "" {
+		state.LibraryProvider = firstEpisodeOrderProvider(chain)
+	}
 	for _, p := range chain {
 		slug := p.Slug()
-		if slug != contentid.ProviderTVDB && slug != contentid.ProviderTMDB {
+		if !isEpisodeOrderProvider(slug) {
 			continue
-		}
-		if state.LibraryProvider == "" {
-			state.LibraryProvider = slug
 		}
 		entry := EpisodeOrderProviderOrders{Provider: slug}
 		if lister, ok := p.(episodeOrderListerProvider); ok && withOrders {

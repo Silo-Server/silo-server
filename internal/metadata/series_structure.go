@@ -6,6 +6,8 @@ import (
 	"slices"
 	"sort"
 	"strings"
+
+	"github.com/Silo-Server/silo-server/internal/contentid"
 )
 
 // providerStructure is what one provider returned for a series' seasons and
@@ -68,16 +70,23 @@ func mergeSeriesStructure(providers []providerStructure, episodeChain []string, 
 
 type episodeStructureKey struct{}
 
-// withEpisodeStructure marks a full series refresh whose episodes the
-// provider slug numbered, so persisting them renumbers the stored rows to
-// match (renumberSeriesEpisodes). Partial episode refetches never carry it.
-func withEpisodeStructure(ctx context.Context, slug string) context.Context {
-	return context.WithValue(ctx, episodeStructureKey{}, slug)
+// episodeStructure marks a full series refresh whose episodes the provider
+// slug numbered, so persisting them renumbers the stored rows to match
+// (renumberSeriesEpisodes). fileNumbers says the episodes carry their file
+// numbers too (assignFileNumbers), so persisting writes them. Partial episode
+// refetches never carry it.
+type episodeStructure struct {
+	provider    string
+	fileNumbers bool
 }
 
-func episodeStructureOf(ctx context.Context) string {
-	slug, _ := ctx.Value(episodeStructureKey{}).(string)
-	return slug
+func withEpisodeStructure(ctx context.Context, structure episodeStructure) context.Context {
+	return context.WithValue(ctx, episodeStructureKey{}, structure)
+}
+
+func episodeStructureOf(ctx context.Context) episodeStructure {
+	structure, _ := ctx.Value(episodeStructureKey{}).(episodeStructure)
+	return structure
 }
 
 // structureProvider picks the remote provider that numbers the series: the
@@ -351,6 +360,24 @@ func (s *providerStructures) seasonNumbers() []int {
 	}
 	sort.Ints(out)
 	return out
+}
+
+// isEpisodeOrderProvider reports whether slug is a provider whose episode
+// order a library or series can follow.
+func isEpisodeOrderProvider(slug string) bool {
+	return slug == contentid.ProviderTVDB || slug == contentid.ProviderTMDB
+}
+
+// firstEpisodeOrderProvider is the first provider of an episode chain whose
+// episode order a library can follow, or empty: the order a library without
+// its own choice follows.
+func firstEpisodeOrderProvider(chain []Provider) string {
+	for _, p := range chain {
+		if slug := p.Slug(); isEpisodeOrderProvider(slug) {
+			return slug
+		}
+	}
+	return ""
 }
 
 // seriesEpisodeOrderProvider returns the provider whose episode order a

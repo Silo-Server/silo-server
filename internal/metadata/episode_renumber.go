@@ -470,11 +470,13 @@ func (s *MetadataService) renumberSeriesEpisodes(ctx context.Context, seriesID s
 	if err := applyEpisodeRenumber(ctx, tx, seriesID, plan.Moves); err != nil {
 		return err
 	}
-	marked, err := markListedEpisodes(ctx, tx, seriesID, structureKey, targetSeasonNumbers(seasons, targets), targets)
+	listedSeasons := targetSeasonNumbers(seasons, targets)
+	marked, err := markListedEpisodes(ctx, tx, seriesID, structureKey, listedSeasons, targets)
 	if err != nil {
 		return err
 	}
-	if episodeFileNumbersOf(ctx) {
+	fileNumbers := episodeStructureOf(ctx).fileNumbers
+	if fileNumbers {
 		if err := writeEpisodeFileNumbers(ctx, tx, seriesID, structureKey, targets); err != nil {
 			return err
 		}
@@ -486,12 +488,12 @@ func (s *MetadataService) renumberSeriesEpisodes(ctx context.Context, seriesID s
 	if err != nil {
 		return err
 	}
-	pruned, err := pruneVacatedSeasons(ctx, tx, seriesID, targetSeasonNumbers(seasons, targets))
+	pruned, err := pruneVacatedSeasons(ctx, tx, seriesID, listedSeasons)
 	if err != nil {
 		return err
 	}
 	changed := len(plan.Moves) > 0 || len(plan.Merges) > 0 || relinked > 0 || pruned > 0
-	if !changed && marked == 0 && !episodeFileNumbersOf(ctx) {
+	if !changed && marked == 0 && !fileNumbers {
 		return nil
 	}
 	if err := tx.Commit(ctx); err != nil {

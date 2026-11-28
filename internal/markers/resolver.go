@@ -88,6 +88,20 @@ type ExternalIDResolver interface {
 	ResolveForFile(ctx context.Context, file *models.MediaFile) (ExternalIDs, error)
 }
 
+// providerSeasonSQL and providerEpisodeSQL are the episodes row e's numbers in
+// its provider's default order: the stored provider numbers when the series
+// shows another order, else the shown ones (models.Episode.ProviderNumbers).
+const (
+	providerSeasonSQL  = `COALESCE(e.provider_season_number, e.season_number)`
+	providerEpisodeSQL = `COALESCE(e.provider_episode_number, e.episode_number)`
+)
+
+// providerNumberingSQL is the numbering e's provider numbers follow: the one
+// stored with them, else the numbering e itself follows (episodeNumberingSQL).
+func providerNumberingSQL(folder string) string {
+	return `COALESCE(NULLIF(e.provider_numbering, ''), ` + episodeNumberingSQL(folder) + `)`
+}
+
 // episodeNumberingSQL is ExternalIDs.EpisodeNumbering for the episodes row e
 // of a file in the media folder folder: the first metadata provider in the
 // folder's episode chain whose episode ID e carries, or empty. Episode rows merge
@@ -151,8 +165,8 @@ func (r *DBExternalIDResolver) ResolveForFile(ctx context.Context, file *models.
 		var season, episode int
 		var aired *time.Time
 		err := r.pool.QueryRow(ctx, `
-			SELECT COALESCE(e.provider_season_number, e.season_number, 0),
-			       COALESCE(e.provider_episode_number, e.episode_number, 0),
+			SELECT COALESCE(`+providerSeasonSQL+`, 0),
+			       COALESCE(`+providerEpisodeSQL+`, 0),
 			       COALESCE(NULLIF(mi.tmdb_id, ''), ''),
 			       COALESCE(NULLIF(mi.imdb_id, ''), ''),
 			       COALESCE(NULLIF(mi.tvdb_id, ''), ''),
@@ -161,7 +175,7 @@ func (r *DBExternalIDResolver) ResolveForFile(ctx context.Context, file *models.
 			       COALESCE(BTRIM(e.tvdb_id), ''),
 			       COALESCE(BTRIM(e.title), ''),
 			       e.air_date,
-			       COALESCE(NULLIF(e.provider_numbering, ''), `+episodeNumberingSQL("(SELECT media_folder_id FROM media_files WHERE id = $2)")+`)
+			       `+providerNumberingSQL("(SELECT media_folder_id FROM media_files WHERE id = $2)")+`
 			FROM episodes e
 			LEFT JOIN media_items mi ON mi.content_id = e.series_id
 			WHERE e.content_id = $1`, episodeID, file.ID).Scan(
