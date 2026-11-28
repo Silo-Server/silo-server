@@ -96,11 +96,15 @@ func applyEpisodeCatalogAccessFilter(libraryID int, access AccessFilter, wherePa
 // checks for every entry it passes, so its cost grows with the offset; up to
 // this many entries that stays within milliseconds. A deeper read keeps the
 // unfenced WHERE, which the planner answers with hash joins once it expects to
-// read that far.
+// read that far. Measured on a production-sized catalog, a fenced read costs
+// about two index probes per entry passed and the unfenced hash joins have a
+// fixed cost of 10-40 ms, so the two cross in the low thousands of entries.
 const episodeCatalogFencedRowLimit = 1000
 
 // episodeCatalogFencedWhere renders whereParts for a short page or seek, with
-// the parent-series checks at parentChecks fenced by OFFSET 0.
+// the parent-series checks at parentChecks fenced by OFFSET 0. A check that is
+// not a single EXISTS (...) stays unfenced, so a change to the shape of those
+// predicates falls back to the unfenced plan instead of producing invalid SQL.
 //
 // Unfenced, PostgreSQL pulls both checks up into semi-joins and costs them as
 // independent filters, although nearly every entry in the library passes both.
@@ -116,7 +120,9 @@ const episodeCatalogFencedRowLimit = 1000
 func episodeCatalogFencedWhere(whereParts []string, parentChecks []int) string {
 	parts := slices.Clone(whereParts)
 	for _, i := range parentChecks {
-		parts[i] = strings.TrimSuffix(parts[i], ")") + " OFFSET 0)"
+		if p := parts[i]; strings.HasPrefix(p, "EXISTS (") && strings.HasSuffix(p, ")") {
+			parts[i] = strings.TrimSuffix(p, ")") + " OFFSET 0)"
+		}
 	}
 	return "WHERE " + strings.Join(parts, " AND ")
 }
