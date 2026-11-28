@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setProfileId } from "@/api/client";
 import { createEmptyQueryDefinition } from "@/api/types";
+import { catalogKeys } from "@/hooks/queries/keys";
 import { installPolicyStorageMocks } from "@/pages/admin-policy/policyTestUtils";
 import LibraryBrowse from "./LibraryBrowse";
 
@@ -77,6 +78,53 @@ describe("library browse while offline", () => {
     expect(await screen.findByText("Couldn't load these authors")).toBeTruthy();
     expect(screen.queryByText("No authors found in this library.")).toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();
+    client.clear();
+  });
+});
+
+describe("audiobook group tabs after a failed refresh", () => {
+  beforeEach(() => {
+    installPolicyStorageMocks();
+    setProfileId("p-owner");
+  });
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  // Loaded groups stay on screen when a later read fails, but the tab must
+  // say they may be out of date and offer Try again, as the Library tab does.
+  it("keeps the loaded authors and shows the refresh notice", async () => {
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockRejectedValue(new TypeError("offline")));
+    const client = showLibrary({ libraryType: "audiobook", browseType: "authors" });
+    await screen.findByText("Couldn't load these authors");
+
+    const key = catalogKeys.audiobookGroups(7, "author", "count", "");
+    client.setQueryData(key, {
+      pages: [
+        {
+          groups: [
+            {
+              name: "Ursula K. Le Guin",
+              item_count: 3,
+              total_duration_seconds: 36000,
+              in_progress_count: 0,
+              finished_count: 0,
+              poster_urls: [],
+            },
+          ],
+          total: 1,
+          total_exact: true,
+          has_more: false,
+        },
+      ],
+      pageParams: [""],
+    });
+    await client.invalidateQueries({ queryKey: key });
+
+    expect(await screen.findByText("Couldn't refresh this library.")).toBeTruthy();
+    expect(screen.getByText("Ursula K. Le Guin")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
     client.clear();
   });
 });

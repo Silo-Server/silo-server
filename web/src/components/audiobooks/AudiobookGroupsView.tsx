@@ -3,6 +3,7 @@ import { ChevronRight } from "lucide-react";
 import type { AudiobookGroup } from "@/api/types";
 import { loadErrorDescription } from "@/components/loadErrorDescription";
 import PageUnavailable from "@/components/PageUnavailable";
+import RefreshFailedNotice from "@/components/RefreshFailedNotice";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -223,6 +224,7 @@ export default function AudiobookGroupsView({
     fetchNextPage,
     hasNextPage,
     isError,
+    isFetchNextPageError,
     isFetching,
     isFetchingNextPage,
     isLoading,
@@ -237,9 +239,11 @@ export default function AudiobookGroupsView({
   const isInitialLoading = isLoading && groups.length === 0;
   // A failed read with nothing loaded is not an empty library, and neither is
   // a first read paused while the browser is offline; it loads by itself on
-  // reconnect. Groups that did load stay on screen when a later refetch fails.
+  // reconnect. Groups that did load stay on screen when a later read fails,
+  // with a notice that they may be out of date, as on the Library tab.
   const failedWithNothingLoaded =
     (isError || (isPaused && data === undefined)) && groups.length === 0;
+  const refreshFailed = isError && groups.length > 0;
   const loadNextPage = useCallback(() => {
     if (hasNextPage && !isFetchingNextPage) {
       void fetchNextPage();
@@ -297,6 +301,21 @@ export default function AudiobookGroupsView({
         </Select>
         {firstPage && <span className="text-muted-foreground ms-auto text-sm">{countLabel}</span>}
       </div>
+
+      {refreshFailed ? (
+        <RefreshFailedNotice
+          message={
+            isFetchNextPageError
+              ? t("web.library.browse.someItemsFailed")
+              : t("web.library.browse.refreshFailed")
+          }
+          error={error}
+          // A failed later page isn't among the loaded pages, so a refetch
+          // would skip it; fetch that page again instead.
+          onRetry={() => void (isFetchNextPageError ? fetchNextPage() : refetch())}
+          retrying={isFetching}
+        />
+      ) : null}
 
       {isInitialLoading ? (
         isSeries ? (
