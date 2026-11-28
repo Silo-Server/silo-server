@@ -280,7 +280,11 @@ export default function LibraryBrowse({
   // the library holds anything at all before calling it empty, so an
   // over-filtered view keeps pointing at its filters.
   const browseCameBackEmpty =
-    !isGroupedAxis && !catalogQuery.isLoading && !catalogQuery.isError && totalItems === 0;
+    !isGroupedAxis &&
+    !catalogQuery.isLoading &&
+    !catalogQuery.isError &&
+    !catalogQuery.isPaused &&
+    totalItems === 0;
   // The bar holds its place from the first render of a title-ordered browse,
   // greyed until the index lands, so the grid doesn't reflow and the bar
   // doesn't pop in. It steps aside only when there is nothing to index or the
@@ -352,9 +356,12 @@ export default function LibraryBrowse({
   };
   // The first page carries the result window, so without it (or with only an
   // empty one) a failure leaves nothing to show: the browse failed outright
-  // and must not read as an empty library. A failed background refetch or a
-  // failed later page keeps the loaded grid and the viewer's place in it.
-  const browseFailed = catalogQuery.isError && (!pages.has(0) || totalItems === 0);
+  // and must not read as an empty library. Neither must a first page paused
+  // while the browser is offline; it loads by itself on reconnect. A failed
+  // background refetch or a failed later page keeps the loaded grid and the
+  // viewer's place in it.
+  const browseFailed =
+    catalogQuery.isPaused || (catalogQuery.isError && (!pages.has(0) || totalItems === 0));
   const browsePartlyFailed = catalogQuery.isError && !browseFailed;
   let refreshFailedMessage: string | undefined;
   if (browsePartlyFailed) {
@@ -451,7 +458,9 @@ export default function LibraryBrowse({
           title={t("web.library.browse.loadFailed")}
           description={loadErrorDescription(catalogQuery.error)}
           onRetry={retryBrowse}
-          retrying={retrying}
+          // A retry while offline pauses with the first page and settles only
+          // on reconnect, so keep the button usable until a fetch really runs.
+          retrying={retrying && !catalogQuery.isPaused}
         />
       ) : (
         <div

@@ -1,4 +1,9 @@
-import { QueryClient, QueryClientProvider, QueryObserver } from "@tanstack/react-query";
+import {
+  onlineManager,
+  QueryClient,
+  QueryClientProvider,
+  QueryObserver,
+} from "@tanstack/react-query";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -85,6 +90,29 @@ describe("catalog window cursor paging", () => {
     cleanup();
     clients.splice(0).forEach((client) => client.clear());
     vi.unstubAllGlobals();
+  });
+
+  it("reports a first page paused offline, then loads it on reconnect", async () => {
+    const { requests } = catalogTransport();
+    const { wrapper } = makeClient();
+    onlineManager.setOnline(false);
+    try {
+      const state = createCatalogSearchState("query", { q: "star" });
+      const { result } = renderHook(
+        () => useCatalogWindow(state, { limit: 2, includeTotal: false, visibleRange: [0, 1] }),
+        { wrapper },
+      );
+      await waitFor(() => expect(result.current.isPaused).toBe(true));
+      expect(result.current.isLoading).toBe(false);
+      expect(result.current.isError).toBe(false);
+      expect(requests).toHaveLength(0);
+
+      act(() => onlineManager.setOnline(true));
+      await waitFor(() => expect(result.current.data.pages.get(0)).toHaveLength(2));
+      expect(result.current.isPaused).toBe(false);
+    } finally {
+      onlineManager.setOnline(true);
+    }
   });
 
   it("uses adjacent cached cursors and returns consecutive unique results", async () => {
