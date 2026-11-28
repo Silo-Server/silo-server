@@ -81,8 +81,9 @@ for a single item does not take the lock.
      kept, not only the longest. A run that is mostly silence is dropped. A
      run is split at silences of 0.45 seconds or more, which separates a
      studio logo, or the audio after the intro, from the theme. A run that
-     starts after a cold open keeps the pauses in its first 15 seconds, and a
-     split that would leave no piece of 10 seconds is not made.
+     starts after a cold open keeps a pause in its first 15 seconds when what
+     follows the pause is long enough to be a match on its own, and a split
+     that would leave no piece of 10 seconds is not made.
    - **Consensus.** A file's pair results that agree within 4 seconds on both
      edges form a cluster, each partner episode counting once. The cluster
      the most partners confirm wins, except that a theme two partners confirm
@@ -247,8 +248,10 @@ tombstone is no marker to clients, as a manual clear is.
   artifact table, `media_intro_fingerprints`; see
   [artifact storage](media-sampling.md#artifact-storage) for its keys and
   statuses. Intro detection writes only `complete` rows. New rows use the
-  `chromaprint+silence:v1` payload: the raw points followed by the window's
-  silences (8 bytes each). `silencedetect` passes the audio through unchanged,
+  `chromaprint+silence:v1` payload, little-endian: a point count and a
+  silence count (`uint32` each), the raw points, then each silence as its
+  start and end in whole milliseconds from the window start (`uint32` each).
+  `silencedetect` passes the audio through unchanged,
   so the points are byte for byte what a fingerprint-only run produces and the
   cache key did not change. Rows in the older `chromaprint:raw:uint32le`
   payload still load; their matches skip silence splitting and trimming rather

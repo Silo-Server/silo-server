@@ -73,7 +73,7 @@ func (e *ChromaprintExtractor) Extract(ctx context.Context, candidate Candidate)
 		FingerprintFormat:     chromaprintSilenceFormat,
 		SampleDurationSeconds: float64(len(points)) * exactChromaprintHopSeconds,
 		Points:                points,
-		Silences:              closeOpenSilences(result.Silences, window.End),
+		Silences:              storedSilences(result.Silences, window.Start, window.End),
 	}, true, nil
 }
 

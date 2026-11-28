@@ -34,15 +34,31 @@ func headSilenceParams() *mediasample.SilenceParams {
 //	silence  start ms uint32, end ms uint32, counted from the window start
 //
 // A silence still open when the window ended is stored ending at the window
-// end; see closeOpenSilences.
+// end; see storedSilences.
 
-// closeOpenSilences ends a silence ffmpeg left open at the end of the window,
-// so a fresh fingerprint and the same one read back from its row compare the
-// same.
-func closeOpenSilences(silences []mediasample.Interval, windowEnd float64) []mediasample.Interval {
+// silenceMillis is a silence boundary as the payload stores it: whole
+// milliseconds from the window start.
+func silenceMillis(seconds, windowStart float64) uint32 {
+	return uint32(math.Round(math.Max(0, seconds-windowStart) * 1000))
+}
+
+// silenceSeconds is a stored silence boundary in media seconds.
+func silenceSeconds(millis uint32, windowStart float64) float64 {
+	return windowStart + float64(millis)/1000
+}
+
+// storedSilences returns silences as their row will read back: a silence
+// ffmpeg left open at the end of the window ends there, and boundaries are
+// whole milliseconds. Matching a fresh fingerprint on these keeps its result
+// the same as matching the cached one later.
+func storedSilences(silences []mediasample.Interval, windowStart, windowEnd float64) []mediasample.Interval {
 	for i, silence := range silences {
 		if silence.End <= 0 {
-			silences[i].End = windowEnd
+			silence.End = windowEnd
+		}
+		silences[i] = mediasample.Interval{
+			Start: silenceSeconds(silenceMillis(silence.Start, windowStart), windowStart),
+			End:   silenceSeconds(silenceMillis(silence.End, windowStart), windowStart),
 		}
 	}
 	return silences
@@ -58,12 +74,9 @@ func encodeFingerprintSilences(points []uint32, silences []mediasample.Interval,
 	for _, point := range points {
 		buf = binary.LittleEndian.AppendUint32(buf, point)
 	}
-	ms := func(seconds float64) uint32 {
-		return uint32(math.Round(math.Max(0, seconds-windowStart) * 1000))
-	}
 	for _, silence := range silences {
-		buf = binary.LittleEndian.AppendUint32(buf, ms(silence.Start))
-		buf = binary.LittleEndian.AppendUint32(buf, ms(silence.End))
+		buf = binary.LittleEndian.AppendUint32(buf, silenceMillis(silence.Start, windowStart))
+		buf = binary.LittleEndian.AppendUint32(buf, silenceMillis(silence.End, windowStart))
 	}
 	return buf
 }
@@ -88,8 +101,8 @@ func decodeFingerprintSilences(payload []byte, windowStart float64) ([]uint32, [
 	for i := range outSilences {
 		offset := base + 8*i
 		outSilences[i] = mediasample.Interval{
-			Start: windowStart + float64(binary.LittleEndian.Uint32(payload[offset:]))/1000,
-			End:   windowStart + float64(binary.LittleEndian.Uint32(payload[offset+4:]))/1000,
+			Start: silenceSeconds(binary.LittleEndian.Uint32(payload[offset:]), windowStart),
+			End:   silenceSeconds(binary.LittleEndian.Uint32(payload[offset+4:]), windowStart),
 		}
 	}
 	return outPoints, outSilences, nil

@@ -12,8 +12,9 @@ import (
 // show up here rather than as fingerprints that silently fail to load.
 func TestFingerprintSilencesRoundTrip(t *testing.T) {
 	points := []uint32{0, 1, 0xdeadbeef, 42}
-	// The last silence was still open when the window ended at 351.5.
-	silences := closeOpenSilences([]mediasample.Interval{{Start: 0, End: 1.25}, {Start: 98.5, End: 100.75}, {Start: 340.5}}, 351.5)
+	// The second silence ends between two milliseconds, and the last was
+	// still open when the window ended at 351.5.
+	silences := storedSilences([]mediasample.Interval{{Start: 0, End: 1.25}, {Start: 98.5, End: 100.7499}, {Start: 340.5}}, 0, 351.5)
 	payload := encodeFingerprintSilences(points, silences, 0)
 	if want := 8 + 4*len(points) + 8*len(silences); len(payload) != want {
 		t.Fatalf("payload is %d bytes, want %d", len(payload), want)
@@ -22,8 +23,11 @@ func TestFingerprintSilencesRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantSilences := []mediasample.Interval{{Start: 0, End: 1.25}, {Start: 98.5, End: 100.75}, {Start: 340.5, End: 351.5}}
-	if !reflect.DeepEqual(gotPoints, points) || !reflect.DeepEqual(gotSilences, wantSilences) {
+	// What matching sees for a fresh fingerprint is what its row reads back.
+	if want := []mediasample.Interval{{Start: 0, End: 1.25}, {Start: 98.5, End: 100.75}, {Start: 340.5, End: 351.5}}; !reflect.DeepEqual(silences, want) {
+		t.Fatalf("stored form is %v, want %v", silences, want)
+	}
+	if !reflect.DeepEqual(gotPoints, points) || !reflect.DeepEqual(gotSilences, silences) {
 		t.Fatalf("decoded %v %v", gotPoints, gotSilences)
 	}
 	if _, _, err := decodeFingerprintSilences(payload[:len(payload)-1], 0); err == nil {
