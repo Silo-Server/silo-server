@@ -189,17 +189,43 @@ export function formatTime(
     ...options,
   };
   const { timeFormat } = preferences;
+  const locale = formatLocale();
   if (timeFormat === "12h") {
     merged.hourCycle = "h12";
   } else if (timeFormat === "24h") {
     merged.hourCycle = "h23";
-    // h23 alone doesn't guarantee zero-padding in every locale; 24h convention
-    // is "09:04". Callers may still override with an explicit hour option.
-    if (!options?.hour) {
-      merged.hour = "2-digit";
-    }
   }
-  return date.toLocaleTimeString(formatLocale(), merged);
+  // h23 alone doesn't guarantee zero-padding in every locale; 24h convention
+  // is "09:04". The automatic clock pads where the locale's own short time
+  // does (#5169). Callers may still override with an explicit hour option.
+  if (
+    !options?.hour &&
+    (timeFormat === "24h" || (timeFormat === "auto" && localePadsHour(locale)))
+  ) {
+    merged.hour = "2-digit";
+  }
+  return date.toLocaleTimeString(locale, merged);
+}
+
+const localePadsHourCache = new Map<string, boolean>();
+
+/**
+ * Whether the locale writes its own short clock time with a two-digit hour:
+ * "01:30" in en-GB and de, "1:30" in ja and en-US. Intl's `hour: "numeric"`
+ * drops the zero even where the locale's own pattern keeps it.
+ */
+function localePadsHour(locale: string | undefined): boolean {
+  const key = locale ?? "";
+  let pads = localePadsHourCache.get(key);
+  if (pads === undefined) {
+    const hour = new Intl.DateTimeFormat(locale, { timeStyle: "short" })
+      .formatToParts(new Date(2000, 0, 1, 1, 30))
+      .find((part) => part.type === "hour")?.value;
+    // Count code points: digits outside the BMP (e.g. "-u-nu-mathbold") are two UTF-16 units.
+    pads = hour !== undefined && [...hour].length === 2;
+    localePadsHourCache.set(key, pads);
+  }
+  return pads;
 }
 
 /**
