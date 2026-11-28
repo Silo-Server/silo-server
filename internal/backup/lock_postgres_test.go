@@ -410,8 +410,8 @@ func TestNightlyFailsWhenBackupTimeCannotBeReadDB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rec.Last == nil || rec.Last.Status != RunFailed || !strings.Contains(rec.Last.Error, "connection reset") || !rec.Last.NightlySlot.IsZero() {
-		t.Fatalf("backup status after the failed run = %+v; want it failed with the read error and no slot", rec.Last)
+	if rec.Last == nil || rec.Last.Status != RunFailed || !strings.Contains(rec.Last.Error, "connection reset") || rec.LastNightlySlot != nil {
+		t.Fatalf("backup status after the failed run = %+v, slot %v; want it failed with the read error and no slot", rec.Last, rec.LastNightlySlot)
 	}
 	opts.Settings = settings
 	if result, err := New(opts).RunTask(ctx, nil); err != nil || result.Skipped != "" {

@@ -1424,6 +1424,7 @@
 ./internal/backup TestStatusBelongsToTheOperationHoldingTheLockDB
 ./internal/backup TestStatusRecordsTheLastSuccessDB
 ./internal/backup TestNightlyRecordsTheSlotItWasAdmittedForDB
+./internal/backup TestNightlyFailsWhenBackupTimeCannotBeReadDB
 ./internal/backup TestBackupAndDeleteWithOnePoolConnectionDB
 ./internal/backup TestEveryTableIsClassifiedDB
 ./internal/backup TestSelectiveRestoreDB

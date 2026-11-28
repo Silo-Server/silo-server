@@ -164,7 +164,8 @@ func (s *Service) SyncSchedule(ctx context.Context, mgr ScheduleManager) error {
 // lockScheduled takes the lock for a run the task manager started: a
 // manual one, or the nightly one, which skips when the lock is held or
 // another server already backed up its slot. A nil run is a skip or an
-// error.
+// error; a run carrying err holds the lock only so failAdmission can report
+// it.
 func (s *Service) lockScheduled(ctx context.Context) (*pendingRun, RunResult, error) {
 	kind := KindNightly
 	if taskmanager.StartedManually(ctx) {
