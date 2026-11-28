@@ -150108,6 +150108,12 @@
       "value": "Enable captions"
     }
   ],
+  "web.subtitles.menu.generateWithAi": [
+    {
+      "type": 0,
+      "value": "Generate subtitles with AI…"
+    }
+  ],
   "web.subtitles.menu.heading": [
     {
       "type": 0,

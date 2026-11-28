@@ -157376,6 +157376,12 @@
       "value": "\u200F\u202EEnable captions\u202C"
     }
   ],
+  "web.subtitles.menu.generateWithAi": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EGenerate subtitles with AI…\u202C"
+    }
+  ],
   "web.subtitles.menu.heading": [
     {
       "type": 0,
