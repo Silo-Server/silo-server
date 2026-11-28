@@ -113283,6 +113283,24 @@
       "value": "bibliotecile dvs."
     }
   ],
+  "web.collections.copy.yourMdblistLists": [
+    {
+      "type": 0,
+      "value": "Listele dvs. MDBList"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsProfileHelp": [
+    {
+      "type": 0,
+      "value": "Din conexiunea MDBList a acestui profil, inclusiv cele private"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsServerHelp": [
+    {
+      "type": 0,
+      "value": "Din contul care deține cheia API MDBList a serverului, inclusiv cele private"
+    }
+  ],
   "web.collections.count.unavailable": [
     {
       "type": 0,
@@ -118091,6 +118109,16 @@
       "value": "Partajată"
     }
   ],
+  "web.collections.templateGallery.accountListsFailed": [
+    {
+      "type": 0,
+      "value": "Nu s-au putut încărca listele dvs. MDBList. "
+    },
+    {
+      "type": 1,
+      "value": "detail"
+    }
+  ],
   "web.collections.templateGallery.allThemes": [
     {
       "type": 0,
@@ -118105,6 +118133,26 @@
     {
       "type": 1,
       "value": "user"
+    }
+  ],
+  "web.collections.templateGallery.connectForOwnLists": [
+    {
+      "type": 0,
+      "value": "Conectați MDBList în "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Setări › Furnizori de vizionare"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " pentru a alege dintre propriile liste, inclusiv cele private. Conectarea pornește și sincronizarea istoricului de vizionare cu MDBList, pe care o puteți dezactiva acolo."
     }
   ],
   "web.collections.templateGallery.groupHeading": [
@@ -118157,10 +118205,34 @@
       }
     }
   ],
+  "web.collections.templateGallery.listLiked": [
+    {
+      "type": 0,
+      "value": "Apreciată"
+    }
+  ],
+  "web.collections.templateGallery.listPrivate": [
+    {
+      "type": 0,
+      "value": "Privată"
+    }
+  ],
+  "web.collections.templateGallery.listViews": [
+    {
+      "type": 0,
+      "value": "Liste de afișat"
+    }
+  ],
   "web.collections.templateGallery.lists": [
     {
       "type": 0,
       "value": "Liste"
+    }
+  ],
+  "web.collections.templateGallery.loadingOwnLists": [
+    {
+      "type": 0,
+      "value": "Se încarcă listele dvs.…"
     }
   ],
   "web.collections.templateGallery.noMatches": [
@@ -118177,10 +118249,36 @@
       "value": "”."
     }
   ],
+  "web.collections.templateGallery.noOwnMatches": [
+    {
+      "type": 0,
+      "value": "Niciuna dintre listele dvs. nu corespunde căutării „"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "”."
+    }
+  ],
   "web.collections.templateGallery.noPicks": [
     {
       "type": 0,
       "value": "Nicio recomandare populară aici. Căutați în MDBList sau lipiți un link."
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateProfile": [
+    {
+      "type": 0,
+      "value": "Funcționează și listele private, dacă aparțin contului MDBList conectat la acest profil."
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateServer": [
+    {
+      "type": 0,
+      "value": "Funcționează și listele private, dacă cheia API MDBList a serverului aparține contului care le deține."
     }
   ],
   "web.collections.templateGallery.searchFailed": [
@@ -118223,6 +118321,12 @@
     {
       "type": 0,
       "value": "Căutarea este dezactivată"
+    }
+  ],
+  "web.collections.templateGallery.searchOwnLists": [
+    {
+      "type": 0,
+      "value": "Căutați în listele dvs."
     }
   ],
   "web.collections.templateGallery.searchPlaceholder": [
@@ -118351,6 +118455,18 @@
     {
       "type": 0,
       "value": "Teme"
+    }
+  ],
+  "web.collections.templateGallery.viewBrowse": [
+    {
+      "type": 0,
+      "value": "Răsfoiți MDBList"
+    }
+  ],
+  "web.collections.templateGallery.viewOwnLists": [
+    {
+      "type": 0,
+      "value": "Listele dvs."
     }
   ],
   "web.collections.templates.mediaKind.mixed": [

@@ -94933,6 +94933,24 @@
       "value": "你的媒體庫"
     }
   ],
+  "web.collections.copy.yourMdblistLists": [
+    {
+      "type": 0,
+      "value": "你的 MDBList 清單"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsProfileHelp": [
+    {
+      "type": 0,
+      "value": "來自此個人檔案的 MDBList 連線，也包括私人清單"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsServerHelp": [
+    {
+      "type": 0,
+      "value": "來自擁有此伺服器 MDBList API 金鑰的帳號，也包括私人清單"
+    }
+  ],
   "web.collections.count.unavailable": [
     {
       "type": 0,
@@ -99099,6 +99117,16 @@
       "value": "已分享"
     }
   ],
+  "web.collections.templateGallery.accountListsFailed": [
+    {
+      "type": 0,
+      "value": "無法載入你的 MDBList 清單。"
+    },
+    {
+      "type": 1,
+      "value": "detail"
+    }
+  ],
   "web.collections.templateGallery.allThemes": [
     {
       "type": 0,
@@ -99117,6 +99145,26 @@
     {
       "type": 0,
       "value": " 建立"
+    }
+  ],
+  "web.collections.templateGallery.connectForOwnLists": [
+    {
+      "type": 0,
+      "value": "在"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "設定 › 觀看提供者"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "中連接 MDBList，即可從你自己的清單中挑選，也包括私人清單。連接後也會開始與 MDBList 同步觀看紀錄，你可以在該處關閉。"
     }
   ],
   "web.collections.templateGallery.groupHeading": [
@@ -99169,10 +99217,34 @@
       }
     }
   ],
+  "web.collections.templateGallery.listLiked": [
+    {
+      "type": 0,
+      "value": "已喜歡"
+    }
+  ],
+  "web.collections.templateGallery.listPrivate": [
+    {
+      "type": 0,
+      "value": "私人"
+    }
+  ],
+  "web.collections.templateGallery.listViews": [
+    {
+      "type": 0,
+      "value": "要顯示的清單"
+    }
+  ],
   "web.collections.templateGallery.lists": [
     {
       "type": 0,
       "value": "清單"
+    }
+  ],
+  "web.collections.templateGallery.loadingOwnLists": [
+    {
+      "type": 0,
+      "value": "正在載入你的清單……"
     }
   ],
   "web.collections.templateGallery.noMatches": [
@@ -99189,10 +99261,36 @@
       "value": "」的公開清單。"
     }
   ],
+  "web.collections.templateGallery.noOwnMatches": [
+    {
+      "type": 0,
+      "value": "你的清單中沒有符合「"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "」的項目。"
+    }
+  ],
   "web.collections.templateGallery.noPicks": [
     {
       "type": 0,
       "value": "這裡沒有熱門精選。請搜尋 MDBList 或貼上連結。"
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateProfile": [
+    {
+      "type": 0,
+      "value": "如果私人清單屬於此個人檔案所連接的 MDBList 帳號，也可以使用。"
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateServer": [
+    {
+      "type": 0,
+      "value": "如果伺服器的 MDBList API 金鑰屬於擁有私人清單的帳號，也可以使用私人清單。"
     }
   ],
   "web.collections.templateGallery.searchFailed": [
@@ -99235,6 +99333,12 @@
     {
       "type": 0,
       "value": "搜尋已關閉"
+    }
+  ],
+  "web.collections.templateGallery.searchOwnLists": [
+    {
+      "type": 0,
+      "value": "搜尋你的清單"
     }
   ],
   "web.collections.templateGallery.searchPlaceholder": [
@@ -99327,6 +99431,18 @@
     {
       "type": 0,
       "value": "主題"
+    }
+  ],
+  "web.collections.templateGallery.viewBrowse": [
+    {
+      "type": 0,
+      "value": "瀏覽 MDBList"
+    }
+  ],
+  "web.collections.templateGallery.viewOwnLists": [
+    {
+      "type": 0,
+      "value": "你的清單"
     }
   ],
   "web.collections.templates.mediaKind.mixed": [

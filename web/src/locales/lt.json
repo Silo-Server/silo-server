@@ -124107,6 +124107,24 @@
       "value": "jūsų bibliotekos"
     }
   ],
+  "web.collections.copy.yourMdblistLists": [
+    {
+      "type": 0,
+      "value": "Jūsų „MDBList“ sąrašai"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsProfileHelp": [
+    {
+      "type": 0,
+      "value": "Iš šio profilio „MDBList“ ryšio, įskaitant privačius"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsServerHelp": [
+    {
+      "type": 0,
+      "value": "Iš paskyros, kuriai priklauso serverio „MDBList“ API raktas, įskaitant privačius"
+    }
+  ],
   "web.collections.count.unavailable": [
     {
       "type": 0,
@@ -129345,6 +129363,16 @@
       "value": "Bendrinama"
     }
   ],
+  "web.collections.templateGallery.accountListsFailed": [
+    {
+      "type": 0,
+      "value": "Nepavyko įkelti jūsų „MDBList“ sąrašų. "
+    },
+    {
+      "type": 1,
+      "value": "detail"
+    }
+  ],
   "web.collections.templateGallery.allThemes": [
     {
       "type": 0,
@@ -129359,6 +129387,26 @@
     {
       "type": 1,
       "value": "user"
+    }
+  ],
+  "web.collections.templateGallery.connectForOwnLists": [
+    {
+      "type": 0,
+      "value": "Prijunkite „MDBList“ skiltyje "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Nustatymai › Žiūrėjimo teikėjai"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", kad galėtumėte rinktis iš savo sąrašų, įskaitant privačius. Prijungus taip pat pradedama sinchronizuoti žiūrėjimo istoriją su „MDBList“; tai galite išjungti ten pat."
     }
   ],
   "web.collections.templateGallery.groupHeading": [
@@ -129411,10 +129459,34 @@
       }
     }
   ],
+  "web.collections.templateGallery.listLiked": [
+    {
+      "type": 0,
+      "value": "Pamėgtas"
+    }
+  ],
+  "web.collections.templateGallery.listPrivate": [
+    {
+      "type": 0,
+      "value": "Privatus"
+    }
+  ],
+  "web.collections.templateGallery.listViews": [
+    {
+      "type": 0,
+      "value": "Rodomi sąrašai"
+    }
+  ],
   "web.collections.templateGallery.lists": [
     {
       "type": 0,
       "value": "Sąrašai"
+    }
+  ],
+  "web.collections.templateGallery.loadingOwnLists": [
+    {
+      "type": 0,
+      "value": "Įkeliami jūsų sąrašai…"
     }
   ],
   "web.collections.templateGallery.noMatches": [
@@ -129431,10 +129503,36 @@
       "value": "“."
     }
   ],
+  "web.collections.templateGallery.noOwnMatches": [
+    {
+      "type": 0,
+      "value": "Nė vienas jūsų sąrašas neatitinka užklausos „"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "“."
+    }
+  ],
   "web.collections.templateGallery.noPicks": [
     {
       "type": 0,
       "value": "Čia nėra populiarių pasirinkimų. Ieškokite „MDBList“ arba įklijuokite nuorodą."
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateProfile": [
+    {
+      "type": 0,
+      "value": "Privatūs sąrašai taip pat veikia, jei jie priklauso šio profilio prijungtai „MDBList“ paskyrai."
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateServer": [
+    {
+      "type": 0,
+      "value": "Privatūs sąrašai taip pat veikia, jei serverio „MDBList“ API raktas priklauso paskyrai, kuriai priklauso šie sąrašai."
     }
   ],
   "web.collections.templateGallery.searchFailed": [
@@ -129477,6 +129575,12 @@
     {
       "type": 0,
       "value": "Paieška išjungta"
+    }
+  ],
+  "web.collections.templateGallery.searchOwnLists": [
+    {
+      "type": 0,
+      "value": "Ieškoti savo sąrašuose"
     }
   ],
   "web.collections.templateGallery.searchPlaceholder": [
@@ -129621,6 +129725,18 @@
     {
       "type": 0,
       "value": "Temos"
+    }
+  ],
+  "web.collections.templateGallery.viewBrowse": [
+    {
+      "type": 0,
+      "value": "Naršyti „MDBList“"
+    }
+  ],
+  "web.collections.templateGallery.viewOwnLists": [
+    {
+      "type": 0,
+      "value": "Jūsų sąrašai"
     }
   ],
   "web.collections.templates.mediaKind.mixed": [

@@ -103137,6 +103137,24 @@
       "value": "a könyvtárai"
     }
   ],
+  "web.collections.copy.yourMdblistLists": [
+    {
+      "type": 0,
+      "value": "Saját MDBList-listák"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsProfileHelp": [
+    {
+      "type": 0,
+      "value": "Ennek a profilnak az MDBList-kapcsolatából, a privát listákkal együtt"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsServerHelp": [
+    {
+      "type": 0,
+      "value": "Abból a fiókból, amelyhez a szerver MDBList API-kulcsa tartozik, a privát listákkal együtt"
+    }
+  ],
   "web.collections.count.unavailable": [
     {
       "type": 0,
@@ -107557,6 +107575,16 @@
       "value": "Megosztva"
     }
   ],
+  "web.collections.templateGallery.accountListsFailed": [
+    {
+      "type": 0,
+      "value": "Nem sikerült betölteni a saját MDBList-listákat. "
+    },
+    {
+      "type": 1,
+      "value": "detail"
+    }
+  ],
   "web.collections.templateGallery.allThemes": [
     {
       "type": 0,
@@ -107571,6 +107599,26 @@
     {
       "type": 1,
       "value": "user"
+    }
+  ],
+  "web.collections.templateGallery.connectForOwnLists": [
+    {
+      "type": 0,
+      "value": "Csatlakoztassa az MDBList szolgáltatást itt: "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Beállítások › Megtekintési szolgáltatók"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", hogy a saját listái közül választhasson, a privát listákat is beleértve. A csatlakoztatással a megtekintési előzmények szinkronizálása is elindul az MDBList szolgáltatással, amelyet ott kikapcsolhat."
     }
   ],
   "web.collections.templateGallery.groupHeading": [
@@ -107623,10 +107671,34 @@
       }
     }
   ],
+  "web.collections.templateGallery.listLiked": [
+    {
+      "type": 0,
+      "value": "Kedvelt"
+    }
+  ],
+  "web.collections.templateGallery.listPrivate": [
+    {
+      "type": 0,
+      "value": "Privát"
+    }
+  ],
+  "web.collections.templateGallery.listViews": [
+    {
+      "type": 0,
+      "value": "Megjelenítendő listák"
+    }
+  ],
   "web.collections.templateGallery.lists": [
     {
       "type": 0,
       "value": "Listák"
+    }
+  ],
+  "web.collections.templateGallery.loadingOwnLists": [
+    {
+      "type": 0,
+      "value": "Saját listák betöltése…"
     }
   ],
   "web.collections.templateGallery.noMatches": [
@@ -107643,10 +107715,36 @@
       "value": "”."
     }
   ],
+  "web.collections.templateGallery.noOwnMatches": [
+    {
+      "type": 0,
+      "value": "Egyik saját listája sem egyezik ezzel: „"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "”."
+    }
+  ],
   "web.collections.templateGallery.noPicks": [
     {
       "type": 0,
       "value": "Itt nincsenek népszerű ajánlatok. Keressen az MDBList szolgáltatásban, vagy illesszen be egy hivatkozást."
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateProfile": [
+    {
+      "type": 0,
+      "value": "A privát listák is működnek, ha ennek a profilnak a csatlakoztatott MDBList-fiókjához tartoznak."
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateServer": [
+    {
+      "type": 0,
+      "value": "A privát listák is működnek, ha a szerver MDBList API-kulcsa a listák tulajdonosának fiókjához tartozik."
     }
   ],
   "web.collections.templateGallery.searchFailed": [
@@ -107689,6 +107787,12 @@
     {
       "type": 0,
       "value": "A keresés ki van kapcsolva"
+    }
+  ],
+  "web.collections.templateGallery.searchOwnLists": [
+    {
+      "type": 0,
+      "value": "Keresés a saját listák között"
     }
   ],
   "web.collections.templateGallery.searchPlaceholder": [
@@ -107801,6 +107905,18 @@
     {
       "type": 0,
       "value": "Témák"
+    }
+  ],
+  "web.collections.templateGallery.viewBrowse": [
+    {
+      "type": 0,
+      "value": "MDBList böngészése"
+    }
+  ],
+  "web.collections.templateGallery.viewOwnLists": [
+    {
+      "type": 0,
+      "value": "Saját listák"
     }
   ],
   "web.collections.templates.mediaKind.mixed": [

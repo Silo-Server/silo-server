@@ -103499,6 +103499,24 @@
       "value": "bibliotekene dine"
     }
   ],
+  "web.collections.copy.yourMdblistLists": [
+    {
+      "type": 0,
+      "value": "Dine MDBList-lister"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsProfileHelp": [
+    {
+      "type": 0,
+      "value": "Fra denne profilens MDBList-tilkobling, også private lister"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsServerHelp": [
+    {
+      "type": 0,
+      "value": "Fra kontoen som eier serverens MDBList-API-nøkkel, også private lister"
+    }
+  ],
   "web.collections.count.unavailable": [
     {
       "type": 0,
@@ -107985,6 +108003,16 @@
       "value": "Delt"
     }
   ],
+  "web.collections.templateGallery.accountListsFailed": [
+    {
+      "type": 0,
+      "value": "Kunne ikke laste inn MDBList-listene dine. "
+    },
+    {
+      "type": 1,
+      "value": "detail"
+    }
+  ],
   "web.collections.templateGallery.allThemes": [
     {
       "type": 0,
@@ -107999,6 +108027,26 @@
     {
       "type": 1,
       "value": "user"
+    }
+  ],
+  "web.collections.templateGallery.connectForOwnLists": [
+    {
+      "type": 0,
+      "value": "Koble til MDBList i "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Innstillinger › Visningstjenester"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " for å velge blant dine egne lister, også private. Når du kobler til, starter også synkronisering av seerloggen med MDBList. Det kan du slå av der."
     }
   ],
   "web.collections.templateGallery.groupHeading": [
@@ -108051,10 +108099,34 @@
       }
     }
   ],
+  "web.collections.templateGallery.listLiked": [
+    {
+      "type": 0,
+      "value": "Likt"
+    }
+  ],
+  "web.collections.templateGallery.listPrivate": [
+    {
+      "type": 0,
+      "value": "Privat"
+    }
+  ],
+  "web.collections.templateGallery.listViews": [
+    {
+      "type": 0,
+      "value": "Lister som skal vises"
+    }
+  ],
   "web.collections.templateGallery.lists": [
     {
       "type": 0,
       "value": "Lister"
+    }
+  ],
+  "web.collections.templateGallery.loadingOwnLists": [
+    {
+      "type": 0,
+      "value": "Laster inn listene dine …"
     }
   ],
   "web.collections.templateGallery.noMatches": [
@@ -108071,10 +108143,36 @@
       "value": "»."
     }
   ],
+  "web.collections.templateGallery.noOwnMatches": [
+    {
+      "type": 0,
+      "value": "Ingen av listene dine samsvarer med «"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "»."
+    }
+  ],
   "web.collections.templateGallery.noPicks": [
     {
       "type": 0,
       "value": "Ingen populære valg her. Søk i MDBList eller lim inn en lenke."
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateProfile": [
+    {
+      "type": 0,
+      "value": "Private lister fungerer også hvis de tilhører MDBList-kontoen som er koblet til denne profilen."
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateServer": [
+    {
+      "type": 0,
+      "value": "Private lister fungerer også hvis serverens MDBList-API-nøkkel tilhører kontoen som eier dem."
     }
   ],
   "web.collections.templateGallery.searchFailed": [
@@ -108117,6 +108215,12 @@
     {
       "type": 0,
       "value": "Søk er av"
+    }
+  ],
+  "web.collections.templateGallery.searchOwnLists": [
+    {
+      "type": 0,
+      "value": "Søk i listene dine"
     }
   ],
   "web.collections.templateGallery.searchPlaceholder": [
@@ -108229,6 +108333,18 @@
     {
       "type": 0,
       "value": "Temaer"
+    }
+  ],
+  "web.collections.templateGallery.viewBrowse": [
+    {
+      "type": 0,
+      "value": "Bla gjennom MDBList"
+    }
+  ],
+  "web.collections.templateGallery.viewOwnLists": [
+    {
+      "type": 0,
+      "value": "Dine lister"
     }
   ],
   "web.collections.templates.mediaKind.mixed": [

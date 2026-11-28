@@ -112074,6 +112074,24 @@
       "value": "הספריות שלך"
     }
   ],
+  "web.collections.copy.yourMdblistLists": [
+    {
+      "type": 0,
+      "value": "הרשימות שלך ב-MDBList"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsProfileHelp": [
+    {
+      "type": 0,
+      "value": "מהחיבור של הפרופיל הזה ל-MDBList, כולל רשימות פרטיות"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsServerHelp": [
+    {
+      "type": 0,
+      "value": "מהחשבון שמפתח ה-API של MDBList בשרת שייך לו, כולל רשימות פרטיות"
+    }
+  ],
   "web.collections.count.unavailable": [
     {
       "type": 0,
@@ -116814,6 +116832,16 @@
       "value": "משותף"
     }
   ],
+  "web.collections.templateGallery.accountListsFailed": [
+    {
+      "type": 0,
+      "value": "לא ניתן היה לטעון את הרשימות שלך ב-MDBList. "
+    },
+    {
+      "type": 1,
+      "value": "detail"
+    }
+  ],
   "web.collections.templateGallery.allThemes": [
     {
       "type": 0,
@@ -116828,6 +116856,26 @@
     {
       "type": 1,
       "value": "user"
+    }
+  ],
+  "web.collections.templateGallery.connectForOwnLists": [
+    {
+      "type": 0,
+      "value": "יש לחבר את MDBList דרך "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "הגדרות ← ספקי צפייה"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " כדי לבחור מהרשימות שלך, כולל רשימות פרטיות. החיבור גם מפעיל סנכרון של היסטוריית הצפייה עם MDBList, ואפשר לכבות אותו שם."
     }
   ],
   "web.collections.templateGallery.groupHeading": [
@@ -116880,10 +116928,34 @@
       }
     }
   ],
+  "web.collections.templateGallery.listLiked": [
+    {
+      "type": 0,
+      "value": "סומנה בלייק"
+    }
+  ],
+  "web.collections.templateGallery.listPrivate": [
+    {
+      "type": 0,
+      "value": "פרטית"
+    }
+  ],
+  "web.collections.templateGallery.listViews": [
+    {
+      "type": 0,
+      "value": "רשימות להצגה"
+    }
+  ],
   "web.collections.templateGallery.lists": [
     {
       "type": 0,
       "value": "רשימות"
+    }
+  ],
+  "web.collections.templateGallery.loadingOwnLists": [
+    {
+      "type": 0,
+      "value": "הרשימות שלך בטעינה…"
     }
   ],
   "web.collections.templateGallery.noMatches": [
@@ -116900,10 +116972,36 @@
       "value": "”."
     }
   ],
+  "web.collections.templateGallery.noOwnMatches": [
+    {
+      "type": 0,
+      "value": "אף אחת מהרשימות שלך לא תואמת ל-”"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "”."
+    }
+  ],
   "web.collections.templateGallery.noPicks": [
     {
       "type": 0,
       "value": "אין כאן בחירות פופולריות. אפשר לחפש ב-MDBList או להדביק קישור."
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateProfile": [
+    {
+      "type": 0,
+      "value": "גם רשימות פרטיות פועלות אם הן שייכות לחשבון MDBList שמחובר לפרופיל הזה."
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateServer": [
+    {
+      "type": 0,
+      "value": "גם רשימות פרטיות פועלות אם הן שייכות לחשבון שמפתח ה-API של MDBList בשרת שייך לו."
     }
   ],
   "web.collections.templateGallery.searchFailed": [
@@ -116946,6 +117044,12 @@
     {
       "type": 0,
       "value": "החיפוש כבוי"
+    }
+  ],
+  "web.collections.templateGallery.searchOwnLists": [
+    {
+      "type": 0,
+      "value": "חיפוש ברשימות שלך"
     }
   ],
   "web.collections.templateGallery.searchPlaceholder": [
@@ -117058,6 +117162,18 @@
     {
       "type": 0,
       "value": "נושאים"
+    }
+  ],
+  "web.collections.templateGallery.viewBrowse": [
+    {
+      "type": 0,
+      "value": "עיון ב-MDBList"
+    }
+  ],
+  "web.collections.templateGallery.viewOwnLists": [
+    {
+      "type": 0,
+      "value": "הרשימות שלך"
     }
   ],
   "web.collections.templates.mediaKind.mixed": [

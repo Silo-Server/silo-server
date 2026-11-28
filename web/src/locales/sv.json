@@ -103387,6 +103387,24 @@
       "value": "dina bibliotek"
     }
   ],
+  "web.collections.copy.yourMdblistLists": [
+    {
+      "type": 0,
+      "value": "Dina MDBList-listor"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsProfileHelp": [
+    {
+      "type": 0,
+      "value": "Från profilens MDBList-anslutning, även privata"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsServerHelp": [
+    {
+      "type": 0,
+      "value": "Från kontot som äger serverns API-nyckel för MDBList, även privata"
+    }
+  ],
   "web.collections.count.unavailable": [
     {
       "type": 0,
@@ -107853,6 +107871,16 @@
       "value": "Delad"
     }
   ],
+  "web.collections.templateGallery.accountListsFailed": [
+    {
+      "type": 0,
+      "value": "Det gick inte att läsa in dina MDBList-listor. "
+    },
+    {
+      "type": 1,
+      "value": "detail"
+    }
+  ],
   "web.collections.templateGallery.allThemes": [
     {
       "type": 0,
@@ -107867,6 +107895,26 @@
     {
       "type": 1,
       "value": "user"
+    }
+  ],
+  "web.collections.templateGallery.connectForOwnLists": [
+    {
+      "type": 0,
+      "value": "Anslut MDBList i "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Inställningar › Tittartjänster"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " för att välja bland dina egna listor, även privata. Anslutningen startar också synkronisering av tittarhistorik med MDBList, vilket du kan stänga av där."
     }
   ],
   "web.collections.templateGallery.groupHeading": [
@@ -107919,10 +107967,34 @@
       }
     }
   ],
+  "web.collections.templateGallery.listLiked": [
+    {
+      "type": 0,
+      "value": "Gillad"
+    }
+  ],
+  "web.collections.templateGallery.listPrivate": [
+    {
+      "type": 0,
+      "value": "Privat"
+    }
+  ],
+  "web.collections.templateGallery.listViews": [
+    {
+      "type": 0,
+      "value": "Listor att visa"
+    }
+  ],
   "web.collections.templateGallery.lists": [
     {
       "type": 0,
       "value": "Listor"
+    }
+  ],
+  "web.collections.templateGallery.loadingOwnLists": [
+    {
+      "type": 0,
+      "value": "Läser in dina listor…"
     }
   ],
   "web.collections.templateGallery.noMatches": [
@@ -107939,10 +108011,36 @@
       "value": "”."
     }
   ],
+  "web.collections.templateGallery.noOwnMatches": [
+    {
+      "type": 0,
+      "value": "Inga av dina listor matchar ”"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "”."
+    }
+  ],
   "web.collections.templateGallery.noPicks": [
     {
       "type": 0,
       "value": "Inga populära val här. Sök på MDBList eller klistra in en länk."
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateProfile": [
+    {
+      "type": 0,
+      "value": "Privata listor fungerar också om de tillhör profilens anslutna MDBList-konto."
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateServer": [
+    {
+      "type": 0,
+      "value": "Privata listor fungerar också om serverns API-nyckel för MDBList tillhör kontot som äger dem."
     }
   ],
   "web.collections.templateGallery.searchFailed": [
@@ -107985,6 +108083,12 @@
     {
       "type": 0,
       "value": "Sökning är avstängd"
+    }
+  ],
+  "web.collections.templateGallery.searchOwnLists": [
+    {
+      "type": 0,
+      "value": "Sök i dina listor"
     }
   ],
   "web.collections.templateGallery.searchPlaceholder": [
@@ -108097,6 +108201,18 @@
     {
       "type": 0,
       "value": "Teman"
+    }
+  ],
+  "web.collections.templateGallery.viewBrowse": [
+    {
+      "type": 0,
+      "value": "Bläddra i MDBList"
+    }
+  ],
+  "web.collections.templateGallery.viewOwnLists": [
+    {
+      "type": 0,
+      "value": "Dina listor"
     }
   ],
   "web.collections.templates.mediaKind.mixed": [

@@ -122799,6 +122799,24 @@
       "value": "vaše knjižnice"
     }
   ],
+  "web.collections.copy.yourMdblistLists": [
+    {
+      "type": 0,
+      "value": "Vaši seznami MDBList"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsProfileHelp": [
+    {
+      "type": 0,
+      "value": "Iz povezave MDBList tega profila, tudi zasebni"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsServerHelp": [
+    {
+      "type": 0,
+      "value": "Iz računa, ki je lastnik strežnikovega ključa API za MDBList, tudi zasebni"
+    }
+  ],
   "web.collections.count.unavailable": [
     {
       "type": 0,
@@ -127855,6 +127873,16 @@
       "value": "Deljeno"
     }
   ],
+  "web.collections.templateGallery.accountListsFailed": [
+    {
+      "type": 0,
+      "value": "Vaših seznamov MDBList ni bilo mogoče naložiti. "
+    },
+    {
+      "type": 1,
+      "value": "detail"
+    }
+  ],
   "web.collections.templateGallery.allThemes": [
     {
       "type": 0,
@@ -127869,6 +127897,26 @@
     {
       "type": 1,
       "value": "user"
+    }
+  ],
+  "web.collections.templateGallery.connectForOwnLists": [
+    {
+      "type": 0,
+      "value": "Povežite storitev MDBList v razdelku "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Nastavitve › Ponudniki ogledov"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", da boste lahko izbirali med svojimi seznami, vključno z zasebnimi. Ob povezavi se začne tudi sinhronizacija zgodovine gledanja s storitvijo MDBList, ki jo lahko tam izklopite."
     }
   ],
   "web.collections.templateGallery.groupHeading": [
@@ -127921,10 +127969,34 @@
       }
     }
   ],
+  "web.collections.templateGallery.listLiked": [
+    {
+      "type": 0,
+      "value": "Všečkano"
+    }
+  ],
+  "web.collections.templateGallery.listPrivate": [
+    {
+      "type": 0,
+      "value": "Zasebno"
+    }
+  ],
+  "web.collections.templateGallery.listViews": [
+    {
+      "type": 0,
+      "value": "Seznami za prikaz"
+    }
+  ],
   "web.collections.templateGallery.lists": [
     {
       "type": 0,
       "value": "Seznami"
+    }
+  ],
+  "web.collections.templateGallery.loadingOwnLists": [
+    {
+      "type": 0,
+      "value": "Nalaganje vaših seznamov …"
     }
   ],
   "web.collections.templateGallery.noMatches": [
@@ -127941,10 +128013,36 @@
       "value": "“."
     }
   ],
+  "web.collections.templateGallery.noOwnMatches": [
+    {
+      "type": 0,
+      "value": "Noben od vaših seznamov ne ustreza iskanju „"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "“."
+    }
+  ],
   "web.collections.templateGallery.noPicks": [
     {
       "type": 0,
       "value": "Tu ni priljubljenih izbir. Poiščite v storitvi MDBList ali prilepite povezavo."
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateProfile": [
+    {
+      "type": 0,
+      "value": "Delujejo tudi zasebni seznami, če pripadajo računu MDBList, povezanemu s tem profilom."
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateServer": [
+    {
+      "type": 0,
+      "value": "Delujejo tudi zasebni seznami, če strežnikov ključ API za MDBList pripada računu, ki je njihov lastnik."
     }
   ],
   "web.collections.templateGallery.searchFailed": [
@@ -127987,6 +128085,12 @@
     {
       "type": 0,
       "value": "Iskanje je izklopljeno"
+    }
+  ],
+  "web.collections.templateGallery.searchOwnLists": [
+    {
+      "type": 0,
+      "value": "Iščite med svojimi seznami"
     }
   ],
   "web.collections.templateGallery.searchPlaceholder": [
@@ -128131,6 +128235,18 @@
     {
       "type": 0,
       "value": "Teme"
+    }
+  ],
+  "web.collections.templateGallery.viewBrowse": [
+    {
+      "type": 0,
+      "value": "Brskaj po MDBList"
+    }
+  ],
+  "web.collections.templateGallery.viewOwnLists": [
+    {
+      "type": 0,
+      "value": "Vaši seznami"
     }
   ],
   "web.collections.templates.mediaKind.mixed": [

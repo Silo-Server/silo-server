@@ -108667,6 +108667,24 @@
       "value": "\u200F\u202Eyour libraries\u202C"
     }
   ],
+  "web.collections.copy.yourMdblistLists": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EYour MDBList lists\u202C"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsProfileHelp": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EFrom this profile's MDBList connection, private ones too\u202C"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsServerHelp": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EFrom the account that owns the server's MDBList API key, private ones too\u202C"
+    }
+  ],
   "web.collections.count.unavailable": [
     {
       "type": 0,
@@ -113417,6 +113435,16 @@
       "value": "\u200F\u202EShared\u202C"
     }
   ],
+  "web.collections.templateGallery.accountListsFailed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECouldn't load your MDBList lists. \u202C"
+    },
+    {
+      "type": 1,
+      "value": "detail"
+    }
+  ],
   "web.collections.templateGallery.allThemes": [
     {
       "type": 0,
@@ -113431,6 +113459,26 @@
     {
       "type": 1,
       "value": "user"
+    }
+  ],
+  "web.collections.templateGallery.connectForOwnLists": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EConnect MDBList in \u202C"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "\u202ESettings › Watch providers\u202C"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "\u202E to pick from your own lists, private ones included. Connecting also starts syncing watch history with MDBList, which you can turn off there.\u202C"
     }
   ],
   "web.collections.templateGallery.groupHeading": [
@@ -113491,10 +113539,34 @@
       }
     }
   ],
+  "web.collections.templateGallery.listLiked": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELiked\u202C"
+    }
+  ],
+  "web.collections.templateGallery.listPrivate": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPrivate\u202C"
+    }
+  ],
+  "web.collections.templateGallery.listViews": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELists to show\u202C"
+    }
+  ],
   "web.collections.templateGallery.lists": [
     {
       "type": 0,
       "value": "\u200F\u202ELists\u202C"
+    }
+  ],
+  "web.collections.templateGallery.loadingOwnLists": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELoading your lists…\u202C"
     }
   ],
   "web.collections.templateGallery.noMatches": [
@@ -113511,10 +113583,36 @@
       "value": "\u202E”.\u202C"
     }
   ],
+  "web.collections.templateGallery.noOwnMatches": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENone of your lists match “\u202C"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "\u202E”.\u202C"
+    }
+  ],
   "web.collections.templateGallery.noPicks": [
     {
       "type": 0,
       "value": "\u200F\u202ENo popular picks here. Search MDBList or paste a link.\u202C"
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateProfile": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPrivate lists work too if they belong to this profile's connected MDBList account.\u202C"
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateServer": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPrivate lists work too if the server's MDBList API key belongs to the account that owns them.\u202C"
     }
   ],
   "web.collections.templateGallery.searchFailed": [
@@ -113557,6 +113655,12 @@
     {
       "type": 0,
       "value": "\u200F\u202ESearch is off\u202C"
+    }
+  ],
+  "web.collections.templateGallery.searchOwnLists": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESearch your lists\u202C"
     }
   ],
   "web.collections.templateGallery.searchPlaceholder": [
@@ -113669,6 +113773,18 @@
     {
       "type": 0,
       "value": "\u200F\u202EThemes\u202C"
+    }
+  ],
+  "web.collections.templateGallery.viewBrowse": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EBrowse MDBList\u202C"
+    }
+  ],
+  "web.collections.templateGallery.viewOwnLists": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EYour lists\u202C"
     }
   ],
   "web.collections.templates.mediaKind.mixed": [

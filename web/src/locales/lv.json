@@ -114619,6 +114619,24 @@
       "value": "jūsu bibliotēkas"
     }
   ],
+  "web.collections.copy.yourMdblistLists": [
+    {
+      "type": 0,
+      "value": "Jūsu MDBList saraksti"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsProfileHelp": [
+    {
+      "type": 0,
+      "value": "No šī profila MDBList savienojuma, ieskaitot privātos"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsServerHelp": [
+    {
+      "type": 0,
+      "value": "No konta, kuram pieder servera MDBList API atslēga, ieskaitot privātos"
+    }
+  ],
   "web.collections.count.unavailable": [
     {
       "type": 0,
@@ -119507,6 +119525,16 @@
       "value": "Kopīgota"
     }
   ],
+  "web.collections.templateGallery.accountListsFailed": [
+    {
+      "type": 0,
+      "value": "Neizdevās ielādēt jūsu MDBList sarakstus. "
+    },
+    {
+      "type": 1,
+      "value": "detail"
+    }
+  ],
   "web.collections.templateGallery.allThemes": [
     {
       "type": 0,
@@ -119521,6 +119549,26 @@
     {
       "type": 1,
       "value": "user"
+    }
+  ],
+  "web.collections.templateGallery.connectForOwnLists": [
+    {
+      "type": 0,
+      "value": "Izveidojiet savienojumu ar MDBList sadaļā "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Iestatījumi › Skatīšanās nodrošinātāji"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", lai izvēlētos no saviem sarakstiem, ieskaitot privātos. Savienojuma izveide arī sāk sinhronizēt skatīšanās vēsturi ar MDBList; to tur varat izslēgt."
     }
   ],
   "web.collections.templateGallery.groupHeading": [
@@ -119573,10 +119621,34 @@
       }
     }
   ],
+  "web.collections.templateGallery.listLiked": [
+    {
+      "type": 0,
+      "value": "Patīk"
+    }
+  ],
+  "web.collections.templateGallery.listPrivate": [
+    {
+      "type": 0,
+      "value": "Privāts"
+    }
+  ],
+  "web.collections.templateGallery.listViews": [
+    {
+      "type": 0,
+      "value": "Rādāmie saraksti"
+    }
+  ],
   "web.collections.templateGallery.lists": [
     {
       "type": 0,
       "value": "Saraksti"
+    }
+  ],
+  "web.collections.templateGallery.loadingOwnLists": [
+    {
+      "type": 0,
+      "value": "Notiek jūsu sarakstu ielāde…"
     }
   ],
   "web.collections.templateGallery.noMatches": [
@@ -119593,10 +119665,36 @@
       "value": "”."
     }
   ],
+  "web.collections.templateGallery.noOwnMatches": [
+    {
+      "type": 0,
+      "value": "Neviens jūsu saraksts neatbilst vaicājumam „"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "”."
+    }
+  ],
   "web.collections.templateGallery.noPicks": [
     {
       "type": 0,
       "value": "Šeit nav populāru izvēļu. Meklējiet pakalpojumā MDBList vai ielīmējiet saiti."
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateProfile": [
+    {
+      "type": 0,
+      "value": "Darbojas arī privātie saraksti, ja tie pieder šī profila savienotajam MDBList kontam."
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateServer": [
+    {
+      "type": 0,
+      "value": "Darbojas arī privātie saraksti, ja servera MDBList API atslēga pieder kontam, kuram pieder šie saraksti."
     }
   ],
   "web.collections.templateGallery.searchFailed": [
@@ -119639,6 +119737,12 @@
     {
       "type": 0,
       "value": "Meklēšana ir izslēgta"
+    }
+  ],
+  "web.collections.templateGallery.searchOwnLists": [
+    {
+      "type": 0,
+      "value": "Meklēt savos sarakstos"
     }
   ],
   "web.collections.templateGallery.searchPlaceholder": [
@@ -119767,6 +119871,18 @@
     {
       "type": 0,
       "value": "Tēmas"
+    }
+  ],
+  "web.collections.templateGallery.viewBrowse": [
+    {
+      "type": 0,
+      "value": "Pārlūkot MDBList"
+    }
+  ],
+  "web.collections.templateGallery.viewOwnLists": [
+    {
+      "type": 0,
+      "value": "Jūsu saraksti"
     }
   ],
   "web.collections.templates.mediaKind.mixed": [

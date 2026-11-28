@@ -103737,6 +103737,24 @@
       "value": "thư viện của bạn"
     }
   ],
+  "web.collections.copy.yourMdblistLists": [
+    {
+      "type": 0,
+      "value": "Danh sách MDBList của bạn"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsProfileHelp": [
+    {
+      "type": 0,
+      "value": "Từ kết nối MDBList của hồ sơ này, gồm cả danh sách riêng tư"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsServerHelp": [
+    {
+      "type": 0,
+      "value": "Từ tài khoản sở hữu khóa API MDBList của máy chủ, gồm cả danh sách riêng tư"
+    }
+  ],
   "web.collections.count.unavailable": [
     {
       "type": 0,
@@ -108255,6 +108273,16 @@
       "value": "Đã chia sẻ"
     }
   ],
+  "web.collections.templateGallery.accountListsFailed": [
+    {
+      "type": 0,
+      "value": "Không thể tải danh sách MDBList của bạn. "
+    },
+    {
+      "type": 1,
+      "value": "detail"
+    }
+  ],
   "web.collections.templateGallery.allThemes": [
     {
       "type": 0,
@@ -108269,6 +108297,26 @@
     {
       "type": 1,
       "value": "user"
+    }
+  ],
+  "web.collections.templateGallery.connectForOwnLists": [
+    {
+      "type": 0,
+      "value": "Kết nối MDBList trong "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Cài đặt › Nhà cung cấp lịch sử xem"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " để chọn từ danh sách của chính bạn, gồm cả danh sách riêng tư. Khi kết nối, lịch sử xem cũng bắt đầu được đồng bộ với MDBList; bạn có thể tắt tùy chọn này tại đó."
     }
   ],
   "web.collections.templateGallery.groupHeading": [
@@ -108321,10 +108369,34 @@
       }
     }
   ],
+  "web.collections.templateGallery.listLiked": [
+    {
+      "type": 0,
+      "value": "Đã thích"
+    }
+  ],
+  "web.collections.templateGallery.listPrivate": [
+    {
+      "type": 0,
+      "value": "Riêng tư"
+    }
+  ],
+  "web.collections.templateGallery.listViews": [
+    {
+      "type": 0,
+      "value": "Danh sách hiển thị"
+    }
+  ],
   "web.collections.templateGallery.lists": [
     {
       "type": 0,
       "value": "Danh sách"
+    }
+  ],
+  "web.collections.templateGallery.loadingOwnLists": [
+    {
+      "type": 0,
+      "value": "Đang tải danh sách của bạn…"
     }
   ],
   "web.collections.templateGallery.noMatches": [
@@ -108341,10 +108413,36 @@
       "value": "”."
     }
   ],
+  "web.collections.templateGallery.noOwnMatches": [
+    {
+      "type": 0,
+      "value": "Không có danh sách nào của bạn khớp với “"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "”."
+    }
+  ],
   "web.collections.templateGallery.noPicks": [
     {
       "type": 0,
       "value": "Không có lựa chọn phổ biến nào ở đây. Tìm trên MDBList hoặc dán liên kết."
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateProfile": [
+    {
+      "type": 0,
+      "value": "Danh sách riêng tư cũng dùng được nếu thuộc tài khoản MDBList đã kết nối với hồ sơ này."
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateServer": [
+    {
+      "type": 0,
+      "value": "Danh sách riêng tư cũng dùng được nếu khóa API MDBList của máy chủ thuộc tài khoản sở hữu các danh sách đó."
     }
   ],
   "web.collections.templateGallery.searchFailed": [
@@ -108387,6 +108485,12 @@
     {
       "type": 0,
       "value": "Tìm kiếm đang tắt"
+    }
+  ],
+  "web.collections.templateGallery.searchOwnLists": [
+    {
+      "type": 0,
+      "value": "Tìm kiếm danh sách của bạn"
     }
   ],
   "web.collections.templateGallery.searchPlaceholder": [
@@ -108499,6 +108603,18 @@
     {
       "type": 0,
       "value": "Chủ đề"
+    }
+  ],
+  "web.collections.templateGallery.viewBrowse": [
+    {
+      "type": 0,
+      "value": "Duyệt MDBList"
+    }
+  ],
+  "web.collections.templateGallery.viewOwnLists": [
+    {
+      "type": 0,
+      "value": "Danh sách của bạn"
     }
   ],
   "web.collections.templates.mediaKind.mixed": [

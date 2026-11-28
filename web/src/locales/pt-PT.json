@@ -113315,6 +113315,24 @@
       "value": "nenhuma das suas bibliotecas"
     }
   ],
+  "web.collections.copy.yourMdblistLists": [
+    {
+      "type": 0,
+      "value": "As suas listas do MDBList"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsProfileHelp": [
+    {
+      "type": 0,
+      "value": "Da ligação ao MDBList deste perfil, incluindo as privadas"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsServerHelp": [
+    {
+      "type": 0,
+      "value": "Da conta que detém a chave de API do MDBList do servidor, incluindo as privadas"
+    }
+  ],
   "web.collections.count.unavailable": [
     {
       "type": 0,
@@ -118025,6 +118043,16 @@
       "value": "Partilhada"
     }
   ],
+  "web.collections.templateGallery.accountListsFailed": [
+    {
+      "type": 0,
+      "value": "Não foi possível carregar as suas listas do MDBList. "
+    },
+    {
+      "type": 1,
+      "value": "detail"
+    }
+  ],
   "web.collections.templateGallery.allThemes": [
     {
       "type": 0,
@@ -118039,6 +118067,26 @@
     {
       "type": 1,
       "value": "user"
+    }
+  ],
+  "web.collections.templateGallery.connectForOwnLists": [
+    {
+      "type": 0,
+      "value": "Ligue o MDBList em "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Definições › Fornecedores de visualização"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " para escolher entre as suas próprias listas, incluindo as privadas. Ao ligar, também começa a sincronizar o histórico de visualização com o MDBList, o que pode desativar aí."
     }
   ],
   "web.collections.templateGallery.groupHeading": [
@@ -118091,10 +118139,34 @@
       }
     }
   ],
+  "web.collections.templateGallery.listLiked": [
+    {
+      "type": 0,
+      "value": "Com gosto"
+    }
+  ],
+  "web.collections.templateGallery.listPrivate": [
+    {
+      "type": 0,
+      "value": "Privada"
+    }
+  ],
+  "web.collections.templateGallery.listViews": [
+    {
+      "type": 0,
+      "value": "Listas a mostrar"
+    }
+  ],
   "web.collections.templateGallery.lists": [
     {
       "type": 0,
       "value": "Listas"
+    }
+  ],
+  "web.collections.templateGallery.loadingOwnLists": [
+    {
+      "type": 0,
+      "value": "A carregar as suas listas…"
     }
   ],
   "web.collections.templateGallery.noMatches": [
@@ -118111,10 +118183,36 @@
       "value": "»."
     }
   ],
+  "web.collections.templateGallery.noOwnMatches": [
+    {
+      "type": 0,
+      "value": "Nenhuma das suas listas corresponde a «"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "»."
+    }
+  ],
   "web.collections.templateGallery.noPicks": [
     {
       "type": 0,
       "value": "Não há escolhas populares aqui. Pesquise no MDBList ou cole um link."
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateProfile": [
+    {
+      "type": 0,
+      "value": "As listas privadas também funcionam se pertencerem à conta do MDBList ligada a este perfil."
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateServer": [
+    {
+      "type": 0,
+      "value": "As listas privadas também funcionam se a chave de API do MDBList do servidor pertencer à conta que as detém."
     }
   ],
   "web.collections.templateGallery.searchFailed": [
@@ -118157,6 +118255,12 @@
     {
       "type": 0,
       "value": "Pesquisa desativada"
+    }
+  ],
+  "web.collections.templateGallery.searchOwnLists": [
+    {
+      "type": 0,
+      "value": "Pesquisar nas suas listas"
     }
   ],
   "web.collections.templateGallery.searchPlaceholder": [
@@ -118285,6 +118389,18 @@
     {
       "type": 0,
       "value": "Temas"
+    }
+  ],
+  "web.collections.templateGallery.viewBrowse": [
+    {
+      "type": 0,
+      "value": "Explorar o MDBList"
+    }
+  ],
+  "web.collections.templateGallery.viewOwnLists": [
+    {
+      "type": 0,
+      "value": "As suas listas"
     }
   ],
   "web.collections.templates.mediaKind.mixed": [

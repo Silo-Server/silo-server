@@ -112315,6 +112315,24 @@
       "value": "⟦ýöûŕ ļîƀŕåŕîéš~~~~~~⟧"
     }
   ],
+  "web.collections.copy.yourMdblistLists": [
+    {
+      "type": 0,
+      "value": "⟦Ýöûŕ ṀĐƁĻîšţ ļîšţš~~~~~~~~⟧"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsProfileHelp": [
+    {
+      "type": 0,
+      "value": "⟦Ƒŕöɱ ţĥîš þŕöƒîļé'š ṀĐƁĻîšţ çöññéçţîöñ, þŕîṽåţé öñéš ţöö~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsServerHelp": [
+    {
+      "type": 0,
+      "value": "⟦Ƒŕöɱ ţĥé åççöûñţ ţĥåţ öŵñš ţĥé šéŕṽéŕ'š ṀĐƁĻîšţ ÅÞÎ ķéý, þŕîṽåţé öñéš ţöö~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.collections.count.unavailable": [
     {
       "type": 0,
@@ -117313,6 +117331,20 @@
       "value": "⟦Šĥåŕéđ~~~⟧"
     }
   ],
+  "web.collections.templateGallery.accountListsFailed": [
+    {
+      "type": 0,
+      "value": "⟦Çöûļđñ'ţ ļöåđ ýöûŕ ṀĐƁĻîšţ ļîšţš. "
+    },
+    {
+      "type": 1,
+      "value": "detail"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.collections.templateGallery.allThemes": [
     {
       "type": 0,
@@ -117331,6 +117363,26 @@
     {
       "type": 0,
       "value": "~~⟧"
+    }
+  ],
+  "web.collections.templateGallery.connectForOwnLists": [
+    {
+      "type": 0,
+      "value": "⟦Çöññéçţ ṀĐƁĻîšţ îñ "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Šéţţîñĝš › Ŵåţçĥ þŕöṽîđéŕš"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " ţö þîçķ ƒŕöɱ ýöûŕ öŵñ ļîšţš, þŕîṽåţé öñéš îñçļûđéđ. Çöññéçţîñĝ åļšö šţåŕţš šýñçîñĝ ŵåţçĥ ĥîšţöŕý ŵîţĥ ṀĐƁĻîšţ, ŵĥîçĥ ýöû çåñ ţûŕñ öƒƒ ţĥéŕé.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.collections.templateGallery.groupHeading": [
@@ -117399,10 +117451,34 @@
       "value": "~~~⟧"
     }
   ],
+  "web.collections.templateGallery.listLiked": [
+    {
+      "type": 0,
+      "value": "⟦Ļîķéđ~~⟧"
+    }
+  ],
+  "web.collections.templateGallery.listPrivate": [
+    {
+      "type": 0,
+      "value": "⟦Þŕîṽåţé~~~⟧"
+    }
+  ],
+  "web.collections.templateGallery.listViews": [
+    {
+      "type": 0,
+      "value": "⟦Ļîšţš ţö šĥöŵ~~~~~~⟧"
+    }
+  ],
   "web.collections.templateGallery.lists": [
     {
       "type": 0,
       "value": "⟦Ļîšţš~~⟧"
+    }
+  ],
+  "web.collections.templateGallery.loadingOwnLists": [
+    {
+      "type": 0,
+      "value": "⟦Ļöåđîñĝ ýöûŕ ļîšţš…~~~~~~~~⟧"
     }
   ],
   "web.collections.templateGallery.noMatches": [
@@ -117419,10 +117495,36 @@
       "value": "”.~~~~~~~~~~⟧"
     }
   ],
+  "web.collections.templateGallery.noOwnMatches": [
+    {
+      "type": 0,
+      "value": "⟦Ñöñé öƒ ýöûŕ ļîšţš ɱåţçĥ “"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "”.~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.collections.templateGallery.noPicks": [
     {
       "type": 0,
       "value": "⟦Ñö þöþûļåŕ þîçķš ĥéŕé. Šéåŕçĥ ṀĐƁĻîšţ öŕ þåšţé å ļîñķ.~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateProfile": [
+    {
+      "type": 0,
+      "value": "⟦Þŕîṽåţé ļîšţš ŵöŕķ ţöö îƒ ţĥéý ƀéļöñĝ ţö ţĥîš þŕöƒîļé'š çöññéçţéđ ṀĐƁĻîšţ åççöûñţ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateServer": [
+    {
+      "type": 0,
+      "value": "⟦Þŕîṽåţé ļîšţš ŵöŕķ ţöö îƒ ţĥé šéŕṽéŕ'š ṀĐƁĻîšţ ÅÞÎ ķéý ƀéļöñĝš ţö ţĥé åççöûñţ ţĥåţ öŵñš ţĥéɱ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.collections.templateGallery.searchFailed": [
@@ -117469,6 +117571,12 @@
     {
       "type": 0,
       "value": "⟦Šéåŕçĥ îš öƒƒ~~~~~~⟧"
+    }
+  ],
+  "web.collections.templateGallery.searchOwnLists": [
+    {
+      "type": 0,
+      "value": "⟦Šéåŕçĥ ýöûŕ ļîšţš~~~~~~~⟧"
     }
   ],
   "web.collections.templateGallery.searchPlaceholder": [
@@ -117585,6 +117693,18 @@
     {
       "type": 0,
       "value": "⟦Ţĥéɱéš~~~⟧"
+    }
+  ],
+  "web.collections.templateGallery.viewBrowse": [
+    {
+      "type": 0,
+      "value": "⟦Ɓŕöŵšé ṀĐƁĻîšţ~~~~~~⟧"
+    }
+  ],
+  "web.collections.templateGallery.viewOwnLists": [
+    {
+      "type": 0,
+      "value": "⟦Ýöûŕ ļîšţš~~~~⟧"
     }
   ],
   "web.collections.templates.mediaKind.mixed": [

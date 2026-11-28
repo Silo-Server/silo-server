@@ -94721,6 +94721,24 @@
       "value": "你的媒体库"
     }
   ],
+  "web.collections.copy.yourMdblistLists": [
+    {
+      "type": 0,
+      "value": "你的MDBList列表"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsProfileHelp": [
+    {
+      "type": 0,
+      "value": "来自此个人资料的MDBList连接，包括私密列表"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsServerHelp": [
+    {
+      "type": 0,
+      "value": "来自拥有服务器MDBList API密钥的账户，包括私密列表"
+    }
+  ],
   "web.collections.count.unavailable": [
     {
       "type": 0,
@@ -98863,6 +98881,16 @@
       "value": "已共享"
     }
   ],
+  "web.collections.templateGallery.accountListsFailed": [
+    {
+      "type": 0,
+      "value": "无法加载你的MDBList列表。"
+    },
+    {
+      "type": 1,
+      "value": "detail"
+    }
+  ],
   "web.collections.templateGallery.allThemes": [
     {
       "type": 0,
@@ -98877,6 +98905,26 @@
     {
       "type": 1,
       "value": "user"
+    }
+  ],
+  "web.collections.templateGallery.connectForOwnLists": [
+    {
+      "type": 0,
+      "value": "在"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "设置 › 观看提供商"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "中连接MDBList，即可从你自己的列表中选择，包括私密列表。连接后还会开始与MDBList同步观看记录，你可以在那里关闭。"
     }
   ],
   "web.collections.templateGallery.groupHeading": [
@@ -98929,10 +98977,34 @@
       }
     }
   ],
+  "web.collections.templateGallery.listLiked": [
+    {
+      "type": 0,
+      "value": "已点赞"
+    }
+  ],
+  "web.collections.templateGallery.listPrivate": [
+    {
+      "type": 0,
+      "value": "私密"
+    }
+  ],
+  "web.collections.templateGallery.listViews": [
+    {
+      "type": 0,
+      "value": "要显示的列表"
+    }
+  ],
   "web.collections.templateGallery.lists": [
     {
       "type": 0,
       "value": "列表"
+    }
+  ],
+  "web.collections.templateGallery.loadingOwnLists": [
+    {
+      "type": 0,
+      "value": "正在加载你的列表……"
     }
   ],
   "web.collections.templateGallery.noMatches": [
@@ -98949,10 +99021,36 @@
       "value": "”匹配的公开列表。"
     }
   ],
+  "web.collections.templateGallery.noOwnMatches": [
+    {
+      "type": 0,
+      "value": "你的列表中没有与“"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "”匹配的。"
+    }
+  ],
   "web.collections.templateGallery.noPicks": [
     {
       "type": 0,
       "value": "这里没有热门精选。请搜索MDBList或粘贴链接。"
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateProfile": [
+    {
+      "type": 0,
+      "value": "如果私密列表属于此个人资料所连接的MDBList账户，也可以使用。"
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateServer": [
+    {
+      "type": 0,
+      "value": "如果服务器的MDBList API密钥属于私密列表的所有者账户，私密列表也可以使用。"
     }
   ],
   "web.collections.templateGallery.searchFailed": [
@@ -98995,6 +99093,12 @@
     {
       "type": 0,
       "value": "搜索已关闭"
+    }
+  ],
+  "web.collections.templateGallery.searchOwnLists": [
+    {
+      "type": 0,
+      "value": "搜索你的列表"
     }
   ],
   "web.collections.templateGallery.searchPlaceholder": [
@@ -99087,6 +99191,18 @@
     {
       "type": 0,
       "value": "主题"
+    }
+  ],
+  "web.collections.templateGallery.viewBrowse": [
+    {
+      "type": 0,
+      "value": "浏览MDBList"
+    }
+  ],
+  "web.collections.templateGallery.viewOwnLists": [
+    {
+      "type": 0,
+      "value": "你的列表"
     }
   ],
   "web.collections.templates.mediaKind.mixed": [

@@ -95141,6 +95141,24 @@
       "value": "คลังของคุณ"
     }
   ],
+  "web.collections.copy.yourMdblistLists": [
+    {
+      "type": 0,
+      "value": "รายการ MDBList ของคุณ"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsProfileHelp": [
+    {
+      "type": 0,
+      "value": "จากการเชื่อมต่อ MDBList ของโปรไฟล์นี้ รวมถึงรายการส่วนตัว"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsServerHelp": [
+    {
+      "type": 0,
+      "value": "จากบัญชีที่เป็นเจ้าของคีย์ API ของ MDBList ในเซิร์ฟเวอร์ รวมถึงรายการส่วนตัว"
+    }
+  ],
   "web.collections.count.unavailable": [
     {
       "type": 0,
@@ -99283,6 +99301,16 @@
       "value": "แชร์แล้ว"
     }
   ],
+  "web.collections.templateGallery.accountListsFailed": [
+    {
+      "type": 0,
+      "value": "โหลดรายการ MDBList ของคุณไม่ได้ "
+    },
+    {
+      "type": 1,
+      "value": "detail"
+    }
+  ],
   "web.collections.templateGallery.allThemes": [
     {
       "type": 0,
@@ -99297,6 +99325,26 @@
     {
       "type": 1,
       "value": "user"
+    }
+  ],
+  "web.collections.templateGallery.connectForOwnLists": [
+    {
+      "type": 0,
+      "value": "เชื่อมต่อ MDBList ใน "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "การตั้งค่า › ผู้ให้บริการการรับชม"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " เพื่อเลือกจากรายการของคุณเอง รวมถึงรายการส่วนตัว การเชื่อมต่อจะเริ่มซิงค์ประวัติการรับชมกับ MDBList ด้วย ซึ่งคุณปิดได้ในหน้านั้น"
     }
   ],
   "web.collections.templateGallery.groupHeading": [
@@ -99349,10 +99397,34 @@
       }
     }
   ],
+  "web.collections.templateGallery.listLiked": [
+    {
+      "type": 0,
+      "value": "ถูกใจแล้ว"
+    }
+  ],
+  "web.collections.templateGallery.listPrivate": [
+    {
+      "type": 0,
+      "value": "ส่วนตัว"
+    }
+  ],
+  "web.collections.templateGallery.listViews": [
+    {
+      "type": 0,
+      "value": "รายการที่จะแสดง"
+    }
+  ],
   "web.collections.templateGallery.lists": [
     {
       "type": 0,
       "value": "รายการ"
+    }
+  ],
+  "web.collections.templateGallery.loadingOwnLists": [
+    {
+      "type": 0,
+      "value": "กำลังโหลดรายการของคุณ…"
     }
   ],
   "web.collections.templateGallery.noMatches": [
@@ -99369,10 +99441,36 @@
       "value": "”"
     }
   ],
+  "web.collections.templateGallery.noOwnMatches": [
+    {
+      "type": 0,
+      "value": "ไม่มีรายการของคุณที่ตรงกับ “"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "”"
+    }
+  ],
   "web.collections.templateGallery.noPicks": [
     {
       "type": 0,
       "value": "ไม่มีรายการยอดนิยมที่ตรงกัน ค้นหาใน MDBList หรือวางลิงก์"
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateProfile": [
+    {
+      "type": 0,
+      "value": "ใช้รายการส่วนตัวได้ด้วยหากเป็นของบัญชี MDBList ที่เชื่อมต่อกับโปรไฟล์นี้"
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateServer": [
+    {
+      "type": 0,
+      "value": "ใช้รายการส่วนตัวได้ด้วยหากคีย์ API ของ MDBList ในเซิร์ฟเวอร์เป็นของบัญชีที่เป็นเจ้าของรายการนั้น"
     }
   ],
   "web.collections.templateGallery.searchFailed": [
@@ -99415,6 +99513,12 @@
     {
       "type": 0,
       "value": "ปิดการค้นหาอยู่"
+    }
+  ],
+  "web.collections.templateGallery.searchOwnLists": [
+    {
+      "type": 0,
+      "value": "ค้นหารายการของคุณ"
     }
   ],
   "web.collections.templateGallery.searchPlaceholder": [
@@ -99511,6 +99615,18 @@
     {
       "type": 0,
       "value": "ธีม"
+    }
+  ],
+  "web.collections.templateGallery.viewBrowse": [
+    {
+      "type": 0,
+      "value": "เรียกดู MDBList"
+    }
+  ],
+  "web.collections.templateGallery.viewOwnLists": [
+    {
+      "type": 0,
+      "value": "รายการของคุณ"
     }
   ],
   "web.collections.templates.mediaKind.mixed": [

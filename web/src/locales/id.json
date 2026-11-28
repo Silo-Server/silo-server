@@ -93939,6 +93939,24 @@
       "value": "perpustakaan Anda"
     }
   ],
+  "web.collections.copy.yourMdblistLists": [
+    {
+      "type": 0,
+      "value": "Daftar MDBList Anda"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsProfileHelp": [
+    {
+      "type": 0,
+      "value": "Dari koneksi MDBList profil ini, termasuk daftar privat"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsServerHelp": [
+    {
+      "type": 0,
+      "value": "Dari akun pemilik kunci API MDBList server ini, termasuk daftar privat"
+    }
+  ],
   "web.collections.count.unavailable": [
     {
       "type": 0,
@@ -98099,6 +98117,16 @@
       "value": "Dibagikan"
     }
   ],
+  "web.collections.templateGallery.accountListsFailed": [
+    {
+      "type": 0,
+      "value": "Tidak dapat memuat daftar MDBList Anda. "
+    },
+    {
+      "type": 1,
+      "value": "detail"
+    }
+  ],
   "web.collections.templateGallery.allThemes": [
     {
       "type": 0,
@@ -98113,6 +98141,26 @@
     {
       "type": 1,
       "value": "user"
+    }
+  ],
+  "web.collections.templateGallery.connectForOwnLists": [
+    {
+      "type": 0,
+      "value": "Hubungkan MDBList di "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Pengaturan › Penyedia tontonan"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " untuk memilih dari daftar Anda sendiri, termasuk daftar privat. Menghubungkan juga memulai sinkronisasi riwayat tontonan dengan MDBList, yang dapat Anda nonaktifkan di sana."
     }
   ],
   "web.collections.templateGallery.groupHeading": [
@@ -98165,10 +98213,34 @@
       }
     }
   ],
+  "web.collections.templateGallery.listLiked": [
+    {
+      "type": 0,
+      "value": "Disukai"
+    }
+  ],
+  "web.collections.templateGallery.listPrivate": [
+    {
+      "type": 0,
+      "value": "Privat"
+    }
+  ],
+  "web.collections.templateGallery.listViews": [
+    {
+      "type": 0,
+      "value": "Daftar yang ditampilkan"
+    }
+  ],
   "web.collections.templateGallery.lists": [
     {
       "type": 0,
       "value": "Daftar"
+    }
+  ],
+  "web.collections.templateGallery.loadingOwnLists": [
+    {
+      "type": 0,
+      "value": "Memuat daftar Anda…"
     }
   ],
   "web.collections.templateGallery.noMatches": [
@@ -98185,10 +98257,36 @@
       "value": "”."
     }
   ],
+  "web.collections.templateGallery.noOwnMatches": [
+    {
+      "type": 0,
+      "value": "Tidak ada daftar Anda yang cocok dengan “"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "”."
+    }
+  ],
   "web.collections.templateGallery.noPicks": [
     {
       "type": 0,
       "value": "Tidak ada pilihan populer di sini. Cari di MDBList atau tempel tautan."
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateProfile": [
+    {
+      "type": 0,
+      "value": "Daftar privat juga dapat digunakan jika daftar itu milik akun MDBList yang terhubung ke profil ini."
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateServer": [
+    {
+      "type": 0,
+      "value": "Daftar privat juga dapat digunakan jika kunci API MDBList server ini milik akun pemilik daftar tersebut."
     }
   ],
   "web.collections.templateGallery.searchFailed": [
@@ -98231,6 +98329,12 @@
     {
       "type": 0,
       "value": "Pencarian nonaktif"
+    }
+  ],
+  "web.collections.templateGallery.searchOwnLists": [
+    {
+      "type": 0,
+      "value": "Cari daftar Anda"
     }
   ],
   "web.collections.templateGallery.searchPlaceholder": [
@@ -98327,6 +98431,18 @@
     {
       "type": 0,
       "value": "Tema"
+    }
+  ],
+  "web.collections.templateGallery.viewBrowse": [
+    {
+      "type": 0,
+      "value": "Jelajahi MDBList"
+    }
+  ],
+  "web.collections.templateGallery.viewOwnLists": [
+    {
+      "type": 0,
+      "value": "Daftar Anda"
     }
   ],
   "web.collections.templates.mediaKind.mixed": [
