@@ -140087,6 +140087,12 @@
       "value": "\u200F\u202EMovie\u202C"
     }
   ],
+  "web.search.typePodcast": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPodcast\u202C"
+    }
+  ],
   "web.search.typeSeason": [
     {
       "type": 0,
