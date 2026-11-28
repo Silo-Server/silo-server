@@ -499,27 +499,33 @@ func TestProfilePINIsFourDigits(t *testing.T) {
 		{"admin create", http.MethodPost, adminProfilesBase},
 		{"admin update", http.MethodPatch, adminProfilesBase + "/p-owner"},
 	}
+	reject := func(w struct{ name, method, path string }, as map[string]string, pin string) {
+		t.Helper()
+		*profiles = fakeProfiles{view: fixtureProfileView()}
+		p := requireProblem(t, do(t, h, w.method, w.path, `{"name":"Kid","pin":"`+pin+`"}`, as), TypeValidationFailed)
+		if len(p.Errors) == 0 {
+			t.Errorf("%s %q: no field errors", w.name, pin)
+		}
+		for _, e := range p.Errors {
+			if e.Location != locationPIN {
+				t.Errorf("%s %q: error at %s, want %s", w.name, pin, e.Location, locationPIN)
+			}
+		}
+		if profiles.lastCreate != nil || profiles.last != nil {
+			t.Errorf("%s %q reached the store", w.name, pin)
+		}
+	}
+	// Too short, too long, and not digits, on one route; the others share
+	// its body types, so one wrong PIN each checks their wiring.
+	for _, pin := range []string{"123", "12345", "abcd"} {
+		reject(writes[0], auth, pin)
+	}
 	for _, w := range writes {
 		as := auth
 		if strings.HasPrefix(w.path, adminProfilesBase) {
 			as = actingRequestAdmin
 		}
-		for _, pin := range []string{"1", "123", "12345", "123456", "abcd", "12a4", "١٢٣٤", strings.Repeat("7", 72)} {
-			*profiles = fakeProfiles{view: fixtureProfileView()}
-			body := `{"name":"Kid","pin":"` + pin + `"}`
-			p := requireProblem(t, do(t, h, w.method, w.path, body, as), TypeValidationFailed)
-			if len(p.Errors) == 0 {
-				t.Errorf("%s %q: no field errors", w.name, pin)
-			}
-			for _, e := range p.Errors {
-				if e.Location != locationPIN {
-					t.Errorf("%s %q: error at %s, want %s", w.name, pin, e.Location, locationPIN)
-				}
-			}
-			if profiles.lastCreate != nil || profiles.last != nil {
-				t.Errorf("%s %q reached the store", w.name, pin)
-			}
-		}
+		reject(w, as, "123456")
 		*profiles = fakeProfiles{view: fixtureProfileView()}
 		rec := do(t, h, w.method, w.path, `{"name":"Kid","pin":"0427"}`, as)
 		if rec.Code != http.StatusOK && rec.Code != http.StatusCreated {

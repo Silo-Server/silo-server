@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strconv"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -913,33 +914,21 @@ const (
 	detailPINTooLong = "PIN must be at most 72 bytes"
 )
 
-// detailPINFormat is the field error for a new PIN that is not four digits.
-const detailPINFormat = "PIN must be exactly four digits"
-
-// validNewPIN reports whether pin may be set on a profile: exactly four ASCII
-// digits, the PIN every first-party client sets and enters. verifyProfilePIN
+// newPINPattern is the form a new PIN takes: four ASCII digits, the PIN every
+// first-party client sets and enters. The pin members of ProfileCreate and
+// ProfileUpdate carry the same pattern, which answers first; verifyProfilePIN
 // does not apply it, so a longer PIN set before the rule still unlocks.
-func validNewPIN(pin string) bool {
-	if len(pin) != 4 {
-		return false
-	}
-	for i := range len(pin) {
-		if pin[i] < '0' || pin[i] > '9' {
-			return false
-		}
-	}
-	return true
-}
+var newPINPattern = regexp.MustCompile(`^[0-9]{4}$`)
 
-// validatePIN rejects a present, non-null PIN that is not four digits. The
-// schema says the same; this also keeps "" from being lowered to the clearing
-// sentinel (only null clears) whatever the schema validator lets through.
+// validatePIN is the backstop behind the schema's pattern: a present, non-null
+// PIN that is not four digits never reaches the store, and "" is never lowered
+// to the clearing sentinel (only null clears).
 func validatePIN(p Patch[string]) *Problem {
-	if !p.Present || p.Null || validNewPIN(p.Value) {
+	if !p.Present || p.Null || newPINPattern.MatchString(p.Value) {
 		return nil
 	}
 	return NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
-		WithErrors(ProblemError{Location: locationPIN, Code: codeOutOfRange, Detail: detailPINFormat})
+		WithErrors(ProblemError{Location: locationPIN, Code: codeOutOfRange, Detail: "PIN must be exactly four digits"})
 }
 
 // toRequest lowers the presence-aware body onto the v1 request, where "" is
