@@ -30,12 +30,25 @@ var pushRetrySchedule = []time.Duration{
 const (
 	pushMaxAttempts         = 5
 	pushDispatchQueue       = 512
-	pushRetryClaimLimit     = 100
 	pushRelayRequestTimeout = 15 * time.Second
-	pushRelayMaxRetryAfter  = 23 * time.Hour
-	relayAppleSendPath      = "/v1/apple/send"
-	relayFcmSendPath        = "/v1/fcm/send"
-	relayModePrivateAlert   = "private_alert"
+	// pushFinalizeMargin is the part of a claim's lease kept for recording a
+	// send's result after the send's own deadline.
+	pushFinalizeMargin = 5 * time.Second
+	// pushSendBudget is how much of its lease a claimed attempt must have left
+	// for its send to start: two relay requests, with a margin for recording
+	// the result. A send can make up to six (a credential renewal or
+	// registration, a capability retry, and both again after credential
+	// recovery); it runs under the lease that is left (see processAttempt),
+	// so the context ends any request past it, and the Idempotency-Key lets
+	// the relay drop a resend from the worker that reclaims the attempt.
+	pushSendBudget = 2*pushRelayRequestTimeout + pushFinalizeMargin
+	// pushRetryClaimLimit sizes a retry batch so the sweep can send each
+	// attempt in it, one at a time, inside the lease.
+	pushRetryClaimLimit    = int(webhookClaimLease / pushSendBudget)
+	pushRelayMaxRetryAfter = 23 * time.Hour
+	relayAppleSendPath     = "/v1/apple/send"
+	relayFcmSendPath       = "/v1/fcm/send"
+	relayModePrivateAlert  = "private_alert"
 
 	// relayCodeIdempotencyKeyReuse is the relay's 422 code for a retry whose
 	// payload differs from the one recorded under its idempotency key.
@@ -250,12 +263,27 @@ func (s *pushSender) processAttempt(ctx context.Context, attempt PushDeliveryAtt
 	if err != nil {
 		return s.finalize(ctx, attempt, PushOutcomeFailed, "decrypt_failed", "push token decrypt failed", nil, "", nil)
 	}
-	result := s.send(ctx, attempt, device, token)
+	left := webhookClaimLease - time.Since(attempt.claimedAt)
+	if left < pushSendBudget {
+		// Too little lease left to finish the send (a long claimed batch):
+		// the retry sweep reclaims the attempt once the lease runs out,
+		// rather than two workers sending it.
+		return nil
+	}
+	// Every request the send makes, credential recovery and capability
+	// retries included, ends before the claim does, leaving time to record
+	// the result under it.
+	sendCtx, cancel := context.WithTimeout(ctx, left-pushFinalizeMargin)
+	result := s.send(sendCtx, attempt, device, token)
+	cancel()
 	attemptNumber := attempt.AttemptNumber + 1
 	if result.OK {
-		updated, _ := s.devices.FinalizePushAttempt(ctx, attempt.ID, PushOutcomeDelivered, attemptNumber,
-			result.RelayRequestID, &result.HTTPStatus, result.UpstreamReason, "", nil)
-		_ = s.devices.RecordPushSuccess(ctx, device.ID)
+		updated, _ := s.devices.FinalizePushAttempt(ctx, attempt, PushOutcomeDelivered, attemptNumber,
+			result.RelayRequestID, &result.HTTPStatus, result.UpstreamReason, "", nil, nil)
+		// A reclaimed attempt's result is the new claim's to record.
+		if updated != nil {
+			_ = s.devices.RecordPushSuccess(ctx, device.ID)
+		}
 		return updated
 	}
 
@@ -270,19 +298,27 @@ func (s *pushSender) processAttempt(ctx context.Context, attempt PushDeliveryAtt
 	if code == "" {
 		code = "push_delivery_failed"
 	}
-	_ = s.devices.RecordPushFailure(ctx, device.ID, code, result.TerminalDevice)
-
+	// The device's failure, and its disabling for a rejected token, commit
+	// with the attempt's outcome and only under its claim: a send counts once,
+	// and a rejected device can't stay enabled after its attempt failed.
+	failure := &pushDeviceFailure{deviceID: device.ID, code: code, disable: result.TerminalDevice}
 	delay, more := pushRetryDelayWithHint(attemptNumber, result.RetryAfter)
 	if more && !result.TerminalDevice && retryableHTTPStatus(result.HTTPStatus) {
 		nextRetry := time.Now().Add(delay)
-		return s.finalize(ctx, attempt, PushOutcomeRetrying, result.UpstreamReason, result.Message, statusPtr, result.RelayRequestID, &nextRetry)
+		return s.finalizeFailure(ctx, attempt, PushOutcomeRetrying, result.UpstreamReason, result.Message, statusPtr, result.RelayRequestID, &nextRetry, failure)
 	}
-	return s.finalize(ctx, attempt, PushOutcomeFailed, result.UpstreamReason, result.Message, statusPtr, result.RelayRequestID, nil)
+	return s.finalizeFailure(ctx, attempt, PushOutcomeFailed, result.UpstreamReason, result.Message, statusPtr, result.RelayRequestID, nil, failure)
 }
 
 func (s *pushSender) finalize(ctx context.Context, attempt PushDeliveryAttempt, outcome string, reason, message string, statusPtr *int, relayRequestID string, nextRetryAt *time.Time) *PushDeliveryAttempt {
+	return s.finalizeFailure(ctx, attempt, outcome, reason, message, statusPtr, relayRequestID, nextRetryAt, nil)
+}
+
+// finalizeFailure is finalize that also records failure on the device in the
+// same transaction, when the attempt still holds its claim.
+func (s *pushSender) finalizeFailure(ctx context.Context, attempt PushDeliveryAttempt, outcome string, reason, message string, statusPtr *int, relayRequestID string, nextRetryAt *time.Time, failure *pushDeviceFailure) *PushDeliveryAttempt {
 	attemptNumber := attempt.AttemptNumber + 1
-	updated, err := s.devices.FinalizePushAttempt(ctx, attempt.ID, outcome, attemptNumber, relayRequestID, statusPtr, reason, message, nextRetryAt)
+	updated, err := s.devices.FinalizePushAttempt(ctx, attempt, outcome, attemptNumber, relayRequestID, statusPtr, reason, message, nextRetryAt, failure)
 	if err != nil && ctx.Err() == nil {
 		s.logger.WarnContext(ctx, "finalize push attempt failed", "attempt_id", attempt.ID, "error", err)
 	}

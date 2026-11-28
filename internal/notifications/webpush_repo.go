@@ -331,29 +331,43 @@ func (r *WebPushRepository) ClaimDue(ctx context.Context, limit int) ([]Delivery
 }
 
 func (r *WebPushRepository) claim(ctx context.Context, query string, args ...any) ([]DeliveryAttempt, error) {
-	rows, err := r.pool.Query(ctx, query, args...)
+	conn, err := r.pool.Acquire(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("claim web push attempts: %w", err)
 	}
-	return scanDeliveryAttempts(rows)
+	defer conn.Release()
+	// The lease starts when the claiming statement does (see the webhook
+	// claim).
+	claimedAt := time.Now()
+	rows, err := conn.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("claim web push attempts: %w", err)
+	}
+	attempts, err := scanDeliveryAttempts(rows)
+	for i := range attempts {
+		attempts[i].claimedAt = claimedAt
+	}
+	return attempts, err
 }
 
-// FinalizeAttempt records a send result.
-func (r *WebPushRepository) FinalizeAttempt(ctx context.Context, attemptID, outcome string, attemptNumber int, httpStatus *int, failureMessage string, nextRetryAt *time.Time) error {
+// FinalizeAttempt records a send result and reports whether it applied: only
+// while the attempt still holds the claim it was sent under. A send that
+// outlived its lease was reclaimed, and the new claim records the outcome.
+func (r *WebPushRepository) FinalizeAttempt(ctx context.Context, claimed DeliveryAttempt, outcome string, attemptNumber int, httpStatus *int, failureMessage string, nextRetryAt *time.Time) (bool, error) {
 	var message *string
 	if failureMessage != "" {
 		message = &failureMessage
 	}
-	_, err := r.pool.Exec(ctx, `
+	tag, err := r.pool.Exec(ctx, `
 		UPDATE web_push_delivery_attempts
 		SET outcome = $2, attempt_number = $3, attempted_at = now(),
 		    http_status = $4, failure_message = left($5, 256), next_retry_at = $6
-		WHERE id = $1`,
-		attemptID, outcome, attemptNumber, httpStatus, message, nextRetryAt)
+		WHERE id = $1 AND outcome = 'retrying' AND next_retry_at = $7`,
+		claimed.ID, outcome, attemptNumber, httpStatus, message, nextRetryAt, claimed.NextRetryAt)
 	if err != nil {
-		return fmt.Errorf("finalize web push attempt: %w", err)
+		return false, fmt.Errorf("finalize web push attempt: %w", err)
 	}
-	return nil
+	return tag.RowsAffected() == 1, nil
 }
 
 // DeleteOldAttempts applies retention: delivered past 7 days, failed past 30.

@@ -759,7 +759,12 @@ func TestQueuedPushStopsWhenTheRegisteringLoginEndsDB(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return *attempt
+		// Sent as the dispatcher sends it: under a claim.
+		claimed, err := repo.ClaimPushAttemptByID(ctx, attempt.ID)
+		if err != nil || len(claimed) != 1 {
+			t.Fatalf("claim = %v, %v", claimed, err)
+		}
+		return claimed[0]
 	}
 	queued := queue()
 

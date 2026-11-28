@@ -495,6 +495,14 @@
 ./internal/notifications TestQueuedWebPushStopsWhenTheRegisteringLoginEndsDB
 ./internal/notifications TestWebPushRetryAfterNeverShortensTheScheduleDB
 
+# A push or web push send starts only with enough of its claim's lease left and
+# ends inside it; a send that outlived its lease and was reclaimed records
+# nothing, on the attempt or on its device or subscription.
+./internal/notifications TestPushSkipsSendWithoutEnoughLeaseDB
+./internal/notifications TestPushSendRunsInsideTheClaimLeaseDB
+./internal/notifications TestPushLateFinishAfterReclaimLeavesTheNewClaimDB
+./internal/notifications TestWebPushLateFinishAfterReclaimLeavesTheNewClaimDB
+
 # Session-less Android push retirement is ordered against registration by generation.
 ./internal/notifications TestRetireAndroidPushStopsDeliveryAndOrdersAgainstRegistrationDB
 
