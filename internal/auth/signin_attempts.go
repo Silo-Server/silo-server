@@ -189,6 +189,10 @@ type signInSpend struct {
 	// name that signed in (Jellyfin's "alice#Kids"), which can be another
 	// account's.
 	derived bool
+	// linking marks an account-linking check of a directory password, which
+	// spends the budget like a sign-in but is not one, so a refusal writes no
+	// signInRefusedMessage record.
+	linking bool
 }
 
 // newSignInSpend starts a sign-in's spend of the budget of name. loginName is
@@ -247,10 +251,12 @@ func (s *Service) reserveSignIn(ctx context.Context, spend *signInSpend) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		slog.WarnContext(ctx, signInRefusedMessage, "component", "auth",
-			"reason", "too many attempts", "known_address", lane == SignInLaneSource,
-			"retry_after_seconds", max(1, int((retryAfter+time.Second-1)/time.Second)),
-			"client_ip", clientip.FromContext(ctx))
+		if !spend.linking {
+			slog.WarnContext(ctx, signInRefusedMessage, "component", "auth",
+				"reason", "too many attempts", "known_address", lane == SignInLaneSource,
+				"retry_after_seconds", max(1, int((retryAfter+time.Second-1)/time.Second)),
+				"client_ip", clientip.FromContext(ctx))
+		}
 		return &SignInThrottledError{RetryAfter: retryAfter}
 	}
 	if lane == SignInLaneName {
