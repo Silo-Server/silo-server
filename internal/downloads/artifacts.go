@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/nodeauth"
@@ -889,43 +890,83 @@ func (m *ArtifactManager) requeueRemoteArtifactWithFence(ctx context.Context, a 
 // drain claims and encodes jobs through a bounded worker pool until the queue is
 // empty or the context is canceled.
 func (m *ArtifactManager) drain(ctx context.Context) error {
-	maxConcurrent := m.downloadConfig().MaxConcurrentPrepares
-	if maxConcurrent <= 0 {
-		maxConcurrent = 2
+	return drainPool(ctx, m.prepareLimit, prepareLimitRecheck,
+		func(ctx context.Context) (*Artifact, error) {
+			job, err := m.repo.ClaimNext(ctx, m.owner, artifactLease)
+			if err == nil {
+				m.notifyPreparationChanged(ctx, job.ID)
+			}
+			return job, err
+		},
+		m.encodeOne)
+}
+
+// prepareLimitRecheck bounds how long a full pool waits before it reads the
+// live download.max_concurrent_prepares again.
+const prepareLimitRecheck = 2 * time.Second
+
+// prepareLimit is this replica's current preparation worker count.
+func (m *ArtifactManager) prepareLimit() int {
+	if n := m.downloadConfig().MaxConcurrentPrepares; n > 0 {
+		return n
 	}
-	sem := make(chan struct{}, maxConcurrent)
-	var wg sync.WaitGroup
+	return 2
+}
+
+// drainPool claims jobs and runs each on its own goroutine until claim reports
+// ErrNoArtifactJob or fails. It reads limit() before every claim, so a changed
+// setting applies to the running queue: a raised limit claims more jobs at
+// once, and a lowered one starts nothing until the running count falls below
+// it. Running jobs are never stopped. A full pool re-reads the limit when a
+// job finishes and at least every recheck.
+func drainPool(ctx context.Context, limit func() int, recheck time.Duration,
+	claim func(context.Context) (*Artifact, error), run func(context.Context, *Artifact)) error {
+	var (
+		wg      sync.WaitGroup
+		running atomic.Int64
+	)
+	defer wg.Wait()
+	freed := make(chan struct{}, 1)
+	ticker := time.NewTicker(recheck)
+	defer ticker.Stop()
 	for {
-		// Acquire a worker slot BEFORE claiming. A claimed job is leased but only
-		// heartbeated once encodeOne runs; claiming first and then blocking for a
+		// Wait for a free slot BEFORE claiming. A claimed job is leased but only
+		// heartbeated once encodeOne runs; claiming first and then waiting for a
 		// slot would leave the job leased-but-unattended, so its lease could lapse
 		// while it waits — letting another node steal it and encode the same
-		// output path concurrently. Reserving the slot first closes that window.
-		select {
-		case sem <- struct{}{}:
-		case <-ctx.Done():
-			wg.Wait()
-			return ctx.Err()
-		}
-		job, err := m.repo.ClaimNext(ctx, m.owner, artifactLease)
-		if err != nil {
-			<-sem // release the slot we reserved but won't use
-			if errors.Is(err, ErrNoArtifactJob) {
-				break
+		// output path concurrently. Waiting first closes that window.
+		for running.Load() >= int64(limit()) {
+			select {
+			case <-freed:
+			case <-ticker.C:
+			case <-ctx.Done():
+				return ctx.Err()
 			}
-			wg.Wait()
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		job, err := claim(ctx)
+		if err != nil {
+			if errors.Is(err, ErrNoArtifactJob) {
+				return nil
+			}
 			return err // includes context cancellation (pgx honors ctx)
 		}
-		m.notifyPreparationChanged(ctx, job.ID)
+		running.Add(1)
 		wg.Add(1)
 		go func(a *Artifact) {
 			defer wg.Done()
-			defer func() { <-sem }()
-			m.encodeOne(ctx, a)
+			defer func() {
+				running.Add(-1)
+				select {
+				case freed <- struct{}{}:
+				default:
+				}
+			}()
+			run(ctx, a)
 		}(job)
 	}
-	wg.Wait()
-	return nil
 }
 
 // encodeOne runs one claimed job to completion, extending its lease via a

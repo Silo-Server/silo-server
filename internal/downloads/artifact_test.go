@@ -3,9 +3,12 @@ package downloads
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/config"
@@ -405,3 +408,141 @@ type fakeUserRepo struct{ user *models.User }
 func (f fakeUserRepo) GetByID(context.Context, int) (*models.User, error) { return f.user, nil }
 
 func ptrBool(value bool) *bool { return &value }
+
+// poolHarness feeds drainPool a fixed queue and holds every job until the
+// test releases it, so the test can count how many run at once.
+type poolHarness struct {
+	limit   atomic.Int64
+	mu      sync.Mutex
+	queue   []*Artifact
+	running map[string]chan struct{}
+	started int
+}
+
+func newPoolHarness(jobs, limit int) *poolHarness {
+	h := &poolHarness{running: map[string]chan struct{}{}}
+	h.limit.Store(int64(limit))
+	for i := range jobs {
+		h.queue = append(h.queue, &Artifact{ID: fmt.Sprintf("job-%d", i)})
+	}
+	return h
+}
+
+func (h *poolHarness) claim(context.Context) (*Artifact, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if len(h.queue) == 0 {
+		return nil, ErrNoArtifactJob
+	}
+	a := h.queue[0]
+	h.queue = h.queue[1:]
+	return a, nil
+}
+
+func (h *poolHarness) run(ctx context.Context, a *Artifact) {
+	release := make(chan struct{})
+	h.mu.Lock()
+	h.running[a.ID] = release
+	h.started++
+	h.mu.Unlock()
+	// The test context ends when a failed assertion returns early, so held
+	// jobs exit and the failure is reported instead of a synctest deadlock.
+	select {
+	case <-release:
+	case <-ctx.Done():
+	}
+	h.mu.Lock()
+	delete(h.running, a.ID)
+	h.mu.Unlock()
+}
+
+func (h *poolHarness) counts() (running, started int) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return len(h.running), h.started
+}
+
+func (h *poolHarness) finishOne() {
+	h.mu.Lock()
+	for _, release := range h.running {
+		close(release)
+		break
+	}
+	h.mu.Unlock()
+}
+
+// settle lets the pool's recheck timer fire and every goroutine block again.
+func settle() {
+	time.Sleep(3 * prepareLimitRecheck) //nolint:forbidigo // synctest fake clock: sleeping advances time; nothing waits on the real clock.
+	synctest.Wait()
+}
+
+func (h *poolHarness) start(t *testing.T) chan error {
+	done := make(chan error, 1)
+	go func() {
+		done <- drainPool(t.Context(), func() int { return int(h.limit.Load()) }, prepareLimitRecheck, h.claim, h.run)
+	}()
+	synctest.Wait()
+	return done
+}
+
+func TestDrainPoolAppliesRaisedLimitToRunningQueue(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		h := newPoolHarness(6, 1)
+		done := h.start(t)
+		if running, _ := h.counts(); running != 1 {
+			t.Fatalf("running = %d at limit 1, want 1", running)
+		}
+
+		h.limit.Store(4)
+		settle()
+		if running, _ := h.counts(); running != 4 {
+			t.Fatalf("running = %d after raising the limit to 4, want 4", running)
+		}
+
+		for range 6 {
+			h.finishOne()
+			settle()
+		}
+		if err := <-done; err != nil {
+			t.Fatalf("drainPool: %v", err)
+		}
+	})
+}
+
+func TestDrainPoolStartsNothingAboveLoweredLimit(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		h := newPoolHarness(6, 3)
+		done := h.start(t)
+		if running, _ := h.counts(); running != 3 {
+			t.Fatalf("running = %d at limit 3, want 3", running)
+		}
+
+		h.limit.Store(1)
+		settle()
+		// Two of the three running jobs finish: the pool is still at the new
+		// limit, so nothing new may start.
+		for range 2 {
+			h.finishOne()
+			settle()
+		}
+		if running, started := h.counts(); running != 1 || started != 3 {
+			t.Fatalf("after lowering to 1 and two finishing: running = %d, started = %d; want 1, 3", running, started)
+		}
+
+		// The last old job finishes: one new job takes its place.
+		h.finishOne()
+		settle()
+		if running, started := h.counts(); running != 1 || started != 4 {
+			t.Fatalf("after the pool fell below the limit: running = %d, started = %d; want 1, 4", running, started)
+		}
+
+		for range 3 {
+			h.finishOne()
+			settle()
+		}
+		if err := <-done; err != nil {
+			t.Fatalf("drainPool: %v", err)
+		}
+	})
+}
