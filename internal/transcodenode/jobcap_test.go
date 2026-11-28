@@ -327,3 +327,28 @@ func TestContinuationOfAnotherKindTakesItsKindCap(t *testing.T) {
 		t.Fatal("new video work was admitted while the replan held the video cap's last slot")
 	}
 }
+
+// Two requests that resume a paused remux together, such as a range probe and
+// the real request, both continue it: the second is not refused at the remux
+// cap the first passes.
+func TestResumedRemuxContinuesForASecondRequest(t *testing.T) {
+	s := newTestServer(t)
+	s.SetJobCapsByKind(map[nodepool.JobKind]int{nodepool.JobKindRemux: 1})
+	now := time.Now()
+	s.noteRemux("play-1", nodepool.JobKindRemux, now)
+	s.countJob(nil, nodepool.JobKindRemux) // another viewer's remux fills the cap
+
+	first, ok := s.claimContinuation("play-1", now)
+	if !ok || !first.covers(nodepool.JobKindRemux) {
+		t.Fatalf("first resume: continues %v, covers remux %v", ok, first.covers(nodepool.JobKindRemux))
+	}
+	defer first.release()
+	second, ok := s.claimContinuation("play-1", now)
+	if !ok || !second.covers(nodepool.JobKindRemux) {
+		t.Fatalf("second resume: continues %v, covers remux %v", ok, second.covers(nodepool.JobKindRemux))
+	}
+	defer second.release()
+	if _, ok := s.claimContinuation("play-1", now); ok {
+		t.Fatal("a third request continued the remux: only one transport may overlap the one it replaces")
+	}
+}

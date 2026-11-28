@@ -75,7 +75,7 @@ func (p *nonReservingCapacityPlanner) ReserveTranscodeWorkWith(string, nodepool.
 	return nil, nil
 }
 
-func (p *nonReservingCapacityPlanner) TranscodeWorkAvailableWith(eligible func(*nodepool.Node) bool) bool {
+func (p *nonReservingCapacityPlanner) TranscodeWorkAvailableWith(_ nodepool.JobKind, eligible func(*nodepool.Node) bool) bool {
 	return eligible(p.node)
 }
 

@@ -509,22 +509,22 @@ func TestNodeAtCapacityIsHeldUntilItsNextHealthCheck(t *testing.T) {
 	planner.now = func() time.Time { return now }
 
 	ReportAtCapacity(planner, "http://transcode-a/", "")
-	if planner.TranscodeWorkAvailableWith(nil) {
+	if planner.TranscodeWorkAvailableWith("", nil) {
 		t.Fatal("a node that refused at its cap still takes work")
 	}
 	transcodes.ApplyHealth(1, "http://transcode-a", true, 1, 0, "", nil, nil, now.Add(time.Second))
-	if !planner.TranscodeWorkAvailableWith(nil) {
+	if !planner.TranscodeWorkAvailableWith("", nil) {
 		t.Fatal("a health check after the refusal did not lift the hold")
 	}
 	// A refusal newer than the last health check holds the node again, and
 	// then only time lifts it.
 	now = now.Add(2 * time.Second)
 	ReportAtCapacity(planner, "http://transcode-a", "")
-	if planner.TranscodeWorkAvailableWith(nil) {
+	if planner.TranscodeWorkAvailableWith("", nil) {
 		t.Fatal("a refusal after the last health check did not hold the node")
 	}
 	now = now.Add(atCapacityHold)
-	if !planner.TranscodeWorkAvailableWith(nil) {
+	if !planner.TranscodeWorkAvailableWith("", nil) {
 		t.Fatal("the hold outlasted atCapacityHold")
 	}
 }

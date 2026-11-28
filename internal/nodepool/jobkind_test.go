@@ -147,6 +147,14 @@ func TestTranscodeSelectionHonorsCapsByKind(t *testing.T) {
 	if got := pick("r1", JobKindRemux); got != "http://a" {
 		t.Fatalf("remux went to %q, want a: a video cap does not hold back other kinds", got)
 	}
+	// The capacity probe a prepared download freezes its tone-map mode on
+	// agrees with placement.
+	if f.planner.TranscodeWorkAvailableWith(JobKindVideoTranscode, nil) {
+		t.Fatal("video transcode work reported available with every node at its video cap")
+	}
+	if !f.planner.TranscodeWorkAvailableWith(JobKindRemux, nil) {
+		t.Fatal("remux work reported unavailable under every node's remux cap")
+	}
 }
 
 // An oversized resource sample is dropped, but the breakdown routes work: losing

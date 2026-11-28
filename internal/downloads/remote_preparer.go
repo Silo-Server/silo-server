@@ -99,7 +99,7 @@ type eligibleTranscodeWorkPlanner interface {
 }
 
 type transcodeWorkCapacityPlanner interface {
-	TranscodeWorkAvailableWith(eligible func(*nodepool.Node) bool) bool
+	TranscodeWorkAvailableWith(kind nodepool.JobKind, eligible func(*nodepool.Node) bool) bool
 }
 
 // transcodeNodeEnumerator lists the currently enabled transcode pool for
@@ -438,7 +438,8 @@ func (p *NodeAwarePreparer) ToneMapCapabilities(ctx context.Context) (tonemap.Ca
 }
 
 // ToneMapModeAvailable reports whether an enabled compatible node has
-// reservable capacity now. Capability discovery completes before the planner
+// reservable capacity now, under its cap for video transcodes: a tone map
+// re-encodes the video. Capability discovery completes before the planner
 // lock is acquired so the eligibility predicate remains lock-safe.
 func (p *NodeAwarePreparer) ToneMapModeAvailable(ctx context.Context, mode tonemap.Mode, kind tonemap.SourceKind) (bool, error) {
 	selector, ok := p.planner.(transcodeWorkCapacityPlanner)
@@ -452,7 +453,7 @@ func (p *NodeAwarePreparer) ToneMapModeAvailable(ctx context.Context, mode tonem
 			capable[nodepool.NormalizeNodeURL(nodeURL)] = struct{}{}
 		}
 	}
-	available := selector.TranscodeWorkAvailableWith(func(candidate *nodepool.Node) bool {
+	available := selector.TranscodeWorkAvailableWith(nodepool.JobKindVideoTranscode, func(candidate *nodepool.Node) bool {
 		if candidate == nil {
 			return false
 		}

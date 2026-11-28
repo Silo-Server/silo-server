@@ -588,9 +588,10 @@ func (p *Planner) ReserveTranscodeWorkWith(workID string, kind JobKind, eligible
 	}
 }
 
-// TranscodeWorkAvailableWith reports whether a healthy, under-cap transcode
-// node satisfies eligible without creating a provisional reservation.
-func (p *Planner) TranscodeWorkAvailableWith(eligible func(*Node) bool) bool {
+// TranscodeWorkAvailableWith reports whether a healthy transcode node under
+// its job cap and its cap for kind satisfies eligible, without creating a
+// provisional reservation. An empty kind checks the job cap alone.
+func (p *Planner) TranscodeWorkAvailableWith(kind JobKind, eligible func(*Node) bool) bool {
 	if p == nil || p.transcodes == nil {
 		return false
 	}
@@ -598,7 +599,7 @@ func (p *Planner) TranscodeWorkAvailableWith(eligible func(*Node) bool) bool {
 	defer p.mu.Unlock()
 	now := p.now()
 	for _, node := range p.transcodes.Nodes() {
-		if !node.TakesNewWork() || !p.transcodes.HasKey(node) || !p.underCap(node, now) {
+		if !node.TakesNewWork() || !p.transcodes.HasKey(node) || !p.underCap(node, now) || !p.underKindCap(node, "", kind, now) {
 			continue
 		}
 		if eligible == nil || eligible(node) {

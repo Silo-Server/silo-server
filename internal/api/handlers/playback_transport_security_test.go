@@ -91,7 +91,7 @@ func TestRemoteStartRefusedAtCapacityHoldsTheNode(t *testing.T) {
 			if err != nil || status != http.StatusServiceUnavailable {
 				t.Fatalf("start = %d, %v; want the node's 503", status, err)
 			}
-			if held := !planner.TranscodeWorkAvailableWith(nil); held != tc.wantHeld {
+			if held := !planner.TranscodeWorkAvailableWith("", nil); held != tc.wantHeld {
 				t.Fatalf("node held back = %v, want %v", held, tc.wantHeld)
 			}
 		})

@@ -130,7 +130,9 @@ func (s *Server) unadmitLocked(slot *jobSlot) {
 // reportedJobs is what the health report counts: the jobs activeJobs counts
 // plus the slots admitted and not yet counted, by kind as well. It reads under
 // s.admission, which countJob holds while it moves a slot from admitted to
-// counted, so a job is in exactly one of the two. A drained node reports only
+// counted, so a job is in exactly one of the two. A kind-only slot (admitKind)
+// is in the counts by kind but not in the total: the job it continues is
+// already counted there. A drained node reports only
 // the jobs it counts: what it admits from then on is a start it is about to
 // refuse.
 func (s *Server) reportedJobs(drained bool) (int32, map[nodepool.JobKind]int) {
@@ -395,15 +397,22 @@ func (s *Server) claimContinuation(playbackSessionID string, now time.Time) (*co
 	s.admission.Lock()
 	defer s.admission.Unlock()
 	held := running + s.continuing[playbackSessionID]
-	switch {
-	case held > 1:
+	if held > 1 {
 		return nil, false
-	case held == 0:
+	}
+	if running == 0 {
+		// With nothing running, the job continued is the remux served
+		// recently: for the first request that resumes it, and for one that
+		// arrives with it (a range probe and the real request), which must
+		// not be refused at the remux cap the first one is not.
 		seen, ok := s.remuxSeen[playbackSessionID]
-		if !ok || now.Sub(seen.at) >= continuationWindow {
+		recent := ok && now.Sub(seen.at) < continuationWindow
+		if held == 0 && !recent {
 			return nil, false
 		}
-		kinds = append(kinds, seen.kind)
+		if recent {
+			kinds = append(kinds, seen.kind)
+		}
 	}
 	if s.continuing == nil {
 		s.continuing = make(map[string]int)

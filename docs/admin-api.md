@@ -774,6 +774,12 @@ encode does. It reports them in
 the kind, the placement finds no transcode node and the API server falls back as
 it does with every node full, which for playback means transcoding locally.
 
+A kind's cap bounds new work, not every process: like the job cap, it lets a
+continuing transport overlap the one it replaces. Upgrade every API server
+before setting these variables on a node. An API server from before them reads
+a refusal at a kind's cap as the node being full, and holds it back from all
+work until its next health report.
+
 ### Scratch admission
 
 A transcode writes HLS segments to its node's scratch volume for the whole life
