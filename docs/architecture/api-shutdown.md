@@ -21,7 +21,9 @@ On SIGTERM or SIGINT, `cmd/silo/main.go`:
 3. Cancels the application context and runs the existing shutdown: resident
    plugins stop, the HTTP servers stop accepting connections and wait up to
    30 seconds for in-flight requests, then playback cleanup, stale session
-   cleanup and heartbeat removal run.
+   cleanup and heartbeat removal run. Each of those later steps gets its own
+   deadline, so they still run when a request kept the HTTP drain busy until
+   its 30 seconds ran out.
 
 A restart request stops at once, as before, and ends the wait if it arrives
 during it: an administrator's restart has already told players the server is
