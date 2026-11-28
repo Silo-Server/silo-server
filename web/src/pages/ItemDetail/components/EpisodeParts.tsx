@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useState, type KeyboardEvent } from "react";
 import type { EpisodeListItem } from "@/api/types";
 import { codeNumber, useT } from "@/i18n";
+import { readingArrowKey } from "@/lib/direction";
 import { cn } from "@/lib/utils";
 import DetailOverview from "./DetailOverview";
 
@@ -66,6 +67,25 @@ export default function EpisodeParts({
   };
   const panelId = `episode-part-${selected.content_id}`;
   const isFirst = selected === first;
+  const tabId = (part: (typeof parts)[number]) => `episode-part-tab-${part.content_id}`;
+
+  // Arrow keys move between tabs and Home and End jump to the ends; Tab
+  // leaves the row from the selected tab.
+  function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    const index = parts.indexOf(selected);
+    const key = readingArrowKey(event);
+    let next: number | null = null;
+    if (key === "ArrowLeft") next = (index - 1 + parts.length) % parts.length;
+    else if (key === "ArrowRight") next = (index + 1) % parts.length;
+    else if (event.key === "Home") next = 0;
+    else if (event.key === "End") next = parts.length - 1;
+    const part = next === null ? undefined : parts[next];
+    if (!part) return;
+    event.preventDefault();
+    setSelectedId(part.content_id);
+    document.getElementById(tabId(part))?.focus();
+  }
 
   return (
     <div className="mt-3 mb-1 max-w-2xl">
@@ -73,14 +93,17 @@ export default function EpisodeParts({
         role="tablist"
         aria-label={t("web.detail.episodes.partsHeading")}
         className="mb-3 flex gap-2 overflow-x-auto"
+        onKeyDown={handleKeyDown}
       >
         {parts.map((part) => {
           const active = part.content_id === selected.content_id;
           return (
             <button
               key={part.content_id}
+              id={tabId(part)}
               type="button"
               role="tab"
+              tabIndex={active ? 0 : -1}
               aria-selected={active}
               aria-controls={panelId}
               aria-label={spokenTitleOf(part)}

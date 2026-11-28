@@ -35,3 +35,31 @@ it("keeps a later episode's description hidden when the first tab is visible", (
   expect(screen.queryByText("Charlie is alive.")).toBeNull();
   expect(screen.getByText(/Description hidden until you watch/)).toBeTruthy();
 });
+
+it("moves between episode tabs with the arrow keys", () => {
+  const episode = {
+    content_id: "e4",
+    season_number: 1,
+    episode_number: 4,
+    title: "Aliens of London (1)",
+    overview: "Rose is taken home.",
+    spanned_episodes: [
+      {
+        content_id: "e5",
+        episode_number: 5,
+        title: "World War Three (2)",
+        overview: "Time runs out.",
+      },
+    ],
+  } as unknown as EpisodeListItem;
+  render(<EpisodeParts episode={episode} hideOverviews={false} />);
+  const first = screen.getByRole("tab", { name: /Episode 4/ });
+  first.focus();
+  fireEvent.keyDown(first, { key: "ArrowRight" });
+
+  const second = screen.getByRole("tab", { name: /Episode 5/ });
+  expect(second.getAttribute("aria-selected")).toBe("true");
+  expect(document.activeElement).toBe(second);
+  expect(screen.getByText("Time runs out.")).toBeTruthy();
+  expect(first.getAttribute("tabindex")).toBe("-1");
+});
