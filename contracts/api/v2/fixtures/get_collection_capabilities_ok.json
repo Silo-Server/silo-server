@@ -1,5 +1,5 @@
 {
-  "revision": "6a87601d9e894507e052de99b434f0e5ab0aac86724c3801b517fef58c4d5aa2",
+  "revision": "4554c595f78f8d36d843242212b5e8815dfeff4239b931ff9ad0a47eee247007",
   "state": "available",
   "allowed": true,
   "groups": false,
@@ -35,6 +35,8 @@
   ],
   "create_description": true,
   "mdblist_search": true,
+  "mdblist_account_lists": false,
+  "mdblist_account_lists_connectable": false,
   "schedule_time_zone": {
     "utc_offset": "-05:00",
     "abbreviation": "CDT",

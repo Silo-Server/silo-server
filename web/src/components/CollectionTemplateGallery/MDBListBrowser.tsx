@@ -22,6 +22,7 @@ import {
   popularPicks,
   popularPicksHelp,
   yourMdblistLists,
+  yourMdblistListsProfileHelp,
   yourMdblistListsServerHelp,
 } from "@/lib/collections/copy";
 import {
@@ -119,13 +120,15 @@ function GroupHeading({ title, help }: { title: string; help: string }) {
  * lists (searched on the server). Any MDBList link can be pasted instead, and
  * the field says when a private one works. With MDBList search off, browsing
  * disables the box and says why; picks and links still work. A failed search
- * keeps the typed text and the last results.
+ * keeps the typed text and the last results. A profile that could read its
+ * own lists after connecting MDBList is told where to connect it.
  */
 export function MDBListBrowser({
   scopeKind,
   picks,
   searchEnabled,
   accountListsEnabled = false,
+  connectForAccountLists = false,
   selectedId,
   onPick,
   link,
@@ -138,6 +141,8 @@ export function MDBListBrowser({
   searchEnabled: boolean;
   /** `mdblist_account_lists` from the scope's capabilities. */
   accountListsEnabled?: boolean;
+  /** `mdblist_account_lists_connectable` from the personal capabilities. */
+  connectForAccountLists?: boolean;
   /** The pick the draft follows, if it came from this tab. */
   selectedId?: string;
   onPick: (pick: SyncedPick) => void;
@@ -197,13 +202,34 @@ export function MDBListBrowser({
 
   const cleaned = cleanMDBListLink(link);
   const linkInvalid = cleaned !== "" && !isMDBListLink(cleaned);
-  // A private list syncs through the server's key, which the account lists come from.
+  // A private list syncs through the same key the account lists come from.
   const privateHelp =
-    scopeKind === "server" ? t("web.collections.templateGallery.pasteLinkPrivateServer") : null;
+    scopeKind === "server"
+      ? t("web.collections.templateGallery.pasteLinkPrivateServer")
+      : accountListsEnabled || connectForAccountLists
+        ? t("web.collections.templateGallery.pasteLinkPrivateProfile")
+        : null;
   const searchOn = searchEnabled || !browsing;
 
   return (
     <div className="grid gap-3">
+      {connectForAccountLists && !accountListsEnabled ? (
+        <p className="bg-muted/60 flex items-start gap-2.5 rounded-xl px-3 py-2.5 text-[0.8125rem]">
+          <Lock aria-hidden className="text-muted-foreground mt-0.5 size-4 shrink-0" />
+          <span>
+            {t("web.collections.templateGallery.connectForOwnLists", {
+              link: (chunks) => (
+                <Link
+                  to="/settings/watch-providers"
+                  className="font-medium underline underline-offset-4"
+                >
+                  {chunks}
+                </Link>
+              ),
+            })}
+          </span>
+        </p>
+      ) : null}
       {ownOffered ? (
         <div
           role="group"
@@ -317,7 +343,14 @@ export function MDBListBrowser({
       >
         {!browsing ? (
           <div>
-            <GroupHeading title={yourMdblistLists()} help={yourMdblistListsServerHelp()} />
+            <GroupHeading
+              title={yourMdblistLists()}
+              help={
+                scopeKind === "server"
+                  ? yourMdblistListsServerHelp()
+                  : yourMdblistListsProfileHelp()
+              }
+            />
             {ownLists.map((list) => (
               <PickRow
                 key={list.url}

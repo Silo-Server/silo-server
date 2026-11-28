@@ -645,6 +645,7 @@ DELETE /api/v2/collections/groups/{id}	non-media
 GET /api/v2/collections/groups/{id}	non-media
 PATCH /api/v2/collections/groups/{id}	non-media
 POST /api/v2/collections/import/mdblist	non-media
+GET /api/v2/collections/import/mdblist/mine	non-media
 GET /api/v2/collections/import/mdblist/search	non-media
 GET /api/v2/collections/import/mdblist/top	non-media
 POST /api/v2/collections/import/tmdb	non-media
@@ -1743,6 +1744,7 @@ DELETE /api/v2/collections/groups/{id}	non-media
 GET /api/v2/collections/groups/{id}	non-media
 PATCH /api/v2/collections/groups/{id}	non-media
 POST /api/v2/collections/import/mdblist	non-media
+GET /api/v2/collections/import/mdblist/mine	non-media
 GET /api/v2/collections/import/mdblist/search	non-media
 GET /api/v2/collections/import/mdblist/top	non-media
 POST /api/v2/collections/import/tmdb	non-media

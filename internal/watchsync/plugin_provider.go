@@ -32,6 +32,8 @@ type WatchSyncPluginClient interface {
 	GetAccount(context.Context, *pluginv1.WatchSyncGetAccountRequest) (*pluginv1.WatchSyncGetAccountResponse, error)
 	ApplyEvents(context.Context, *pluginv1.WatchSyncApplyEventsRequest) (*pluginv1.WatchSyncApplyEventsResponse, error)
 	ListRemoteState(context.Context, *pluginv1.WatchSyncListRemoteStateRequest) (*pluginv1.WatchSyncListRemoteStateResponse, error)
+	ListCustomLists(context.Context, *pluginv1.WatchSyncListCustomListsRequest) (*pluginv1.WatchSyncListCustomListsResponse, error)
+	ListCustomListItems(context.Context, *pluginv1.WatchSyncListCustomListItemsRequest) (*pluginv1.WatchSyncListCustomListItemsResponse, error)
 }
 
 type WatchSyncPluginClientResolver func(context.Context, int, string) (WatchSyncPluginClient, error)

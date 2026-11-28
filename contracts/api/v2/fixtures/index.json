@@ -7212,7 +7212,7 @@
       "response_headers": {
         "Cache-Control": "private, no-cache",
         "Content-Type": "application/json",
-        "ETag": "\"d1ab2d090e59fc1b188200e07381aad6e929278904a8e25da475b7882cdf3815\""
+        "ETag": "\"d5cd942b91c7ad601bc46359b79c3df51d38af41b45f04216c006012b7172efb\""
       },
       "response_media_type": "application/json",
       "schema": "#/components/schemas/CollectionCapabilities",

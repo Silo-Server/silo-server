@@ -89,6 +89,26 @@ func ParseMDBListRef(rawURL string) (MDBListRef, bool) {
 	}
 }
 
+// URL returns the mdblist.com page of the list r names.
+func (r MDBListRef) URL() string {
+	if r.ID > 0 {
+		return "https://mdblist.com/lists/" + strconv.FormatInt(r.ID, 10)
+	}
+	return "https://mdblist.com/lists/" + url.PathEscape(r.User) + "/" + url.PathEscape(r.Slug)
+}
+
+// Why a profile's own MDBList connection can't read a list for a personal
+// collection, before MDBList is asked.
+var (
+	// ErrMDBListNoConnection means the profile has not connected MDBList.
+	ErrMDBListNoConnection = errors.New("this profile has no MDBList connection")
+	// ErrMDBListNoProvider means the server has no MDBList watch provider.
+	ErrMDBListNoProvider = errors.New("the MDBList watch provider is not installed")
+	// ErrMDBListProviderTooOld means the installed MDBList watch provider
+	// plugin predates reading lists for collections.
+	ErrMDBListProviderTooOld = errors.New("the MDBList watch provider plugin can't read lists for collections")
+)
+
 // MDBListReadErrorKind classifies an MDBList API refusal to read a list.
 type MDBListReadErrorKind int
 

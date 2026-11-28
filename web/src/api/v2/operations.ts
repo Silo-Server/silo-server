@@ -392,6 +392,7 @@ export const v2Operations = {
   "GET /api/v2/collections/capabilities": "getCollectionCapabilities",
   "GET /api/v2/collections/groups/order": "getCollectionGroupsOrder",
   "GET /api/v2/collections/groups/{id}": "getCollectionGroup",
+  "GET /api/v2/collections/import/mdblist/mine": "listMyMDBListLists",
   "GET /api/v2/collections/import/mdblist/search": "searchMDBListLists",
   "GET /api/v2/collections/import/mdblist/top": "listTopMDBListLists",
   "GET /api/v2/collections/order": "getCollectionOrder",

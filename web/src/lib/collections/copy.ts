@@ -578,6 +578,9 @@ export function yourMdblistLists() {
 export function yourMdblistListsServerHelp() {
   return t("web.collections.copy.yourMdblistListsServerHelp");
 }
+export function yourMdblistListsProfileHelp() {
+  return t("web.collections.copy.yourMdblistListsProfileHelp");
+}
 export function pasteMdblistLink() {
   return t("web.collections.copy.pasteMdblistLink");
 }

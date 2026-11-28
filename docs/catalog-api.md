@@ -373,6 +373,9 @@ Both collection capability documents, `getCollectionCapabilities` and
   storing it. A cron `sync_schedule` with a `TZ=` or `CRON_TZ=` prefix runs in the zone
   the prefix names instead.
 
+`getCollectionCapabilities` also reports `mdblist_account_lists`; see
+[Private MDBList lists](#private-mdblist-lists).
+
 `getCollectionCapabilities` also reports `sync_schedule_editable`, `true` when `updateCollection`
 accepts `sync_schedule`; see [Personal sync schedules](#personal-sync-schedules).
 
@@ -406,6 +409,21 @@ read: one the key's account owns. `mdblist_account_lists` in the
   share a name are one item with both `media_types`. External lists are left out. Without a
   key it answers `configured: false` with no items. It reads the account's private lists, so
   only administrators can call it.
+
+A personal collection follows a private MDBList list through its owner profile's own
+MDBList watch provider connection, never the server's key: a profile can read only the
+private lists of the MDBList account it connected. `mdblist_account_lists` in the
+`getCollectionCapabilities` document is `true` when the acting profile has that
+connection and the installed MDBList plugin reads lists.
+
+- **Sync.** As for a server collection, the public feed answers first. A refused list
+  is read with the connection of the collection's creator profile. Without one, the
+  stored sync message says to connect MDBList under Watch providers; an MDBList plugin
+  too old to read lists says to update it. A rate limit on the read also defers the
+  connection's watch sync, which shares the key.
+- **Picking a list.** `listMyMDBListLists` (`GET /api/v2/collections/import/mdblist/mine`)
+  returns the acting profile's own and liked MDBList lists in the same shape as
+  `listAdminMDBListLists`, or `configured: false` with no items.
 
 ## Personal collection descriptions
 

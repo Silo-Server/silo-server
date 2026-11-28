@@ -98,6 +98,31 @@ once when it is made and the host does not store.
   anything is stored. A stored value for a setting the plugin no longer declares stays
   in the row but is not sent.
 
+## Custom lists for collections
+
+A plugin whose descriptor sets `provides_custom_lists` serves
+`WatchSyncCustomListService`: the lists of the connected account, private ones
+included, and their items. The host uses it for one thing: a personal collection
+that follows a private MDBList list reads it with its owner profile's own MDBList
+connection, so silo-server never decrypts that key for its own requests and never
+reads a personal collection's list with the server's MDBList key
+(`watchsync.MDBListProfileLists`, used by `usercollections`).
+
+- The collection sync asks only after the public feed refused the list, and only for
+  the `mdblist` key. The owner is the collection's creator profile, never the profile
+  that pressed Sync now.
+- `ListCustomListItems` is paged by `next_page_token`; the host reads every page
+  (bounded in pages and items), stable-sorts the items by `rank` and cuts them to the
+  sync's limit. Twins each rank from 1, so the merge interleaves them.
+- Faults map onto the collection's sync message: `INVALID_CREDENTIAL` says to
+  reconnect (the connection is not disconnected), `PERMISSION_DENIED` and
+  `INVALID_REQUEST` carry the plugin's `safe_message`, and `RATE_LIMITED` defers the
+  connection like a watch-sync 429, since the profile's key serves both. A connection
+  under such a deferral is not asked.
+- A plugin without the flag, or one that answers `Unimplemented`, gets an "update the
+  plugin" message. The flag comes from the capability metadata stored at install, so
+  it takes effect when the plugin is next installed or updated.
+
 ## List sync rows
 
 `watch_provider_list_items` holds one row per item on a synced

@@ -35,6 +35,10 @@ type UserCollectionImportHandler struct {
 	ArtworkStore    blobstore.Store
 	ArtworkResolver artworkurl.Resolver
 	frontendFS      fs.FS
+
+	// ProfileMDBListLists lists a profile's own MDBList lists; nil leaves
+	// the personal "Your MDBList lists" choice off.
+	ProfileMDBListLists ProfileMDBListLists
 }
 
 func NewUserCollectionImportHandler(
@@ -349,6 +353,13 @@ func (h *UserCollectionImportHandler) TopMDBList(ctx context.Context) (MDBListDi
 	return MDBListDiscoveryView{Configured: true, Lists: lists}, nil
 }
 
+// ProfileMDBListLists lists the lists of a profile's own MDBList account
+// through its MDBList connection (watchsync.MDBListProfileLists).
+type ProfileMDBListLists interface {
+	Check(ctx context.Context, userID int, profileID string) error
+	AccountLists(ctx context.Context, userID int, profileID string) ([]mdblist.AccountList, error)
+}
+
 // MDBListAccountListsView is the lists of the MDBList account behind an API
 // key: its own, private ones included, and the ones it liked.
 type MDBListAccountListsView struct {
@@ -375,6 +386,46 @@ func (h *UserCollectionImportHandler) ServerMDBListAccountLists(ctx context.Cont
 				return MDBListAccountListsView{}, apiError(http.StatusBadGateway, "upstream_error", "MDBList rejected the server's MDBList API key")
 			case collectionutil.MDBListRateLimited:
 				return MDBListAccountListsView{}, apiError(http.StatusBadGateway, "upstream_error", "The server's MDBList API key has used up its daily MDBList limit")
+			}
+		}
+		return MDBListAccountListsView{}, apiError(http.StatusBadGateway, "upstream_error", fmt.Sprintf("Reading MDBList lists failed: %v", err))
+	}
+	if lists == nil {
+		lists = []mdblist.AccountList{}
+	}
+	return MDBListAccountListsView{Configured: true, Lists: lists}, nil
+}
+
+// ProfileMDBListAccountListsState reports whether the profile can list and
+// sync its own MDBList lists (it has an MDBList connection and the installed
+// plugin reads lists) and, when it can't, whether connecting MDBList in
+// Settings › Watch providers would let it. v2 getCollectionCapabilities
+// reports them as mdblist_account_lists and mdblist_account_lists_connectable.
+func (h *UserCollectionImportHandler) ProfileMDBListAccountListsState(ctx context.Context, userID int, profileID string) (available, connectable bool) {
+	if h.ProfileMDBListLists == nil || profileID == "" {
+		return false, false
+	}
+	err := h.ProfileMDBListLists.Check(ctx, userID, profileID)
+	return err == nil, errors.Is(err, collectionutil.ErrMDBListNoConnection)
+}
+
+// ProfileMDBListAccountLists answers the lists of the profile's own MDBList
+// account, private ones included, read with its MDBList connection and
+// never the server's key. A profile that can't list them answers
+// configured=false and no lists. v2 listMyMDBListLists calls it.
+func (h *UserCollectionImportHandler) ProfileMDBListAccountLists(ctx context.Context, userID int, profileID string) (MDBListAccountListsView, error) {
+	if available, _ := h.ProfileMDBListAccountListsState(ctx, userID, profileID); !available {
+		return MDBListAccountListsView{Configured: false, Lists: []mdblist.AccountList{}}, nil
+	}
+	lists, err := h.ProfileMDBListLists.AccountLists(ctx, userID, profileID)
+	if err != nil {
+		var readErr *collectionutil.MDBListReadError
+		if errors.As(err, &readErr) {
+			switch readErr.Kind {
+			case collectionutil.MDBListKeyRejected:
+				return MDBListAccountListsView{}, apiError(http.StatusBadGateway, "upstream_error", "MDBList rejected this profile's MDBList connection")
+			case collectionutil.MDBListRateLimited:
+				return MDBListAccountListsView{}, apiError(http.StatusBadGateway, "upstream_error", "This profile's MDBList connection has used up its daily MDBList limit")
 			}
 		}
 		return MDBListAccountListsView{}, apiError(http.StatusBadGateway, "upstream_error", fmt.Sprintf("Reading MDBList lists failed: %v", err))

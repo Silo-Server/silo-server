@@ -51,6 +51,13 @@ type Service struct {
 	TMDBCollections catalog.TMDBCollectionFetcher
 	TMDBLists       catalog.TMDBListFetcher
 
+	// MDBList reads a list the public MDBList feed refuses, such as a
+	// private one, with the owner profile's own MDBList connection. Nil
+	// leaves such lists failing with the feed's refusal. It never falls back
+	// to the server's MDBList key, which could read lists of an account the
+	// profile doesn't own.
+	MDBList ProfileMDBListReader
+
 	// Collages builds the collage of a synced collection without an uploaded
 	// or imported poster; nil when artwork storage is not configured.
 	Collages *catalog.PersonalCollectionCollages
@@ -105,6 +112,14 @@ func (s *Service) SyncCollection(ctx context.Context, userID int, collectionID s
 	return result, err
 }
 
+// ProfileMDBListReader reads an MDBList list with a profile's own MDBList
+// connection (watchsync.MDBListProfileLists). Refusals are
+// *collectionutil.MDBListReadError or one of the collectionutil
+// ErrMDBListNo… errors.
+type ProfileMDBListReader interface {
+	ListItems(ctx context.Context, userID int, profileID, listURL string, maxEntries int) ([]collectionutil.MDBListEntry, error)
+}
+
 // sourceMatcher fetches a collection's source list and returns, for each
 // entry in source order, the catalog content_id it names ("" when the
 // catalog has no such title).
@@ -130,7 +145,9 @@ func (s *Service) RunSync(ctx context.Context, userID int, store userstore.UserS
 	var match sourceMatcher
 	switch cfg.Mode {
 	case SourceModeMDBList:
-		match = s.matchMDBList
+		match = func(ctx context.Context, collection *userstore.Collection, cfg SourceConfig) ([]string, error) {
+			return s.matchMDBList(ctx, userID, collection, cfg)
+		}
 	case SourceModeTMDBPreset:
 		match = s.matchTMDB
 	case SourceModeTMDBList:
@@ -233,25 +250,18 @@ func (s *Service) recordFailedSync(ctx context.Context, userID int, store userst
 
 // ── MDBList ──────────────────────────────────────────────────────────────────
 
-type mdblistEntry struct {
-	ID          int    `json:"id"`
-	Rank        int    `json:"rank"`
-	TVDBID      *int   `json:"tvdbid"`
-	IMDbID      string `json:"imdb_id"`
-	MediaType   string `json:"mediatype"`
-	Title       string `json:"title"`
-	ReleaseYear int    `json:"release_year"`
-}
-
-func (s *Service) matchMDBList(ctx context.Context, collection *userstore.Collection, cfg SourceConfig) ([]string, error) {
+// matchMDBList matches the collection's MDBList list. A list the public feed
+// refuses is read with the MDBList connection of the collection's owner
+// profile, never the profile that asked for the sync.
+func (s *Service) matchMDBList(ctx context.Context, userID int, collection *userstore.Collection, cfg SourceConfig) ([]string, error) {
 	urls := collectionutil.MDBListURLCandidates(cfg.URL, collection.SourceURL)
 	if len(urls) == 0 {
 		return nil, fmt.Errorf("mdblist sync: url is required")
 	}
 
 	fetchLimit := collectionutil.SourceFetchLimit(cfg.Limit)
-	entries, err := collectionutil.FetchMDBListWithFallback(urls, func(url string) ([]mdblistEntry, error) {
-		return s.fetchMDBListEntries(ctx, url, fetchLimit)
+	entries, err := collectionutil.FetchMDBListEntries(ctx, s.httpClient, urls, fetchLimit, func(ref collectionutil.MDBListRef, feedErr *collectionutil.MDBListFeedError) ([]collectionutil.MDBListEntry, error) {
+		return s.readMDBListWithOwnerConnection(ctx, userID, collection.CreatorProfileID, ref, fetchLimit, feedErr)
 	})
 	if err != nil {
 		return nil, &SourceError{Err: err}
@@ -260,7 +270,7 @@ func (s *Service) matchMDBList(ctx context.Context, collection *userstore.Collec
 	var movieBatch, seriesBatch catalog.ExternalIDBatch
 	for _, entry := range entries {
 		batch := &movieBatch
-		if mdbListItemType(entry) == "series" {
+		if entry.ItemType() == "series" {
 			batch = &seriesBatch
 		}
 		if entry.ID > 0 {
@@ -285,7 +295,7 @@ func (s *Service) matchMDBList(ctx context.Context, collection *userstore.Collec
 
 	return matchEntries(len(entries), func(i int) string {
 		entry := entries[i]
-		itemType := mdbListItemType(entry)
+		itemType := entry.ItemType()
 		lookup := movieLookup
 		if itemType == "series" {
 			lookup = seriesLookup
@@ -302,12 +312,35 @@ func (s *Service) matchMDBList(ctx context.Context, collection *userstore.Collec
 	}), nil
 }
 
-func mdbListItemType(entry mdblistEntry) string {
-	switch strings.ToLower(entry.MediaType) {
-	case "show", "tv", "series":
-		return "series"
+// readMDBListWithOwnerConnection reads a list the public feed refused with
+// the owner profile's MDBList connection. Its errors are the messages the
+// sync stores, which say what to change.
+func (s *Service) readMDBListWithOwnerConnection(ctx context.Context, userID int, ownerProfileID string, ref collectionutil.MDBListRef, maxEntries int, feedErr *collectionutil.MDBListFeedError) ([]collectionutil.MDBListEntry, error) {
+	if s.MDBList == nil || ownerProfileID == "" {
+		return nil, feedErr
+	}
+	entries, err := s.MDBList.ListItems(ctx, userID, ownerProfileID, ref.URL(), maxEntries)
+	if err == nil {
+		return entries, nil
+	}
+	var readErr *collectionutil.MDBListReadError
+	switch {
+	case errors.Is(err, collectionutil.ErrMDBListNoConnection):
+		return nil, fmt.Errorf("%w. To sync a private list, connect MDBList for this profile in Settings › Watch providers with the account that owns the list", feedErr)
+	case errors.Is(err, collectionutil.ErrMDBListNoProvider):
+		return nil, fmt.Errorf("%w. Private lists sync through the MDBList watch provider, which this server doesn't have", feedErr)
+	case errors.Is(err, collectionutil.ErrMDBListProviderTooOld):
+		return nil, fmt.Errorf("%w. Update the MDBList watch provider plugin to sync private lists", feedErr)
+	case !errors.As(err, &readErr):
+		return nil, err
+	case readErr.Kind == collectionutil.MDBListKeyRejected:
+		return nil, errors.New("MDBList rejected this profile's MDBList connection. Reconnect it in Settings › Watch providers")
+	case readErr.Kind == collectionutil.MDBListRateLimited:
+		return nil, errors.New("this profile's MDBList connection has used up its daily MDBList limit. The next sync tries again")
+	case readErr.Reason != "":
+		return nil, fmt.Errorf("%s. If the list is private, connect MDBList for this profile with the account that owns it", readErr.Reason)
 	default:
-		return "movie"
+		return nil, errors.New("this profile's MDBList connection can't read this list. If it is private, connect MDBList for this profile with the account that owns it")
 	}
 }
 
@@ -393,10 +426,6 @@ func pickMembers(contentIDs []string, allowed map[string]bool, limit *int) ([]us
 		}
 	}
 	return members, scanned, unmatched
-}
-
-func (s *Service) fetchMDBListEntries(ctx context.Context, url string, maxEntries int) ([]mdblistEntry, error) {
-	return collectionutil.FetchMDBListJSON[mdblistEntry](ctx, s.httpClient, url, maxEntries)
 }
 
 // ── TMDB presets ─────────────────────────────────────────────────────────────
