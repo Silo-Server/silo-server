@@ -246,7 +246,7 @@ export default function SeriesContent({
                 onEditMetadata={canCurateMetadata ? () => setEditOpen(true) : undefined}
                 onMatchItem={canCurateMetadata ? () => setMatchOpen(true) : undefined}
                 onSplitItem={canCurateMetadata ? () => setSplitOpen(true) : undefined}
-                onArrangeShow={canCurateMetadata ? () => setOrderOpen(true) : undefined}
+                onArrangeSeries={canCurateMetadata ? () => setOrderOpen(true) : undefined}
                 onRequestSeasons={canRequestSeasons ? () => setRequestSeasonsOpen(true) : undefined}
                 onShuffle={
                   episodeCount > 1

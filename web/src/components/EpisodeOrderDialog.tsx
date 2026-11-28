@@ -1,7 +1,7 @@
 // Per-series episode order in one dialog: which provider and order number the
 // show and which order its file names follow (the header), and how its seasons
 // are laid out: as the order lists them, as one absolute list, or arranged by
-// hand. Opened from the series page's Manage → Arrange Show (admins and
+// hand. Opened from the series page's Manage → Arrange Series (admins and
 // metadata curators).
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";

@@ -256,7 +256,7 @@ export interface ActionBarProps {
   onEditMetadata?: () => void;
   onMatchItem?: () => void;
   onSplitItem?: () => void;
-  onArrangeShow?: () => void;
+  onArrangeSeries?: () => void;
   onShowMediaInfo?: () => void;
   isAdmin?: boolean;
   canCurateMetadata?: boolean;
@@ -356,7 +356,7 @@ export default function ActionBar({
   onEditMetadata,
   onMatchItem,
   onSplitItem,
-  onArrangeShow,
+  onArrangeSeries,
   onShowMediaInfo,
   isAdmin = false,
   canCurateMetadata = false,
@@ -980,14 +980,14 @@ export default function ActionBar({
           {t("web.detail.actions.splitVersions")}
         </DetailOverflowMenuItem>
       ),
-      canCurateMetadata && onArrangeShow && (
+      canCurateMetadata && onArrangeSeries && (
         <DetailOverflowMenuItem
-          key="arrange-show"
+          key="arrange-series"
           closeMenu={closeOverflowMenu}
-          onAction={onArrangeShow}
+          onAction={onArrangeSeries}
         >
           <ListOrdered className="size-4" />
-          {t("web.detail.actions.arrangeShow")}
+          {t("web.detail.actions.arrangeSeries")}
         </DetailOverflowMenuItem>
       ),
     ],

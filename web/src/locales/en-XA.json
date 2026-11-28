@@ -121585,10 +121585,10 @@
       "value": "~~~~~⟧"
     }
   ],
-  "web.detail.actions.arrangeShow": [
+  "web.detail.actions.arrangeSeries": [
     {
       "type": 0,
-      "value": "⟦Åŕŕåñĝé Šĥöŵ~~~~~⟧"
+      "value": "⟦Åŕŕåñĝé Šéŕîéš~~~~~~⟧"
     }
   ],
   "web.detail.actions.browseSeries": [
@@ -135550,7 +135550,7 @@
   "web.item.episodeOrder.basedOn": [
     {
       "type": 0,
-      "value": "⟦Ɓåšéđ öñ~~~~⟧"
+      "value": "⟦Ɓåšé öŕđéŕ~~~~⟧"
     }
   ],
   "web.item.episodeOrder.change": [
@@ -135562,7 +135562,7 @@
   "web.item.episodeOrder.conflict": [
     {
       "type": 0,
-      "value": "⟦Šöɱéöñé éļšé çĥåñĝéđ ţĥîš šĥöŵ'š éþîšöđé öŕđéŕ. Ŕéöþéñ ţĥé đîåļöĝ ţö šéé îţ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+      "value": "⟦Šöɱéöñé éļšé çĥåñĝéđ ţĥîš šéŕîéš' éþîšöđé öŕđéŕ. Ŕéöþéñ ţĥé đîåļöĝ ţö šéé îţ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.item.episodeOrder.defaultOrder": [
@@ -135574,7 +135574,7 @@
   "web.item.episodeOrder.description": [
     {
       "type": 0,
-      "value": "⟦Çĥööšé ŵĥîçĥ þŕöṽîđéŕ öŕđéŕ Šîļö ûšéš ƒöŕ ţĥîš šĥöŵ åñđ ĥöŵ îţš šéåšöñš åŕé ļåîđ öûţ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+      "value": "⟦Çĥööšé ŵĥîçĥ þŕöṽîđéŕ öŕđéŕ Šîļö ûšéš ƒöŕ ţĥîš šéŕîéš åñđ ĥöŵ îţš šéåšöñš åŕé ļåîđ öûţ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.item.episodeOrder.files.fit": [
@@ -135588,47 +135588,21 @@
     },
     {
       "type": 0,
-      "value": " öƒ "
+      "value": "/"
     },
     {
-      "type": 6,
-      "value": "total",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " ƒîļé"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " ƒîļéš"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      "type": 1,
+      "value": "total"
     },
     {
       "type": 0,
-      "value": "~~~~⟧"
+      "value": " ɱåţçĥéđ~~~~⟧"
     }
   ],
   "web.item.episodeOrder.files.fitsAll": [
     {
       "type": 0,
-      "value": "⟦Þļåçéš éṽéŕý ƒîļé~~~~~~~⟧"
+      "value": "⟦Åļļ ƒîļéš ɱåţçĥéđ~~~~~~~⟧"
     }
   ],
   "web.item.episodeOrder.files.help": [
@@ -135640,7 +135614,7 @@
   "web.item.episodeOrder.files.label": [
     {
       "type": 0,
-      "value": "⟦Ƒîļéš åŕé ñåɱéđ îñ~~~~~~~~⟧"
+      "value": "⟦Ƒîļé ñåɱîñĝ~~~~~⟧"
     }
   ],
   "web.item.episodeOrder.files.suggestion": [
@@ -135938,7 +135912,7 @@
   "web.item.episodeOrder.preview.empty": [
     {
       "type": 0,
-      "value": "⟦Ñéîţĥéŕ ŢṼĐƁ ñöŕ ŢṀĐƁ ŕéţûŕñéđ éþîšöđéš ƒöŕ ţĥîš šĥöŵ, šö îţ ķééþš ţĥé ñûɱƀéŕš ƒŕöɱ îţš ƒîļé ñåɱéš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+      "value": "⟦Ñéîţĥéŕ ŢṼĐƁ ñöŕ ŢṀĐƁ ŕéţûŕñéđ éþîšöđéš ƒöŕ ţĥîš šéŕîéš, šö îţ ķééþš ţĥé ñûɱƀéŕš ƒŕöɱ îţš ƒîļé ñåɱéš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.item.episodeOrder.preview.episodes": [
@@ -135998,7 +135972,7 @@
     },
     {
       "type": 0,
-      "value": " ĥåš ñö éþîšöđéš ƒöŕ ţĥîš šĥöŵ, šö îţ ƒöļļöŵš "
+      "value": " ĥåš ñö éþîšöđéš ƒöŕ ţĥîš šéŕîéš, šö îţ ƒöļļöŵš "
     },
     {
       "type": 1,
@@ -136006,7 +135980,7 @@
     },
     {
       "type": 0,
-      "value": ".~~~~~~~~~~~~~~~~~~~⟧"
+      "value": ".~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.item.episodeOrder.preview.files": [
@@ -136054,7 +136028,7 @@
     },
     {
       "type": 0,
-      "value": " þļåçéđ~~~~~~⟧"
+      "value": " ɱåţçĥéđ~~~~~~⟧"
     }
   ],
   "web.item.episodeOrder.preview.loading": [
@@ -136344,7 +136318,7 @@
   "web.item.episodeOrder.source.label": [
     {
       "type": 0,
-      "value": "⟦Éþîšöđé đåţå ƒŕöɱ~~~~~~~⟧"
+      "value": "⟦Šöûŕçé~~~⟧"
     }
   ],
   "web.item.episodeOrder.source.library": [
@@ -136388,7 +136362,7 @@
     },
     {
       "type": 0,
-      "value": " ĥåš ñö éþîšöđéš ƒöŕ ţĥîš šĥöŵ.~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+      "value": " ĥåš ñö éþîšöđéš ƒöŕ ţĥîš šéŕîéš.~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.item.episodeOrder.source.tmdbBody": [
@@ -136484,7 +136458,7 @@
   "web.item.episodeOrder.title": [
     {
       "type": 0,
-      "value": "⟦Åŕŕåñĝé šĥöŵ~~~~~⟧"
+      "value": "⟦Åŕŕåñĝé šéŕîéš~~~~~~⟧"
     }
   ],
   "web.item.images.allProviders": [

@@ -117609,10 +117609,10 @@
       "value": "profiles"
     }
   ],
-  "web.detail.actions.arrangeShow": [
+  "web.detail.actions.arrangeSeries": [
     {
       "type": 0,
-      "value": "\u200F\u202EArrange Show\u202C"
+      "value": "\u200F\u202EArrange Series\u202C"
     }
   ],
   "web.detail.actions.browseSeries": [
@@ -131006,7 +131006,7 @@
   "web.item.episodeOrder.basedOn": [
     {
       "type": 0,
-      "value": "\u200F\u202EBased on\u202C"
+      "value": "\u200F\u202EBase order\u202C"
     }
   ],
   "web.item.episodeOrder.change": [
@@ -131018,7 +131018,7 @@
   "web.item.episodeOrder.conflict": [
     {
       "type": 0,
-      "value": "\u200F\u202ESomeone else changed this show's episode order. Reopen the dialog to see it.\u202C"
+      "value": "\u200F\u202ESomeone else changed this series' episode order. Reopen the dialog to see it.\u202C"
     }
   ],
   "web.item.episodeOrder.defaultOrder": [
@@ -131030,7 +131030,7 @@
   "web.item.episodeOrder.description": [
     {
       "type": 0,
-      "value": "\u200F\u202EChoose which provider order Silo uses for this show and how its seasons are laid out.\u202C"
+      "value": "\u200F\u202EChoose which provider order Silo uses for this series and how its seasons are laid out.\u202C"
     }
   ],
   "web.item.episodeOrder.files.fit": [
@@ -131044,43 +131044,21 @@
     },
     {
       "type": 0,
-      "value": "\u202E of \u202C"
+      "value": "\u202E/\u202C"
     },
     {
-      "type": 6,
-      "value": "total",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": "\u202E file\u202C"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": "\u202E files\u202C"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "\u202E matched\u202C"
     }
   ],
   "web.item.episodeOrder.files.fitsAll": [
     {
       "type": 0,
-      "value": "\u200F\u202EPlaces every file\u202C"
+      "value": "\u200F\u202EAll files matched\u202C"
     }
   ],
   "web.item.episodeOrder.files.help": [
@@ -131092,7 +131070,7 @@
   "web.item.episodeOrder.files.label": [
     {
       "type": 0,
-      "value": "\u200F\u202EFiles are named in\u202C"
+      "value": "\u200F\u202EFile naming\u202C"
     }
   ],
   "web.item.episodeOrder.files.suggestion": [
@@ -131386,7 +131364,7 @@
   "web.item.episodeOrder.preview.empty": [
     {
       "type": 0,
-      "value": "\u200F\u202ENeither TVDB nor TMDB returned episodes for this show, so it keeps the numbers from its file names.\u202C"
+      "value": "\u200F\u202ENeither TVDB nor TMDB returned episodes for this series, so it keeps the numbers from its file names.\u202C"
     }
   ],
   "web.item.episodeOrder.preview.episodes": [
@@ -131446,7 +131424,7 @@
     },
     {
       "type": 0,
-      "value": "\u202E has no episodes for this show, so it follows \u202C"
+      "value": "\u202E has no episodes for this series, so it follows \u202C"
     },
     {
       "type": 1,
@@ -131502,7 +131480,7 @@
     },
     {
       "type": 0,
-      "value": "\u202E placed\u202C"
+      "value": "\u202E matched\u202C"
     }
   ],
   "web.item.episodeOrder.preview.loading": [
@@ -131776,7 +131754,7 @@
   "web.item.episodeOrder.source.label": [
     {
       "type": 0,
-      "value": "\u200F\u202EEpisode data from\u202C"
+      "value": "\u200F\u202ESource\u202C"
     }
   ],
   "web.item.episodeOrder.source.library": [
@@ -131816,7 +131794,7 @@
     },
     {
       "type": 0,
-      "value": "\u202E has no episodes for this show.\u202C"
+      "value": "\u202E has no episodes for this series.\u202C"
     }
   ],
   "web.item.episodeOrder.source.tmdbBody": [
@@ -131904,7 +131882,7 @@
   "web.item.episodeOrder.title": [
     {
       "type": 0,
-      "value": "\u200F\u202EArrange show\u202C"
+      "value": "\u200F\u202EArrange series\u202C"
     }
   ],
   "web.item.images.allProviders": [

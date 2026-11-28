@@ -111965,10 +111965,10 @@
       "value": "profiles"
     }
   ],
-  "web.detail.actions.arrangeShow": [
+  "web.detail.actions.arrangeSeries": [
     {
       "type": 0,
-      "value": "Arrange Show"
+      "value": "Arrange Series"
     }
   ],
   "web.detail.actions.browseSeries": [
@@ -124710,7 +124710,7 @@
   "web.item.episodeOrder.basedOn": [
     {
       "type": 0,
-      "value": "Based on"
+      "value": "Base order"
     }
   ],
   "web.item.episodeOrder.change": [
@@ -124722,7 +124722,7 @@
   "web.item.episodeOrder.conflict": [
     {
       "type": 0,
-      "value": "Someone else changed this show's episode order. Reopen the dialog to see it."
+      "value": "Someone else changed this series' episode order. Reopen the dialog to see it."
     }
   ],
   "web.item.episodeOrder.defaultOrder": [
@@ -124734,7 +124734,7 @@
   "web.item.episodeOrder.description": [
     {
       "type": 0,
-      "value": "Choose which provider order Silo uses for this show and how its seasons are laid out."
+      "value": "Choose which provider order Silo uses for this series and how its seasons are laid out."
     }
   ],
   "web.item.episodeOrder.files.fit": [
@@ -124744,43 +124744,21 @@
     },
     {
       "type": 0,
-      "value": " of "
+      "value": "/"
     },
     {
-      "type": 6,
-      "value": "total",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " file"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " files"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": " matched"
     }
   ],
   "web.item.episodeOrder.files.fitsAll": [
     {
       "type": 0,
-      "value": "Places every file"
+      "value": "All files matched"
     }
   ],
   "web.item.episodeOrder.files.help": [
@@ -124792,7 +124770,7 @@
   "web.item.episodeOrder.files.label": [
     {
       "type": 0,
-      "value": "Files are named in"
+      "value": "File naming"
     }
   ],
   "web.item.episodeOrder.files.suggestion": [
@@ -125066,7 +125044,7 @@
   "web.item.episodeOrder.preview.empty": [
     {
       "type": 0,
-      "value": "Neither TVDB nor TMDB returned episodes for this show, so it keeps the numbers from its file names."
+      "value": "Neither TVDB nor TMDB returned episodes for this series, so it keeps the numbers from its file names."
     }
   ],
   "web.item.episodeOrder.preview.episodes": [
@@ -125114,7 +125092,7 @@
     },
     {
       "type": 0,
-      "value": " has no episodes for this show, so it follows "
+      "value": " has no episodes for this series, so it follows "
     },
     {
       "type": 1,
@@ -125166,7 +125144,7 @@
     },
     {
       "type": 0,
-      "value": " placed"
+      "value": " matched"
     }
   ],
   "web.item.episodeOrder.preview.loading": [
@@ -125408,7 +125386,7 @@
   "web.item.episodeOrder.source.label": [
     {
       "type": 0,
-      "value": "Episode data from"
+      "value": "Source"
     }
   ],
   "web.item.episodeOrder.source.library": [
@@ -125448,7 +125426,7 @@
     },
     {
       "type": 0,
-      "value": " has no episodes for this show."
+      "value": " has no episodes for this series."
     }
   ],
   "web.item.episodeOrder.source.tmdbBody": [
@@ -125520,7 +125498,7 @@
   "web.item.episodeOrder.title": [
     {
       "type": 0,
-      "value": "Arrange show"
+      "value": "Arrange series"
     }
   ],
   "web.item.images.allProviders": [
