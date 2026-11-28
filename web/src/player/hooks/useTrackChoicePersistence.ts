@@ -1,9 +1,10 @@
 import { useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
-import { readableErrorText } from "@/api/v2/request";
 import { useT } from "@/i18n";
-import { reportOfflineSettingFailure } from "@/hooks/queries/settingWriteOffline";
+import {
+  reportOfflineSettingFailure,
+  toastSettingWriteError,
+} from "@/hooks/queries/settingWriteOffline";
 import { invalidateItemDetails } from "@/hooks/queries/trackPreferences";
 import { usePlayerConfig } from "../context/PlayerConfigContext";
 import type { SubtitleInventoryItemV3 } from "../protocol-v3";
@@ -46,7 +47,7 @@ export function useTrackChoicePersistence({
         (err: unknown) => {
           // The viewer switched profile before it went out; it isn't theirs.
           if (err instanceof StaleTrackPreferenceWriteError) return;
-          toast.error(readableErrorText(err, t("web.player.tracks.saveAudioFailed")));
+          toastSettingWriteError(err, t("web.player.tracks.saveAudioFailed"));
         },
       );
     },

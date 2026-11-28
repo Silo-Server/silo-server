@@ -60,6 +60,7 @@ import {
   useDeleteAllAdminUserDeviceSettingsForDevice,
   useUpdateAdminUserSetting,
 } from "./admin/users";
+import { SettingWriteOfflineError } from "./settingWriteOffline";
 import { useSetSubtitlePreference } from "./subtitles";
 import { useSetAudioPreference } from "./trackPreferences";
 
@@ -205,6 +206,11 @@ describe("write failures whose error text is developer English", () => {
     expect(await toastFor(pick(new PlayerFetchError(422, "That track isn't in this file.")))).toBe(
       "That track isn't in this file.",
     );
+    // Offline it shares the subtitle pick's notice, one for a burst.
+    await toastFor(pick(new SettingWriteOfflineError()));
+    expect(mocks.toastError.mock.calls).toEqual([
+      ["You're offline, so this change wasn't saved", { id: "setting-write-offline" }],
+    ]);
   });
 
   // A player subtitle pick made offline is refused unsent (#4576); the
