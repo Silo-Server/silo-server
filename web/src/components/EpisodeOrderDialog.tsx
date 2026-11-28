@@ -234,10 +234,11 @@ function Editor({
           <>
             {!custom && (
               <EpisodeOrderSeasonsView
+                contentId={contentId}
+                choice={choice!}
                 structure={structure}
                 files={draft.files}
                 preview={preview.data}
-                failed={preview.isError}
                 onReadFilesAs={(files) => update({ files })}
                 onArrange={() => update({ layout: "custom" })}
               />

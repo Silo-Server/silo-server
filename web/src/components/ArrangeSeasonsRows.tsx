@@ -259,11 +259,6 @@ export function EpisodeRow({
     useMotionSafeSortable({
       id: `ep:${episode.key}`,
     });
-  const origin = [
-    provider,
-    formatEpisodeCode(episode.provider_season, episode.provider_episode),
-  ].join(" ");
-  const year = episode.air_date?.slice(0, 4);
   return (
     <div
       ref={setNodeRef}
@@ -292,6 +287,40 @@ export function EpisodeRow({
       >
         <GripVertical className="size-4" aria-hidden="true" />
       </button>
+      <EpisodeSummary episode={episode} provider={provider} number={number} />
+      {onSplit && (
+        <button
+          type="button"
+          onClick={onSplit}
+          className="bg-surface border-border text-muted-foreground hover:text-foreground absolute end-3 top-1/2 flex -translate-y-1/2 items-center gap-1 rounded-md border px-2 py-1 text-xs opacity-0 shadow-sm transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
+          title={t("web.item.arrangeSeasons.splitTitle")}
+        >
+          <Scissors className="size-3.5" aria-hidden="true" />
+          {t("web.item.arrangeSeasons.splitHere")}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** An episode's number, still, title and where it comes from, with its file. */
+export function EpisodeSummary({
+  episode,
+  provider,
+  number,
+}: {
+  episode: CustomSeasonEpisode;
+  provider: string;
+  number: number;
+}) {
+  const t = useT();
+  const origin = [
+    provider,
+    formatEpisodeCode(episode.provider_season, episode.provider_episode),
+  ].join(" ");
+  const year = episode.air_date?.slice(0, 4);
+  return (
+    <>
       <span className="text-muted-foreground/70 w-8 shrink-0 text-center text-sm font-semibold tabular-nums">
         {number}
       </span>
@@ -328,17 +357,6 @@ export function EpisodeRow({
           )}
         </div>
       </div>
-      {onSplit && (
-        <button
-          type="button"
-          onClick={onSplit}
-          className="bg-surface border-border text-muted-foreground hover:text-foreground absolute end-3 top-1/2 flex -translate-y-1/2 items-center gap-1 rounded-md border px-2 py-1 text-xs opacity-0 shadow-sm transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
-          title={t("web.item.arrangeSeasons.splitTitle")}
-        >
-          <Scissors className="size-3.5" aria-hidden="true" />
-          {t("web.item.arrangeSeasons.splitHere")}
-        </button>
-      )}
-    </div>
+    </>
   );
 }

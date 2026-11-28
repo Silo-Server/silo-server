@@ -1,13 +1,19 @@
 // The episode order dialog's Seasons and Absolute layouts: the show as the
 // chosen order lays it out, read-only, with the file Silo links to each
 // episode. Moving episodes or renaming seasons happens in the Custom layout.
-import { useMemo, useState, type ReactNode } from "react";
-import { FileSearch, FileVideo, Info, Loader2, TriangleAlert } from "lucide-react";
+import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
+import { FileSearch, Info, Loader2, TriangleAlert } from "lucide-react";
+import { EpisodeSummary, VirtualEpisodeList } from "@/components/ArrangeSeasonsRows";
 import { Button } from "@/components/ui/button";
-import type { EpisodeOrderPreview } from "@/hooks/queries/episodeOrder";
+import {
+  useCustomSeasons,
+  type CustomSeasonEpisode,
+  type CustomSeasons,
+  type EpisodeOrderChoice,
+  type EpisodeOrderPreview,
+} from "@/hooks/queries/episodeOrder";
 import { useT } from "@/i18n";
 import { joinList } from "@/lib/appLocale";
-import { formatEpisodeCode } from "@/lib/episodeCardLabels";
 import {
   asProvider,
   fileOrderLabel,
@@ -18,34 +24,82 @@ import {
 import { cn } from "@/lib/utils";
 import { seasonDisplayName } from "@/pages/ItemDetail/itemDetailLayout";
 
-/** Rows shown per season; a longer season says how many more it has. */
-const MAX_ROWS = 200;
+/** A season as the read-only layouts show it. */
+interface ShownSeason {
+  number: number;
+  title: string;
+  overview: string;
+  posterUrl?: string;
+  episodes: CustomSeasonEpisode[];
+}
+
+/**
+ * The order's seasons, or for the Absolute layout its regular episodes as one
+ * season numbered from 1; Specials last.
+ */
+function shownSeasons(data: CustomSeasons, absolute: boolean): ShownSeason[] {
+  const shown = data.seasons.map((s) => ({
+    number: s.number,
+    title: s.provider_title,
+    overview: s.provider_overview,
+    posterUrl: s.provider_poster_url,
+    episodes: s.episodes,
+  }));
+  if (!absolute) return shown;
+  const regular = shown.filter((s) => s.number !== 0);
+  return [
+    {
+      number: 1,
+      title: "",
+      overview: "",
+      posterUrl: regular[0]?.posterUrl,
+      episodes: regular.flatMap((s) => s.episodes),
+    },
+    ...shown.filter((s) => s.number === 0),
+  ];
+}
 
 export function EpisodeOrderSeasonsView({
+  contentId,
+  choice,
   structure,
   files,
   preview,
-  failed,
   onReadFilesAs,
   onArrange,
 }: {
+  contentId: string;
+  /** The Seasons or Absolute choice being shown. */
+  choice: EpisodeOrderChoice;
   /** The provider the chosen order belongs to. */
   structure: Provider;
   /** The provider whose numbering the file names follow. */
   files: Provider;
   preview: EpisodeOrderPreview | undefined;
-  failed: boolean;
   onReadFilesAs: (provider: Provider) => void;
   onArrange: () => void;
 }) {
   const t = useT();
+  // The order's seasons with stills, posters and files, as the arranger
+  // would start from them.
+  const query = useCustomSeasons(contentId, true, { ...choice, layout: "custom" });
+  const data = query.data;
+  const absolute = choice.layout === "absolute";
+  const seasons = useMemo(() => (data ? shownSeasons(data, absolute) : []), [data, absolute]);
   const [seasonNumber, setSeasonNumber] = useState<number | null>(null);
-  const seasons = preview?.seasons ?? [];
+  // The episode list scrolls in the details pane on wide screens and with
+  // the whole body on narrow ones; the virtual list follows whichever.
+  const paneRef = useRef<HTMLElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const scrollElement = useCallback(() => {
+    const pane = paneRef.current;
+    return pane && getComputedStyle(pane).overflowY !== "visible" ? pane : bodyRef.current;
+  }, []);
   const regular = seasons.filter((s) => s.number !== 0);
   const specials = seasons.find((s) => s.number === 0);
   const shown =
     seasons.find((s) => s.number === seasonNumber) ??
-    seasons.find((s) => s.file_count > 0) ??
+    seasons.find((s) => s.episodes.some((e) => e.file)) ??
     seasons[0];
   const missingFiles = (preview?.file_count ?? 0) - (preview?.matched_files ?? 0);
   const suggestion = suggestedFiles(preview, files, structure);
@@ -55,11 +109,12 @@ export function EpisodeOrderSeasonsView({
       ? t("web.item.episodeOrder.preview.moreFiles", { names, count: missingFiles - 3 })
       : names;
   }, [preview, missingFiles, t]);
+  const provider = providerLabel(data?.structure_provider || structure);
 
-  if (!preview) {
+  if (!data) {
     return (
       <div className="text-muted-foreground flex flex-1 items-center justify-center gap-2 p-10 text-sm">
-        {failed ? (
+        {query.isError ? (
           t("web.item.episodeOrder.preview.failed")
         ) : (
           <>
@@ -70,7 +125,7 @@ export function EpisodeOrderSeasonsView({
       </div>
     );
   }
-  if (preview.structure_provider === "") {
+  if (data.structure_provider === "") {
     return (
       <div className="p-5">
         <Notice tone="info" title={t("web.item.episodeOrder.preview.empty")} />
@@ -78,12 +133,17 @@ export function EpisodeOrderSeasonsView({
     );
   }
 
-  const seasonButton = (s: (typeof seasons)[number]) => {
-    const name = seasonDisplayName(s.number);
-    const titled = seasonDisplayName(s.number, s.title);
-    const meta = [t("web.item.episodeOrder.preview.episodes", { count: s.episode_count })];
-    if (s.file_count > 0)
-      meta.push(t("web.item.episodeOrder.preview.onDisk", { count: s.file_count }));
+  const nameOf = (s: ShownSeason) => {
+    const plain = seasonDisplayName(s.number);
+    const named = seasonDisplayName(s.number, s.title);
+    return s.number === 0 || named === plain
+      ? plain
+      : t("web.item.arrangeSeasons.seasonTitled", { number: s.number, title: named });
+  };
+  const seasonButton = (s: ShownSeason) => {
+    const onDisk = s.episodes.filter((e) => e.file).length;
+    const meta = [t("web.item.arrangeSeasons.episodeCount", { count: s.episodes.length })];
+    if (onDisk > 0) meta.push(t("web.item.episodeOrder.preview.onDisk", { count: onDisk }));
     return (
       <li key={s.number}>
         <button
@@ -91,19 +151,26 @@ export function EpisodeOrderSeasonsView({
           onClick={() => setSeasonNumber(s.number)}
           aria-current={s.number === shown?.number}
           className={cn(
-            "flex w-full flex-col rounded-lg border border-transparent px-3 py-2 text-start",
+            "flex w-full items-center gap-2.5 rounded-lg border border-transparent px-2.5 py-1.5 text-start",
             s.number === shown?.number ? "bg-primary/10 border-primary/30" : "hover:bg-accent/50",
           )}
         >
-          <span className="truncate text-sm font-medium">
-            {titled === name
-              ? name
-              : t("web.item.arrangeSeasons.seasonTitled", {
-                  number: s.number,
-                  title: titled,
-                })}
+          {s.number !== 0 && (
+            <span className="bg-surface border-border/60 h-12 w-8 shrink-0 overflow-hidden rounded-md border">
+              {s.posterUrl && (
+                <img
+                  src={s.posterUrl}
+                  alt=""
+                  className="h-full w-full object-cover"
+                  loading="lazy"
+                />
+              )}
+            </span>
+          )}
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm leading-snug font-medium text-pretty">{nameOf(s)}</span>
+            <span className="text-muted-foreground block text-xs">{meta.join(" · ")}</span>
           </span>
-          <span className="text-muted-foreground text-xs">{meta.join(" · ")}</span>
         </button>
       </li>
     );
@@ -112,9 +179,13 @@ export function EpisodeOrderSeasonsView({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="border-border/10 text-muted-foreground flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b px-5 py-2.5 text-xs">
-        <span>{t("web.item.episodeOrder.preview.seasons", { count: regular.length })}</span>
-        <span>{t("web.item.episodeOrder.preview.episodes", { count: preview.episode_count })}</span>
-        {preview.file_count > 0 && (
+        <span>{t("web.item.arrangeSeasons.seasonCount", { count: regular.length })}</span>
+        <span>
+          {t("web.item.arrangeSeasons.episodeCount", {
+            count: seasons.reduce((n, s) => n + s.episodes.length, 0),
+          })}
+        </span>
+        {preview && preview.file_count > 0 && (
           <span
             className={cn("font-medium", missingFiles === 0 ? "text-green-500" : "text-amber-500")}
           >
@@ -130,21 +201,27 @@ export function EpisodeOrderSeasonsView({
         </Button>
       </div>
 
-      <div className="flex max-h-[60vh] min-h-0 flex-1 flex-col overflow-y-auto md:max-h-none md:flex-row md:overflow-hidden">
-        <aside className="border-border/10 min-h-0 shrink-0 p-3 md:w-[320px] md:overflow-y-auto md:border-e">
+      <div
+        ref={bodyRef}
+        className="flex max-h-[70vh] min-h-0 flex-1 flex-col overflow-y-auto md:max-h-none md:flex-row md:overflow-hidden"
+      >
+        <aside className="border-border/10 min-h-0 shrink-0 p-3 md:w-[420px] md:overflow-y-auto md:border-e">
+          <h2 className="px-1.5 pb-2 text-sm font-semibold">
+            {t("web.item.arrangeSeasons.seasons")}
+          </h2>
           <ul className="space-y-1">{regular.map(seasonButton)}</ul>
           {specials && (
             <ul className="border-border/60 mt-2 border-t pt-2">{seasonButton(specials)}</ul>
           )}
         </aside>
 
-        <section className="min-h-0 min-w-0 flex-1 p-5 md:overflow-y-auto">
-          {preview.structure_provider !== structure && (
+        <section ref={paneRef} className="min-h-0 min-w-0 flex-1 p-5 md:overflow-y-auto">
+          {data.structure_provider !== structure && (
             <Notice
               tone="info"
               title={t("web.item.episodeOrder.preview.fallback", {
                 provider: providerLabel(structure),
-                other: providerLabel(asProvider(preview.structure_provider)),
+                other: providerLabel(asProvider(data.structure_provider)),
               })}
             />
           )}
@@ -172,20 +249,27 @@ export function EpisodeOrderSeasonsView({
 
           {shown && (
             <>
-              <div className="mb-3 flex flex-wrap items-baseline gap-3">
-                <h2 className="text-xl font-semibold tracking-tight">
-                  {seasonDisplayName(shown.number, shown.title)}
-                </h2>
+              <div className="mb-3 flex flex-wrap items-center gap-3">
+                <h2 className="text-xl font-semibold tracking-tight">{nameOf(shown)}</h2>
                 <span className="text-muted-foreground text-sm">
-                  {[
-                    t("web.item.episodeOrder.preview.episodes", { count: shown.episode_count }),
-                    ...(shown.file_count > 0
-                      ? [t("web.item.episodeOrder.preview.onDisk", { count: shown.file_count })]
-                      : []),
-                  ].join(" · ")}
+                  {t("web.item.arrangeSeasons.episodeCount", { count: shown.episodes.length })}
                 </span>
               </div>
-              <EpisodeTable season={shown} />
+              {shown.number !== 0 && !absolute && <SeasonCard season={shown} provider={provider} />}
+              <VirtualEpisodeList
+                // Each season scrolls from its top.
+                key={shown.number}
+                keys={shown.episodes.map((e) => e.key)}
+                scrollElement={scrollElement}
+                renderRow={(_, i) => {
+                  const episode = shown.episodes[i];
+                  return episode ? (
+                    <div className="border-border/40 flex items-center gap-3 border-b px-3 py-2">
+                      <EpisodeSummary episode={episode} provider={provider} number={i + 1} />
+                    </div>
+                  ) : null;
+                }}
+              />
             </>
           )}
         </section>
@@ -194,62 +278,28 @@ export function EpisodeOrderSeasonsView({
   );
 }
 
-/** The episode's number in the file naming order, or a dash without a file. */
-function fileNumber(e: EpisodeOrderPreview["seasons"][number]["episodes"][number]) {
-  return e.file_episode > 0 ? formatEpisodeCode(e.file_season, e.file_episode) : "–";
-}
-
-function EpisodeTable({ season }: { season: EpisodeOrderPreview["seasons"][number] }) {
+/** A season's poster, title and description as the provider has them. */
+function SeasonCard({ season, provider }: { season: ShownSeason; provider: string }) {
   const t = useT();
   return (
-    <div className="border-border/10 overflow-hidden rounded-xl border">
-      <div className="text-muted-foreground border-border/10 bg-background/40 flex items-center gap-3 border-b px-3 py-2 text-[0.6875rem] font-medium tracking-wide uppercase">
-        <span className="w-8 shrink-0 text-end">
-          {t("web.item.episodeOrder.preview.colNumber")}
-        </span>
-        <span className="min-w-0 flex-1">{t("web.item.episodeOrder.preview.colEpisode")}</span>
-        <span className="hidden w-[38%] shrink-0 sm:block">
-          {t("web.item.episodeOrder.preview.colFile")}
-        </span>
-        <span className="w-[72px] shrink-0 text-end">
-          {t("web.item.episodeOrder.preview.colFileNumber")}
-        </span>
+    <div className="surface-panel mb-4 flex gap-4 rounded-2xl p-4">
+      <div className="bg-surface border-border relative aspect-[2/3] w-24 shrink-0 overflow-hidden rounded-xl border">
+        {season.posterUrl ? (
+          <img src={season.posterUrl} alt="" className="h-full w-full object-cover" />
+        ) : (
+          <div className="text-muted-foreground flex h-full items-center justify-center p-2 text-center text-xs font-medium">
+            {t("web.item.arrangeSeasons.posterNone")}
+          </div>
+        )}
       </div>
-      <div className="py-1">
-        {season.episodes.slice(0, MAX_ROWS).map((e) => (
-          <div
-            key={`${season.number}-${e.number}`}
-            className="hover:bg-accent/40 flex items-center gap-3 px-3 py-1.5 text-[0.8125rem]"
-          >
-            <span className="text-muted-foreground w-8 shrink-0 text-end font-mono text-xs tabular-nums">
-              {e.number}
-            </span>
-            <span className={cn("min-w-0 flex-1 truncate", !e.file && "text-muted-foreground")}>
-              {e.title}
-            </span>
-            <span className="hidden w-[38%] shrink-0 sm:block">
-              {e.file ? (
-                <span className="text-muted-foreground flex min-w-0 items-center gap-1.5 font-mono text-[0.6875rem]">
-                  <FileVideo className="size-3 shrink-0 text-green-500/80" aria-hidden="true" />
-                  <span className="truncate">{e.file}</span>
-                </span>
-              ) : (
-                <span className="text-muted-foreground/60 text-[0.6875rem]">
-                  {t("web.item.episodeOrder.preview.notOnDisk")}
-                </span>
-              )}
-            </span>
-            <span className="text-muted-foreground/70 w-[72px] shrink-0 text-end font-mono text-[0.6875rem]">
-              {fileNumber(e)}
-            </span>
-          </div>
-        ))}
-        {season.episodes.length > MAX_ROWS && (
-          <div className="text-muted-foreground px-3 py-2 text-xs">
-            {t("web.item.episodeOrder.preview.moreEpisodes", {
-              count: season.episodes.length - MAX_ROWS,
-            })}
-          </div>
+      <div className="min-w-0 flex-1 space-y-1.5">
+        <p className="text-muted-foreground text-[0.6875rem]">
+          {t("web.item.arrangeSeasons.fromProvider", { provider, number: season.number })}
+        </p>
+        {season.overview && (
+          <p className="text-muted-foreground text-sm leading-relaxed whitespace-pre-line">
+            {season.overview}
+          </p>
         )}
       </div>
     </div>
