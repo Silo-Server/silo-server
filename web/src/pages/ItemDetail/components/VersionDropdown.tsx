@@ -64,12 +64,13 @@ function VersionDropdown({
   return (
     <>
       {onlyNamedEdition ? (
-        <div className="glass-subtle text-foreground inline-flex h-8 max-w-full min-w-0 shrink items-center gap-1.5 rounded-full px-3 text-xs font-medium whitespace-nowrap">
+        <div className="detail-stream-label glass-subtle text-foreground inline-flex h-8 max-w-full min-w-0 shrink items-center gap-1.5 rounded-full px-3 text-xs font-medium whitespace-nowrap">
           <Layers3 className="size-3.5 shrink-0" />
           {t("web.detail.versions.editionButton")}
           <span
+            dir="auto"
             title={onlyNamedEdition.label}
-            className="text-muted-foreground max-w-44 truncate text-[0.6875rem] font-normal sm:max-w-64"
+            className="bidi-text text-muted-foreground truncate text-[0.6875rem] font-normal"
           >
             {onlyNamedEdition.label}
           </span>
