@@ -211,14 +211,19 @@ func applyEpisodeBrowseMetadata(resp *itemListResponse, meta episodeBrowseMetada
 	}
 	resp.PosterIsEpisodeStill = new(meta.StillPath != "" && resp.posterPath == meta.StillPath)
 	resp.BackdropIsEpisodeStill = new(meta.StillPath != "" && resp.backdropPath == meta.StillPath)
-	resp.SeriesID = meta.SeriesID
-	resp.SeriesTitle = meta.SeriesTitle
-	resp.SeasonNumber = meta.SeasonNumber
-	resp.EpisodeNumber = meta.EpisodeNumber
+	setEpisodeCardIdentity(resp, meta)
 	resp.EpisodeLabels = meta.EpisodeLabels
 	if meta.EpisodeLabels != "" {
 		resp.AirDate = meta.AirDate
 	}
+}
+
+// setEpisodeCardIdentity names an episode card's series and its numbers.
+func setEpisodeCardIdentity(resp *itemListResponse, meta episodeBrowseMetadata) {
+	resp.SeriesID = meta.SeriesID
+	resp.SeriesTitle = meta.SeriesTitle
+	resp.SeasonNumber = meta.SeasonNumber
+	resp.EpisodeNumber = meta.EpisodeNumber
 }
 
 type groupedCatalogEntry struct {

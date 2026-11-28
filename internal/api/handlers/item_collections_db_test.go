@@ -329,6 +329,71 @@ func TestItemCollectionsPreviewLibraryDB(t *testing.T) {
 	}
 }
 
+// TestLibraryCollectionEpisodeCardsNameTheirSeriesDB pins that an episode
+// card on a smart collection's page names its series and carries its
+// numbers, as browse does, so a client labels it "Series · S2:E3" rather than
+// the bare episode title.
+func TestLibraryCollectionEpisodeCardsNameTheirSeriesDB(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := t.Context()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	prefix := fmt.Sprintf("collection-episode-cards-%d", time.Now().UnixNano())
+	series, episode := prefix+"-series", prefix+"-s2e3"
+	var tv int
+	if err := pool.QueryRow(ctx, `INSERT INTO media_folders(type,name,enabled) VALUES('series',$1,true) RETURNING id`, prefix).Scan(&tv); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		cleanup := context.Background()
+		_, _ = pool.Exec(cleanup, `DELETE FROM library_collections WHERE slug = $1`, prefix)
+		_, _ = pool.Exec(cleanup, `DELETE FROM episodes WHERE content_id = $1`, episode)
+		_, _ = pool.Exec(cleanup, `DELETE FROM media_items WHERE content_id = $1`, series)
+		_, _ = pool.Exec(cleanup, `DELETE FROM media_folders WHERE id = $1`, tv)
+	})
+	for _, q := range []struct {
+		sql  string
+		args []any
+	}{
+		{`INSERT INTO media_items(content_id,type,title) VALUES($1,'series','The Series')`, []any{series}},
+		{`INSERT INTO media_item_libraries(content_id,media_folder_id) VALUES($1,$2)`, []any{series, tv}},
+		{`INSERT INTO episodes(content_id,series_id,season_number,episode_number,title) VALUES($1,$2,2,3,$3)`, []any{episode, series, prefix + " Pilot"}},
+		{`INSERT INTO episode_libraries(episode_id,media_folder_id) VALUES($1,$2)`, []any{episode, tv}},
+	} {
+		if _, err := pool.Exec(ctx, q.sql, q.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	query := fmt.Sprintf(`{"media_scope":"episode","match":"all","groups":[{"match":"all","rules":[{"field":"title","op":"contains","value":%q}]}],"sort":{"field":"title","order":"asc"}}`, prefix)
+	repo := catalog.NewLibraryCollectionRepository(pool)
+	c, err := repo.Create(ctx, catalog.CreateLibraryCollectionInput{LibraryID: tv, LibraryIDs: []int{tv}, Slug: prefix, Title: "Episodes",
+		CollectionType: "smart", Visibility: "visible", QueryDefinition: json.RawMessage(query)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := NewLibraryCollectionHandler(repo, nil, catalog.NewItemRepository(pool), nil)
+	h.FolderRepo = catalog.NewFolderRepository(pool)
+	h.Executor = &catalog.QueryExecutor{Pool: pool}
+	h.EpisodeRepo = catalog.NewEpisodeRepository(pool)
+
+	page, err := h.LibraryCollectionItemsPage(ctx, tv, c.ID, catalog.AccessFilter{}, userstore.CollectionItemsPageOptions{Limit: 10}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 || page.Items[0].ContentID != episode {
+		t.Fatalf("cards = %+v, want the one episode", page.Items)
+	}
+	if got, want := episodeCardContextOf(page.Items[0]), series+" The Series S2E3"; got != want {
+		t.Errorf("episode card context = %q, want %q", got, want)
+	}
+}
+
 func cardIDs(v ItemCollectionsView) []string {
 	var ids []string
 	for _, card := range v.Cards {

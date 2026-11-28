@@ -855,7 +855,21 @@ func (h *ItemsHandler) listEpisodeBrowseMetadata(
 	ctx context.Context,
 	items []*models.MediaItem,
 ) map[string]episodeBrowseMetadata {
-	if h == nil || h.episodeRepo == nil {
+	if h == nil {
+		return map[string]episodeBrowseMetadata{}
+	}
+	return listEpisodeCardMetadata(ctx, h.episodeRepo, items)
+}
+
+// listEpisodeCardMetadata loads what the episode cards among items need
+// beyond their catalog row, in one query, keyed by episode content ID. Other
+// types are not looked up; a nil repo or a failed read answers an empty map.
+func listEpisodeCardMetadata(
+	ctx context.Context,
+	episodeRepo *catalog.EpisodeRepository,
+	items []*models.MediaItem,
+) map[string]episodeBrowseMetadata {
+	if episodeRepo == nil {
 		return map[string]episodeBrowseMetadata{}
 	}
 
@@ -870,7 +884,7 @@ func (h *ItemsHandler) listEpisodeBrowseMetadata(
 		return map[string]episodeBrowseMetadata{}
 	}
 
-	contexts, err := h.episodeRepo.ListCardContexts(ctx, episodeIDs)
+	contexts, err := episodeRepo.ListCardContexts(ctx, episodeIDs)
 	if err != nil || len(contexts) == 0 {
 		return map[string]episodeBrowseMetadata{}
 	}

@@ -176,9 +176,7 @@ func (h *LibraryCollectionHandler) LibraryCollectionItemsPage(ctx context.Contex
 		if revision != witness {
 			return out, collectionPageError(userstore.ErrCollectionChanged)
 		}
-		for _, item := range page.Items {
-			out.Items = append(out.Items, h.itemListResponseOf(ctx, item))
-		}
+		out.Items = append(out.Items, h.itemListResponsesOf(ctx, page.Items)...)
 		h.setListingLogos(ctx, out.Items, page.Items, access)
 		out.Revision = witness
 		out.HasMore = page.HasMore
@@ -202,8 +200,8 @@ func (h *LibraryCollectionHandler) LibraryCollectionItemsPage(ctx context.Contex
 		return out, collectionPageError(err)
 	}
 	byID := make(map[string]CollectionItemView, len(items))
-	for _, i := range items {
-		byID[i.ContentID] = h.itemListResponseOf(ctx, i)
+	for _, card := range h.itemListResponsesOf(ctx, items) {
+		byID[card.ContentID] = card
 	}
 	for _, id := range ids {
 		if v, ok := byID[id]; ok {
