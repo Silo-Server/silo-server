@@ -383,6 +383,7 @@ it("sends one delete for the mirrored intro skip pair in a reset-all", async () 
 // with the addressed row only, so the cached list must add the other half too.
 it.each([
   ["Skip intros, from no override", "playback.intro_skip_mode", "always", [], "true"],
+  ["Skip intros set to never", "playback.intro_skip_mode", "never", [], "false"],
   [
     "the old switch, over an existing pair",
     "playback.auto_skip_intro",
