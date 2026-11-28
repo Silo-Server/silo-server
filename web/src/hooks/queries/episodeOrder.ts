@@ -69,6 +69,8 @@ export function useSaveEpisodeOrder(contentId: string) {
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: ["episode-order", contentId] });
       void queryClient.invalidateQueries({ queryKey: ["episode-order-preview", contentId] });
+      // Cached arrangements carry the revision this save moves past.
+      void queryClient.invalidateQueries({ queryKey: ["custom-seasons", contentId] });
     },
   });
 }

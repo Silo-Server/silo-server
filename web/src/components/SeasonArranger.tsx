@@ -355,6 +355,8 @@ export function SeasonArranger({
   return (
     <div
       aria-busy={busy}
+      // Keyboard too: a save now would store the arrangement being replaced.
+      inert={busy}
       className={cn(
         "motion-safe:animate-in motion-safe:fade-in-0 flex min-h-0 flex-1 flex-col transition-opacity motion-safe:duration-200",
         hidden && "hidden",

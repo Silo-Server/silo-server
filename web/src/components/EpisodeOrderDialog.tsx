@@ -31,16 +31,14 @@ import {
   useEpisodeOrderPreview,
   useSaveEpisodeOrder,
   type EpisodeOrderChoice,
-  type EpisodeOrderState,
 } from "@/hooks/queries/episodeOrder";
 import { useT } from "@/i18n";
 import { asProvider, type Provider } from "@/lib/episodeOrder";
 
-function draftOf(state: EpisodeOrderState): Draft {
-  const { choice } = state;
+function draftOf(choice: EpisodeOrderChoice, libraryProvider: Provider): Draft {
   const source: Source =
     choice.provider === "tvdb" || choice.provider === "tmdb" ? choice.provider : "library";
-  const structure = source === "library" ? asProvider(state.library_provider) : source;
+  const structure = source === "library" ? libraryProvider : source;
   return {
     source,
     orderId: choice.order_id,
@@ -97,9 +95,9 @@ function Editor({
   const stateQuery = useEpisodeOrder(contentId, true, true);
   const state = stateQuery.data;
   const [edited, setEdited] = useState<Draft | null>(null);
-  const saved = state ? draftOf(state) : null;
-  const draft = edited ?? saved;
   const libraryProvider = asProvider(state?.library_provider);
+  const saved = state ? draftOf(state.choice, libraryProvider) : null;
+  const draft = edited ?? saved;
   const choice = draft ? choiceOf(draft, libraryProvider) : undefined;
   const savedChoice = saved ? choiceOf(saved, libraryProvider) : undefined;
   const custom = draft?.layout === "custom";
@@ -109,7 +107,11 @@ function Editor({
   // back and forth keeps them.
   const [arrangerEdited, setArrangerEdited] = useState(false);
   const [confirm, setConfirm] = useState<
-    { kind: "draft"; next: Draft } | { kind: "startOver" } | { kind: "close" } | null
+    | { kind: "draft"; next: Draft }
+    | { kind: "startOver" }
+    | { kind: "close" }
+    | { kind: "apply" }
+    | null
   >(null);
   const [restarts, setRestarts] = useState(0);
 
@@ -123,14 +125,16 @@ function Editor({
   // The stored arrangement opens when it was made from the chosen order;
   // another order, or a start over, builds a fresh one from its seasons.
   const arrangerOn = custom || arrangerEdited;
-  // Both load while the dialog is open, so switching to Custom shows them at
-  // once; the fresh one is the same query the read-only layouts show.
+  // Both load while the dialog is open, so switching layouts shows them at
+  // once: the stored arrangement, and the chosen order's own seasons, which
+  // the read-only layouts show and a fresh arrangement starts from.
   const stored = useCustomSeasons(contentId, true, null);
-  const startFrom: EpisodeOrderChoice | null =
-    choice && stored.data && (restarts > 0 || !sameBase(stored.data.choice, choice))
-      ? { ...choice, layout: "custom" }
+  const orderBase: EpisodeOrderChoice | null = choice ? { ...choice, layout: "custom" } : null;
+  const fresh = useCustomSeasons(contentId, orderBase !== null, orderBase);
+  const startFrom =
+    stored.data && (restarts > 0 || !sameBase(stored.data.choice, orderBase ?? stored.data.choice))
+      ? orderBase
       : null;
-  const fresh = useCustomSeasons(contentId, startFrom !== null, startFrom);
   const arrangement = startFrom ? fresh.data : stored.data;
   const arrangementFailed = stored.isError || fresh.isError;
   // The arranger keeps showing the last arrangement, dimmed, while the next
@@ -146,7 +150,11 @@ function Editor({
 
   function update(patch: Partial<Draft>) {
     if (!draft) return;
-    const next = { ...draft, ...patch };
+    let next = { ...draft, ...patch };
+    // Switching to Custom reopens a saved arrangement on the order it was
+    // made from; changing Based on afterwards starts over.
+    if (patch.layout === "custom" && draft.layout !== "custom" && stored.data?.saved)
+      next = { ...draftOf(stored.data.choice, libraryProvider), layout: "custom" };
     const baseChanged = !!choice && !sameBase(choiceOf(next, libraryProvider), choice);
     if (arrangerEdited && baseChanged) setConfirm({ kind: "draft", next });
     else setEdited(next);
@@ -160,6 +168,12 @@ function Editor({
   function requestClose() {
     if (arrangerEdited) setConfirm({ kind: "close" });
     else onClose();
+  }
+
+  // Applying a read-only layout drops arranger edits kept behind it.
+  function requestApply() {
+    if (arrangerEdited) setConfirm({ kind: "apply" });
+    else apply();
   }
 
   const changed = !!choice && JSON.stringify(choice) !== JSON.stringify(savedChoice);
@@ -292,7 +306,7 @@ function Editor({
               <Button variant="ghost" onClick={requestClose}>
                 {t("common.cancel")}
               </Button>
-              <Button disabled={!changed || save.isPending} onClick={apply}>
+              <Button disabled={!changed || save.isPending} onClick={requestApply}>
                 {save.isPending && <Loader2 className="size-4 animate-spin" aria-hidden="true" />}
                 {t("web.item.episodeOrder.apply")}
               </Button>
@@ -316,6 +330,7 @@ function Editor({
             const pending = confirm;
             setConfirm(null);
             if (pending?.kind === "close") onClose();
+            else if (pending?.kind === "apply") apply();
             else if (pending?.kind === "startOver") startOver();
             else if (pending?.kind === "draft") {
               setArrangerEdited(false);

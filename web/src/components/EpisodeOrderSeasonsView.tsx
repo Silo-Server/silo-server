@@ -207,6 +207,7 @@ export function EpisodeOrderSeasonsView({
       <div
         ref={bodyRef}
         aria-busy={switching}
+        inert={switching}
         className={cn(
           "flex max-h-[70vh] min-h-0 flex-1 flex-col overflow-y-auto transition-opacity md:max-h-none md:flex-row md:overflow-hidden",
           switching && "pointer-events-none opacity-50",
@@ -270,7 +271,15 @@ export function EpisodeOrderSeasonsView({
                   const episode = shown.episodes[i];
                   return episode ? (
                     <div className="border-border/40 flex items-center gap-3 border-b px-3 py-2">
-                      <EpisodeSummary episode={episode} provider={provider} number={i + 1} />
+                      <EpisodeSummary
+                        episode={episode}
+                        provider={provider}
+                        // Seasons and Specials keep the order's numbers;
+                        // Absolute counts its one season from 1.
+                        number={
+                          absolute && shown.number !== 0 ? i + 1 : episode.provider_episode || i + 1
+                        }
+                      />
                     </div>
                   ) : null;
                 }}
