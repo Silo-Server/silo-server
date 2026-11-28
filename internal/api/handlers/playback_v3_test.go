@@ -5392,7 +5392,10 @@ func TestTranscodeTimelineStartsATailResumeAtTheLastVideoSegment(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0))
 			var probed []float64
-			handler.transcodeStart = func(_ context.Context, _ string, _ string, requested, _ float64, _ int) (float64, error) {
+			handler.transcodeStart = func(_ context.Context, _ string, _ string, requested, duration float64, _ int) (float64, error) {
+				if duration != 30 {
+					t.Errorf("probe duration = %v, want the stored 30", duration)
+				}
 				probed = append(probed, requested)
 				return tc.resolved, tc.probeErr
 			}

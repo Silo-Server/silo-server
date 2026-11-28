@@ -18,16 +18,17 @@ import (
 var transcodeStartProbeSlots = make(chan struct{}, maxConcurrentCopySeekProbes)
 
 // transcodeStartProbeBacksteps are how far before the end of the file the
-// probe looks again when its first seek finds no video packet. MPEG-TS seeks
-// forward, to the first keyframe at or after the target, so a seek to the end
-// lands past the last keyframe; and a tail longer than the first step leaves
-// that step past the video too. Each step bounds what a probe reads.
+// probe looks again when the packets after its first seek hold no video
+// keyframe. MPEG-TS seeks forward, to the first packet at or after the
+// target, so a seek to the end lands past the last keyframe; and a tail
+// longer than a step leaves that step past the video too. Each step bounds
+// how much of the file a probe reads.
 var transcodeStartProbeBacksteps = []float64{10, 60, 300}
 
 // ResolveTranscodeStart returns where an encoded transcode asked to start at
 // requestedSeconds should start. That is requestedSeconds itself, unless its
-// segment begins after the file's last video frame. In that case it is the
-// start of the segment holding that frame.
+// segment begins after the file's last video keyframe. In that case it is
+// the start of the segment holding that keyframe.
 //
 // A stored duration can run past the video: a subtitle track or a bad
 // duration tag stretches the container. The synthetic playlist lists segments
@@ -35,15 +36,17 @@ var transcodeStartProbeBacksteps = []float64{10, 60, 300}
 // the tail. FFmpeg started there writes a segment with no media, and a player
 // whose first segment has no samples cannot prepare (ExoPlayer stops with a
 // parser error). A session that reaches the tail from earlier media ends
-// cleanly instead (see ServePastEndOfStream).
+// cleanly instead (see ServePastEndOfStream). The keyframe, not the last
+// frame, bounds the start: an MPEG-TS input seek goes forward to the next
+// keyframe, so a start after the last one writes no video either.
 //
 // The probe seeks to the end of the file (durationSeconds, or the requested
-// position when it is later) and copies the video packets from the keyframe
-// it lands on, so it reads only the last group of pictures wherever playback
-// starts. When that finds no video packet it looks again from earlier
-// (transcodeStartProbeBacksteps). A probe that finds none returns
-// requestedSeconds, and so does a file with no known duration, whose probe
-// would read from the requested position to the end.
+// position when it is later) and lists the video packets from there, so it
+// reads only the end of the file wherever playback starts. When those hold no
+// keyframe it looks again from transcodeStartProbeBacksteps before that
+// position. A probe that finds none returns requestedSeconds, and so does a
+// file with no known duration, whose probe would read from the requested
+// position to the end.
 func ResolveTranscodeStart(
 	ctx context.Context,
 	ffmpegPath string,
@@ -61,13 +64,13 @@ func ResolveTranscodeStart(
 	if segmentDuration <= 0 {
 		segmentDuration = DefaultSegmentDuration
 	}
-	resolvedFFmpegPath := ResolveFFmpegPath(ffmpegPath)
-	probeAt := math.Max(requestedSeconds, durationSeconds)
+	ffprobePath := ffprobePathFromFFmpeg(ResolveFFmpegPath(ffmpegPath))
+	end := math.Max(requestedSeconds, durationSeconds)
 	key := strings.Join([]string{
 		"transcode-start",
-		resolvedFFmpegPath,
+		ffprobePath,
 		inputPath,
-		strconv.FormatFloat(probeAt, 'f', 6, 64),
+		strconv.FormatFloat(end, 'f', 6, 64),
 	}, "\x00")
 	resultCh := copySeekProbeGroup.DoChan(key, func() (any, error) {
 		probeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), copySeekProbeTimeout)
@@ -76,20 +79,21 @@ func ResolveTranscodeStart(
 		case transcodeStartProbeSlots <- struct{}{}:
 			defer func() { <-transcodeStartProbeSlots }()
 		case <-probeCtx.Done():
-			return lastVideoFrame{}, probeCtx.Err()
+			return lastVideoKeyframe{}, probeCtx.Err()
 		}
-		last, err := probeLastVideoFrame(probeCtx, resolvedFFmpegPath, inputPath, probeAt)
+		seek := end
+		last, err := probeLastVideoKeyframe(probeCtx, ffprobePath, inputPath, seek)
 		for _, step := range transcodeStartProbeBacksteps {
-			if err != nil || last.found || probeAt <= 0 {
+			if err != nil || last.found || seek <= 0 {
 				break
 			}
-			probeAt = math.Max(0, probeAt-step)
-			last, err = probeLastVideoFrame(probeCtx, resolvedFFmpegPath, inputPath, probeAt)
+			seek = math.Max(0, end-step)
+			last, err = probeLastVideoKeyframe(probeCtx, ffprobePath, inputPath, seek)
 		}
 		return last, err
 	})
 
-	var last lastVideoFrame
+	var last lastVideoKeyframe
 	select {
 	case <-ctx.Done():
 		return requestedSeconds, ctx.Err()
@@ -97,7 +101,7 @@ func ResolveTranscodeStart(
 		if result.Err != nil {
 			return requestedSeconds, result.Err
 		}
-		last = result.Val.(lastVideoFrame) //nolint:errcheck,forcetypeassert // the "transcode-start" DoChan closure returns a lastVideoFrame
+		last = result.Val.(lastVideoKeyframe) //nolint:errcheck,forcetypeassert // the "transcode-start" DoChan closure returns a lastVideoKeyframe
 	}
 	if !last.found {
 		return requestedSeconds, nil
@@ -109,31 +113,25 @@ func ResolveTranscodeStart(
 	return float64(lastSegment * segmentDuration), nil
 }
 
-// lastVideoFrame is the presentation time of a file's last video frame.
-type lastVideoFrame struct {
+// lastVideoKeyframe is when a file's last video keyframe is presented,
+// relative to the start of the file.
+type lastVideoKeyframe struct {
 	seconds float64
 	found   bool
 }
 
-// probeLastVideoFrame copies the first video stream from seekSeconds (FFmpeg
-// lands on the last keyframe at or before it) to the end of the file and
-// returns the latest presentation time among those packets. The flags match
-// ResolveCopySeekAnchor, so the times are relative to the source start.
-func probeLastVideoFrame(ctx context.Context, ffmpegPath, inputPath string, seekSeconds float64) (lastVideoFrame, error) {
-	cmd := fspath.CommandContext(ctx, ffmpegPath,
+// probeLastVideoKeyframe lists the first video stream's packets from
+// seekSeconds to the end of the file and returns the latest keyframe among
+// them, relative to the file's start time: the timeline a transcode's -ss and
+// segment numbers use.
+func probeLastVideoKeyframe(ctx context.Context, ffprobePath, inputPath string, seekSeconds float64) (lastVideoKeyframe, error) {
+	cmd := fspath.CommandContext(ctx, ffprobePath,
 		"-v", "error",
-		"-fflags", "+genpts+fastseek",
-		"-analyzeduration", "3000000",
-		"-probesize", "5000000",
-		"-ss", fmt.Sprintf("%.3f", seekSeconds),
-		"-i", inputPath,
-		"-map", "0:V:0",
-		"-c:v", "copy",
-		"-copyts",
-		"-start_at_zero",
-		"-avoid_negative_ts", "disabled",
-		"-f", "framecrc",
-		"-",
+		"-select_streams", "V:0",
+		"-read_intervals", fmt.Sprintf("%.3f%%", seekSeconds),
+		"-show_entries", "packet=pts_time,flags:format=start_time",
+		"-of", "csv=p=0",
+		inputPath,
 	)
 	var stdout bytes.Buffer
 	stderr := newBoundedTailBuffer(stderrTailMaxBytes)
@@ -141,36 +139,34 @@ func probeLastVideoFrame(ctx context.Context, ffmpegPath, inputPath string, seek
 	cmd.Stderr = stderr
 	if err := cmd.Run(); err != nil {
 		if tail := truncateStderr(stderr.String()); tail != "" {
-			return lastVideoFrame{}, fmt.Errorf("probe last video frame: ffmpeg failed: %w (stderr: %s)", err, tail)
+			return lastVideoKeyframe{}, fmt.Errorf("probe last video keyframe: ffprobe failed: %w (stderr: %s)", err, tail)
 		}
-		return lastVideoFrame{}, fmt.Errorf("probe last video frame: ffmpeg failed: %w", err)
+		return lastVideoKeyframe{}, fmt.Errorf("probe last video keyframe: ffprobe failed: %w", err)
 	}
-	seconds, ok := lastFramecrcTimestamp(stdout.Bytes())
-	return lastVideoFrame{seconds: seconds, found: ok}, nil
+	return lastKeyframeInPacketList(stdout.Bytes()), nil
 }
 
-// lastFramecrcTimestamp returns the latest presentation time, in seconds,
-// among the stream-0 packets a framecrc report lists (a packet's decode time
-// when it has none). Packets come in decode order, so the latest is not
-// necessarily the last line.
-func lastFramecrcTimestamp(report []byte) (float64, bool) {
-	latest, found := 0.0, false
-	// firstFramecrcTimestamp reads a packet line against the time base line
-	// before it, so each packet is passed with the report's time base.
-	timeBase := ""
+// lastKeyframeInPacketList reads ffprobe's csv packet list: "pts_time,flags"
+// for each packet, and a line holding only the format's start_time.
+func lastKeyframeInPacketList(report []byte) lastVideoKeyframe {
+	var last lastVideoKeyframe
+	startTime := 0.0
 	for line := range bytes.SplitSeq(report, []byte("\n")) {
-		trimmed := strings.TrimSpace(string(line))
-		if strings.HasPrefix(trimmed, "#tb 0:") {
-			timeBase = trimmed
+		fields := strings.Split(strings.TrimSpace(string(line)), ",")
+		seconds, err := strconv.ParseFloat(fields[0], 64)
+		if err != nil || math.IsNaN(seconds) || math.IsInf(seconds, 0) {
 			continue
 		}
-		if timeBase == "" || trimmed == "" || strings.HasPrefix(trimmed, "#") {
+		if len(fields) == 1 {
+			startTime = seconds
 			continue
 		}
-		seconds, ok := firstFramecrcTimestamp([]byte(timeBase + "\n" + trimmed))
-		if ok && (!found || seconds > latest) {
-			latest, found = seconds, true
+		if strings.Contains(fields[1], "K") && (!last.found || seconds > last.seconds) {
+			last = lastVideoKeyframe{seconds: seconds, found: true}
 		}
 	}
-	return latest, found
+	if last.found {
+		last.seconds -= startTime
+	}
+	return last
 }

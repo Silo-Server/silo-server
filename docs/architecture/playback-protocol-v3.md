@@ -1153,10 +1153,12 @@ writes nothing, and the request answers the same segment.
 A native encoded transcode that starts or reanchors in the tail would give the
 player only such segments, and a player whose first segment holds no media
 cannot prepare. So before the plan is returned, a start past zero probes the
-file's last video frame (`playback.ResolveTranscodeStart`): FFmpeg copies the
-video packets from a seek to the stored duration, and from up to 300 s earlier
-when that finds none, since MPEG-TS seeks forward. When the start's segment
-begins after that frame, the plan starts at the segment that holds it, and
+file's last video keyframe (`playback.ResolveTranscodeStart`): ffprobe lists
+the video packets from a seek to the later of the stored duration and the
+requested start, and when those hold no keyframe, from 10, 60 and then 300 s
+before that point, since MPEG-TS seeks forward. When the start's segment
+begins after that keyframe, the plan starts at the segment that holds it (an
+MPEG-TS transcode started after the last keyframe writes no video), and
 playback ends at the end of the video as above. A probe that fails, finds no
 video, or has no stored duration to seek to keeps the requested start. The
 Jellyfin-compatible start path does not probe. A crash, a kill, a

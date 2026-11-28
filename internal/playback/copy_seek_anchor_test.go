@@ -204,9 +204,11 @@ func TestResolveCopySeekAnchorMatchesRealLongGOPHEVC(t *testing.T) {
 }
 
 // A file whose stored duration outlasts its video and audio (#5127) starts an
-// encoded transcode inside that tail at the last segment that holds video,
-// and anywhere else where it was asked to. Matroska seeks back to the last
-// keyframe; MPEG-TS seeks forward, past it.
+// encoded transcode inside that tail at the segment that holds its last video
+// keyframe, and anywhere else where it was asked to. Matroska seeks back to
+// the last keyframe; MPEG-TS seeks forward, past it, so its probe looks again
+// from earlier, and its transcode would write no video from a segment after
+// that keyframe (here at 16 s of 19 s of video).
 func TestResolveTranscodeStartMovesATailStartToTheLastVideoSegment(t *testing.T) {
 	if testing.Short() {
 		t.Skip("real FFmpeg integration test")
@@ -215,6 +217,9 @@ func TestResolveTranscodeStartMovesATailStartToTheLastVideoSegment(t *testing.T)
 	if err != nil {
 		t.Skip("ffmpeg is not installed")
 	}
+	if _, err := exec.LookPath(ffprobePathFromFFmpeg(ffmpegPath)); err != nil {
+		t.Skip("ffprobe is not installed beside ffmpeg")
+	}
 	dir := t.TempDir()
 	subtitlePath := filepath.Join(dir, "tail.srt")
 	if err := os.WriteFile(subtitlePath, []byte("1\n00:00:28,000 --> 00:00:30,000\nend credits\n"), 0o644); err != nil {
@@ -222,11 +227,11 @@ func TestResolveTranscodeStartMovesATailStartToTheLastVideoSegment(t *testing.T)
 	}
 	encodeCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	encode := func(path string, extra ...string) {
+	encode := func(path, seconds string, extra ...string) {
 		args := append([]string{
 			"-hide_banner", "-loglevel", "error",
-			"-f", "lavfi", "-i", "testsrc2=size=320x180:rate=24:duration=20",
-			"-f", "lavfi", "-i", "sine=frequency=440:duration=20",
+			"-f", "lavfi", "-i", "testsrc2=size=320x180:rate=24:duration=" + seconds,
+			"-f", "lavfi", "-i", "sine=frequency=440:duration=" + seconds,
 		}, extra...)
 		args = append(args, "-c:v", "mpeg2video", "-c:a", "mp2", "-y", path)
 		if output, err := exec.CommandContext(encodeCtx, ffmpegPath, args...).CombinedOutput(); err != nil {
@@ -234,23 +239,24 @@ func TestResolveTranscodeStartMovesATailStartToTheLastVideoSegment(t *testing.T)
 		}
 	}
 	mkvPath := filepath.Join(dir, "tail.mkv")
-	encode(mkvPath, "-i", subtitlePath, "-map", "0:v", "-map", "1:a", "-map", "2:s", "-c:s", "srt")
+	encode(mkvPath, "20", "-i", subtitlePath, "-map", "0:v", "-map", "1:a", "-map", "2:s", "-c:s", "srt")
 	tsPath := filepath.Join(dir, "tail.ts")
-	encode(tsPath)
+	encode(tsPath, "19", "-g", "96")
 
 	for _, tc := range []struct {
 		name      string
 		path      string
 		requested float64
+		duration  float64
 		want      float64
 	}{
-		{name: "mkv inside the tail", path: mkvPath, requested: 24, want: 18},
-		{name: "mkv inside the last video segment", path: mkvPath, requested: 19, want: 19},
-		{name: "mkv mid-file", path: mkvPath, requested: 10, want: 10},
-		{name: "mpegts inside the tail", path: tsPath, requested: 24, want: 18},
+		{name: "mkv inside the tail", path: mkvPath, requested: 24, duration: 30, want: 18},
+		{name: "mkv inside the last video segment", path: mkvPath, requested: 19, duration: 30, want: 19},
+		{name: "mkv mid-file", path: mkvPath, requested: 10, duration: 30, want: 10},
+		{name: "mpegts inside the tail", path: tsPath, requested: 22, duration: 25, want: 16},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := ResolveTranscodeStart(context.Background(), ffmpegPath, tc.path, tc.requested, 30, 2)
+			got, err := ResolveTranscodeStart(context.Background(), ffmpegPath, tc.path, tc.requested, tc.duration, 2)
 			if err != nil {
 				t.Fatalf("ResolveTranscodeStart: %v", err)
 			}
