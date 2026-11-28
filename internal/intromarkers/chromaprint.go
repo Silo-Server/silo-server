@@ -42,7 +42,7 @@ func (e *ChromaprintExtractor) Preflight(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	return caps.Require(mediasample.Request{Audio: &mediasample.AudioOutput{Fingerprint: true}})
+	return caps.Require(mediasample.Request{Audio: &mediasample.AudioOutput{Fingerprint: true, Silence: headSilenceParams()}})
 }
 
 // Extract fingerprints the candidate's opening audio for intro detection.
