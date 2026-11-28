@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useDashboardInsightsActivity } from "@/hooks/queries/admin/insights";
-import { useAdminStats } from "@/hooks/queries/admin/stats";
+import { adminStatsKey, useAdminStats } from "@/hooks/queries/admin/stats";
 import AdminDashboard from "./AdminDashboard";
 
 const mocks = vi.hoisted(() => ({ request: vi.fn(), withInsightsWidget: false }));
@@ -141,6 +141,90 @@ describe("AdminDashboard refresh ordering", () => {
       expect(tile.textContent).toBe("222");
     },
   );
+
+  function statsTransport() {
+    const ordinary: Deferred[] = [];
+    const refreshes: Deferred[] = [];
+    mocks.request.mockImplementation(
+      (operation: string, args: { query?: { refresh?: boolean } }) => {
+        if (operation !== "GET /api/v2/admin/stats") throw new Error(`unexpected ${operation}`);
+        const response = deferred<{ total_movies: number }>();
+        (args.query?.refresh ? refreshes : ordinary).push(response);
+        return response.promise;
+      },
+    );
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <AdminDashboard />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    // A realtime event invalidates the stats query, which starts its own read.
+    const realtimeEvent = () =>
+      act(async () => {
+        void queryClient.invalidateQueries({
+          queryKey: adminStatsKey(profileContext),
+          exact: true,
+        });
+      });
+    const settle = () => act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+    return { ordinary, refreshes, realtimeEvent, settle };
+  }
+
+  // The ordinary read is answered from the server's stats cache. When it
+  // answers after a refresh, its older numbers must not replace the refreshed
+  // ones (#5246). The stats are read again after the refresh instead, so the
+  // event that started the read still reaches the tiles.
+  it("keeps a refresh's stats when an earlier ordinary read answers after it", async () => {
+    const { ordinary, refreshes, realtimeEvent, settle } = statsTransport();
+    await vi.waitFor(() => expect(ordinary).toHaveLength(1));
+    await act(async () => ordinary[0]!.resolve({ total_movies: 1 }));
+    const tile = await screen.findByText("1");
+
+    await realtimeEvent();
+    await vi.waitFor(() => expect(ordinary).toHaveLength(2));
+
+    fireEvent.click(await screen.findByRole("button", { name: /^refresh$/i }));
+    await vi.waitFor(() => expect(refreshes).toHaveLength(1));
+    await act(async () => refreshes[0]!.resolve({ total_movies: 222 }));
+    await vi.waitFor(() => expect(tile.textContent).toBe("222"));
+
+    await act(async () => ordinary[1]!.resolve({ total_movies: 111 }));
+    await settle();
+    expect(tile.textContent).toBe("222");
+
+    await vi.waitFor(() => expect(ordinary).toHaveLength(3));
+    await act(async () => ordinary[2]!.resolve({ total_movies: 333 }));
+    await vi.waitFor(() => expect(tile.textContent).toBe("333"));
+  });
+
+  // An older refresh that answers after a newer one has written is dropped.
+  // It must not cancel a read that started after the newer refresh, either.
+  it("lets a superseded refresh leave a later ordinary read alone", async () => {
+    const { ordinary, refreshes, realtimeEvent, settle } = statsTransport();
+    await vi.waitFor(() => expect(ordinary).toHaveLength(1));
+    await act(async () => ordinary[0]!.resolve({ total_movies: 1 }));
+    const tile = await screen.findByText("1");
+
+    // The automatic refresh starts, then the admin presses Refresh.
+    await act(async () => {
+      vi.advanceTimersByTime(60_000);
+    });
+    fireEvent.click(await screen.findByRole("button", { name: /^refresh$/i }));
+    await vi.waitFor(() => expect(refreshes).toHaveLength(2));
+    const [older, newer] = refreshes as [Deferred, Deferred];
+    await act(async () => newer.resolve({ total_movies: 222 }));
+    await vi.waitFor(() => expect(tile.textContent).toBe("222"));
+
+    await realtimeEvent();
+    await vi.waitFor(() => expect(ordinary).toHaveLength(2));
+    await act(async () => older.resolve({ total_movies: 111 }));
+    await settle();
+    await act(async () => ordinary[1]!.resolve({ total_movies: 333 }));
+    await vi.waitFor(() => expect(tile.textContent).toBe("333"));
+  });
 
   // The server serves its cached Insights while it refreshes them in the
   // background; a refresh the admin asked for must ask it for fresh data.

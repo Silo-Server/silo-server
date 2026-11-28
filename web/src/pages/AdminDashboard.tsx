@@ -168,10 +168,28 @@ export default function AdminDashboard() {
             : []),
         ]);
         const nextStats = await fetchAdminStats({ refresh: true, profileContext });
-        if (!isCapturedProfileAuthorityActive(profileContext)) return;
-        if (sequence < order.applied) return;
+        const statsKey = adminStatsKey(profileContext);
+        // A refresh that won't write touches nothing, not even another read.
+        const superseded = () =>
+          !isCapturedProfileAuthorityActive(profileContext) || sequence < order.applied;
+        if (superseded()) return;
+        // setQueryData doesn't stop the stats query's own read. One still in
+        // flight (after a realtime event, say) may have been answered from the
+        // server's older cached stats, and would put them back over these. It
+        // is cancelled, and read again once these are written, so an event
+        // that started it isn't lost.
+        const readInFlight = queryClient.getQueryState(statsKey)?.fetchStatus === "fetching";
+        if (readInFlight) await queryClient.cancelQueries({ queryKey: statsKey, exact: true });
+        const readAgain = () => {
+          if (readInFlight) void queryClient.invalidateQueries({ queryKey: statsKey, exact: true });
+        };
+        if (superseded()) {
+          readAgain();
+          return;
+        }
         order.applied = sequence;
-        queryClient.setQueryData(adminStatsKey(profileContext), nextStats);
+        queryClient.setQueryData(statsKey, nextStats);
+        readAgain();
         await Promise.all([refetchSessions(), refetchLibraries(), refetchUsers()]);
         const refreshedAt = Date.now();
         setLastDashboardUpdatedAt(refreshedAt);
