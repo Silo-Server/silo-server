@@ -378,3 +378,90 @@ it("sends one delete for the mirrored intro skip pair in a reset-all", async () 
   expect(deleted).toEqual(["playback.intro_skip_mode", "playback.subtitle_appearance"]);
   await waitFor(() => expect(result.current.stored.data).toEqual([]));
 });
+
+// The server writes both halves of a mirrored pair in one save, but answers
+// with the addressed row only, so the cached list must add the other half too.
+it.each([
+  ["Skip intros, from no override", "playback.intro_skip_mode", "always", [], "true"],
+  ["Skip intros set to never", "playback.intro_skip_mode", "never", [], "false"],
+  [
+    "the old switch, over an existing pair",
+    "playback.auto_skip_intro",
+    "false",
+    [
+      ["playback.intro_skip_mode", "always"],
+      ["playback.auto_skip_intro", true],
+    ],
+    "ask",
+  ],
+] as const)(
+  "shows the mirrored intro skip row a save writes with it (%s)",
+  async (_case, key, value, stored, mirroredValue) => {
+    const introRow = (rowKey: string, rowValue: unknown, updated_at = "2026-11-22T00:00:00Z") => ({
+      ...row("medium", 1, updated_at),
+      key: rowKey,
+      value: rowValue,
+    });
+    let gets = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input instanceof Request ? input.url : input);
+        const method = init?.method ?? (input instanceof Request ? input.method : "GET");
+        if (method === "PUT") {
+          return json(
+            introRow(
+              key,
+              // The boolean key stores a boolean, not the string the form sends.
+              value === "false" ? false : value,
+              "2026-11-23T00:00:00Z",
+            ),
+          );
+        }
+        if (url.includes("/settings/values")) {
+          gets += 1;
+          // The refetch after the save never answers.
+          return gets === 1
+            ? valuesPage(stored.map(([k, v]) => introRow(k, v)))
+            : new Promise<Response>(() => undefined);
+        }
+        return json({ items: [], page: { has_more: false } });
+      }),
+    );
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      createElement(QueryClientProvider, { client }, children);
+    const { result } = renderHook(
+      () => ({ stored: useAdminUserSettings(1), save: useUpdateAdminUserDeviceSetting() }),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.stored.data).toHaveLength(stored.length));
+
+    await act(() =>
+      result.current.save.mutateAsync({
+        userId: 1,
+        profileId: "profile-a",
+        deviceId: "device-a",
+        key,
+        value,
+      }),
+    );
+
+    const mirror =
+      key === "playback.intro_skip_mode" ? "playback.auto_skip_intro" : "playback.intro_skip_mode";
+    await waitFor(() => expect(result.current.stored.data).toHaveLength(2));
+    expect(result.current.stored.data).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ key, value, updated_at: "2026-11-23T00:00:00Z" }),
+        expect.objectContaining({
+          key: mirror,
+          scope: "profile_device",
+          profile_id: "profile-a",
+          device_id: "device-a",
+          value: mirroredValue,
+          updated_at: "2026-11-23T00:00:00Z",
+        }),
+      ]),
+    );
+  },
+);
