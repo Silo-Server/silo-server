@@ -147,10 +147,11 @@ func (m *TaskManager) claimFiring(ctx context.Context, w *taskWorker, fired Trig
 	return won
 }
 
-// reloadLastResult reads w's latest run from history after another server
-// took its firing. Only local runs update lastResult, so without this a
-// server that keeps losing claims shows the run it loaded at startup as the
-// task's last execution.
+// reloadLastResult reads w's latest run from history, keeping the run w
+// already holds when that one is newer. Startup loads the last result with it,
+// and it runs again after another server took w's firing: only local runs
+// update lastResult, so without this a server that keeps losing claims shows
+// the run it loaded at startup as the task's last execution.
 func (m *TaskManager) reloadLastResult(ctx context.Context, w *taskWorker) {
 	latest, err := m.historyRepo.GetLatest(ctx, w.task.Key())
 	if err != nil || latest == nil {

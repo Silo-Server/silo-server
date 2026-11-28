@@ -145,6 +145,8 @@ func (w *taskWorker) infoLocked() TaskInfo {
 // when it finishes, so an edit cannot spend a startup firing mid-run.
 // Pass lastResult to resume scheduling from the last execution, or nil to
 // start the interval fresh from now (e.g. when the user edits the schedule).
+// A newer local result that wasn't interrupted takes precedence over a
+// non-nil lastResult.
 func (w *taskWorker) setTriggers(configs []TriggerConfig, factory func(TriggerConfig) Trigger, lastResult *ExecutionResult, notify bool) {
 	w.mu.Lock()
 
@@ -158,6 +160,13 @@ func (w *taskWorker) setTriggers(configs []TriggerConfig, factory func(TriggerCo
 	w.schedule = configs
 	if w.isRetired() {
 		configs = nil
+	}
+	// A run that completed after the caller chose lastResult rearmed no
+	// triggers, so count from it instead. An interrupted result stays where
+	// scheduleBase put it.
+	if lastResult != nil && w.lastResult != nil && !w.lastResult.IsInterrupted() &&
+		w.lastResult.CompletedAt.After(lastResult.CompletedAt) {
+		lastResult = w.lastResult
 	}
 	spread := startSpread(w.task)
 	for _, cfg := range configs {
