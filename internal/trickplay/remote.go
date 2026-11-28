@@ -262,7 +262,7 @@ func (e *NodeExtractor) remote(ctx context.Context, node *nodepool.Node, job *Jo
 	limited := io.LimitReader(resp.Body, maxRemoteResultBytes)
 	if resp.StatusCode != http.StatusOK {
 		if nodepool.RefusedAtCapacity(resp) {
-			nodepool.ReportAtCapacity(e.planner, node.URL)
+			nodepool.ReportAtCapacity(e.planner, node.URL, nodepool.RefusedKind(resp))
 		}
 		failure := &ExtractError{Reason: NodeUnavailableReason, Message: fmt.Sprintf("node answered %d", resp.StatusCode)}
 		var payload ExtractError

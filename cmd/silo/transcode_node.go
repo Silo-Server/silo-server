@@ -86,6 +86,9 @@ type transcodeNodeEnv struct {
 	// declaration is the configuration the node declares from its
 	// environment; see nodedeclare.
 	declaration nodepool.UpdateNodeInput
+	// jobCapsByKind caps each kind of work under the declared job cap; see
+	// nodedeclare.JobCapsByKindFromEnv.
+	jobCapsByKind map[nodepool.JobKind]int
 }
 
 // loadTranscodeNodeEnv reads and checks the node's environment. A missing core
@@ -112,6 +115,9 @@ func loadTranscodeNodeEnv(getenv func(string) string) (transcodeNodeEnv, error) 
 	}
 	env.listen = ":" + port
 	if env.declaration, err = nodedeclare.FromEnv(nodepool.NodeTypeTranscode, getenv); err != nil {
+		return transcodeNodeEnv{}, err
+	}
+	if env.jobCapsByKind, err = nodedeclare.JobCapsByKindFromEnv(getenv); err != nil {
 		return transcodeNodeEnv{}, err
 	}
 	for _, name := range transcodeNodeIgnoredEnv {
@@ -210,6 +216,7 @@ func runTranscodeNode() {
 
 	srv := transcodenode.NewServer(remote, tracker)
 	applyDeclaredLimits(srv, env.declaration)
+	srv.SetJobCapsByKind(env.jobCapsByKind)
 	srv.SetNodeKey(env.nodeKey)
 	srv.SetKeyRejected(remote.KeyRejected)
 	srv.SetCore(client)

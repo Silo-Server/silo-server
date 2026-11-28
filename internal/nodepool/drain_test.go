@@ -55,7 +55,7 @@ func TestDrainingNodeTakesNoReservedWork(t *testing.T) {
 		release()
 		t.Fatalf("reserved work on a draining node: %+v", node)
 	}
-	if f.planner.TranscodeWorkAvailableWith(nil) {
+	if f.planner.TranscodeWorkAvailableWith("", nil) {
 		t.Fatal("a draining node reported as available for work")
 	}
 

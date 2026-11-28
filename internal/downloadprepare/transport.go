@@ -55,6 +55,26 @@ var (
 	ErrNodeStorageFull = errors.New("remote download prepare: node's prepared-download directory is at its budget")
 )
 
+// kindAtCapacityError is ErrNodeAtCapacity from a node that named the job
+// kind whose own cap refused the preparation (nodepool.RefusedKind).
+type kindAtCapacityError struct{ kind nodepool.JobKind }
+
+func (e kindAtCapacityError) Error() string {
+	return ErrNodeAtCapacity.Error() + " for " + string(e.kind)
+}
+
+func (kindAtCapacityError) Is(target error) bool { return target == ErrNodeAtCapacity }
+
+// RefusedKind returns the job kind whose own cap refused a preparation that
+// failed with ErrNodeAtCapacity, or "" when the node's job cap did.
+func RefusedKind(err error) nodepool.JobKind {
+	var refusal kindAtCapacityError
+	if errors.As(err, &refusal) {
+		return refusal.kind
+	}
+	return ""
+}
+
 func newHTTPClient(responseHeaderTimeout time.Duration) *http.Client {
 	baseTransport, ok := http.DefaultTransport.(*http.Transport)
 	if !ok {
@@ -429,6 +449,9 @@ func (p HTTPPreparer) Prepare(ctx context.Context, nodeURL string, keys nodeauth
 	defer func() { _ = resp.Body.Close() }()
 	if nodepool.RefusedAtCapacity(resp) {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+		if kind := nodepool.RefusedKind(resp); kind != "" {
+			return Result{}, kindAtCapacityError{kind: kind}
+		}
 		return Result{}, ErrNodeAtCapacity
 	}
 	if nodepool.RefusedStorageFull(resp) {

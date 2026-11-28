@@ -251417,11 +251417,23 @@
                 }
               },
               "X-Silo-Node-Refusal": {
-                "description": "Why the node refused new work: at_capacity at the job cap it declares (SILO_NODE_MAX_TRANSCODES), storage_full at the prepared-download budget it declares. Absent on every other 503, a draining refusal included; a caller that does not know it treats the 503 as a draining refusal.",
+                "description": "Why the node refused new work: at_capacity at the job cap it declares (SILO_NODE_MAX_TRANSCODES) or the cap it declares for the work's kind (SILO_NODE_MAX_VIDEO_TRANSCODES, SILO_NODE_MAX_AUDIO_TRANSCODES, SILO_NODE_MAX_REMUXES), storage_full at the prepared-download budget it declares. Absent on every other 503, a draining refusal included; a caller that does not know it treats the 503 as a draining refusal.",
                 "schema": {
                   "enum": [
                     "at_capacity",
                     "storage_full"
+                  ],
+                  "type": "string"
+                }
+              },
+              "X-Silo-Node-Refusal-Kind": {
+                "description": "With at_capacity, the job kind whose own cap refused the work; absent when the node's job cap did. The core then holds the node back from that kind only.",
+                "schema": {
+                  "enum": [
+                    "video_transcode",
+                    "audio_transcode",
+                    "remux",
+                    "trickplay"
                   ],
                   "type": "string"
                 }
@@ -252619,11 +252631,23 @@
                 }
               },
               "X-Silo-Node-Refusal": {
-                "description": "Why the node refused new work: at_capacity at the job cap it declares (SILO_NODE_MAX_TRANSCODES), storage_full at the prepared-download budget it declares. Absent on every other 503, a draining refusal included; a caller that does not know it treats the 503 as a draining refusal.",
+                "description": "Why the node refused new work: at_capacity at the job cap it declares (SILO_NODE_MAX_TRANSCODES) or the cap it declares for the work's kind (SILO_NODE_MAX_VIDEO_TRANSCODES, SILO_NODE_MAX_AUDIO_TRANSCODES, SILO_NODE_MAX_REMUXES), storage_full at the prepared-download budget it declares. Absent on every other 503, a draining refusal included; a caller that does not know it treats the 503 as a draining refusal.",
                 "schema": {
                   "enum": [
                     "at_capacity",
                     "storage_full"
+                  ],
+                  "type": "string"
+                }
+              },
+              "X-Silo-Node-Refusal-Kind": {
+                "description": "With at_capacity, the job kind whose own cap refused the work; absent when the node's job cap did. The core then holds the node back from that kind only.",
+                "schema": {
+                  "enum": [
+                    "video_transcode",
+                    "audio_transcode",
+                    "remux",
+                    "trickplay"
                   ],
                   "type": "string"
                 }
@@ -254034,11 +254058,23 @@
                 }
               },
               "X-Silo-Node-Refusal": {
-                "description": "Why the node refused new work: at_capacity at the job cap it declares (SILO_NODE_MAX_TRANSCODES), storage_full at the prepared-download budget it declares. Absent on every other 503, a draining refusal included; a caller that does not know it treats the 503 as a draining refusal.",
+                "description": "Why the node refused new work: at_capacity at the job cap it declares (SILO_NODE_MAX_TRANSCODES) or the cap it declares for the work's kind (SILO_NODE_MAX_VIDEO_TRANSCODES, SILO_NODE_MAX_AUDIO_TRANSCODES, SILO_NODE_MAX_REMUXES), storage_full at the prepared-download budget it declares. Absent on every other 503, a draining refusal included; a caller that does not know it treats the 503 as a draining refusal.",
                 "schema": {
                   "enum": [
                     "at_capacity",
                     "storage_full"
+                  ],
+                  "type": "string"
+                }
+              },
+              "X-Silo-Node-Refusal-Kind": {
+                "description": "With at_capacity, the job kind whose own cap refused the work; absent when the node's job cap did. The core then holds the node back from that kind only.",
+                "schema": {
+                  "enum": [
+                    "video_transcode",
+                    "audio_transcode",
+                    "remux",
+                    "trickplay"
                   ],
                   "type": "string"
                 }
@@ -256564,11 +256600,23 @@
                 }
               },
               "X-Silo-Node-Refusal": {
-                "description": "Why the node refused new work: at_capacity at the job cap it declares (SILO_NODE_MAX_TRANSCODES), storage_full at the prepared-download budget it declares. Absent on every other 503, a draining refusal included; a caller that does not know it treats the 503 as a draining refusal.",
+                "description": "Why the node refused new work: at_capacity at the job cap it declares (SILO_NODE_MAX_TRANSCODES) or the cap it declares for the work's kind (SILO_NODE_MAX_VIDEO_TRANSCODES, SILO_NODE_MAX_AUDIO_TRANSCODES, SILO_NODE_MAX_REMUXES), storage_full at the prepared-download budget it declares. Absent on every other 503, a draining refusal included; a caller that does not know it treats the 503 as a draining refusal.",
                 "schema": {
                   "enum": [
                     "at_capacity",
                     "storage_full"
+                  ],
+                  "type": "string"
+                }
+              },
+              "X-Silo-Node-Refusal-Kind": {
+                "description": "With at_capacity, the job kind whose own cap refused the work; absent when the node's job cap did. The core then holds the node back from that kind only.",
+                "schema": {
+                  "enum": [
+                    "video_transcode",
+                    "audio_transcode",
+                    "remux",
+                    "trickplay"
                   ],
                   "type": "string"
                 }

@@ -2,6 +2,8 @@ package nodepool
 
 import (
 	"net/http"
+	"slices"
+	"strings"
 	"time"
 )
 
@@ -45,38 +47,72 @@ func RefusedStorageFull(resp *http.Response) bool {
 		resp.Header.Get(NodeRefusalHeader) == RefusalStorageFull
 }
 
+// NodeRefusalKindHeader names, on an at_capacity refusal, the job kind whose
+// own cap (SILO_NODE_MAX_VIDEO_TRANSCODES and the like) refused the work, as
+// a JobKind value. It is absent when the node's job cap refused it, and from
+// a node that predates kind caps: either way the whole node is full.
+const NodeRefusalKindHeader = "X-Silo-Node-Refusal-Kind"
+
+// RefusedKind returns the job kind whose own cap an at_capacity refusal
+// names, or "" when the node's job cap refused the work or the header names
+// no kind this build knows.
+func RefusedKind(resp *http.Response) JobKind {
+	if !RefusedAtCapacity(resp) {
+		return ""
+	}
+	return knownJobKind(resp.Header.Get(NodeRefusalKindHeader))
+}
+
+// knownJobKind returns raw as a JobKind when it names one, else "".
+func knownJobKind(raw string) JobKind {
+	kind := JobKind(strings.TrimSpace(raw))
+	if slices.Contains(JobKinds, kind) {
+		return kind
+	}
+	return ""
+}
+
 // atCapacityMarker is implemented by *Planner.
 type atCapacityMarker interface {
-	MarkTranscodeNodeAtCapacity(nodeURL string)
+	MarkTranscodeNodeAtCapacity(nodeURL string, kind JobKind)
 }
 
 // ReportAtCapacity tells planner that the transcode node at nodeURL refused
-// new work at its own job cap. planner is whatever planner the caller holds;
-// one that cannot hold nodes back ignores the report.
-func ReportAtCapacity(planner any, nodeURL string) {
+// new work at its own job cap, or with kind (RefusedKind) at that kind's own
+// cap, which holds the node back from that kind only: the node still takes
+// the other kinds. planner is whatever planner the caller holds; one that
+// cannot hold nodes back ignores the report.
+func ReportAtCapacity(planner any, nodeURL string, kind JobKind) {
 	if marker, ok := planner.(atCapacityMarker); ok && nodeURL != "" {
-		marker.MarkTranscodeNodeAtCapacity(nodeURL)
+		marker.MarkTranscodeNodeAtCapacity(nodeURL, kind)
 	}
 }
 
-// MarkTranscodeNodeAtCapacity holds the node at nodeURL back from new work;
-// see ReportAtCapacity.
-func (p *Planner) MarkTranscodeNodeAtCapacity(nodeURL string) {
+// atCapacityKey is one hold: a node's job cap (kind "") or one kind's cap.
+type atCapacityKey struct {
+	url  string
+	kind JobKind
+}
+
+// MarkTranscodeNodeAtCapacity holds the node at nodeURL back from new work,
+// or from work of kind when kind is set; see ReportAtCapacity.
+func (p *Planner) MarkTranscodeNodeAtCapacity(nodeURL string, kind JobKind) {
 	if p == nil {
 		return
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.atCapacity == nil {
-		p.atCapacity = make(map[string]time.Time)
+		p.atCapacity = make(map[atCapacityKey]time.Time)
 	}
-	p.atCapacity[normalizeNodeURL(nodeURL)] = p.now()
+	p.atCapacity[atCapacityKey{url: normalizeNodeURL(nodeURL), kind: kind}] = p.now()
 }
 
-// heldAtCapacity reports whether n refused new work at its own cap and no
-// health check has reported its load since. The caller holds p.mu.
-func (p *Planner) heldAtCapacity(n *Node, now time.Time) bool {
-	refusedAt, ok := p.atCapacity[normalizeNodeURL(n.URL)]
+// heldAtCapacity reports whether n refused new work at its own job cap, or
+// work of kind at that kind's cap when kind is set, and no health check has
+// reported its load since. The caller holds p.mu.
+func (p *Planner) heldAtCapacity(n *Node, kind JobKind, now time.Time) bool {
+	refusedAt, ok := p.atCapacity[atCapacityKey{url: normalizeNodeURL(n.URL), kind: kind}]
 	if !ok || now.Sub(refusedAt) >= atCapacityHold {
 		return false
 	}
@@ -85,9 +121,9 @@ func (p *Planner) heldAtCapacity(n *Node, now time.Time) bool {
 
 // pruneAtCapacity drops holds that have run out. The caller holds p.mu.
 func (p *Planner) pruneAtCapacity(now time.Time) {
-	for url, refusedAt := range p.atCapacity {
+	for key, refusedAt := range p.atCapacity {
 		if now.Sub(refusedAt) >= atCapacityHold {
-			delete(p.atCapacity, url)
+			delete(p.atCapacity, key)
 		}
 	}
 }

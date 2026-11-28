@@ -71,9 +71,14 @@ running sessions are unaffected. Its health `status` is `draining`, then
 `drained`.
 
 A transcode node that declares a job cap (`SILO_NODE_MAX_TRANSCODES`, see
-[transcode nodes](transcode-nodes.md#what-the-node-enforces)) refuses new work
+[transcode nodes](transcode-nodes.md#what-the-node-enforces)), or a cap on one
+kind of work ([caps by kind](../admin-api.md#caps-by-kind)), refuses new work
 past it with `503`, `Retry-After: 5` and `X-Silo-Node-Refusal: at_capacity`
-(`nodepool.NodeRefusalHeader`). It counts what health reports as
+(`nodepool.NodeRefusalHeader`). A refusal at a kind's cap also names the kind
+in `X-Silo-Node-Refusal-Kind` (`nodepool.NodeRefusalKindHeader`, a job kind
+such as `video_transcode`), and the core then holds the node back from that
+kind only until its next health report; without the header the whole node is
+held. It counts what health reports as
 `active_jobs`, which includes work it has admitted and not yet started (a
 start still waiting for its first segment), under one lock, so two starts
 arriving at the cap less one cannot both pass. The routes that
@@ -87,7 +92,9 @@ playback session is new work), a remux `GET` for a playback session it runs
 nothing for now but served within ten minutes (a seek or a reconnect), a
 prepare whose artifact it is
 preparing or has prepared with the same recipe (one it has to encode again
-takes a slot), and the rebuild of a lost HLS session. Chapter-thumbnail extraction and media
+takes a slot), and the rebuild of a lost HLS session. Continuing work of
+another kind than the job it continues (a remux replanned to a video encode)
+still needs room under its own kind's cap. Chapter-thumbnail extraction and media
 sampling count no job and are not capped. A node that declares a
 prepared-download budget (`SILO_NODE_DOWNLOAD_ARTIFACT_MAX_BYTES`) refuses a
 new preparation once its last measurement of the directory reaches it, with

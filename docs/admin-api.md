@@ -712,6 +712,10 @@ waiting for its first segment counts against the node. Their sums can differ
 briefly while a job starts or stops. Node selection reads it: see "Job kind
 balancing" below. Omitted on a node predating job kinds.
 
+`last_stats.job_caps_by_kind` is the cap the transcode node sets on each kind
+of work, as an object naming only the capped kinds; see "Caps by kind" below.
+Omitted when the node caps no kind.
+
 ### Job kind balancing
 
 The kinds cost very different amounts: a video encode holds a GPU encoder for
@@ -729,7 +733,7 @@ playback session on its current node compares the kind's count: a session moves
 only to a node with at least two fewer jobs of its kind.
 
 The job total still decides `max_jobs`. Kind balancing changes which node
-takes work, never how much work a node may take.
+takes work, never how much work a node may take; caps by kind do that.
 
 When any eligible candidate has no stored `active_jobs_by_kind`, that placement
 uses the job total for every candidate. A node that cannot say must not look
@@ -738,6 +742,43 @@ that predates the field. A sample over the 32 KiB limit (the "node resource
 sample too large to store" warning) is dropped except for
 `active_jobs_by_kind`, so `last_stats` holds only that field until the sample
 fits again, and balancing continues.
+
+### Caps by kind
+
+A transcode node can cap one kind of work under its job cap, so its GPU takes
+only as many encodes as it handles while cheaper work still fills the rest of
+the job cap:
+
+| Variable | Caps |
+|---|---|
+| `SILO_NODE_MAX_VIDEO_TRANSCODES` | `video_transcode` |
+| `SILO_NODE_MAX_AUDIO_TRANSCODES` | `audio_transcode` |
+| `SILO_NODE_MAX_REMUXES` | `remux` |
+
+Each is a whole number; unset or `0` leaves the kind to the job cap alone. A
+job must fit under both its kind's cap and `SILO_NODE_MAX_TRANSCODES`. With a
+job cap of 30 and a video cap of 10, the node runs at most 10 video encodes and
+30 jobs in all. Trickplay has no cap of its own: the trickplay node capacity
+setting bounds it. These are set only in the node's environment, never on its
+row, so they are not part of `max_jobs` or the admin edit form.
+
+The node enforces them as it does its job cap: past a kind's cap it refuses new
+work of that kind with `at_capacity`, naming the kind in
+`X-Silo-Node-Refusal-Kind`, so the API server holds the node back from that
+kind only until its next health report. Continuing work (a quality switch,
+seek or reconnect of a session it serves) is never refused at the job cap, and
+at its kind's cap only when it changes kind, as a remux replanned to a video
+encode does. It reports them in
+`job_caps_by_kind`, and placement skips a node whose effective jobs of the kind
+(as in balancing above) have reached its cap. When every node is at its cap for
+the kind, the placement finds no transcode node and the API server falls back as
+it does with every node full, which for playback means transcoding locally.
+
+A kind's cap bounds new work, not every process: like the job cap, it lets a
+continuing transport overlap the one it replaces. Upgrade every API server
+before setting these variables on a node. An API server from before them reads
+a refusal at a kind's cap as the node being full, and holds it back from all
+work until its next health report.
 
 ### Scratch admission
 

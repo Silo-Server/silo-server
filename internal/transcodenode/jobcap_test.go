@@ -70,7 +70,7 @@ func TestJobCapAdmissionIsRaceFree(t *testing.T) {
 	)
 	for range 64 {
 		wg.Go(func() {
-			if slot, ok := s.admitJob(nodepool.JobKindVideoTranscode); ok {
+			if slot, _, ok := s.admitJob(nodepool.JobKindRemux); ok {
 				mu.Lock()
 				admitted = append(admitted, slot)
 				mu.Unlock()
@@ -86,8 +86,8 @@ func TestJobCapAdmissionIsRaceFree(t *testing.T) {
 	if s.activeJobs.Load() != 3 || s.admitted != 0 {
 		t.Fatalf("after counting the slot: active %d, admitted %d", s.activeJobs.Load(), s.admitted)
 	}
-	if _, ok := s.admitJob(nodepool.JobKindVideoTranscode); ok {
-		t.Fatal("a job was admitted at the cap")
+	if _, capKind, ok := s.admitJob(nodepool.JobKindRemux); ok || capKind != "" {
+		t.Fatalf("at the job cap: admitted %v, refused kind %q, want a refusal naming no kind", ok, capKind)
 	}
 }
 
@@ -254,7 +254,7 @@ func TestHealthCountsARunningStartOnce(t *testing.T) {
 func TestDrainedHealthReportsNoJobs(t *testing.T) {
 	s := newTestServer(t)
 	s.shutdownDrain.Store(true)
-	slot, ok := s.admitJob(nodepool.JobKindVideoTranscode)
+	slot, _, ok := s.admitJob(nodepool.JobKindVideoTranscode)
 	if !ok {
 		t.Fatal("admission refused")
 	}
@@ -263,5 +263,92 @@ func TestDrainedHealthReportsNoJobs(t *testing.T) {
 	if health.Status != HealthStatusDrained || health.ActiveJobs != 0 || health.ActiveJobsByKind[nodepool.JobKindVideoTranscode] != 0 {
 		t.Fatalf("health: status %q, active_jobs %d, by kind %v; want drained with no jobs",
 			health.Status, health.ActiveJobs, health.ActiveJobsByKind)
+	}
+}
+
+// A kind's own cap refuses new work of that kind, admitted or counted, names
+// the kind in the refusal, and leaves every other kind to the job cap.
+func TestJobCapByKind(t *testing.T) {
+	s := newTestServer(t)
+	s.SetJobCap(3)
+	s.SetJobCapsByKind(map[nodepool.JobKind]int{nodepool.JobKindVideoTranscode: 1})
+	video, _, ok := s.admitJob(nodepool.JobKindVideoTranscode)
+	if !ok {
+		t.Fatal("the first video transcode was refused")
+	}
+	if _, _, ok := s.admitJob(nodepool.JobKindVideoTranscode); ok {
+		t.Fatal("a second video transcode was admitted while the first was admitted")
+	}
+	s.countJob(video, nodepool.JobKindVideoTranscode)
+	if _, capKind, ok := s.admitJob(nodepool.JobKindVideoTranscode); ok || capKind != nodepool.JobKindVideoTranscode {
+		t.Fatalf("second video transcode while the first ran: admitted %v, refused kind %q", ok, capKind)
+	}
+	remux, _, ok := s.admitJob(nodepool.JobKindRemux)
+	if !ok {
+		t.Fatal("a remux was refused at the video cap")
+	}
+	s.countJob(remux, nodepool.JobKindRemux)
+	s.endJob(nodepool.JobKindVideoTranscode)
+	if _, _, ok := s.admitJob(nodepool.JobKindVideoTranscode); !ok {
+		t.Fatal("a video transcode was refused once the first ended")
+	}
+}
+
+// A start that continues a playback session's job of another kind needs room
+// under its own kind's cap; one of the same kind continues at any cap. A
+// replan from a remux to a video encode must not run the node past its video
+// cap.
+func TestContinuationOfAnotherKindTakesItsKindCap(t *testing.T) {
+	s := newTestServer(t)
+	s.SetJobCapsByKind(map[nodepool.JobKind]int{nodepool.JobKindVideoTranscode: 1, nodepool.JobKindRemux: 1})
+	s.progressiveRemuxes["remux-1"] = progressiveRemuxRequest{playbackSessionID: "play-1", kind: nodepool.JobKindRemux}
+	s.countJob(nil, nodepool.JobKindRemux)
+	s.countJob(nil, nodepool.JobKindVideoTranscode) // another viewer's encode fills the video cap
+	now := time.Now()
+
+	toVideo := TranscodeStartRequest{SessionID: "hls-1", PlaybackSessionID: "play-1", TargetCodecVideo: "h264", TargetCodecAudio: "aac"}
+	if _, _, capKind, ok := s.admitStart(toVideo, now); ok || capKind != nodepool.JobKindVideoTranscode {
+		t.Fatalf("remux replanned to video at the video cap: admitted %v, refused kind %q", ok, capKind)
+	}
+	sameKind := TranscodeStartRequest{SessionID: "hls-1", PlaybackSessionID: "play-1", TargetCodecVideo: "copy", TargetCodecAudio: "copy"}
+	slot, release, _, ok := s.admitStart(sameKind, now)
+	if !ok || slot != nil {
+		t.Fatalf("remux replanned as a remux at the remux cap: admitted %v, slot %v", ok, slot)
+	}
+	release()
+
+	s.endJob(nodepool.JobKindVideoTranscode)
+	slot, release, _, ok = s.admitStart(toVideo, now)
+	if !ok || slot == nil || !slot.kindOnly {
+		t.Fatalf("remux replanned to video under the video cap: admitted %v, slot %+v", ok, slot)
+	}
+	defer release()
+	if _, _, ok := s.admitJob(nodepool.JobKindVideoTranscode); ok {
+		t.Fatal("new video work was admitted while the replan held the video cap's last slot")
+	}
+}
+
+// Two requests that resume a paused remux together, such as a range probe and
+// the real request, both continue it: the second is not refused at the remux
+// cap the first passes.
+func TestResumedRemuxContinuesForASecondRequest(t *testing.T) {
+	s := newTestServer(t)
+	s.SetJobCapsByKind(map[nodepool.JobKind]int{nodepool.JobKindRemux: 1})
+	now := time.Now()
+	s.noteRemux("play-1", nodepool.JobKindRemux, now)
+	s.countJob(nil, nodepool.JobKindRemux) // another viewer's remux fills the cap
+
+	first, ok := s.claimContinuation("play-1", now)
+	if !ok || !first.covers(nodepool.JobKindRemux) {
+		t.Fatalf("first resume: continues %v, covers remux %v", ok, first.covers(nodepool.JobKindRemux))
+	}
+	defer first.release()
+	second, ok := s.claimContinuation("play-1", now)
+	if !ok || !second.covers(nodepool.JobKindRemux) {
+		t.Fatalf("second resume: continues %v, covers remux %v", ok, second.covers(nodepool.JobKindRemux))
+	}
+	defer second.release()
+	if _, ok := s.claimContinuation("play-1", now); ok {
+		t.Fatal("a third request continued the remux: only one transport may overlap the one it replaces")
 	}
 }

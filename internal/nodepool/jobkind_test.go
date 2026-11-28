@@ -92,12 +92,68 @@ func TestTranscodeSelectionCountsUnreportedReservationsOfTheKind(t *testing.T) {
 // dropping it there would silently return every pick to total jobs.
 func TestCheckNodeStoresJobsByKindForSelection(t *testing.T) {
 	url := newStatsHealthNode(t, `{"status":"ok","active_jobs":2,
-		"active_jobs_by_kind":{"video_transcode":2,"remux":0}}`)
+		"active_jobs_by_kind":{"video_transcode":2,"remux":0},"job_caps_by_kind":{"video_transcode":4}}`)
 
 	_, _, _, _, lastStats, _ := CheckNode(context.Background(), &Node{URL: url})
 	jobs, ok := reportedJobsByKind(&Node{LastStats: lastStats})
 	if !ok || jobs[JobKindVideoTranscode] != 2 || jobs[JobKindRemux] != 0 {
 		t.Fatalf("stored breakdown = %v (ok %v), want video_transcode 2 from %s", jobs, ok, lastStats)
+	}
+	if view, _ := reportedJobStats(&Node{LastStats: lastStats}); view.JobCapsByKind[JobKindVideoTranscode] != 4 {
+		t.Fatalf("stored caps = %v, want video_transcode 4 from %s", view.JobCapsByKind, lastStats)
+	}
+}
+
+// A node at the cap it reports for a kind takes no more of that kind, here or
+// on its own, while other kinds still go to it; with every node at the cap the
+// plan has no transcode node and the caller falls back.
+func TestTranscodeSelectionHonorsCapsByKind(t *testing.T) {
+	capped := func(t *testing.T, id int, url string, jobs map[JobKind]int, caps map[JobKind]int) *Node {
+		t.Helper()
+		n := transcodeNode(id, url, nil, 0)
+		total := 0
+		for _, count := range jobs {
+			total += count
+		}
+		n.ActiveJobs = total
+		stats, err := json.Marshal(map[string]any{"active_jobs_by_kind": jobs, "job_caps_by_kind": caps})
+		if err != nil {
+			t.Fatal(err)
+		}
+		n.LastStats = stats
+		return n
+	}
+	a := capped(t, 1, "http://a", map[JobKind]int{JobKindVideoTranscode: 1}, map[JobKind]int{JobKindVideoTranscode: 2})
+	b := capped(t, 2, "http://b", map[JobKind]int{JobKindVideoTranscode: 2, JobKindRemux: 1}, map[JobKind]int{JobKindVideoTranscode: 2})
+	f := newFixture(nil, []*Node{a, b})
+
+	pick := func(session string, kind JobKind) string {
+		plan := f.planner.PlanRoute(RouteRequest{SessionID: session, NeedsTranscode: true, JobKind: kind})
+		if plan.TranscodeNode == nil {
+			return ""
+		}
+		return plan.TranscodeNode.URL
+	}
+	if got := pick("v1", JobKindVideoTranscode); got != "http://a" {
+		t.Fatalf("first encode went to %q, want a, the only node under its video cap", got)
+	}
+	if got := pick("v2", JobKindVideoTranscode); got != "" {
+		t.Fatalf("second encode went to %q with both nodes at their video cap, want none", got)
+	}
+	replan := f.planner.PlanRoute(RouteRequest{SessionID: "v0", NeedsTranscode: true, JobKind: JobKindVideoTranscode, CurrentTranscodeURL: "http://b"})
+	if replan.TranscodeNode == nil || replan.TranscodeNode.URL != "http://b" {
+		t.Fatalf("a replan of an encode on b went to %+v, want b: its own job fills the cap", replan.TranscodeNode)
+	}
+	if got := pick("r1", JobKindRemux); got != "http://a" {
+		t.Fatalf("remux went to %q, want a: a video cap does not hold back other kinds", got)
+	}
+	// The capacity probe a prepared download freezes its tone-map mode on
+	// agrees with placement.
+	if f.planner.TranscodeWorkAvailableWith(JobKindVideoTranscode, nil) {
+		t.Fatal("video transcode work reported available with every node at its video cap")
+	}
+	if !f.planner.TranscodeWorkAvailableWith(JobKindRemux, nil) {
+		t.Fatal("remux work reported unavailable under every node's remux cap")
 	}
 }
 
@@ -108,14 +164,18 @@ func TestCheckNodeKeepsJobsByKindWhenTheSampleIsTooLarge(t *testing.T) {
 	padding := strings.Repeat("x", maxLastStatsBytes)
 	url := newStatsHealthNode(t, `{"status":"ok","active_jobs":2,
 		"active_jobs_by_kind":{"video_transcode":2,"remux":0},
+		"job_caps_by_kind":{"video_transcode":2},
 		"system":{"cpu_pct":41,"junk":"`+padding+`"}}`)
 
 	_, _, _, _, lastStats, _ := CheckNode(context.Background(), &Node{URL: url})
 	if len(lastStats) > maxLastStatsBytes || strings.Contains(string(lastStats), "junk") {
 		t.Fatalf("stored the oversized sample (%d bytes)", len(lastStats))
 	}
-	jobs, ok := reportedJobsByKind(&Node{LastStats: lastStats})
-	if !ok || jobs[JobKindVideoTranscode] != 2 {
-		t.Fatalf("stored breakdown = %v (ok %v), want video_transcode 2", jobs, ok)
+	view, ok := reportedJobStats(&Node{LastStats: lastStats})
+	if !ok || view.ActiveJobsByKind[JobKindVideoTranscode] != 2 {
+		t.Fatalf("stored breakdown = %v (ok %v), want video_transcode 2", view.ActiveJobsByKind, ok)
+	}
+	if view.JobCapsByKind[JobKindVideoTranscode] != 2 {
+		t.Fatalf("stored caps = %v, want video_transcode 2: the planner skips a node at a kind's cap from them", view.JobCapsByKind)
 	}
 }
