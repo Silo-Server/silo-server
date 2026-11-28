@@ -4,6 +4,7 @@ import {
   deleteAdminSettingValue,
   captureAdminSettingAuthority,
 } from "@/api/v2/adminAccountSettings";
+import { requireAdminAuthority } from "@/api/v2/adminAuthority";
 import {
   listAdminDevices,
   getAdminDevice,
@@ -583,7 +584,7 @@ export function useDeleteAdminUserDeviceSetting() {
   return useMutation({
     ...settingWriteOptions,
     retry: false,
-    mutationFn: ({
+    mutationFn: async ({
       userId,
       profileId,
       deviceId,
@@ -593,13 +594,22 @@ export function useDeleteAdminUserDeviceSetting() {
       profileId: string;
       deviceId: string;
       key: string;
-    }) =>
-      deleteAdminSettingValue(
-        userId,
-        key,
-        { scope: "profile_device", profileId, deviceId },
-        authority,
-      ),
+    }) => {
+      try {
+        await deleteAdminSettingValue(
+          userId,
+          key,
+          { scope: "profile_device", profileId, deviceId },
+          authority,
+        );
+      } catch (err) {
+        // 404: another admin or tab reset it first. That is the state this
+        // reset asked for, so it succeeds and drops the row like any other.
+        if (!(err instanceof V2ProblemError && err.status === 404)) throw err;
+        // Like a 204, it counts only while the profile that sent it is active.
+        requireAdminAuthority(authority);
+      }
+    },
     onSuccess: async (_data, variables) => {
       toast.success(t("web.admin.common.users.deviceOverrideReset"));
       await dropAdminDeviceOverrideRows(queryClient, authority, {

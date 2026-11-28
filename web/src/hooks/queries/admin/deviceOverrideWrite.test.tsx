@@ -28,6 +28,18 @@ const row = (fontSize: string, revision: number, updated_at: string) => ({
   updated_at,
 });
 const valuesPage = (items: unknown[]) => json({ revision: 1, page: { has_more: false }, items });
+const deleted = () => new Response(null, { status: 204 });
+// The server's answer to a delete with nothing stored at that scope.
+const alreadyGone = () =>
+  new Response(
+    JSON.stringify({
+      type: "https://siloserver.org/docs/api/v2/problems/not_found",
+      title: "Not found",
+      status: 404,
+      detail: "No value is set at this scope",
+    }),
+    { status: 404, headers: { "Content-Type": "application/problem+json" } },
+  );
 
 beforeEach(() => {
   setAccessToken("test-admin");
@@ -99,7 +111,9 @@ it.each([
 
 // A reopened editor reads its row and override flag from the same list, so a
 // reset must take the row out as soon as the delete settles; otherwise the
-// editor offers the deleted values again until a refetch answers.
+// editor offers the deleted values again until a refetch answers. A reset the
+// server answers with 404 (another admin or tab reset it first) ends the same
+// way instead of failing on every retry.
 it.each([
   [
     "one override",
@@ -113,6 +127,21 @@ it.each([
           key: "playback.subtitle_appearance",
         });
     },
+    deleted,
+  ],
+  [
+    "one override another tab already reset",
+    () => {
+      const reset = useDeleteAdminUserDeviceSetting();
+      return () =>
+        reset.mutateAsync({
+          userId: 1,
+          profileId: "profile-a",
+          deviceId: "device-a",
+          key: "playback.subtitle_appearance",
+        });
+    },
+    alreadyGone,
   ],
   [
     "every override for the profile",
@@ -126,6 +155,7 @@ it.each([
           keys: ["playback.subtitle_appearance"],
         });
     },
+    deleted,
   ],
   [
     "a removal on the user's Preferences tab",
@@ -138,8 +168,9 @@ it.each([
           identity: { scope: "profile_device", profileId: "profile-a", deviceId: "device-a" },
         });
     },
+    deleted,
   ],
-])("drops a reset device override from the user's stored values (%s)", async (_case, useReset) => {
+])("drops a reset device override from the stored values (%s)", async (_case, useReset, reply) => {
   const otherDevice = { ...row("large", 1, "2026-11-21T00:00:00Z"), device_id: "device-b" };
   let gets = 0;
   vi.stubGlobal(
@@ -147,7 +178,7 @@ it.each([
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input instanceof Request ? input.url : input);
       const method = init?.method ?? (input instanceof Request ? input.method : "GET");
-      if (method === "DELETE") return new Response(null, { status: 204 });
+      if (method === "DELETE") return reply();
       if (url.includes("/settings/values")) {
         gets += 1;
         // The refetch after the reset never answers.
