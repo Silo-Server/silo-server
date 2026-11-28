@@ -208,7 +208,8 @@ func TestResolveCopySeekAnchorMatchesRealLongGOPHEVC(t *testing.T) {
 // keyframe, and anywhere else where it was asked to. Matroska seeks back to
 // the last keyframe; MPEG-TS seeks forward, past it, so its probe looks again
 // from earlier, and its transcode would write no video from a segment after
-// that keyframe (here at 16 s of 19 s of video).
+// that keyframe (here at 16 s of 19 s of video, on timestamps that start at
+// 1000 s).
 func TestResolveTranscodeStartMovesATailStartToTheLastVideoSegment(t *testing.T) {
 	if testing.Short() {
 		t.Skip("real FFmpeg integration test")
@@ -241,7 +242,8 @@ func TestResolveTranscodeStartMovesATailStartToTheLastVideoSegment(t *testing.T)
 	mkvPath := filepath.Join(dir, "tail.mkv")
 	encode(mkvPath, "20", "-i", subtitlePath, "-map", "0:v", "-map", "1:a", "-map", "2:s", "-c:s", "srt")
 	tsPath := filepath.Join(dir, "tail.ts")
-	encode(tsPath, "19", "-g", "96")
+	// Broadcast captures rarely start at zero.
+	encode(tsPath, "19", "-g", "96", "-output_ts_offset", "1000")
 
 	for _, tc := range []struct {
 		name      string
