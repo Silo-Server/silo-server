@@ -270,9 +270,7 @@ func (s *ItemCollections) preview(ctx context.Context, v ItemViewer, contentID s
 	}
 	// listCatalogItems reads a collection with no presentation library, so
 	// the page's library_id must not reach the preview either.
-	v.Access.PresentationLibraryID = nil
-	v.Access.ScopeFilesToLibrary = false
-	v.Access.SeriesLibraryCoversEpisodes = false
+	v.Access = v.Access.WithoutPresentationLibrary()
 	if card.Source == sections.CollectionCardLibrary {
 		req.Source = catalog.CatalogSourceLibraryCollection
 		// Explore all opens the collection in the card's library, which

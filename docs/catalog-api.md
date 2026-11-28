@@ -502,9 +502,14 @@ parameter as unknown.
 
 `library_id` on `getCatalogItem`, `listCatalogItemVersions`, `listCatalogItemEpisodes`,
 `listSeriesSeasons`, `getSeriesSeason`, and `listSeasonEpisodes` names the library the
-viewer opened the item from. It always validates that the item is a member of that
-library and picks the library's metadata language as the presentation fallback. A
-season, and the season and episode lists, are members through their series. On these
+viewer opened the item from. When the item is a member of that library, the read is
+presented from it: the library's metadata language is the presentation fallback. A
+season, and the season and episode lists, are members through their series. When the
+item is not a member, the read answers as if no `library_id` were sent rather than
+`404`: a server collection can hold titles from several libraries, and a client
+browsing it sends the library it opened the collection from. The viewer's library
+access still applies, so an item outside the viewer's libraries is `404` under any
+`library_id`. On these
 native reads an episode is a member when it or its series is in the library: the
 series' lists name every episode under any library that holds the series, so an
 episode with no file in that library still opens from it. Native v2
@@ -515,7 +520,9 @@ and "Movies 4K" split still shows both files from either library.
 
 The administrator setting `catalog.scope_versions_to_library` (default `false`)
 makes those reads answer only the versions stored in the named library, so an
-episode with no file there lists no versions. A read without `library_id` is
+episode with no file there lists no versions. An item that is not a member of the
+named library is read as if no `library_id` were sent, so it lists every accessible
+version. A read without `library_id` is
 unaffected, and so is `getWatchState`, watch-together selection, and the Jellyfin
 compatibility surface: an item always plays from its full accessible version list.
 No client change is needed: the setting only changes what an existing `library_id`

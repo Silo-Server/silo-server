@@ -119,7 +119,8 @@ per-account enrollment.
 
 On `GET /api/v2/watch/{id}`, `library_id` accepts an episode when either the
 episode or its series belongs to that library. The series must still pass the
-viewer's access checks. The response includes every file the viewer may access,
+viewer's access checks. A `library_id` that holds neither is ignored, as on the
+catalog reads. The response includes every file the viewer may access,
 even if the selected library has none of that episode's files;
 `catalog.scope_versions_to_library` does not narrow watch responses.
 

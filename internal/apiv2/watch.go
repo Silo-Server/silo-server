@@ -330,7 +330,9 @@ func (reg *Registry) getWatchState(ctx context.Context, in *WatchDetailInput) (*
 	if err != nil {
 		return nil, NewProblem(TypeInternalError, "An unexpected error occurred.")
 	}
-	detail, err := reg.deps.Watch.WatchDetail(ctx, claims.UserID, profileFrom(ctx), string(in.ID), filter)
+	detail, err := readWithLibraryFallback(filter, func(f catalogpkg.AccessFilter) (*catalogpkg.WatchDetail, error) {
+		return reg.deps.Watch.WatchDetail(ctx, claims.UserID, profileFrom(ctx), string(in.ID), f)
+	})
 	if err != nil {
 		return nil, watchDetailProblem(err)
 	}
