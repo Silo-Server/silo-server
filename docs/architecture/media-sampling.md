@@ -134,6 +134,16 @@ statistics. Rules:
   cost of reading the whole span. `Sheets` also fall back to that window
   when the HEVC decoder drops listed keyframes as duplicates (see the
   `Sheets` rules below).
+- An MP4/MOV whose first video track has an `stss` (sync sample table) that
+  lists none of its samples is read as that window too. ffmpeg then indexes
+  only the first sample as a keyframe, so every list entry would seek to the
+  start of the file and decode every keyframe up to its sample, and a long
+  file's list times out. The runner reads the box headers and table counts
+  once per run, under the same slots and timeout as the Matroska Cues
+  lookup, before choosing. A missing `stss` (every sample is a sync sample),
+  a non-empty `stps`, a `rap ` sample group, a sample table of at most one
+  sample (as a fragmented file's `moov` holds), or a check that cannot
+  finish keeps the list.
 - The VP9 decoder ignores `-skip_frame nokey`, so a VP9 sample decodes every
   frame from its keyframe to the outpoint. The first frame is still the one
   kept, but the cost grows with the keyframe interval.

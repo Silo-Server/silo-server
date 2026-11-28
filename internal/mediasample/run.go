@@ -122,8 +122,9 @@ func (r Runner) Run(ctx context.Context, req Request) (Result, error) {
 	failure := &Error{}
 	toneMap := &toneMapResolver{}
 	keyframes := sheetKeyframes(ctx, req)
+	syncSamples := &syncSampleCheck{}
 	for _, attempt := range req.attempts() {
-		result, attemptErr := r.runAttempt(ctx, req, attempt, toneMap, keyframes)
+		result, attemptErr := r.runAttempt(ctx, req, attempt, toneMap, keyframes, syncSamples)
 		if attemptErr == nil {
 			return result, nil
 		}
@@ -136,7 +137,7 @@ func (r Runner) Run(ctx context.Context, req Request) (Result, error) {
 	return Result{}, failure
 }
 
-func (r Runner) runAttempt(ctx context.Context, req Request, attempt Attempt, toneMap *toneMapResolver, keyframes []float64) (Result, *AttemptError) {
+func (r Runner) runAttempt(ctx context.Context, req Request, attempt Attempt, toneMap *toneMapResolver, keyframes []float64, syncSamples *syncSampleCheck) (Result, *AttemptError) {
 	decoder := softwareDecoder
 	if attempt.Hardware {
 		decoder = "hardware:" + r.HWAccel
@@ -176,7 +177,7 @@ func (r Runner) runAttempt(ctx context.Context, req Request, attempt Attempt, to
 		attemptCtx, cancel = context.WithDeadline(ctx, deadline)
 		defer cancel()
 	}
-	run := attemptRun{runner: r, ctx: ctx, attemptCtx: attemptCtx, deadline: deadline, attempt: attempt, hw: hw, decoder: decoder, sheetsGraph: sheetsGraph, toneMap: toneMap, keyframes: keyframes}
+	run := attemptRun{runner: r, ctx: ctx, attemptCtx: attemptCtx, deadline: deadline, attempt: attempt, hw: hw, decoder: decoder, sheetsGraph: sheetsGraph, toneMap: toneMap, keyframes: keyframes, syncSamples: syncSamples}
 	switch {
 	case req.At != nil:
 		return run.image(req, imageArgs)
@@ -234,6 +235,9 @@ type attemptRun struct {
 	// keyframes are the input's video keyframe times a Sheets list starts
 	// its entries at (see keyframes.go), nil for sample-time entries.
 	keyframes []float64
+	// syncSamples is the run's check for an MP4 input that lists no sync
+	// samples (see syncsamples.go).
+	syncSamples *syncSampleCheck
 }
 
 // samples runs a Samples request. Unless it reads through, it probes the
@@ -284,7 +288,10 @@ func (a attemptRun) samples(req Request) (Result, *AttemptError) {
 			}
 			a.sheetsGraph = graph
 		}
-		if !req.Samples.ReadThrough && header.info.seeksToKeyframes() {
+		// An MP4 that lists no sync samples seeks every entry to its start
+		// (see syncsamples.go).
+		if !req.Samples.ReadThrough && header.info.seeksToKeyframes() &&
+			(!header.info.isMP4() || !a.syncSamples.lacks(a.attemptCtx, req.Input)) {
 			if req.Sheets == nil {
 				return a.decode(req, header.info.StartSeconds)
 			}

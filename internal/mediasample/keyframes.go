@@ -2,6 +2,7 @@ package mediasample
 
 import (
 	"context"
+	"errors"
 	"io"
 	"math"
 	"os"
@@ -52,7 +53,8 @@ import (
 // MP4 keyframe's time often seeks past it. Repairs always list sample times;
 // they read from the keyframe on by design.
 
-// keyframeLookupTimeout bounds the wait for a Sheets input's Cues. Reading
+// keyframeLookupTimeout bounds the wait for a Sheets input's Cues, or an
+// MP4 input's sync sample table (see syncsamples.go). Reading
 // them takes milliseconds; a read still blocked after this, as on stalled
 // storage, is left behind and the run lists sample times.
 const keyframeLookupTimeout = 10 * time.Second
@@ -72,57 +74,87 @@ var lookupKeyframes = matroskaKeyframes
 // sheetKeyframes returns the video keyframe times, on the container's
 // timeline, of a Sheets list request's input, or nil when it has none to
 // start entries at. Run calls it once, before any attempt and its timeout
-// start, and stops waiting when ctx ends or keyframeLookupTimeout passes.
+// start (see boundedLookup).
 func sheetKeyframes(ctx context.Context, req Request) []float64 {
-	if req.Sheets == nil || req.Samples == nil || req.Samples.ReadThrough || ctx.Err() != nil {
+	if req.Sheets == nil || req.Samples == nil || req.Samples.ReadThrough {
 		return nil
+	}
+	lookup := lookupKeyframes
+	keyframes, _ := boundedLookup(ctx, func(ctx context.Context) []float64 { return lookup(ctx, req.Input) })
+	return keyframes
+}
+
+// boundedLookup runs lookup, a read of the input's container index, in a
+// keyframeLookups slot, and stops waiting for it when ctx ends or
+// keyframeLookupTimeout passes. It returns lookup's result and true, or the
+// zero value and false when every slot is taken or the wait ends first.
+func boundedLookup[T any](ctx context.Context, lookup func(context.Context) T) (T, bool) {
+	var zero T
+	if ctx.Err() != nil {
+		return zero, false
 	}
 	select {
 	case keyframeLookups <- struct{}{}:
 	default:
-		return nil
+		return zero, false
 	}
 	ctx, cancel := context.WithTimeout(ctx, keyframeLookupTimeout)
 	defer cancel()
-	lookup := lookupKeyframes
-	found := make(chan []float64, 1)
+	found := make(chan T, 1)
 	go func() {
 		defer func() { <-keyframeLookups }()
-		found <- lookup(ctx, req.Input)
+		found <- lookup(ctx)
 	}()
 	select {
-	case keyframes := <-found:
+	case value := <-found:
 		// A lookup can finish just as the wait ends; the run has moved on.
 		if ctx.Err() != nil {
-			return nil
+			return zero, false
 		}
-		return keyframes
+		return value, true
 	case <-ctx.Done():
-		return nil
+		return zero, false
 	}
 }
 
 // matroskaKeyframes reads the keyframe times of the Matroska file at path
 // from its Cues and a few clusters' block headers (keyframes.ReadMatroska),
-// or returns nil. The file opens without blocking, so a FIFO in its place
-// cannot hold the lookup, and only a regular file is read. A relayed input (a
-// transcode node reading through the core) reads its Cues over HTTP.
+// or returns nil.
 func matroskaKeyframes(ctx context.Context, path string) []float64 {
-	file, err := openKeyframeSource(ctx, path)
+	file, size, err := openRegularKeyframeSource(ctx, path)
 	if err != nil {
 		return nil
 	}
 	defer func() { _ = file.Close() }()
-	info, err := file.Stat()
-	if err != nil || !info.Mode().IsRegular() {
-		return nil
-	}
-	index, err := keyframes.ReadMatroska(contextReaderAt{ctx: ctx, r: file}, info.Size())
+	index, err := keyframes.ReadMatroska(contextReaderAt{ctx: ctx, r: file}, size)
 	if err != nil {
 		return nil
 	}
 	return index.Keyframes
 }
+
+// openRegularKeyframeSource opens path for an index read and returns its
+// size. The file opens without blocking, so a FIFO in its place cannot hold
+// the lookup, and only a regular file is read. A relayed input (a transcode
+// node reading through the core) reads over HTTP.
+func openRegularKeyframeSource(ctx context.Context, path string) (fspath.Reader, int64, error) {
+	file, err := openKeyframeSource(ctx, path)
+	if err != nil {
+		return nil, 0, err
+	}
+	info, err := file.Stat()
+	if err == nil && !info.Mode().IsRegular() {
+		err = errNotRegular
+	}
+	if err != nil {
+		_ = file.Close()
+		return nil, 0, err
+	}
+	return file, info.Size(), nil
+}
+
+// errNotRegular is an index source that is not a regular file.
+var errNotRegular = errors.New("not a regular file")
 
 // openKeyframeSource opens path for the Cues read: a relayed input through
 // its relay, a library path without blocking.
