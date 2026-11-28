@@ -3,7 +3,10 @@ package auth
 import (
 	"context"
 	"errors"
+	"log/slog"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -345,4 +348,115 @@ func TestSignInNameBudgetDB(t *testing.T) {
 			t.Fatalf("sign-in from travel after a refresh there: %v", err)
 		}
 	})
+
+	// The server log says why a sign-in failed, so an admin can tell its
+	// person what to fix, while the error, and so the response, stays the
+	// same for every name.
+	t.Run("a refused sign-in logs why, without the password", func(t *testing.T) {
+		defer limiter.expire()
+		logs := captureSignInLogs(t)
+		disabled := env.localAccount(t, "signin-budget-disabled", models.RoleUser)
+		if _, err := env.pool.Exec(t.Context(), `UPDATE users SET enabled = false WHERE id = $1`, disabled.ID); err != nil {
+			t.Fatalf("disable account: %v", err)
+		}
+		cases := []struct {
+			label, name, password, reason string
+			userID                        int
+		}{
+			{"unknown name", env.name("no-such-account"), wrong, "unknown name", 0},
+			{"wrong password", user.Username, wrong, "wrong password", user.ID},
+			{"disabled account", disabled.Username, right, "account disabled", disabled.ID},
+		}
+		for _, tc := range cases {
+			logs.reset()
+			err := compat(tc.name, tc.password)
+			want := ErrInvalidCredentials
+			if tc.reason == "account disabled" {
+				want = ErrUserDisabled
+			}
+			if !errors.Is(err, want) || err.Error() != want.Error() {
+				t.Fatalf("%s: err = %q, want the plain %q", tc.label, err, want)
+			}
+			logs.wantRefusal(t, tc.label, tc.reason, tc.userID, tc.password)
+		}
+
+		for range limiter.max - 1 {
+			wantInvalid(t, native(user.Username, wrong))
+		}
+		logs.reset()
+		wantThrottled(t, native(user.Username, right))
+		logs.wantRefusal(t, "locked name", "too many attempts", 0, right)
+	})
+}
+
+// signInLogs collects the sign-in refusals the default logger records while
+// a test runs.
+type signInLogs struct {
+	mu      sync.Mutex
+	records []map[string]string
+}
+
+func captureSignInLogs(t *testing.T) *signInLogs {
+	t.Helper()
+	logs := &signInLogs{}
+	previous := slog.Default()
+	slog.SetDefault(slog.New(logs))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	return logs
+}
+
+func (l *signInLogs) Enabled(context.Context, slog.Level) bool { return true }
+func (l *signInLogs) WithAttrs([]slog.Attr) slog.Handler       { return l }
+func (l *signInLogs) WithGroup(string) slog.Handler            { return l }
+
+func (l *signInLogs) Handle(_ context.Context, r slog.Record) error {
+	record := map[string]string{"msg": r.Message}
+	r.Attrs(func(a slog.Attr) bool {
+		record[a.Key] = a.Value.String()
+		return true
+	})
+	l.mu.Lock()
+	l.records = append(l.records, record)
+	l.mu.Unlock()
+	return nil
+}
+
+func (l *signInLogs) reset() {
+	l.mu.Lock()
+	l.records = nil
+	l.mu.Unlock()
+}
+
+// wantRefusal checks that exactly one sign-in refusal was logged, giving
+// reason and the account's ID (none when userID is 0), and that no record
+// holds password.
+func (l *signInLogs) wantRefusal(t *testing.T, label, reason string, userID int, password string) {
+	t.Helper()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	var refusals []map[string]string
+	for _, record := range l.records {
+		for _, value := range record {
+			if strings.Contains(value, password) {
+				t.Fatalf("%s: a log record holds the password: %v", label, record)
+			}
+		}
+		if record["msg"] == "password sign-in refused" {
+			refusals = append(refusals, record)
+		}
+	}
+	if len(refusals) != 1 {
+		t.Fatalf("%s: logged %d sign-in refusals, want 1: %v", label, len(refusals), l.records)
+	}
+	got := refusals[0]
+	if got["reason"] != reason {
+		t.Fatalf("%s: reason = %q, want %q", label, got["reason"], reason)
+	}
+	wantUser := ""
+	if userID != 0 {
+		wantUser = strconv.Itoa(userID)
+	}
+	if got["user_id"] != wantUser {
+		t.Fatalf("%s: user_id = %q, want %q", label, got["user_id"], wantUser)
+	}
 }

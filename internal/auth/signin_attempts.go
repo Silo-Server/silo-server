@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/auth/passwordhash"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
@@ -188,6 +189,10 @@ type signInSpend struct {
 	// name that signed in (Jellyfin's "alice#Kids"), which can be another
 	// account's.
 	derived bool
+	// linking marks an account-linking check of a directory password, which
+	// spends the budget like a sign-in but is not one, so a refusal writes no
+	// signInRefusedMessage record.
+	linking bool
 }
 
 // newSignInSpend starts a sign-in's spend of the budget of name. loginName is
@@ -246,6 +251,12 @@ func (s *Service) reserveSignIn(ctx context.Context, spend *signInSpend) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		if !spend.linking {
+			slog.WarnContext(ctx, signInRefusedMessage, "component", "auth",
+				"reason", "too many attempts", "known_address", lane == SignInLaneSource,
+				"retry_after_seconds", max(1, int((retryAfter+time.Second-1)/time.Second)),
+				"client_ip", clientip.FromContext(ctx))
+		}
 		return &SignInThrottledError{RetryAfter: retryAfter}
 	}
 	if lane == SignInLaneName {
@@ -289,6 +300,73 @@ func (s *Service) finishSignIn(ctx context.Context, spend *signInSpend, user *mo
 		own = append(own, spend.key)
 	}
 	s.signInAttempts.Trust(ctx, own, spend.source)
+}
+
+// signInRefusedMessage is the server log message of every refused password
+// sign-in.
+const signInRefusedMessage = "password sign-in refused"
+
+// signInRefusalError is a refused password sign-in's error, err, with the reason
+// the server log gives for it and the account the name found, if any. It
+// reads and matches as err, so the client gets the same answer for an
+// unknown name as for a wrong password and only the log tells them apart.
+type signInRefusalError struct {
+	err    error
+	reason string
+	user   *models.User
+}
+
+func (e *signInRefusalError) Error() string { return e.err.Error() }
+func (e *signInRefusalError) Unwrap() error { return e.err }
+
+// logRefusedSignIn records why a password sign-in failed (err; nil logs
+// nothing), so an admin can
+// tell its person what to fix: an unknown name, a wrong password, a disabled
+// account. user is the account the sign-in found, when the error does not
+// carry it. The record names the account and the client address, never the
+// typed name or the password. A locked name was logged when its attempt was
+// refused (reserveSignIn), and a client that hung up has nobody to tell.
+func logRefusedSignIn(ctx context.Context, user *models.User, err error) {
+	if err == nil {
+		return
+	}
+	if _, ok := errors.AsType[*SignInThrottledError](err); ok || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return
+	}
+	level := slog.LevelInfo
+	var reason string
+	if refusal, ok := errors.AsType[*signInRefusalError](err); ok {
+		reason = refusal.reason
+		if refusal.user != nil {
+			user = refusal.user
+		}
+	} else {
+		switch {
+		case errors.Is(err, ErrInvalidCredentials):
+			reason = "invalid credentials"
+		case errors.Is(err, ErrUserDisabled):
+			reason = "account disabled"
+		case errors.Is(err, ErrPasswordChangeRequired):
+			reason = "temporary password must be replaced first"
+		case errors.Is(err, ErrLocalLoginDisabled):
+			reason = "local password sign-in turned off"
+		case errors.Is(err, ErrNotPermitted):
+			reason = "not permitted"
+		case errors.Is(err, passwordhash.ErrBusy):
+			reason = "server busy"
+		default:
+			level, reason = slog.LevelWarn, "error"
+		}
+	}
+	attrs := []any{"component", "auth", "reason", reason}
+	if user != nil {
+		attrs = append(attrs, "user_id", user.ID, "username", user.Username)
+	}
+	attrs = append(attrs, "client_ip", clientip.FromContext(ctx))
+	if level == slog.LevelWarn {
+		attrs = append(attrs, "error", err)
+	}
+	slog.Log(ctx, level, signInRefusedMessage, attrs...)
 }
 
 // ownsSignInBudget reports whether the name whose budget spend spent belongs

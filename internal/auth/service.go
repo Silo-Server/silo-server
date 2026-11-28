@@ -318,7 +318,10 @@ func (s *Service) CompatLoginWithLocalFallback(ctx context.Context, username, pa
 	if err = s.reserveSignIn(ctx, spend); err != nil {
 		return nil, nil, false, err
 	}
-	defer func() { s.finishSignIn(ctx, spend, user, err) }()
+	defer func() {
+		logRefusedSignIn(ctx, user, err)
+		s.finishSignIn(ctx, spend, user, err)
+	}()
 	if fallback != "" {
 		// A fallback is a second password that may be checked, so it spends a
 		// second attempt up front, for every name: charging it only where the
@@ -373,7 +376,10 @@ func (s *Service) LoginWithProvider(
 	if err = s.reserveSignIn(ctx, spend); err != nil {
 		return nil, nil, err
 	}
-	defer func() { s.finishSignIn(ctx, spend, user, err) }()
+	defer func() {
+		logRefusedSignIn(ctx, user, err)
+		s.finishSignIn(ctx, spend, user, err)
+	}()
 	if providerID == "" {
 		routed, err := s.routePasswordLogin(ctx, username)
 		if err != nil {

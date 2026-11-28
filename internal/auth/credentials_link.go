@@ -69,6 +69,7 @@ func (s *Service) LinkCredentialsIdentity(ctx context.Context, in CredentialsLin
 		return nil, ErrInvalidCredentials
 	}
 	spend := s.newSignInSpend(ctx, username, "")
+	spend.linking = true
 	if err = s.reserveSignIn(ctx, spend); err != nil {
 		return nil, err
 	}

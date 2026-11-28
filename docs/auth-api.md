@@ -584,6 +584,17 @@ A locked name answers 429 with `Retry-After` giving the seconds left:
 - Jellyfin: `{"Error":"TooManyRequests",...}`, as for its other 429s.
 - Audiobookshelf: a plain-text 429.
 
+Every refused password sign-in, native, Jellyfin or Audiobookshelf, also writes one
+`password sign-in refused` record to the server log. Its `reason` is `unknown name`,
+`wrong password`, `no local password`, `account disabled`, another refusal such as
+`local password sign-in turned off`, or `too many attempts` for a locked name, with
+`known_address` and `retry_after_seconds` (as `Retry-After` gives it). The record gives
+the client address and, when the name found an account, that account (`user_id`,
+`username`), never the typed name or the password, so an admin can tell a person what to
+fix while the response stays the same for an unknown name and a wrong password. A
+request whose client hung up, and a 429 from the per-address `login` request budget,
+write no such record.
+
 The counts and known addresses live in Redis whenever the server has Redis configured,
 so every node and every listener share them, independent of `ratelimit.backend` and of
 whether request rate limiting is enabled. Only a server without Redis keeps them in
