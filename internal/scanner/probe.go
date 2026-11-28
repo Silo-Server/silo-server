@@ -965,8 +965,9 @@ const frameSideDataProbeTimeout = 30 * time.Second
 
 // applyPrimaryVideoFrameSideData reads the first decoded frame of the primary
 // video stream when that stream is PQ, and records the frame's side data and
-// color range on the stream so normalization can see HDR10+ metadata and the
-// range the decoder takes from the bitstream. Only the primary stream is
+// color range on the stream so normalization can see HDR10+ metadata, a Dolby
+// Vision enhancement layer's type, and the range the decoder takes from the
+// bitstream. Only the primary stream is
 // checked because it is the one playback and the badges describe.
 //
 // A failed frame read is not fatal: the file keeps its stream-level facts,
@@ -1065,7 +1066,10 @@ func probeFirstVideoFramePackets(ctx context.Context, ffprobePath, filePath, str
 		"-read_intervals", "%+#"+strconv.Itoa(packets),
 		"-select_streams", streamSpecifier,
 		"-show_frames",
-		"-show_entries", "frame=media_type,color_range:frame_side_data=side_data_type",
+		// A Dolby Vision RPU's denominator and NLQ coefficients tell a minimal
+		// enhancement layer from a full one (mediaprobe.DolbyVisionEnhancementLayer).
+		"-show_entries", "frame=media_type,color_range:frame_side_data=side_data_type,coef_log2_denom"+
+			":frame_side_data_component=nlq_offset,vdr_in_max,linear_deadzone_slope,linear_deadzone_threshold",
 		"-print_format", "json",
 		filePath,
 	)

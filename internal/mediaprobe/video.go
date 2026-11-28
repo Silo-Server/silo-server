@@ -76,8 +76,9 @@ type Stream struct {
 	Tags               map[string]string `json:"tags"`
 	SideDataList       []SideData        `json:"side_data_list"`
 	// FrameSideDataList holds side data read from the stream's first decoded
-	// frame. FFmpeg reports HDR10+ dynamic metadata only per frame, never in
-	// the stream's own side data, so a stream-only probe cannot see it.
+	// frame. FFmpeg reports HDR10+ dynamic metadata and a Dolby Vision RPU's
+	// enhancement-layer coefficients only per frame, never in the stream's
+	// own side data, so a stream-only probe cannot see them.
 	FrameSideDataList []SideData `json:"-"`
 	// FrameSideDataRead reports that the first frame was read, so an empty
 	// FrameSideDataList means the frame carries no side data.
@@ -110,6 +111,21 @@ type SideData struct {
 	DVRPUPresentLegacy  int    `json:"dv_rpu_present"`
 	DVBLCompatID        int    `json:"dv_bl_signal_compatibility_id"`
 	DVBLCompatIDPresent bool   `json:"-"`
+	// DVCoefLog2Denom and DVComponents come from a frame's "Dolby Vision
+	// Metadata": the RPU's fixed-point denominator and, per color component,
+	// its enhancement-layer (NLQ) coefficients.
+	DVCoefLog2Denom *int                   `json:"coef_log2_denom"`
+	DVComponents    []DolbyVisionComponent `json:"components"`
+}
+
+// DolbyVisionComponent holds one color component's NLQ coefficients from a
+// Dolby Vision RPU. FFmpeg prints them only when the RPU carries NLQ data, so
+// a nil field means the frame did not say.
+type DolbyVisionComponent struct {
+	NLQOffset               *int64  `json:"nlq_offset"`
+	VDRInMax                *uint64 `json:"vdr_in_max"`
+	LinearDeadzoneSlope     *uint64 `json:"linear_deadzone_slope"`
+	LinearDeadzoneThreshold *uint64 `json:"linear_deadzone_threshold"`
 }
 
 // UnmarshalJSON preserves whether FFprobe emitted a Dolby Vision compatibility
@@ -212,7 +228,7 @@ func NormalizeVideoTrack(stream Stream) models.VideoTrack {
 		DVBLPresent:         dvConfig.DVBlPresent > 0 || dvConfig.DVBlPresentLegacy > 0,
 		DVRPUPresent:        dvConfig.DVRPUPresent > 0 || dvConfig.DVRPUPresentLegacy > 0,
 		DVELPresent:         dvELPresent,
-		DVEnhancementLayer:  enhancementLayer(dvELPresent),
+		DVEnhancementLayer:  enhancementLayer(dvELPresent, stream.FrameSideDataList),
 		HDR10Plus:           hdr10Plus,
 		HDR10PlusUnchecked:  !hdr10Plus && NeedsFrameSideData(stream) && !stream.FrameSideDataRead,
 		Profile:             stream.Profile,
@@ -275,11 +291,56 @@ func dolbyVisionProfile(profile int) string {
 	return ""
 }
 
-func enhancementLayer(present bool) string {
-	if present {
-		return "unknown"
+func enhancementLayer(present bool, frameSideData []SideData) string {
+	if !present {
+		return "none"
 	}
-	return "none"
+	if layer := DolbyVisionEnhancementLayer(frameSideData); layer != "" {
+		return layer
+	}
+	return "unknown"
+}
+
+// DolbyVisionEnhancementLayer classifies the enhancement layer of a Dolby
+// Vision stream from the first Dolby Vision metadata in its decoded frames'
+// side data, as dovi_tool does: "mel"
+// (minimal enhancement layer) when every component's NLQ coefficients are the
+// identity, offset 0, vdr_in_max exactly 1.0 and no deadzone, so the layer
+// adds nothing to the picture; "fel" (full enhancement layer) when any
+// differs. It returns "" when the frame carries no Dolby Vision metadata or
+// no NLQ coefficients, which leaves the layer unknown.
+func DolbyVisionEnhancementLayer(frameSideData []SideData) string {
+	for _, data := range frameSideData {
+		if !strings.EqualFold(data.SideDataType, "Dolby Vision Metadata") {
+			continue
+		}
+		// The first Dolby Vision metadata found answers for the stream: a
+		// fallback read can return several frames, and the first decoded one
+		// may carry none. A Profile 7 RPU carries the same NLQ setup on every
+		// frame, so a later frame's tells the same story.
+		return dolbyVisionNLQLayer(data)
+	}
+	return ""
+}
+
+func dolbyVisionNLQLayer(data SideData) string {
+	if data.DVCoefLog2Denom == nil || *data.DVCoefLog2Denom < 0 || *data.DVCoefLog2Denom > 32 || len(data.DVComponents) != 3 {
+		return ""
+	}
+	one := uint64(1) << *data.DVCoefLog2Denom
+	identity := true
+	for _, c := range data.DVComponents {
+		if c.NLQOffset == nil || c.VDRInMax == nil || c.LinearDeadzoneSlope == nil || c.LinearDeadzoneThreshold == nil {
+			return ""
+		}
+		if *c.NLQOffset != 0 || *c.VDRInMax != one || *c.LinearDeadzoneSlope != 0 || *c.LinearDeadzoneThreshold != 0 {
+			identity = false
+		}
+	}
+	if identity {
+		return "mel"
+	}
+	return "fel"
 }
 
 // HasHDR10Plus reports whether side data, from a stream or a decoded frame,

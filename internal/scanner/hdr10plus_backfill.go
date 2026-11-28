@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -81,6 +82,16 @@ type HDR10PlusBackfillResult struct {
 	Unreadable int `json:"unreadable"`
 	// TimedOut files did not answer within the frame read timeout.
 	TimedOut int `json:"timed_out"`
+	// DolbyVisionMEL and DolbyVisionFEL count Dolby Vision files whose
+	// enhancement layer was unknown and is now recorded as minimal or full.
+	// A file whose first frame carries no NLQ coefficients stays unknown and
+	// is read again on the next pass.
+	DolbyVisionMEL int `json:"dolby_vision_mel"`
+	DolbyVisionFEL int `json:"dolby_vision_fel"`
+	// Unchanged files were read but told nothing their row lacks: the
+	// enhancement layer of a Dolby Vision file whose first frame carries no
+	// NLQ coefficients. Their row is not written.
+	Unchanged int `json:"unchanged"`
 }
 
 // HDR10PlusBackfiller records HDR10+ status on video probed before the
@@ -89,18 +100,25 @@ type HDR10PlusBackfillResult struct {
 //
 // It also records the first frame's color range, which the decoder takes from
 // the bitstream and tone mapping trusts over a container tag that contradicts
-// it (see models.VideoTrack.FrameColorRange).
+// it (see models.VideoTrack.FrameColorRange), and the type of a Dolby Vision
+// enhancement layer, which only the frame's RPU tells (see
+// mediaprobe.DolbyVisionEnhancementLayer).
 //
 // Candidates are present files whose first video track is PQ and lacks the
-// hdr10_plus or the frame_color_range key, apart from those whose read decoded
-// no frame in the last hdr10PlusNoFrameRetryAfter. The backfiller decodes the
-// first frame of the primary video stream and sets frame_color_range and, on a
-// track without one, hdr10_plus and, for an HDR10+ file, video_range_type on
-// that track. It leaves the rest of the probe alone, so chapters, probe time,
+// hdr10_plus or the frame_color_range key or has an enhancement layer of
+// unknown type, apart from those whose read decoded no frame in the last
+// hdr10PlusNoFrameRetryAfter. The backfiller decodes the first frame of the
+// primary video stream and sets frame_color_range and, on a track without
+// one, hdr10_plus and, for an HDR10+ file, video_range_type on that track, and
+// on a track with an unknown enhancement layer, dv_enhancement_layer when the
+// frame tells it. It leaves the rest of the probe alone, so chapters, probe time,
 // and everything keyed to them stay as they are. A pass is resumable by
 // construction: a file drops out once its track has both keys, which every
-// write sets together, and a pass that stops early resumes with the files it
-// did not reach.
+// write sets together, and a known enhancement-layer type, and a pass that
+// stops early resumes with the files it did not reach. A Dolby Vision file
+// whose first frame carries no NLQ coefficients keeps an unknown type, so each
+// pass reads it again; with the bundled FFmpeg every Profile 7 remux carries
+// them.
 type HDR10PlusBackfiller struct {
 	pool        *pgxpool.Pool
 	ffprobePath string
@@ -152,6 +170,7 @@ const (
 	hdr10PlusOutcomeUnreadable
 	hdr10PlusOutcomeTimedOut
 	hdr10PlusOutcomeFrameRangeOnly
+	hdr10PlusOutcomeUnchanged
 )
 
 // Run makes one pass over every candidate file. progress, when non-nil, is
@@ -185,13 +204,19 @@ func (b *HDR10PlusBackfiller) Run(ctx context.Context, progress func(HDR10PlusBa
 		group.SetLimit(b.workers)
 		for _, candidate := range candidates {
 			group.Go(func() error {
-				outcome, err := b.backfillFile(groupCtx, candidate)
+				outcome, layer, err := b.backfillFile(groupCtx, candidate)
 				if err != nil {
 					return err
 				}
 				mu.Lock()
 				defer mu.Unlock()
 				result.Checked++
+				switch layer {
+				case "mel":
+					result.DolbyVisionMEL++
+				case "fel":
+					result.DolbyVisionFEL++
+				}
 				if outcome == hdr10PlusOutcomeTimedOut {
 					consecutiveTimeouts++
 				} else {
@@ -210,6 +235,8 @@ func (b *HDR10PlusBackfiller) Run(ctx context.Context, progress func(HDR10PlusBa
 					result.Unreadable++
 				case hdr10PlusOutcomeTimedOut:
 					result.TimedOut++
+				case hdr10PlusOutcomeUnchanged:
+					result.Unchanged++
 				}
 				if consecutiveTimeouts >= hdr10PlusBackfillMaxTimeouts {
 					return fmt.Errorf("%w: %d HDR10+ frame reads in a row timed out after %s",
@@ -246,7 +273,11 @@ func (b *HDR10PlusBackfiller) loadCandidates(ctx context.Context, afterID int) (
 		  AND jsonb_typeof(mf.video_tracks) = 'array'
 		  AND jsonb_typeof(mf.video_tracks->0) = 'object'
 		  AND lower(COALESCE(mf.video_tracks->0->>'color_transfer', '')) LIKE '%smpte2084%'
-		  AND NOT (mf.video_tracks->0 ?& ARRAY['hdr10_plus', 'frame_color_range'])
+		  AND (NOT (mf.video_tracks->0 ?& ARRAY['hdr10_plus', 'frame_color_range'])
+		       OR ((mf.video_tracks->0->>'dv_el_present' = 'true'
+		            OR (mf.video_tracks->0->>'dv_profile' = '7'
+		                AND lower(COALESCE(mf.video_tracks->0->>'video_range_type', '')) LIKE '%withel%'))
+		           AND COALESCE(mf.video_tracks->0->>'dv_enhancement_layer', 'unknown') = 'unknown'))
 		  AND NOT EXISTS (
 			SELECT 1 FROM hdr10_plus_backfill_no_frame nf
 			WHERE nf.media_file_id = mf.id
@@ -284,27 +315,29 @@ func (b *HDR10PlusBackfiller) loadCandidates(ctx context.Context, afterID int) (
 // backfillFile returns an error for a database failure or a canceled pass,
 // either of which ends the pass. A file that cannot be read is an outcome,
 // not an error, and is recorded unless reading it again could give a
-// different result.
-func (b *HDR10PlusBackfiller) backfillFile(ctx context.Context, c hdr10PlusCandidate) (hdr10PlusOutcome, error) {
+// different result. layer is the Dolby Vision enhancement-layer type it
+// recorded, "mel" or "fel", or "" when it recorded none.
+func (b *HDR10PlusBackfiller) backfillFile(ctx context.Context, c hdr10PlusCandidate) (hdr10PlusOutcome, string, error) {
 	if err := ctx.Err(); err != nil {
-		return 0, err
+		return 0, "", err
 	}
 	frame, err := b.readFrame(ctx, b.ffprobePath, c.path, hdr10PlusPrimaryVideoStream)
 	if ctxErr := ctx.Err(); ctxErr != nil {
-		return 0, ctxErr
+		return 0, "", ctxErr
 	}
 	if errors.Is(err, errFrameSideDataTimeout) {
 		slog.WarnContext(ctx, "scanner: HDR10+ frame read timed out",
 			"component", "scanner", "file_id", c.id, "path", c.path, "timeout", frameSideDataProbeTimeout)
-		return hdr10PlusOutcomeTimedOut, nil
+		return hdr10PlusOutcomeTimedOut, "", nil
 	}
 	if err != nil {
 		slog.DebugContext(ctx, "scanner: HDR10+ backfill could not read the first frame",
 			"component", "scanner", "file_id", c.id, "path", c.path, "error", err)
 		if errors.Is(err, errNoFrameDecoded) {
-			return b.recordNoFrame(ctx, c)
+			outcome, err := b.recordNoFrame(ctx, c)
+			return outcome, "", err
 		}
-		return hdr10PlusOutcomeUnreadable, nil
+		return hdr10PlusOutcomeUnreadable, "", nil
 	}
 	// The frame describes the file on disk, which a scan has not reprobed if
 	// it changed since the row was written. Such a file is settled by that
@@ -312,25 +345,25 @@ func (b *HDR10PlusBackfiller) backfillFile(ctx context.Context, c hdr10PlusCandi
 	// without an mtime can only be checked on size.
 	info, err := b.statFileBounded(ctx, c.path)
 	if ctxErr := ctx.Err(); ctxErr != nil {
-		return 0, ctxErr
+		return 0, "", ctxErr
 	}
 	if errors.Is(err, errHDR10PlusStatBusy) {
 		// Earlier checks are still stuck on storage. Checking more would
 		// only add to them, so the pass ends here and the next run resumes.
-		return 0, fmt.Errorf("%w: %w", errHDR10PlusStorageStalled, err)
+		return 0, "", fmt.Errorf("%w: %w", errHDR10PlusStorageStalled, err)
 	}
 	if errors.Is(err, errHDR10PlusStatTimeout) {
 		slog.WarnContext(ctx, "scanner: HDR10+ backfill file check timed out",
 			"component", "scanner", "file_id", c.id, "path", c.path, "timeout", b.statTimeout)
-		return hdr10PlusOutcomeTimedOut, nil
+		return hdr10PlusOutcomeTimedOut, "", nil
 	}
 	if err != nil {
 		slog.DebugContext(ctx, "scanner: HDR10+ backfill could not stat the file",
 			"component", "scanner", "file_id", c.id, "path", c.path, "error", err)
-		return hdr10PlusOutcomeUnreadable, nil
+		return hdr10PlusOutcomeUnreadable, "", nil
 	}
 	if info.Size() != c.size || (c.modifiedAt != nil && !sameFileModifiedAt(c.modifiedAt, info.ModTime())) {
-		return hdr10PlusOutcomeChanged, nil
+		return hdr10PlusOutcomeChanged, "", nil
 	}
 	hdr10Plus := mediaprobe.HasHDR10Plus(frame.SideData)
 	outcome := hdr10PlusOutcomeNotHDR10Plus
@@ -341,37 +374,59 @@ func (b *HDR10PlusBackfiller) backfillFile(ctx context.Context, c hdr10PlusCandi
 	case hdr10Plus:
 		outcome = hdr10PlusOutcomeHDR10Plus
 	}
+	// An enhancement layer of unknown type takes the one the frame's RPU
+	// tells, if it tells one. A row from before Silo stored dv_el_present
+	// shows its layer only in a Profile 7 DOVIWithEL range label, as the
+	// planner reads it.
+	layer := ""
+	hasEL := c.track.DVELPresent ||
+		c.track.DVProfile == 7 && strings.Contains(strings.ToLower(c.track.VideoRangeType), "withel")
+	if hasEL && (c.track.DVEnhancementLayer == "" || c.track.DVEnhancementLayer == "unknown") {
+		layer = mediaprobe.DolbyVisionEnhancementLayer(frame.SideData)
+	}
+	frameRange := mediaprobe.RecordedFrameColorRange(frame.ColorRange)
+	if !c.track.HDR10PlusUnchecked && c.track.FrameColorRange == frameRange && layer == "" {
+		// The read told nothing new, as for an enhancement layer whose frame
+		// carries no NLQ coefficients, so the row and its updated_at stay as
+		// they are. Only a wait an earlier no-frame read left is dropped.
+		if _, err := b.pool.Exec(ctx, `DELETE FROM hdr10_plus_backfill_no_frame WHERE media_file_id = $1`, c.id); err != nil {
+			return 0, "", fmt.Errorf("clearing the HDR10+ no-frame wait for file %d: %w", c.id, err)
+		}
+		return hdr10PlusOutcomeUnchanged, "", nil
+	}
 	// Set only frame_color_range and, on a track not yet checked for HDR10+,
-	// hdr10_plus and for an HDR10+ file video_range_type, on the first track,
-	// so fields this binary does not know survive. Write only over the exact
-	// row that was read: the same file revision and the same first track. A
-	// scan that rewrote the row in the meantime read the frame itself. The
-	// same statement drops the wait an earlier no-frame read left.
+	// hdr10_plus and for an HDR10+ file video_range_type, and for a known
+	// enhancement layer dv_enhancement_layer, on the first track, so fields
+	// this binary does not know survive. Write only over the exact row that
+	// was read: the same file revision and the same first track. A scan that
+	// rewrote the row in the meantime read the frame itself. The same
+	// statement drops the wait an earlier no-frame read left.
 	tag, err := b.pool.Exec(ctx, `
 		WITH cleared AS (
 			DELETE FROM hdr10_plus_backfill_no_frame WHERE media_file_id = $1
 		)
 		UPDATE media_files
-		SET video_tracks = jsonb_set(
+		SET video_tracks = jsonb_set_lax(jsonb_set(
 		        CASE WHEN video_tracks->0 ? 'hdr10_plus' THEN video_tracks
 		            WHEN $5::boolean
 		            THEN jsonb_set(jsonb_set(video_tracks, '{0,hdr10_plus}', 'true'::jsonb), '{0,video_range_type}', to_jsonb($6::text))
 		            ELSE jsonb_set(video_tracks, '{0,hdr10_plus}', 'false'::jsonb)
 		        END,
 		        '{0,frame_color_range}', to_jsonb($7::text)),
+		        '{0,dv_enhancement_layer}', to_jsonb(NULLIF($8::text, '')), true, 'return_target'),
 		    updated_at = NOW()
 		WHERE id = $1
 		  AND file_size = $2
 		  AND date_trunc('microseconds', file_modified_at) IS NOT DISTINCT FROM $3::timestamptz
 		  AND video_tracks->0 = $4::jsonb`,
-		c.id, c.size, normalizedStoredModifiedAt(c.modifiedAt), c.trackJSON, hdr10Plus, mediaprobe.RangeTypeWithHDR10Plus(c.track), mediaprobe.RecordedFrameColorRange(frame.ColorRange))
+		c.id, c.size, normalizedStoredModifiedAt(c.modifiedAt), c.trackJSON, hdr10Plus, mediaprobe.RangeTypeWithHDR10Plus(c.track), frameRange, layer)
 	if err != nil {
-		return 0, fmt.Errorf("recording HDR10+ status for file %d: %w", c.id, err)
+		return 0, "", fmt.Errorf("recording HDR10+ status for file %d: %w", c.id, err)
 	}
 	if tag.RowsAffected() == 0 {
-		return hdr10PlusOutcomeChanged, nil
+		return hdr10PlusOutcomeChanged, "", nil
 	}
-	return outcome, nil
+	return outcome, layer, nil
 }
 
 // recordNoFrame records that a file's read decoded no frame, so passes in the
