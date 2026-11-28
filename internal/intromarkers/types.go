@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/mediasample"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -19,11 +20,11 @@ import (
 // or re-analysis cannot overwrite markers the old version wrote.
 const (
 	AlgorithmVersion            = 1
-	AnalysisBehaviorVersion     = 6
+	AnalysisBehaviorVersion     = 7
 	ChapterAlgorithm            = "chapter:v1"
 	ChapterSilenceAlgorithm     = "chapter:silence:v2"
 	EpisodeVersionCopyAlgorithm = "episode-version-copy:v1"
-	ChromaprintAlgorithm        = "chromaprint:v4"
+	ChromaprintAlgorithm        = "chromaprint:v5"
 	ChromaprintFormat           = "chromaprint:raw:uint32le"
 	DefaultPointHopSeconds      = 0.123
 
@@ -75,12 +76,16 @@ type Config struct {
 	attemptTimeout time.Duration
 }
 
-// Intro duration bounds for a Chromaprint match. Twelve seconds keeps most
-// short title cards: in replay against authored chapters, lowering the bound
-// further mostly added matches in the wrong place. Three minutes covers long
-// drama openings, inside TheIntroDB's limit.
+// Intro duration bounds for a Chromaprint match. A match usually comes out a
+// few seconds shorter than the intro, so a floor of twelve seconds missed
+// most intros under fifteen. In replay against authored chapters, eight
+// instead of twelve found about one more intro in twenty, nearly all of them
+// under twenty seconds long, for about seven more matches in the wrong place
+// per thousand; going below eight found no more. A match under
+// shortIntroSeconds still needs two partner episodes. Three minutes covers
+// long drama openings, inside TheIntroDB's limit.
 const (
-	defaultMinimumIntroDurationSeconds = 12
+	defaultMinimumIntroDurationSeconds = 8
 	defaultMaximumIntroDurationSeconds = 180
 )
 
@@ -345,6 +350,9 @@ type Fingerprint struct {
 	FingerprintFormat     string
 	SampleDurationSeconds float64
 	Points                []uint32
+	// Silences are the silences of an intro fingerprint's window, in media
+	// seconds, when FingerprintFormat is chromaprintSilenceFormat.
+	Silences []mediasample.Interval
 }
 
 type SeasonState struct {

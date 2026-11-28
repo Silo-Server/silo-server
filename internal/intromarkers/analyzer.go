@@ -1704,7 +1704,7 @@ func (a *Analyzer) ensureFingerprints(ctx context.Context, candidates []Candidat
 			}
 			switch lookup {
 			case fingerprintCached:
-				count(&counts.hits, &fingerprintInput{Candidate: candidate, Points: cached.Points, WindowStart: cached.WindowStartSeconds})
+				count(&counts.hits, &fingerprintInput{Candidate: candidate, Points: cached.Points, WindowStart: cached.WindowStartSeconds, Silences: cached.Silences})
 				return
 			case fingerprintUnusable:
 				return
@@ -1736,7 +1736,7 @@ func (a *Analyzer) ensureFingerprints(ctx context.Context, candidates []Candidat
 				setErr(err)
 				return
 			}
-			count(&counts.computed, &fingerprintInput{Candidate: candidate, Points: fp.Points, WindowStart: fp.WindowStartSeconds})
+			count(&counts.computed, &fingerprintInput{Candidate: candidate, Points: fp.Points, WindowStart: fp.WindowStartSeconds, Silences: fp.Silences})
 		}()
 	}
 	wg.Wait()

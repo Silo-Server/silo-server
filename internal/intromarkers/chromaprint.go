@@ -48,9 +48,18 @@ func (e *ChromaprintExtractor) Preflight(ctx context.Context) error {
 // Extract fingerprints the candidate's opening audio for intro detection.
 func (e *ChromaprintExtractor) Extract(ctx context.Context, candidate Candidate) (Fingerprint, bool, error) {
 	window := headWindow(candidate, e.config)
-	points, err := e.extractWindow(ctx, candidate, window)
-	if err != nil || len(points) == 0 {
-		return Fingerprint{}, false, err
+	if window.empty() {
+		return Fingerprint{}, false, nil
+	}
+	req := fingerprintRequest(ctx, candidate, window)
+	req.Audio.Silence = headSilenceParams()
+	result, err := runAnalysis(ctx, e.config, analysisRunner(e.config), req)
+	if err != nil {
+		return Fingerprint{}, false, fmt.Errorf("extracting chromaprint for file %d: %w", candidate.FileID, err)
+	}
+	points := result.Fingerprint
+	if len(points) == 0 {
+		return Fingerprint{}, false, nil
 	}
 	return Fingerprint{
 		MediaFileID:           candidate.FileID,
@@ -61,9 +70,10 @@ func (e *ChromaprintExtractor) Extract(ctx context.Context, candidate Candidate)
 		WindowEndSeconds:      window.End,
 		AlgorithmVersion:      AlgorithmVersion,
 		ConfigHash:            e.config.ConfigHash(),
-		FingerprintFormat:     ChromaprintFormat,
-		SampleDurationSeconds: float64(len(points)) * DefaultPointHopSeconds,
+		FingerprintFormat:     chromaprintSilenceFormat,
+		SampleDurationSeconds: float64(len(points)) * exactChromaprintHopSeconds,
 		Points:                points,
+		Silences:              closeOpenSilences(result.Silences, window.End),
 	}, true, nil
 }
 

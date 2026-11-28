@@ -4,6 +4,8 @@ import (
 	"math"
 	"math/bits"
 	"sort"
+
+	"github.com/Silo-Server/silo-server/internal/mediasample"
 )
 
 type fingerprintInput struct {
@@ -12,20 +14,24 @@ type fingerprintInput struct {
 	// WindowStart is where the fingerprinted window begins in the file, in
 	// seconds. Points count from it.
 	WindowStart float64
+	// Silences are the silences of the window in media seconds, when the
+	// fingerprint pass recorded them.
+	Silences []mediasample.Interval
 }
 
 // Chromaprint points each summarize a window of roughly 2.4 seconds that
 // starts at the point's timestamp, so a segment two files share starts matching
 // before it begins and stops matching before it ends. These leads were measured
 // against authored intro chapters and shift both boundaries back into place.
+// Credits matching uses them with DefaultPointHopSeconds; intro matching has
+// its own in compare_refined.go.
 const (
 	chromaprintStartLeadSeconds = 1.35
 	chromaprintEndLeadSeconds   = 1.05
 )
 
 // zeroStartSnapSeconds treats a detected start this close to the beginning of
-// the file as the beginning. Intros that start after a short logo or cold open
-// keep their real start.
+// the file as the beginning in the legacy matcher.
 const zeroStartSnapSeconds = 2.0
 
 // compareNeighborEpisodes bounds how many following episodes, in episode
@@ -40,7 +46,8 @@ const compareNeighborEpisodes = 8
 const compareFallbackEpisodes = 48
 
 // minimumConsensusOverlap is the overlap, as intersection over union, a pair
-// result needs with a file's anchor segment to count toward its consensus.
+// result needs with a file's anchor segment to count toward its consensus in
+// the legacy matcher.
 const minimumConsensusOverlap = 0.3
 
 // Confidence reflects how often markers of each kind covered at least 80
@@ -69,13 +76,6 @@ const (
 	minimumSeasonCoverage = 0.5
 )
 
-// Adjusted intro bounds: a pair result outside them after the Chromaprint
-// leads, zero snap, and chapter snapping is dropped.
-const (
-	minimumAdjustedIntroSeconds = 10.0
-	maximumAdjustedIntroSeconds = 180.0
-)
-
 // matchProfile is what a marker kind's season comparison looks for.
 type matchProfile struct {
 	// MinSeconds and MaxSeconds bound a raw match between two files.
@@ -92,6 +92,10 @@ type matchProfile struct {
 	// neighbors give it only a short match with fewer partners also gets the
 	// wider search, which may find the rest.
 	MinimumShortPartners int
+	// ShortQualitySeconds and MinimumShortQuality reject very short matches
+	// whose median pair score is too noisy to be a genuine title card.
+	ShortQualitySeconds float64
+	MinimumShortQuality float64
 	// SeasonToleranceSeconds is how far a file's match duration may be from
 	// the season's usual duration and still agree with it.
 	SeasonToleranceSeconds float64
@@ -108,6 +112,10 @@ type matchProfile struct {
 	// SnapToChapters moves adjusted boundaries onto nearby chapter
 	// boundaries.
 	SnapToChapters bool
+	// RefinedMatch enables exact Chromaprint hop timing, single-point shift
+	// refinement, Kadane multi-run matching, tight edge clustering with logo
+	// preference, and silence-based splitting and edge trimming.
+	RefinedMatch bool
 }
 
 // introProfile is the intro comparison for cfg.
@@ -116,27 +124,28 @@ func introProfile(cfg Config) matchProfile {
 	return matchProfile{
 		MinSeconds:             float64(cfg.MinimumIntroDurationSeconds),
 		MaxSeconds:             float64(cfg.MaximumIntroDurationSeconds),
-		AdjustedMinSeconds:     minimumAdjustedIntroSeconds,
-		AdjustedMaxSeconds:     maximumAdjustedIntroSeconds,
+		AdjustedMinSeconds:     float64(cfg.MinimumIntroDurationSeconds),
+		AdjustedMaxSeconds:     float64(cfg.MaximumIntroDurationSeconds),
 		ShortSeconds:           shortIntroSeconds,
 		MinimumShortPartners:   minimumShortIntroPartners,
+		ShortQualitySeconds:    introShortQualitySeconds,
+		MinimumShortQuality:    introMinimumShortQuality,
 		SeasonToleranceSeconds: seasonDurationToleranceSeconds,
 		Algorithm:              ChromaprintAlgorithm,
 		ConsistentConfidence:   chromaprintConsistentConfidence,
 		InconsistentConfidence: chromaprintInconsistentConfidence,
 		ShortConfidence:        chromaprintShortConfidence,
-		ZeroStartSnapSeconds:   zeroStartSnapSeconds,
+		ZeroStartSnapSeconds:   introZeroStartSnapSeconds,
 		SnapToChapters:         true,
+		RefinedMatch:           true,
 	}
 }
 
 // CompareFingerprints matches each file against its neighboring episodes, and
-// an unmatched file against a wider set of the season, and
-// reduces the pair results for a file to a consensus: the median boundaries of
-// the results that agree with the most-confirmed one. Taking the longest pair
-// result instead let a single over-extended match set the boundaries. A file's
-// confidence depends on whether its intro agrees with the season: a real intro
-// runs the same length in most episodes.
+// an unmatched file against a wider set of the season, and reduces the pair
+// results for a file to a consensus. A file's confidence depends on whether
+// its intro agrees with the season: a real intro runs the same length in most
+// episodes.
 func CompareFingerprints(inputs []fingerprintInput, cfg Config) map[int]Segment {
 	return compareFingerprints(inputs, introProfile(cfg))
 }
@@ -179,6 +188,11 @@ type seasonMatch struct {
 	SeasonConsistent bool
 }
 
+type pairVote struct {
+	Segment Segment
+	Quality float64
+}
+
 // matchSeason compares the files of a season and reduces each file's pair
 // results to a consensus; see CompareFingerprints.
 func matchSeason(inputs []fingerprintInput, profile matchProfile) map[int]seasonMatch {
@@ -194,141 +208,262 @@ func matchSeason(inputs []fingerprintInput, profile matchProfile) map[int]season
 		return a.FileID < b.FileID
 	})
 
-	// Results are kept per partner episode so a partner with several versions
-	// still casts a single vote in the consensus.
-	results := map[int]map[string][]Segment{}
-	record := func(input fingerprintInput, partner string, segment Segment) {
-		if !validAdjustedSegment(segment, profile) {
-			return
-		}
-		byPartner := results[input.Candidate.FileID]
-		if byPartner == nil {
-			byPartner = map[string][]Segment{}
-			results[input.Candidate.FileID] = byPartner
-		}
-		byPartner[partner] = append(byPartner[partner], segment)
+	results := collectSeasonPairVotes(ordered, profile)
+	return finalizeSeasonMatches(inputs, ordered, results, profile)
+}
+
+func collectSeasonPairVotes(ordered []fingerprintInput, profile matchProfile) map[int]map[string][]pairVote {
+	c := &seasonPairCollector{
+		ordered:    ordered,
+		profile:    profile,
+		minPairSec: math.Max(0, profile.MinSeconds-introPairMinSlackSeconds),
+		results:    map[int]map[string][]pairVote{},
+		compared:   map[[2]int]struct{}{},
+		pairCache:  map[[2]int][]pairMatch{},
 	}
-	compared := map[[2]int]struct{}{}
-	compare := func(i, j int) {
-		left, right := ordered[min(i, j)], ordered[max(i, j)]
-		compared[[2]int{min(i, j), max(i, j)}] = struct{}{}
-		leftSeg, rightSeg, ok := comparePair(left.Points, right.Points, profile)
-		if !ok {
-			return
-		}
-		record(left, right.Candidate.EpisodeID, adjustSegment(leftSeg, left, profile))
-		record(right, left.Candidate.EpisodeID, adjustSegment(rightSeg, right, profile))
+	c.runNeighbors()
+	c.runFallback()
+	return c.results
+}
+
+type seasonPairCollector struct {
+	ordered    []fingerprintInput
+	profile    matchProfile
+	minPairSec float64
+	// results keeps pair votes per partner episode so a partner with several
+	// versions still casts a single vote in the consensus.
+	results   map[int]map[string][]pairVote
+	compared  map[[2]int]struct{}
+	pairCache map[[2]int][]pairMatch
+}
+
+func (c *seasonPairCollector) addVote(fileID int, partner string, vote pairVote) {
+	byPartner := c.results[fileID]
+	if byPartner == nil {
+		byPartner = map[string][]pairVote{}
+		c.results[fileID] = byPartner
 	}
-	// compareFor records only file i's side of a pair and leaves the pair
-	// unmarked, so a wider search for a weak short match changes no other
-	// file's results, and the partner's own wider search still runs as usual.
-	compareFor := func(i, j int) {
-		left, right := ordered[min(i, j)], ordered[max(i, j)]
-		leftSeg, rightSeg, ok := comparePair(left.Points, right.Points, profile)
-		if !ok {
-			return
-		}
-		if i < j {
-			record(left, right.Candidate.EpisodeID, adjustSegment(leftSeg, left, profile))
-		} else {
-			record(right, left.Candidate.EpisodeID, adjustSegment(rightSeg, right, profile))
-		}
+	byPartner[partner] = append(byPartner[partner], vote)
+}
+
+func (c *seasonPairCollector) recordLegacy(input fingerprintInput, partner string, segment Segment) {
+	adj := adjustSegment(segment, input, c.profile)
+	if !validAdjustedSegment(adj, c.profile) {
+		return
 	}
-	comparable := func(i, j int) bool {
-		a, b := ordered[i].Candidate.EpisodeID, ordered[j].Candidate.EpisodeID
-		return a != "" && b != "" && a != b
+	c.addVote(input.Candidate.FileID, partner, pairVote{Segment: adj})
+}
+
+func (c *seasonPairCollector) recordRefined(input fingerprintInput, partner string, segment Segment, quality float64) {
+	segment.Start += input.WindowStart
+	segment.End += input.WindowStart
+	if segment.Start < 0 {
+		segment.Start = 0
 	}
-	// Windows count episodes, not files: every version of an episode in reach
-	// is compared, but they share one place.
-	within := func(episodes map[string]struct{}, limit int, episode string) bool {
-		if _, seen := episodes[episode]; seen {
-			return true
+	if input.Candidate.DurationSeconds > 0 && segment.End > input.Candidate.DurationSeconds {
+		segment.End = input.Candidate.DurationSeconds
+	}
+	for _, piece := range splitSegmentBySilences(segment, input.Silences, c.minPairSec) {
+		dur := piece.End - piece.Start
+		if piece.Start < 0 || piece.End <= piece.Start || dur < c.minPairSec || dur > c.profile.MaxSeconds {
+			continue
 		}
-		if len(episodes) == limit {
-			return false
+		c.addVote(input.Candidate.FileID, partner, pairVote{Segment: piece, Quality: quality})
+	}
+}
+
+func (c *seasonPairCollector) getRefinedPair(a, b int) []pairMatch {
+	key := [2]int{a, b}
+	if cached, ok := c.pairCache[key]; ok {
+		return cached
+	}
+	matches := comparePairRefined(c.ordered[a].Points, c.ordered[b].Points, c.minPairSec, c.profile.MaxSeconds)
+	c.pairCache[key] = matches
+	return matches
+}
+
+func (c *seasonPairCollector) compare(i, j int) {
+	a, b := min(i, j), max(i, j)
+	c.compared[[2]int{a, b}] = struct{}{}
+	left, right := c.ordered[a], c.ordered[b]
+	if c.profile.RefinedMatch {
+		for _, m := range c.getRefinedPair(a, b) {
+			c.recordRefined(left, right.Candidate.EpisodeID, m.Left, m.Quality)
+			c.recordRefined(right, left.Candidate.EpisodeID, m.Right, m.Quality)
 		}
-		episodes[episode] = struct{}{}
+		return
+	}
+	leftSeg, rightSeg, ok := comparePair(left.Points, right.Points, c.profile)
+	if !ok {
+		return
+	}
+	c.recordLegacy(left, right.Candidate.EpisodeID, leftSeg)
+	c.recordLegacy(right, left.Candidate.EpisodeID, rightSeg)
+}
+
+// compareFor records only file i's side of a pair and leaves the pair
+// unmarked, so a wider search for a weak match changes no other file's
+// results, and the partner's own wider search still runs as usual.
+func (c *seasonPairCollector) compareFor(i, j int) {
+	a, b := min(i, j), max(i, j)
+	left, right := c.ordered[a], c.ordered[b]
+	if c.profile.RefinedMatch {
+		for _, m := range c.getRefinedPair(a, b) {
+			if i < j {
+				c.recordRefined(left, right.Candidate.EpisodeID, m.Left, m.Quality)
+			} else {
+				c.recordRefined(right, left.Candidate.EpisodeID, m.Right, m.Quality)
+			}
+		}
+		return
+	}
+	leftSeg, rightSeg, ok := comparePair(left.Points, right.Points, c.profile)
+	if !ok {
+		return
+	}
+	if i < j {
+		c.recordLegacy(left, right.Candidate.EpisodeID, leftSeg)
+	} else {
+		c.recordLegacy(right, left.Candidate.EpisodeID, rightSeg)
+	}
+}
+
+func (c *seasonPairCollector) comparable(i, j int) bool {
+	a, b := c.ordered[i].Candidate.EpisodeID, c.ordered[j].Candidate.EpisodeID
+	return a != "" && b != "" && a != b
+}
+
+// withinEpisodeBudget counts episodes, not files: every version of an episode
+// in reach is compared, but they share one slot.
+func withinEpisodeBudget(episodes map[string]struct{}, limit int, episode string) bool {
+	if _, seen := episodes[episode]; seen {
 		return true
 	}
-	for i := range ordered {
+	if len(episodes) == limit {
+		return false
+	}
+	episodes[episode] = struct{}{}
+	return true
+}
+
+func (c *seasonPairCollector) runNeighbors() {
+	for i := range c.ordered {
 		neighbors := map[string]struct{}{}
-		for j := i + 1; j < len(ordered); j++ {
-			if !comparable(i, j) {
+		for j := i + 1; j < len(c.ordered); j++ {
+			if !c.comparable(i, j) {
 				continue
 			}
-			if !within(neighbors, compareNeighborEpisodes, ordered[j].Candidate.EpisodeID) {
+			if !withinEpisodeBudget(neighbors, compareNeighborEpisodes, c.ordered[j].Candidate.EpisodeID) {
 				break
 			}
-			compare(i, j)
+			c.compare(i, j)
 		}
 	}
+}
+
+func (c *seasonPairCollector) runFallback() {
 	// A file whose intro its neighbors lack, such as one sharing an opening
 	// with episodes elsewhere in the season, gets a wider search, and so does
 	// one whose neighbors give it only a short match too few partners confirm.
 	// Eligibility is fixed after the neighbor pass: a result another file's
 	// wider search records for this one must not cancel its own.
-	neighborMatched := make(map[int]bool, len(results))
+	neighborMatched := make(map[int]bool, len(c.results))
 	weakShort := map[int]bool{}
-	for fileID, byPartner := range results {
-		weakShort[fileID] = profile.weakShortMatch(consensusSegment(byPartner))
+	for fileID, byPartner := range c.results {
+		if c.profile.RefinedMatch {
+			// An intro match is settled once two partners confirm one that
+			// is not short. Any other file searches wider, for its own
+			// result only.
+			seg, conf, _ := tightConsensusSegment(byPartner)
+			neighborMatched[fileID] = conf >= 2 && seg.End-seg.Start >= c.profile.ShortSeconds
+			weakShort[fileID] = true
+			continue
+		}
+		weakShort[fileID] = c.profile.weakShortMatch(consensusSegmentVotes(byPartner))
 		neighborMatched[fileID] = !weakShort[fileID]
 	}
+
 	// The search walks episodes, not files, outward from the file's own: a
 	// file among many versions of its episode would otherwise reach every
 	// episode on one side before the nearer ones on the other.
-	groups := episodeGroups(ordered)
-	groupOf := make([]int, len(ordered))
+	groups := episodeGroups(c.ordered)
+	groupOf := make([]int, len(c.ordered))
 	for g, group := range groups {
 		for i := group[0]; i < group[1]; i++ {
 			groupOf[i] = g
 		}
 	}
-	for i := range ordered {
-		if neighborMatched[ordered[i].Candidate.FileID] {
+	for i := range c.ordered {
+		if neighborMatched[c.ordered[i].Candidate.FileID] {
 			continue
 		}
-		extra := map[string]struct{}{}
-		g := groupOf[i]
-		for distance := 1; distance < len(groups) && len(extra) < compareFallbackEpisodes; distance++ {
-			for _, h := range [2]int{g - distance, g + distance} {
-				if h < 0 || h >= len(groups) {
+		c.runFallbackForFile(i, groupOf[i], groups, weakShort[c.ordered[i].Candidate.FileID])
+	}
+}
+
+func (c *seasonPairCollector) runFallbackForFile(i, g int, groups [][2]int, selfOnly bool) {
+	extra := map[string]struct{}{}
+	for distance := 1; distance < len(groups) && len(extra) < compareFallbackEpisodes; distance++ {
+		for _, h := range [2]int{g - distance, g + distance} {
+			if h < 0 || h >= len(groups) {
+				continue
+			}
+			for j := groups[h][0]; j < groups[h][1]; j++ {
+				if !c.comparable(i, j) {
 					continue
 				}
-				for j := groups[h][0]; j < groups[h][1]; j++ {
-					if !comparable(i, j) {
-						continue
-					}
-					if _, done := compared[[2]int{min(i, j), max(i, j)}]; done {
-						continue
-					}
-					if !within(extra, compareFallbackEpisodes, ordered[j].Candidate.EpisodeID) {
-						continue
-					}
-					if weakShort[ordered[i].Candidate.FileID] {
-						compareFor(i, j)
-					} else {
-						compare(i, j)
-					}
+				if _, done := c.compared[[2]int{min(i, j), max(i, j)}]; done {
+					continue
+				}
+				if !withinEpisodeBudget(extra, compareFallbackEpisodes, c.ordered[j].Candidate.EpisodeID) {
+					continue
+				}
+				if selfOnly {
+					c.compareFor(i, j)
+				} else {
+					c.compare(i, j)
 				}
 			}
 		}
 	}
+}
 
+func finalizeSeasonMatches(
+	inputs []fingerprintInput,
+	ordered []fingerprintInput,
+	results map[int]map[string][]pairVote,
+	profile matchProfile,
+) map[int]seasonMatch {
 	type fileResult struct {
 		segment       Segment
 		confirmations int
 	}
-	episodeOf := make(map[int]string, len(inputs))
-	for _, input := range inputs {
-		episodeOf[input.Candidate.FileID] = input.Candidate.EpisodeID
+	inputByID := make(map[int]fingerprintInput, len(ordered))
+	for _, input := range ordered {
+		inputByID[input.Candidate.FileID] = input
 	}
 	scored := make(map[int]fileResult, len(results))
 	durations := make([]episodeDuration, 0, len(results))
 	for fileID, byPartner := range results {
-		segment, confirmations := consensusSegment(byPartner)
-		scored[fileID] = fileResult{segment: segment, confirmations: confirmations}
-		durations = append(durations, episodeDuration{episode: episodeOf[fileID], seconds: segment.End - segment.Start})
+		input := inputByID[fileID]
+		if profile.RefinedMatch {
+			seg, conf, qual := tightConsensusSegment(byPartner)
+			if conf == 0 {
+				continue
+			}
+			seg, ok := refineAndValidateIntro(seg, conf, qual, input, profile)
+			if !ok {
+				continue
+			}
+			scored[fileID] = fileResult{segment: seg, confirmations: conf}
+			durations = append(durations, episodeDuration{episode: input.Candidate.EpisodeID, seconds: seg.End - seg.Start})
+			continue
+		}
+		seg, conf := consensusSegmentVotes(byPartner)
+		scored[fileID] = fileResult{segment: seg, confirmations: conf}
+		durations = append(durations, episodeDuration{episode: input.Candidate.EpisodeID, seconds: seg.End - seg.Start})
 	}
+
 	usualDuration, sharing := usualIntroDuration(durations, profile.SeasonToleranceSeconds)
 	episodes := distinctFingerprintEpisodeCount(inputs)
 	seasonConsistent := episodes > 0 && float64(sharing)/float64(episodes) >= minimumSeasonCoverage
@@ -403,11 +538,11 @@ func usualIntroDuration(durations []episodeDuration, tolerance float64) (float64
 	return usual, sharing
 }
 
-// consensusSegment picks the pair result that the most partner episodes agree
+// consensusSegmentVotes picks the pair result that the most partner episodes agree
 // with, preferring the longer one on a tie. Each partner then contributes its
 // result closest to that anchor, and the consensus is the median of those
 // boundaries, together with how many partners agreed.
-func consensusSegment(byPartner map[string][]Segment) (Segment, int) {
+func consensusSegmentVotes(byPartner map[string][]pairVote) (Segment, int) {
 	partners := make([]string, 0, len(byPartner))
 	for partner := range byPartner {
 		partners = append(partners, partner)
@@ -418,7 +553,7 @@ func consensusSegment(byPartner map[string][]Segment) (Segment, int) {
 		votes := 0
 		for _, partner := range partners {
 			for _, other := range byPartner[partner] {
-				if segmentOverlap(candidate, other) >= minimumConsensusOverlap {
+				if segmentOverlap(candidate, other.Segment) >= minimumConsensusOverlap {
 					votes++
 					break
 				}
@@ -430,9 +565,9 @@ func consensusSegment(byPartner map[string][]Segment) (Segment, int) {
 	anchorVotes := -1
 	for _, partner := range partners {
 		for _, candidate := range byPartner[partner] {
-			votes := agreeing(candidate)
-			if votes > anchorVotes || (votes == anchorVotes && candidate.End-candidate.Start > anchor.End-anchor.Start) {
-				anchor, anchorVotes = candidate, votes
+			votes := agreeing(candidate.Segment)
+			if votes > anchorVotes || (votes == anchorVotes && candidate.Segment.End-candidate.Segment.Start > anchor.End-anchor.Start) {
+				anchor, anchorVotes = candidate.Segment, votes
 			}
 		}
 	}
@@ -442,8 +577,8 @@ func consensusSegment(byPartner map[string][]Segment) (Segment, int) {
 	for _, partner := range partners {
 		best, bestOverlap := Segment{}, 0.0
 		for _, candidate := range byPartner[partner] {
-			if overlap := segmentOverlap(anchor, candidate); overlap > bestOverlap {
-				best, bestOverlap = candidate, overlap
+			if overlap := segmentOverlap(anchor, candidate.Segment); overlap > bestOverlap {
+				best, bestOverlap = candidate.Segment, overlap
 			}
 		}
 		if bestOverlap >= minimumConsensusOverlap {
@@ -560,11 +695,15 @@ func comparePairAtShift(left, right []uint32, profile matchProfile, shift int) (
 }
 
 func candidateShifts(left, right []uint32) []int {
-	step := candidateShiftSamplePoints()
+	return candidateShiftsWithLimit(left, right, candidateShiftSamplePoints(), 8)
+}
+
+func candidateShiftsWithLimit(left, right []uint32, step, maxShifts int) []int {
 	counts := map[int]int{}
 	for i := 0; i < len(left); i += step {
+		a := left[i]
 		for j := 0; j < len(right); j += step {
-			if bits.OnesCount32(left[i]^right[j]) <= 6 {
+			if bits.OnesCount32(a^right[j]) <= 6 {
 				counts[j-i]++
 			}
 		}
@@ -591,7 +730,7 @@ func candidateShifts(left, right []uint32) []int {
 		return candidates[i].shift < candidates[j].shift
 	})
 
-	limit := min(8, len(candidates))
+	limit := min(maxShifts, len(candidates))
 	shifts := make([]int, 0, limit)
 	seen := map[int]struct{}{}
 	for _, candidate := range candidates {

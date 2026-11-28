@@ -234,6 +234,8 @@ func scannerAlgorithmPriority(algorithm string) int {
 		return 25
 	case "episode-version-copy:v1":
 		return 24
+	case "chromaprint:v5":
+		return 23
 	case "chromaprint:dialogue:v4": //nolint:misspell // Persisted algorithm identifier.
 		return 22
 	case "chromaprint:v4":

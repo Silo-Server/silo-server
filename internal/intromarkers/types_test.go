@@ -23,7 +23,7 @@ func TestConfigHashKeepsStoredFingerprintKey(t *testing.T) {
 // season comparison. A deliberate change, such as bumping
 // AnalysisBehaviorVersion, updates this value in the same commit.
 func TestAnalysisConfigHashKeepsStoredSeasonStateKey(t *testing.T) {
-	if got := DefaultConfig("ffmpeg").AnalysisConfigHash(); got != "29b65deb3453cd3b" {
-		t.Fatalf("AnalysisConfigHash() = %s, want the stored season state key 29b65deb3453cd3b", got)
+	if got := DefaultConfig("ffmpeg").AnalysisConfigHash(); got != "93eb38aa3fa7eacf" {
+		t.Fatalf("AnalysisConfigHash() = %s, want the stored season state key 93eb38aa3fa7eacf", got)
 	}
 }

@@ -52,3 +52,20 @@ func TestManualDeletionRejectsAutomaticProjection(t *testing.T) {
 		t.Fatal("explicit manual replacement must be allowed")
 	}
 }
+
+func TestChromaprintV5SupersedesV4AndYieldsToVersionCopy(t *testing.T) {
+	v4 := SegmentPayload{Source: models.MarkerSourceScanner, Algorithm: "chromaprint:v4", Confidence: new(0.90), Start: new(10.0), End: new(60.0)}
+	v4Sub := SegmentPayload{Source: models.MarkerSourceScanner, Algorithm: "chromaprint:dialogue:v4", Confidence: new(0.90), Start: new(10.0), End: new(60.0)} //nolint:misspell // Persisted algorithm identifier.
+	v5 := SegmentPayload{Source: models.MarkerSourceScanner, Algorithm: "chromaprint:v5", Confidence: new(0.65), Start: new(11.0), End: new(59.0)}
+	vcopy := SegmentPayload{Source: models.MarkerSourceScanner, Algorithm: "episode-version-copy:v1", Confidence: new(0.85), Start: new(10.0), End: new(60.0)}
+
+	if !CanWriteMarkerUpdate(v4, v5) {
+		t.Fatal("chromaprint:v5 must replace chromaprint:v4")
+	}
+	if !CanWriteMarkerUpdate(v4Sub, v5) {
+		t.Fatal("chromaprint:v5 must replace chromaprint:dialogue:v4") //nolint:misspell // Persisted algorithm identifier.
+	}
+	if CanWriteMarkerUpdate(vcopy, v5) {
+		t.Fatal("chromaprint:v5 must not replace episode-version-copy:v1")
+	}
+}
