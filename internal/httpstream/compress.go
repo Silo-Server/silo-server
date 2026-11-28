@@ -75,8 +75,26 @@ func CompressWithExclusions(skipRequest func(*http.Request) bool, skipResponse f
 			}
 			coding, identityRefused := negotiate(r.Header.Values("Accept-Encoding"))
 			cw := &compressWriter{ResponseWriter: w, r: r, c: c, coding: coding, identityRefused: identityRefused}
-			defer cw.close()
+			// A handler that panics did not finish its response, so it must not
+			// be sent as finished. Not recovering keeps the panic's own stack
+			// for whatever answers it.
+			returned := false
+			defer func() {
+				if returned {
+					// A recoverer inside this middleware answered a panic after the
+					// response was committed (AbandonOnPanic marked it): its status
+					// cannot replace the one sent, so the connection is broken, as
+					// a raw /api/v2 route's committed panic is.
+					if cw.committedAbandon {
+						panic(http.ErrAbortHandler)
+					}
+					cw.close()
+				} else {
+					cw.abandon()
+				}
+			}()
 			next.ServeHTTP(cw, r)
+			returned = true
 		})
 	}
 }
@@ -242,6 +260,10 @@ type compressWriter struct {
 	status    int
 	header    http.Header
 	remaining int64
+	// committedAbandon is set when abandon dropped a response whose status
+	// had already gone out: only breaking the connection keeps the client
+	// from reading its end as a finished response.
+	committedAbandon bool
 }
 
 func (w *compressWriter) WriteHeader(status int) {
@@ -382,6 +404,75 @@ func (w *compressWriter) close() {
 		w.writeHeldHeader(b.buf.Len())
 		_, _ = w.ResponseWriter.Write(b.buf.Bytes())
 	}
+	w.releaseHeld(b)
+}
+
+// AbandonOnPanic is for a recoverer mounted inside the compressor, as both
+// listeners mount theirs: mounted just inside that recoverer, it abandons the
+// compressor's response while a handler's panic unwinds, before the
+// recoverer answers it. Otherwise the recoverer's status reaches a held
+// writer as a second one, which the writer drops as net/http would, and the
+// handler's partial body is sent as finished. A response already streaming
+// can't be replaced, so the compressor breaks its connection once the
+// recoverer has returned. It does not recover the panic.
+func AbandonOnPanic(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		returned := false
+		defer func() {
+			if !returned {
+				abandonResponse(w)
+			}
+		}()
+		next.ServeHTTP(w, r)
+		returned = true
+	})
+}
+
+// abandonResponse abandons the compressor's writer found through w's Unwrap
+// chain, if there is one.
+func abandonResponse(w http.ResponseWriter) {
+	for w != nil {
+		if cw, ok := w.(*compressWriter); ok {
+			cw.abandon()
+			return
+		}
+		u, ok := w.(interface{ Unwrap() http.ResponseWriter })
+		if !ok {
+			return
+		}
+		w = u.Unwrap()
+	}
+}
+
+// abandon ends a response whose handler panicked, writing nothing more. A
+// held response never reaches the client: its status and body are dropped,
+// and the coding and length it declared come off the header, so whatever
+// answers the panic writes a response of its own. A response that already
+// streams is left without the coding's end, so the client cannot decode it
+// as complete, and is marked committedAbandon. The encoder goes back to its
+// pool, which resets it on reuse.
+func (w *compressWriter) abandon() {
+	if w.enc == nil {
+		return
+	}
+	w.coding.put(w.enc)
+	w.enc = nil
+	b := w.held
+	// Not held, or held and then streamed: the status has gone out.
+	w.committedAbandon = b == nil || b.out != nil
+	if b == nil {
+		return
+	}
+	if b.out == nil {
+		h := w.Header()
+		h.Del("Content-Encoding")
+		h.Del("Content-Length")
+	}
+	w.releaseHeld(b)
+}
+
+// releaseHeld returns a held response's buffer to its pool.
+func (w *compressWriter) releaseHeld(b *heldBody) {
 	w.held, w.header = nil, nil
 	// The pooled encoder still points at b until its next Reset, so a large
 	// buffer is dropped rather than left reachable through it.

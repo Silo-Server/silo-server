@@ -854,6 +854,9 @@ var infrastructureMiddleware = []string{
 	// httpstream.NoSniff sets one response header on every response; it
 	// admits and refuses nothing.
 	"httpstream.NoSniff",
+	// httpstream.AbandonOnPanic drops a panicking handler's held compressed
+	// response; it admits and refuses nothing.
+	"httpstream.AbandonOnPanic",
 }
 
 func classifyAuth(middleware []string) (string, []string) {

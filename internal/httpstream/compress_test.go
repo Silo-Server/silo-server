@@ -226,3 +226,150 @@ func decodeBody(coding string, b []byte) (string, error) {
 	out, err := io.ReadAll(r)
 	return string(out), err
 }
+
+// servePanicking runs a handler that writes part of a JSON body and then
+// panics with value under the compressor, behind a recoverer that answers a
+// panic other than http.ErrAbortHandler with a 500, as the listeners' do. It
+// reports the recorder and whether the panic reached the recoverer.
+func servePanicking(t *testing.T, accept string, declared bool, value any) (*httptest.ResponseRecorder, bool) {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	partial := strings.Repeat(`{"item":1},`, 30)
+	h := CompressWithExclusions(nil, nil, "application/json")(
+		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			if declared {
+				w.Header().Set("Content-Length", strconv.Itoa(2*len(partial)))
+			}
+			w.WriteHeader(http.StatusOK)
+			_, _ = io.WriteString(w, partial)
+			if !declared {
+				_ = http.NewResponseController(w).Flush()
+			}
+			panic(value)
+		}))
+	reached := false
+	func() {
+		defer func() {
+			p := recover()
+			if p == nil {
+				return
+			}
+			reached = true
+			if p != http.ErrAbortHandler { //nolint:errorlint // sentinel compared by identity, as net/http does
+				rec.WriteHeader(http.StatusInternalServerError)
+			}
+		}()
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.Header.Set("Accept-Encoding", accept)
+		h.ServeHTTP(rec, r)
+	}()
+	return rec, reached
+}
+
+// A handler that panics while the compressor holds its response must not
+// have that partial response sent as a finished one: the held status and
+// body are dropped, so the recoverer's 500 is what the client gets, and an
+// aborted response sends nothing at all (#5240).
+func TestCompressWithExclusionsDropsHeldResponseOfPanickingHandler(t *testing.T) {
+	for _, accept := range []string{"gzip", "br", "zstd"} {
+		rec, reached := servePanicking(t, accept, true, "boom")
+		if !reached {
+			t.Fatalf("%s: the panic did not reach the recoverer", accept)
+		}
+		if rec.Code != http.StatusInternalServerError {
+			t.Errorf("%s: status %d, want the recoverer's 500", accept, rec.Code)
+		}
+		if coding, length := rec.Header().Get("Content-Encoding"), rec.Header().Get("Content-Length"); coding != "" || length != "" {
+			t.Errorf("%s: the 500 carries the held response's Content-Encoding %q and Content-Length %q", accept, coding, length)
+		}
+		if rec.Body.Len() != 0 {
+			t.Errorf("%s: %d bytes of the held body were sent", accept, rec.Body.Len())
+		}
+
+		rec, _ = servePanicking(t, accept, true, http.ErrAbortHandler)
+		if rec.Body.Len() != 0 || rec.Header().Get("Content-Encoding") != "" {
+			t.Errorf("%s abort: sent %d body bytes with Content-Encoding %q, want nothing", accept, rec.Body.Len(), rec.Header().Get("Content-Encoding"))
+		}
+	}
+}
+
+// A response that already streams when its handler panics is left without
+// the coding's end, so the client cannot decode the partial body as whole.
+func TestCompressWithExclusionsLeavesStreamedResponseOfPanickingHandlerUnfinished(t *testing.T) {
+	for _, accept := range []string{"gzip", "br", "zstd"} {
+		rec, reached := servePanicking(t, accept, false, "boom")
+		if !reached {
+			t.Fatalf("%s: the panic did not reach the recoverer", accept)
+		}
+		if got := rec.Header().Get("Content-Encoding"); got != accept {
+			t.Fatalf("%s: Content-Encoding %q, want the streamed coding", accept, got)
+		}
+		if body, err := decodeBody(accept, rec.Body.Bytes()); err == nil {
+			t.Errorf("%s: the partial body decodes as a complete stream of %d bytes", accept, len(body))
+		}
+	}
+}
+
+// A recoverer mounted inside the compressor, with AbandonOnPanic inside it as
+// the listeners mount them, answers a handler's panic. A held response gives
+// way to its 500; one already streaming can't, so the compressor breaks the
+// connection with http.ErrAbortHandler once the recoverer returns (#5240).
+func TestCompressWithExclusionsBreaksCommittedResponseAnsweredInside(t *testing.T) {
+	partial := strings.Repeat(`{"item":1},`, 30)
+	for _, tc := range []struct {
+		name      string
+		declared  bool
+		wantAbort bool
+	}{
+		{name: "held", declared: true},
+		{name: "streamed", wantAbort: true},
+	} {
+		handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			if tc.declared {
+				w.Header().Set("Content-Length", strconv.Itoa(2*len(partial)))
+			}
+			w.WriteHeader(http.StatusOK)
+			_, _ = io.WriteString(w, partial)
+			if !tc.declared {
+				_ = http.NewResponseController(w).Flush()
+			}
+			panic("boom")
+		})
+		recoverer := func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				defer func() {
+					if p := recover(); p != nil {
+						if p == http.ErrAbortHandler { //nolint:errorlint // sentinel compared by identity, as net/http does
+							panic(p)
+						}
+						w.WriteHeader(http.StatusInternalServerError)
+					}
+				}()
+				next.ServeHTTP(w, r)
+			})
+		}
+		h := CompressWithExclusions(nil, nil, "application/json")(recoverer(AbandonOnPanic(handler)))
+		rec := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.Header.Set("Accept-Encoding", "gzip")
+		var aborted any
+		func() {
+			defer func() { aborted = recover() }()
+			h.ServeHTTP(rec, r)
+		}()
+		if tc.wantAbort {
+			if aborted != http.ErrAbortHandler { //nolint:errorlint // sentinel compared by identity, as net/http does
+				t.Fatalf("%s: panic = %v, want http.ErrAbortHandler to break the connection", tc.name, aborted)
+			}
+			continue
+		}
+		if aborted != nil {
+			t.Fatalf("%s: panic = %v, want the recoverer's 500", tc.name, aborted)
+		}
+		if rec.Code != http.StatusInternalServerError || rec.Body.Len() != 0 {
+			t.Fatalf("%s: status %d with %d body bytes, want the recoverer's empty 500", tc.name, rec.Code, rec.Body.Len())
+		}
+	}
+}
