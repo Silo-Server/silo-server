@@ -117,6 +117,8 @@ const JELLYFIN_URL_EXAMPLE = "https://jellyfin.example.com";
 
 export default function HistoryImportSettings() {
   const t = useT();
+  // Each label names its field for assistive technology.
+  const fieldId = useId();
   useEventChannel("history_import");
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -582,15 +584,21 @@ export default function HistoryImportSettings() {
               <div className="space-y-4">
                 <div className="grid gap-4 md:grid-cols-2">
                   <div className="space-y-2">
-                    <Label>{t("web.settings.historyImport.emailOrUsername")}</Label>
+                    <Label htmlFor={`${fieldId}-emby-connect-username`}>
+                      {t("web.settings.historyImport.emailOrUsername")}
+                    </Label>
                     <Input
+                      id={`${fieldId}-emby-connect-username`}
                       value={connectUsername}
                       onChange={(e) => setConnectUsername(e.target.value)}
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label>{t("web.settings.historyImport.password")}</Label>
+                    <Label htmlFor={`${fieldId}-emby-connect-password`}>
+                      {t("web.settings.historyImport.password")}
+                    </Label>
                     <Input
+                      id={`${fieldId}-emby-connect-password`}
                       type="password"
                       value={connectPassword}
                       onChange={(e) => setConnectPassword(e.target.value)}
@@ -615,9 +623,11 @@ export default function HistoryImportSettings() {
                       </span>
                     </div>
                     <div className="space-y-2">
-                      <Label>{t("web.settings.historyImport.server")}</Label>
+                      <Label htmlFor={`${fieldId}-emby-connect-server`}>
+                        {t("web.settings.historyImport.server")}
+                      </Label>
                       <Select value={connectServerId} onValueChange={setConnectServerId}>
-                        <SelectTrigger>
+                        <SelectTrigger id={`${fieldId}-emby-connect-server`}>
                           <SelectValue placeholder={t("web.settings.historyImport.chooseServer")} />
                         </SelectTrigger>
                         <SelectContent>
@@ -686,9 +696,11 @@ export default function HistoryImportSettings() {
                 ) : (
                   <>
                     <div className="space-y-2">
-                      <Label>{t("web.settings.historyImport.savedServer")}</Label>
+                      <Label htmlFor={`${fieldId}-emby-saved-server`}>
+                        {t("web.settings.historyImport.savedServer")}
+                      </Label>
                       <Select value={effectiveSavedSourceId} onValueChange={setSavedSourceId}>
-                        <SelectTrigger>
+                        <SelectTrigger id={`${fieldId}-emby-saved-server`}>
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -702,15 +714,21 @@ export default function HistoryImportSettings() {
                     </div>
                     <div className="grid gap-4 md:grid-cols-2">
                       <div className="space-y-2">
-                        <Label>{t("web.settings.historyImport.embyUsername")}</Label>
+                        <Label htmlFor={`${fieldId}-emby-saved-username`}>
+                          {t("web.settings.historyImport.embyUsername")}
+                        </Label>
                         <Input
+                          id={`${fieldId}-emby-saved-username`}
                           value={savedUsername}
                           onChange={(e) => setSavedUsername(e.target.value)}
                         />
                       </div>
                       <div className="space-y-2">
-                        <Label>{t("web.settings.historyImport.embyPassword")}</Label>
+                        <Label htmlFor={`${fieldId}-emby-saved-password`}>
+                          {t("web.settings.historyImport.embyPassword")}
+                        </Label>
                         <Input
+                          id={`${fieldId}-emby-saved-password`}
                           type="password"
                           placeholder={t("web.settings.historyImport.embyPasswordPlaceholder")}
                           value={savedPassword}
@@ -779,13 +797,15 @@ export default function HistoryImportSettings() {
                       </span>
                     </div>
                     <div className="space-y-2">
-                      <Label>{t("web.settings.historyImport.server")}</Label>
+                      <Label htmlFor={`${fieldId}-plex-server`}>
+                        {t("web.settings.historyImport.server")}
+                      </Label>
                       <Select
                         value={plexServerId}
                         onValueChange={setPlexServerId}
                         disabled={pending}
                       >
-                        <SelectTrigger>
+                        <SelectTrigger id={`${fieldId}-plex-server`}>
                           <SelectValue placeholder={t("web.settings.historyImport.chooseServer")} />
                         </SelectTrigger>
                         <SelectContent>
@@ -806,7 +826,9 @@ export default function HistoryImportSettings() {
                     </div>
                     {plexHome.users.length > 1 && (
                       <div className="space-y-2">
-                        <Label>{t("web.settings.historyImport.plexHome.user")}</Label>
+                        <Label htmlFor={`${fieldId}-plex-home-user`}>
+                          {t("web.settings.historyImport.plexHome.user")}
+                        </Label>
                         <Select
                           value={plexHomeUserId}
                           disabled={pending}
@@ -816,7 +838,7 @@ export default function HistoryImportSettings() {
                             setPlexSwitchError(null);
                           }}
                         >
-                          <SelectTrigger aria-label={t("web.settings.historyImport.plexHome.user")}>
+                          <SelectTrigger id={`${fieldId}-plex-home-user`}>
                             <SelectValue
                               placeholder={t("web.settings.historyImport.plexHome.choose")}
                             />
@@ -869,12 +891,14 @@ export default function HistoryImportSettings() {
                 ) : (
                   <>
                     <div className="space-y-2">
-                      <Label>{t("web.settings.historyImport.savedServer")}</Label>
+                      <Label htmlFor={`${fieldId}-plex-saved-server`}>
+                        {t("web.settings.historyImport.savedServer")}
+                      </Label>
                       <Select
                         value={effectivePlexSavedSourceId}
                         onValueChange={setPlexSavedSourceId}
                       >
-                        <SelectTrigger>
+                        <SelectTrigger id={`${fieldId}-plex-saved-server`}>
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -887,8 +911,11 @@ export default function HistoryImportSettings() {
                       </Select>
                     </div>
                     <div className="space-y-2">
-                      <Label>{t("web.settings.historyImport.plexToken")}</Label>
+                      <Label htmlFor={`${fieldId}-plex-token`}>
+                        {t("web.settings.historyImport.plexToken")}
+                      </Label>
                       <Input
+                        id={`${fieldId}-plex-token`}
                         type="password"
                         value={plexToken}
                         onChange={(e) => setPlexToken(e.target.value)}
@@ -907,8 +934,11 @@ export default function HistoryImportSettings() {
           <div className="space-y-4">
             <div className="space-y-4">
               <div className="space-y-2">
-                <Label>{t("web.settings.historyImport.jellyfinServerUrl")}</Label>
+                <Label htmlFor={`${fieldId}-jellyfin-url`}>
+                  {t("web.settings.historyImport.jellyfinServerUrl")}
+                </Label>
                 <Input
+                  id={`${fieldId}-jellyfin-url`}
                   dir="ltr"
                   value={jellyfinServerURL}
                   onChange={(e) => setJellyfinServerURL(e.target.value)}
@@ -917,15 +947,21 @@ export default function HistoryImportSettings() {
               </div>
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
-                  <Label>{t("web.settings.historyImport.jellyfinUsername")}</Label>
+                  <Label htmlFor={`${fieldId}-jellyfin-username`}>
+                    {t("web.settings.historyImport.jellyfinUsername")}
+                  </Label>
                   <Input
+                    id={`${fieldId}-jellyfin-username`}
                     value={jellyfinUsername}
                     onChange={(e) => setJellyfinUsername(e.target.value)}
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label>{t("web.settings.historyImport.jellyfinPassword")}</Label>
+                  <Label htmlFor={`${fieldId}-jellyfin-password`}>
+                    {t("web.settings.historyImport.jellyfinPassword")}
+                  </Label>
                   <Input
+                    id={`${fieldId}-jellyfin-password`}
                     type="password"
                     value={jellyfinPassword}
                     onChange={(e) => setJellyfinPassword(e.target.value)}
@@ -942,10 +978,13 @@ export default function HistoryImportSettings() {
         {/* Action row */}
         <div className="border-border/40 flex flex-col gap-4 border-t pt-4 sm:flex-row sm:items-end sm:justify-between">
           <div className="w-full space-y-2 sm:max-w-[280px]">
-            <Label>{t("web.settings.historyImport.importIntoProfile")}</Label>
+            {/* Without the choice, the label heads the note naming the profile. */}
+            <Label htmlFor={canImportForOthers ? `${fieldId}-profile` : undefined}>
+              {t("web.settings.historyImport.importIntoProfile")}
+            </Label>
             {canImportForOthers ? (
               <Select value={effectiveProfileId} onValueChange={setProfileId} disabled={pending}>
-                <SelectTrigger aria-label={t("web.settings.historyImport.importIntoProfile")}>
+                <SelectTrigger id={`${fieldId}-profile`}>
                   <SelectValue placeholder={t("web.settings.historyImport.chooseProfile")} />
                 </SelectTrigger>
                 <SelectContent>
