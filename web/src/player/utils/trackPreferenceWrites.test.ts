@@ -1,4 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { onlineManager } from "@tanstack/react-query";
+import { afterEach, describe, expect, it } from "vitest";
+
+import { SettingWriteOfflineError } from "@/hooks/queries/settingWriteOffline";
 import type { PlayerConfig } from "../context/PlayerConfigContext";
 import {
   runPlayerTrackPreferenceWrite,
@@ -55,5 +58,31 @@ describe("runPlayerTrackPreferenceWrite", () => {
     await first;
 
     await expect(queued).resolves.toBe("profile-a");
+  });
+});
+
+describe("a choice made offline", () => {
+  afterEach(() => onlineManager.setOnline(true));
+
+  // An earlier write can stay pending until the browser reconnects; a choice
+  // queued behind it would then go out and replace a newer one made in
+  // another browser, so it is refused at once instead (#4576).
+  it("is refused at once and not sent after the earlier write settles", async () => {
+    const config = playerConfig({ id: "profile-a" });
+    const slow = held();
+    const first = runPlayerTrackPreferenceWrite(config, "subtitle", "series-1", () => slow.promise);
+
+    onlineManager.setOnline(false);
+    let sent = 0;
+    const offline = runPlayerTrackPreferenceWrite(config, "subtitle", "series-1", async () => {
+      sent++;
+    });
+    await expect(offline).rejects.toBeInstanceOf(SettingWriteOfflineError);
+
+    onlineManager.setOnline(true);
+    slow.release();
+    await first;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(sent).toBe(0);
   });
 });

@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   deleteAdminSettingValue: vi.fn(),
   v2: vi.fn(),
   sendAudioChoiceRequest: vi.fn(),
+  sendSubtitleChoiceRequest: vi.fn(),
 }));
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: mocks.toastError } }));
@@ -34,10 +35,22 @@ vi.mock("@/api/v2/request", async () => ({
 }));
 
 vi.mock("@/lib/recipes", () => ({ fetchRecipeCatalog: async () => ({ categories: {} }) }));
-vi.mock("@/player/context/PlayerConfigContext", () => ({ usePlayerConfig: () => ({}) }));
+vi.mock("@/player/context/PlayerConfigContext", () => ({
+  usePlayerConfig: () => ({
+    apiBaseUrl: "/api/v2",
+    getAccessToken: () => "token",
+    getProfileId: () => "p1",
+    getDeviceHeaders: () => ({}),
+  }),
+}));
 vi.mock("@/player/utils/audioChoicePersistence", async () => ({
   ...(await vi.importActual<object>("@/player/utils/audioChoicePersistence")),
   sendAudioChoiceRequest: mocks.sendAudioChoiceRequest,
+}));
+vi.mock("@/player/utils/subtitleChoicePersistence", async () => ({
+  ...(await vi.importActual<object>("@/player/utils/subtitleChoicePersistence")),
+  buildSubtitleChoiceRequests: () => [{}],
+  sendSubtitleChoiceRequest: mocks.sendSubtitleChoiceRequest,
 }));
 
 import { ProfileHomeSections } from "@/pages/admin-users/detail/preferences/ProfileHomeSections";
@@ -47,6 +60,7 @@ import {
   useDeleteAllAdminUserDeviceSettingsForDevice,
   useUpdateAdminUserSetting,
 } from "./admin/users";
+import { SettingWriteOfflineError } from "./settingWriteOffline";
 import { useSetSubtitlePreference } from "./subtitles";
 import { useSetAudioPreference } from "./trackPreferences";
 
@@ -192,6 +206,34 @@ describe("write failures whose error text is developer English", () => {
     expect(await toastFor(pick(new PlayerFetchError(422, "That track isn't in this file.")))).toBe(
       "That track isn't in this file.",
     );
+    // Offline it shares the subtitle pick's notice, one for a burst.
+    await toastFor(pick(new SettingWriteOfflineError()));
+    expect(mocks.toastError.mock.calls).toEqual([
+      ["You're offline, so this change wasn't saved", { id: "setting-write-offline" }],
+    ]);
+  });
+
+  // A player subtitle pick made offline is refused unsent (#4576); the
+  // viewer is told it wasn't saved, as a settings page tells them.
+  it("show the offline notice for a player subtitle pick made offline", async () => {
+    const { result } = renderHook(
+      () =>
+        useTrackChoicePersistence({ seriesId: "series-1", audioTracks: [], subtitleTracks: [] }),
+      { wrapper },
+    );
+    mocks.toastError.mockClear();
+    mocks.sendSubtitleChoiceRequest.mockClear();
+    onlineManager.setOnline(false);
+    try {
+      result.current.saveSubtitleChoice(0);
+      await vi.waitFor(() => expect(mocks.toastError).toHaveBeenCalled());
+    } finally {
+      onlineManager.setOnline(true);
+    }
+    expect(mocks.toastError.mock.calls).toEqual([
+      ["You're offline, so this change wasn't saved", { id: "setting-write-offline" }],
+    ]);
+    expect(mocks.sendSubtitleChoiceRequest).not.toHaveBeenCalled();
   });
 
   it("show one offline notice for a burst of saves made offline", async () => {
