@@ -107,4 +107,25 @@ func checkOutboundSettings(t *testing.T, loader PGLoader, pool *pgxpool.Pool, ds
 		t.Fatalf("carrying none (%v): password %q, enabled %q, cleared %v; want it cleared and off", err, read(settingSMTPPassword), read(settingEmailEnabled), cleared)
 	}
 	checkAIReset("bindings without their providers")
+	// A restore with another key can have deleted the registry, every key and
+	// every binding, leaving the backup's endpoint and recommendations on.
+	// The next start would build providers from those, so the unit is reset
+	// as well (#4801).
+	if _, err := restored.Exec(ctx, `DELETE FROM server_settings WHERE key = ANY($1)`,
+		append([]string{config.AIProvidersSettingKey, settingAIKey}, config.AIProviderBindingKeys()...)); err != nil {
+		t.Fatal(err)
+	}
+	set(restored, map[string]string{settingAIBaseURL: "https://ai.then.invalid", "recommendations.enabled": "true"})
+	if _, cleared, err := loader.CarryOutboundSettings(ctx, into, "", nil); err != nil || !slices.Contains(cleared, "AI providers") {
+		t.Fatalf("carrying none with only an endpoint left (%v): cleared %v, want the AI providers reset", err, cleared)
+	}
+	checkAIReset("no AI key, binding or registry left")
+	// A backup that configures no AI at all keeps nothing to reset or report.
+	if _, err := restored.Exec(ctx, `DELETE FROM server_settings WHERE key = ANY($1)`,
+		[]string{config.AIProvidersSettingKey, settingAIBaseURL, "recommendations.enabled"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, cleared, err := loader.CarryOutboundSettings(ctx, into, "", nil); err != nil || slices.Contains(cleared, "AI providers") {
+		t.Fatalf("carrying none with no AI configured (%v): cleared %v, want the AI providers left alone", err, cleared)
+	}
 }
