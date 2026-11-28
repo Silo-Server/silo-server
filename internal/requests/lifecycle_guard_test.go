@@ -8,6 +8,7 @@ import (
 	"os"
 	"runtime"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -752,5 +753,92 @@ func TestDeleteTargetWaitsForAConcurrentReclaimDatabase(t *testing.T) {
 	}
 	if got, err := repo.ListTargets(ctx, "r1"); err != nil || len(got) != 1 {
 		t.Fatalf("targets after the stale delete = %+v err = %v, want the target kept", got, err)
+	}
+}
+
+// Issue #5496: a disabled server is never asked about its targets again, so
+// refusing its delete while targets are queued or downloading left no way out.
+// Deleting a disabled server fails those targets instead, so their requests
+// can be retried elsewhere; an enabled server still refuses, and says why.
+func TestDeleteServerWithLiveTargetsDatabase(t *testing.T) {
+	repo, pool := lifecycleTestRepository(t)
+	ctx := t.Context()
+	if _, err := pool.Exec(ctx, `CREATE TABLE request_routes (LIKE public.request_routes INCLUDING ALL)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO request_integrations (id, name, capability_id, installation_id, enabled)
+		VALUES ('off', 'Off', 'seerr', 1, false), ('on', 'On', 'seerr', 1, true)`); err != nil {
+		t.Fatal(err)
+	}
+	for i, id := range []string{"downloading", "queued", "mixed", "done", "elsewhere"} {
+		insertLifecycleRequest(t, repo, id, 1, 101+i, StatusApproved)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO media_request_targets (request_id, integration_id, quality, status) VALUES
+		('downloading', 'off', '1080p', 'downloading'),
+		('queued', 'off', '1080p', 'queued'),
+		('mixed', 'off', '1080p', 'downloading'),
+		('mixed', 'on', '2160p', 'completed'),
+		('done', 'off', '1080p', 'completed'),
+		('elsewhere', 'on', '1080p', 'downloading')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE media_requests SET status = CASE id
+		WHEN 'queued' THEN 'queued' WHEN 'done' THEN 'completed' ELSE 'downloading' END`); err != nil {
+		t.Fatal(err)
+	}
+
+	// While a route still sends to the enabled server, the route is what the
+	// admin must change: disabling the server would not let the delete through.
+	if _, err := pool.Exec(ctx, `INSERT INTO request_routes (id, media_type, position, name, hd_integration_id)
+		VALUES ('to-on', 'movie', 1, 'Movies', 'on')`); err != nil {
+		t.Fatal(err)
+	}
+	err := repo.DeleteIntegrationConditional(ctx, "on", -1)
+	if refused, ok := errors.AsType[*ValidationError](err); !ok || !strings.Contains(refused.FormError, "Routing still sends") {
+		t.Fatalf("delete routed enabled server: err = %v, want the routing refusal", err)
+	}
+	if _, err := pool.Exec(ctx, `DELETE FROM request_routes`); err != nil {
+		t.Fatal(err)
+	}
+
+	// The enabled server can still finish its download, so it is kept, with
+	// a reason the admin can act on.
+	err = repo.DeleteIntegrationConditional(ctx, "on", -1)
+	blocked, ok := errors.AsType[*InvalidStateError](err)
+	if !ok || !errors.Is(err, ErrInvalidState) || !strings.Contains(blocked.Detail, "1 request is still in progress") {
+		t.Fatalf("delete enabled server: err = %v, want an invalid state naming 1 request in progress", err)
+	}
+
+	if err := repo.DeleteIntegrationConditional(ctx, "off", -1); err != nil {
+		t.Fatalf("delete disabled server with live targets: %v", err)
+	}
+	if _, err := repo.GetIntegration(ctx, "off"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("disabled server after delete: err = %v, want ErrNotFound", err)
+	}
+	want := map[string]struct {
+		status  Status
+		outcome Outcome
+	}{
+		"downloading": {StatusQueued, OutcomeFailed},
+		"queued":      {StatusQueued, OutcomeFailed},
+		"mixed":       {StatusQueued, OutcomeFailed},
+		"done":        {StatusCompleted, OutcomeActive},
+		"elsewhere":   {StatusDownloading, OutcomeActive},
+	}
+	for id, w := range want {
+		req, err := repo.GetRequest(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if req.Status != w.status || req.Outcome != w.outcome {
+			t.Errorf("%s = %s/%s, want %s/%s", id, req.Status, req.Outcome, w.status, w.outcome)
+		}
+	}
+	targets, err := repo.ListTargets(ctx, "downloading")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(targets) != 1 || targets[0].Status != StatusFailed || targets[0].LastError == "" {
+		t.Fatalf("downloading's target = %+v, want failed with a reason", targets)
 	}
 }

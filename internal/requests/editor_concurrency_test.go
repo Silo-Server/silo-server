@@ -51,7 +51,7 @@ func editorTestRepository(t *testing.T) *Repository {
 			t.Fatal(err)
 		}
 	}
-	if _, err = pool.Exec(t.Context(), `CREATE TABLE users(id integer PRIMARY KEY); INSERT INTO users VALUES(1),(2); CREATE TABLE media_request_targets(integration_id text,status text)`); err != nil {
+	if _, err = pool.Exec(t.Context(), `CREATE TABLE users(id integer PRIMARY KEY); INSERT INTO users VALUES(1),(2); CREATE TABLE media_request_targets(integration_id text,status text,request_id text)`); err != nil {
 		t.Fatal(err)
 	}
 	cipher, err := secret.New([]byte("0123456789abcdef0123456789abcdef"))
@@ -147,7 +147,7 @@ func TestEditorIntegrationsDatabase(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = repo.pool.Exec(ctx, `INSERT INTO media_request_targets VALUES($1,'queued')`, in.ID); err != nil {
+	if _, err = repo.pool.Exec(ctx, `INSERT INTO media_request_targets VALUES($1,'queued','editor-request')`, in.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err = repo.DeleteIntegrationConditional(ctx, in.ID, current.Revision); !errors.Is(err, ErrInvalidState) {

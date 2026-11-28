@@ -1261,27 +1261,26 @@ func (r *Repository) DeleteIntegration(ctx context.Context, id string) error {
 // deleteIntegration deletes a server. The caller holds the routing mode lock,
 // taken before any row lock as every server write does.
 func (r *Repository) deleteIntegration(ctx context.Context, tx pgx.Tx, id string) error {
-	var lockedID string
+	var enabled bool
 	if err := tx.QueryRow(ctx, `
-		SELECT id FROM request_integrations WHERE id = $1 FOR UPDATE
-	`, id).Scan(&lockedID); err != nil {
+		SELECT enabled FROM request_integrations WHERE id = $1 FOR UPDATE
+	`, id).Scan(&enabled); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
 		}
 		return fmt.Errorf("lock request integration: %w", err)
 	}
 
-	var hasLiveTargets bool
+	// An enabled server can still finish its queued and downloading targets,
+	// so it is kept until they do. A disabled one is never asked about them
+	// again (statusCheckable), so refusing would keep it forever: its live
+	// targets fail instead, below, and their requests can be retried.
+	var liveRequests int
 	if err := tx.QueryRow(ctx, `
-		SELECT EXISTS (
-			SELECT 1 FROM media_request_targets
-			WHERE integration_id = $1 AND status IN ('queued', 'downloading')
-		)
-	`, id).Scan(&hasLiveTargets); err != nil {
+		SELECT count(DISTINCT request_id) FROM media_request_targets
+		WHERE integration_id = $1 AND status IN ('queued', 'downloading')
+	`, id).Scan(&liveRequests); err != nil {
 		return fmt.Errorf("check integration targets: %w", err)
-	}
-	if hasLiveTargets {
-		return ErrInvalidState
 	}
 
 	// The last server of its kind can go with the Everything else that
@@ -1357,8 +1356,63 @@ func (r *Repository) deleteIntegration(ctx context.Context, tx pgx.Tx, id string
 		return &ValidationError{FormError: "Routing still sends requests to this server (" + strings.Join(routes, ", ") + "); send them elsewhere first."}
 	}
 
+	// Checked after the routes: disabling a server a route still sends to
+	// would not let its delete through, so it is not the advice to give.
+	if liveRequests > 0 && enabled {
+		detail := "1 request is still in progress on this server. Let it finish, or disable the server first: deleting a disabled server marks it failed so it can be retried."
+		if liveRequests > 1 {
+			detail = strconv.Itoa(liveRequests) + " requests are still in progress on this server. Let them finish, or disable the server first: deleting a disabled server marks them failed so they can be retried."
+		}
+		return &InvalidStateError{Detail: detail}
+	}
+
+	if liveRequests > 0 {
+		if err := r.failServerTargets(ctx, tx, id); err != nil {
+			return err
+		}
+	}
+
 	if _, err := tx.Exec(ctx, `DELETE FROM request_integrations WHERE id = $1`, id); err != nil {
 		return fmt.Errorf("delete request integration: %w", err)
+	}
+	return nil
+}
+
+// failServerTargets fails the queued and downloading targets of a disabled
+// server that is being deleted, and settles each of their requests from its
+// targets, so a request left with nothing in flight shows as failed and can be
+// retried. The requests are locked first, in id order, as DeleteTarget and an
+// account delete's cascade lock a request before its targets. UpdateTargetStatus
+// takes a target before its request, so a status write to one of these targets
+// at the same moment (a poll that began before the server was disabled, or the
+// stalled-target backstop) can deadlock with this delete; Postgres aborts one
+// of the two, and either can be retried.
+func (r *Repository) failServerTargets(ctx context.Context, tx pgx.Tx, id string) error {
+	rows, err := tx.Query(ctx, `
+		SELECT id FROM media_requests
+		WHERE id IN (
+			SELECT request_id FROM media_request_targets
+			WHERE integration_id = $1 AND status IN ('queued', 'downloading'))
+		ORDER BY id
+		FOR UPDATE`, id)
+	if err != nil {
+		return fmt.Errorf("lock deleted server's requests: %w", err)
+	}
+	requestIDs, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return fmt.Errorf("lock deleted server's requests: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE media_request_targets
+		SET status = 'failed', last_error = $2, updated_at = now(), `+clearTargetDownload+`
+		WHERE integration_id = $1 AND status IN ('queued', 'downloading')`,
+		id, "Its download server was deleted before it finished."); err != nil {
+		return fmt.Errorf("fail deleted server's targets: %w", err)
+	}
+	for _, requestID := range requestIDs {
+		if _, err := r.recomputeAggregate(ctx, tx, requestID, Viewer{}); err != nil {
+			return err
+		}
 	}
 	return nil
 }
