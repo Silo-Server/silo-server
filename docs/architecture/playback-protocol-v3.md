@@ -416,7 +416,12 @@ A client therefore:
    and, if the viewer is still watching, starts a new attempt (§6.2). A
    `410 playback_session_ended` means an administrator ended it, and the
    client leaves playback instead. So does
-   `410 playback_session_paused_timeout` (§6.3).
+   `410 playback_session_paused_timeout` (§6.3). Media requests for an ended
+   session answer the same way: `410 playback_session_ended` after an
+   administrator's or the paused timeout's end, `404` after any other
+   ([Playback API](../playback-api.md#revocation)). A proxy node answers
+   every ended session `410`, so a client confirms a media `404` or `410`
+   with a replan or progress post before it leaves.
 4. If it opens the control socket, answers every command it receives with a
    `result` before the command's `deadline_ms` (below).
 

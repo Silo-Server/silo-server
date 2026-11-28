@@ -134,7 +134,7 @@ func (h *StreamHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
 	}
 	setPlaybackSessionLogContext(r, sessionID)
 	if h.StreamDeny.Denied(r.Context(), sessionID) {
-		writePlaybackSessionEnded(w)
+		writeDeniedPlaybackSession(w, r, h.PlanStoreV3, sessionID)
 		return
 	}
 
@@ -345,7 +345,7 @@ func (h *StreamHandler) handleSubtitle(w http.ResponseWriter, r *http.Request) {
 	}
 	setPlaybackSessionLogContext(r, sessionID)
 	if h.StreamDeny.Denied(r.Context(), sessionID) {
-		writePlaybackSessionEnded(w)
+		writeDeniedPlaybackSession(w, r, h.PlanStoreV3, sessionID)
 		return
 	}
 
@@ -715,7 +715,7 @@ func (h *StreamHandler) SubtitleFonts(ctx context.Context, in SubtitleFontReques
 		lc.PlaybackSessionID = in.SessionID
 	}
 	if h.StreamDeny.Denied(ctx, in.SessionID) {
-		return nil, apiError(http.StatusGone, playbackSessionEndedErrorCode, "Playback session has ended")
+		return nil, deniedPlaybackSessionError(ctx, h.PlanStoreV3, in.SessionID)
 	}
 	session, claims, err := h.loadSidecarSession(ctx, in.Query.Get(streamTokenParam), in.SessionID, userID)
 	if err != nil {

@@ -280,7 +280,7 @@ func (h *PlaybackHandler) relayOrRehomeTranscode(
 		return h.moveTranscodeOffNodeV3(ctx, session.ID, dead, card, requestedSegment)
 	})
 	if errors.Is(moveErr, errPlaybackSessionEnded) {
-		writePlaybackSessionEnded(w)
+		writeDeniedPlaybackSession(w, r, h.PlanStoreV3, session.ID)
 		return nil, true
 	}
 	if moveErr != nil {
@@ -296,7 +296,7 @@ func (h *PlaybackHandler) relayOrRehomeTranscode(
 	// a move another request led, or found the session already moved. The
 	// session's deny check ran before the move, which can take a while.
 	if h.moveDeniedV3(r.Context(), session.ID, remoteTransportID(session)) {
-		writePlaybackSessionEnded(w)
+		writeDeniedPlaybackSession(w, r, h.PlanStoreV3, session.ID)
 		return nil, true
 	}
 	if runtime := h.tm.GetTranscodeSession(session.ID); runtime != nil {

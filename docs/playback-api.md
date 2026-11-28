@@ -430,8 +430,10 @@ audiobook player, which has no reopen at the current position, Firefox, Safari
 and native players keep the `200`; native players skip the bytes they already
 have. An audio-only remux (`audio/mp4`) arrives as MP4 fragments of about 2
 seconds each, so a player can start on the first one. A failure before the first
-byte is a Problem Details response; a failure after it ends the stream. A stopped, expired or
-terminated session answers `410 playback_session_ended`. When the hls delivery
+byte is a Problem Details response; a failure after it ends the stream. A session
+an administrator or the paused timeout ended answers `410 playback_session_ended`;
+any other ended session (expired, stopped by its client, aborted) answers `404`
+([Revocation](#revocation)). When the hls delivery
 lists `hls_transport_marker_v1`, the plan's HLS URLs carry `silo_transport`, and
 a request from a playlist that a replan replaced answers `404 playback_transport_superseded`:
 the session is still live, so stop that player and play the current plan
@@ -504,6 +506,22 @@ session, so a still-valid token cannot revive a session on any replica. Lookups 
 process for two seconds. When Redis is unavailable the check fails open with a
 warning: serving never waits on Redis. A deployment without Redis keeps the
 token TTL as its bound.
+
+A media request the marker refuses (stream, HLS manifest and segment, subtitle
+sidecar, font bundle) gets no bytes, and its status says what the player does
+next, as progress and replan do:
+
+| How the session ended | API answer |
+| --- | --- |
+| An administrator ended it, or the paused timeout did | `410 playback_session_ended`: leave playback |
+| Anything else (idle expiry, the client's own stop, an abort) | `404`: start a new attempt at the saved position if the viewer is still watching |
+
+Only the session's account (and profile, when the request selects one) gets
+the `410`; anyone else gets the `404`. A proxy node has no attempt store and
+answers every refused token-verified serve with a plain-text `410`, so a
+client asks the server after a media `404` or `410` (a replan or a progress
+post) and acts on that answer
+([playback protocol v3 §6](architecture/playback-protocol-v3.md#6-replan)).
 
 The realtime control socket (`/api/v2/playback/sessions/{session_id}/control/ws`)
 is documented in the [realtime API](realtime-api.md); ownership is the session's

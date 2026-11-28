@@ -15,8 +15,10 @@ reconstruction + a server-side session-deny marker for revocation).
 > token-verified serve. A transcode node reads neither Redis nor tokens: every
 > relay that signs a request to it checks the marker first, and the API's
 > resolve checks it before the node rebuilds a lost session or serves a
-> progressive remux. A denied session answers `410 playback_session_ended`
-> and is never reconstructed. When Redis is
+> progressive remux. A denied session is never reconstructed. The API
+> answers it `410 playback_session_ended` when an administrator or the paused
+> timeout ended it, and `404` for any other end, as progress and replan do
+> ([Playback API](../playback-api.md#revocation)). When Redis is
 > unavailable the check fails open with a rate-limited warning; lookups are
 > cached in process for about two seconds.
 
@@ -278,8 +280,10 @@ process for about two seconds) before serving any bytes, answering `410` with no
 media bytes on a hit. A transcode node reads no Redis: every relay that signs a
 request to it checks the marker first, and the API's resolve checks it before
 the node rebuilds a session ([transcode nodes](transcode-nodes.md#relays)). The
-token routes on the proxy and transcode node send a plain-text body; the API and the proxy's media-grant
-routes send JSON with the `playback_session_ended` code. Enforcement is
+token routes on the proxy and transcode node send a plain-text body; the proxy's media-grant
+routes send JSON with the `playback_session_ended` code. The API answers `410
+playback_session_ended` only for a session an administrator or the paused
+timeout ended, and `404` for any other end ([Playback API](../playback-api.md#revocation)). Enforcement is
 **byte-withholding, not client cooperation** — a revoked client that ignores the
 410 keeps hitting a wall.
 
@@ -366,8 +370,11 @@ package.
 - The API check runs before a serve or a reconstruct:
   `loadTranscodeServeSession` for the transcode manifest and segment routes, and
   the stream and subtitle handlers (`HandleStream`, `handleSubtitle`,
-  `HandleSubtitleFonts`). A hit is `410 playback_session_ended`, and no
-  reconstruct is attempted.
+  `HandleSubtitleFonts`). No reconstruct is attempted on a hit. It answers
+  `410 playback_session_ended` when the session's attempt row records an
+  administrator's or the paused timeout's stop for the requesting account, and
+  `404` otherwise (`writeDeniedPlaybackSession`), so a player resuming an
+  expired session starts over instead of leaving.
 - The node guards: `internal/proxy/server.go` consults the same marker on every
   token-verified serve and answers a plain-text `410` with no media bytes. A
   transcode node reads no marker: every relay that signs a request to it checks
