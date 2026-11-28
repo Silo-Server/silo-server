@@ -20,7 +20,95 @@ var (
 	// cueCreditsPattern matches a cue that is itself a credit, such as a
 	// translator's card, which says the credits have begun.
 	cueCreditsPattern = regexp.MustCompile(`(?i)\b(subtitle[sd]? by|subtitles? (were )?(created|translated)|translated by|synced by)\b`)
+	// cueNonDialogPattern matches a cue that is not dialog: a lyric marker, or
+	// a line that is nothing but a bracketed sound tag ([door slams],
+	// (laughs)). A cue like this carries no line of speech, so it cannot say
+	// where the speech stopped.
+	cueNonDialogPattern = regexp.MustCompile(`(?i)[♪♫]|^\s*[\[(][^\])\n]{0,40}[\])]\s*$`)
 )
+
+// Where a cue bound needs corroboration.
+const (
+	// cueDialogRunSeconds is how far back from a bound its supporting dialog
+	// is counted.
+	cueDialogRunSeconds = 60.0
+	// cueDialogRunMinimum is how many dialog cues must end inside that window
+	// before a bound on a track that also carries non-dialog text is taken. A
+	// song over the credits is transcribed with its lyrics, and a machine
+	// transcript writes them as plain lines, so one line after the music
+	// started is not evidence that dialog was still running.
+	cueDialogRunMinimum = 3
+	// creditCueMaxLeadSeconds is how far past the placed start a cue may begin
+	// and still be read as a line the placement cut off.
+	//
+	// The hint exists for the placement that landed inside the last line of
+	// dialogue, so the line it reads is one already running when the credits
+	// begin, or one within this lead of it. A cue that starts later is inside
+	// the credits: on-screen credit text, or the closing song's lyrics. Moving
+	// the start to the end of one moves it into the credits picture, which is
+	// the fault the hint was added to prevent. On a measured library the
+	// misplaced starts came from cues beginning 27 to 30 seconds in, and the
+	// whole of the search window they were found in is why.
+	creditCueMaxLeadSeconds = 10.0
+)
+
+// cueBoundIsDialogue reports whether the cue ending at end is dialogue, rather
+// than content inside the credits. The caller has already bounded the search to
+// cues that begin close enough to the placed start to be a line it cut off.
+func cueBoundIsDialogue(cues []subtitleCue, segment Segment, end float64) bool {
+	// A track carries the music as well as the dialogue when its cues run into
+	// the song, and a machine transcript writes a song's lyrics as ordinary
+	// lines. On such a track one line ending after the placed start is not
+	// dialogue that ran late; it needs a run of dialogue behind it.
+	if cueNonDialogNear(cues, segment.Start, end, creditCueSearchSeconds) &&
+		cueDialogRun(cues, end, cueDialogRunSeconds) < cueDialogRunMinimum {
+		return false
+	}
+	return true
+}
+
+// cuesStartingBefore returns the cues that begin at or before limit.
+func cuesStartingBefore(cues []subtitleCue, limit float64) []subtitleCue {
+	for i, cue := range cues {
+		if cue.Start > limit {
+			return cues[:i]
+		}
+	}
+	return cues
+}
+
+// cueDialogRun counts the dialog cues ending within window before end.
+func cueDialogRun(cues []subtitleCue, end, window float64) int {
+	run := 0
+	for _, cue := range cues {
+		if cue.End > end || cue.End < end-window {
+			continue
+		}
+		if cueCreditsPattern.MatchString(cue.Text) || cueNonDialogPattern.MatchString(cue.Text) {
+			continue
+		}
+		run++
+	}
+	return run
+}
+
+// cueNonDialogNear reports whether the track holds non-dialog text between
+// from-window and to: the mark of a track that carries the music as well as
+// the speech.
+func cueNonDialogNear(cues []subtitleCue, from, to, window float64) bool {
+	for _, cue := range cues {
+		if cue.Start < from-window || cue.Start > to {
+			continue
+		}
+		if cueCreditsPattern.MatchString(cue.Text) {
+			continue
+		}
+		if cueNonDialogPattern.MatchString(cue.Text) {
+			return true
+		}
+	}
+	return false
+}
 
 // cueRecap returns the recap a file's cues mark: the cues saying "previously
 // on" in the opening, from the first such cue to the end of the run they form.
@@ -77,8 +165,10 @@ func cueDialogEnd(cues []subtitleCue, bound, searchSeconds float64) (float64, bo
 		}
 		// A translator's card is part of the credits, not the dialog before
 		// them: reading it as dialog would move the start past the first
-		// fifteen seconds of credits picture.
-		if cueCreditsPattern.MatchString(cue.Text) {
+		// fifteen seconds of credits picture. A cue that is only a lyric or a
+		// sound tag holds no line of speech either, so it cannot say where the
+		// speech stopped.
+		if cueCreditsPattern.MatchString(cue.Text) || cueNonDialogPattern.MatchString(cue.Text) {
 			continue
 		}
 		if cue.End >= bound-searchSeconds && cue.End > best {
@@ -109,8 +199,12 @@ func cueCreditsMarker(cues []subtitleCue, segment Segment) (float64, bool) {
 // translator's card is part of the credits, so the start never moves past one.
 func applyCreditCueHint(segment Segment, cues []subtitleCue) Segment {
 	marker, hasMarker := cueCreditsMarker(cues, segment)
-	end, ok := cueDialogEnd(cues, segment.Start+creditCueSearchSeconds, creditCueSearchSeconds+creditCueLagSeconds)
-	if ok && end > segment.Start {
+	// A cue that begins well after the placed start is inside the credits —
+	// on-screen credit text, or the closing song's lyrics — not a line the
+	// placement cut off, so the search stops at the lead.
+	within := cuesStartingBefore(cues, segment.Start+creditCueMaxLeadSeconds)
+	end, ok := cueDialogEnd(within, segment.Start+creditCueSearchSeconds, creditCueSearchSeconds+creditCueLagSeconds)
+	if ok && end > segment.Start && cueBoundIsDialogue(cues, segment, end) {
 		segment.Start = end + creditCueLeadSeconds
 	}
 	if hasMarker && marker < segment.Start {

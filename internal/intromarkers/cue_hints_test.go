@@ -111,6 +111,22 @@ func TestApplyCreditCueHintMovesALateCreditsStart(t *testing.T) {
 	}
 }
 
+func TestApplyCreditCueHintIgnoresTheSongInsideTheCredits(t *testing.T) {
+	// The closing song's lines, written as ordinary text, start inside the
+	// credits. The last of them is not dialogue the placement cut off: the
+	// dialogue it cut off is the line ending at 2594, and moving the start to
+	// the song would put it 26 seconds into the credits.
+	cues := []subtitleCue{
+		testCue(2588, 2594, "Goodbye, then."),
+		testCue(2606, 2610, "A fire that burns"),
+		testCue(2612, 2616, "We're not planning to return"),
+	}
+	segment := Segment{Start: 2590, End: 3004, Confidence: 0.9, Algorithm: CreditsAudioAlgorithm}
+	if got := applyCreditCueHint(segment, cues); math.Abs(got.Start-2594.2) > 0.01 {
+		t.Fatalf("credits start %.2f, want 2594.20: the song begins 16 seconds into the credits", got.Start)
+	}
+}
+
 func TestApplyCreditCueHintKeepsATranslatorCardInsideTheCredits(t *testing.T) {
 	cues := []subtitleCue{
 		testCue(2705, 2710, "Subtitles by Example Translations"),
@@ -132,6 +148,16 @@ func TestCueTrackPicksAnEnglishTextTrack(t *testing.T) {
 	track, ok := cueTrack(tracks)
 	if !ok || track.Index != 2 {
 		t.Fatalf("picked %+v, want the English text track at index 2", track)
+	}
+	// A file whose subtitle streams sit at container indices 2 and 3: the cue
+	// reader asks ffmpeg for `0:s:N` by the track's position among subtitle
+	// streams, so the English track is ordinal 1, not its container index 3.
+	containerIndexed := []models.SubtitleTrack{
+		{Index: 2, Language: "ara", Codec: "subrip"},
+		{Index: 3, Language: "eng", Codec: "subrip"},
+	}
+	if ordinal, ok := cueTrackIndex(containerIndexed); !ok || ordinal != 1 {
+		t.Fatalf("ordinal %d (%v), want 1: the English track is the file's second subtitle stream", ordinal, ok)
 	}
 	if _, ok := cueTrack([]models.SubtitleTrack{{Index: 0, Language: "eng", Codec: "hdmv_pgs_subtitle"}}); ok {
 		t.Fatal("an image subtitle was picked as a cue source")

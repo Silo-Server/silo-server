@@ -95,26 +95,44 @@ var textSubtitleCodecs = map[string]struct{}{
 	"mov_text": {}, "text": {}, "tx3g": {}, "microdvd": {}, "sami": {}, "jacosub": {},
 }
 
-// cueTrack returns the text track whose cues are read: the first in a
-// preferred language, else the first text track that is not forced.
-func cueTrack(tracks []models.SubtitleTrack) (models.SubtitleTrack, bool) {
+// cueTrackIndex returns the position of the track cueTrack chooses among the
+// file's subtitle streams: the ordinal `-map 0:s:N` takes.
+//
+// A track's Index is its index in the container, and that is not this ordinal
+// once the file carries more than one subtitle stream — a file whose subtitle
+// streams are 2, 3, 4 has ordinals 0, 1, 2, so asking for `0:s:2` reads its
+// third subtitle track, in whatever language that happens to be, and a file
+// with two subtitle streams fails the map outright.
+func cueTrackIndex(tracks []models.SubtitleTrack) (int, bool) {
 	preferred := strings.Split(cuesPreferredLanguages, ",")
 	for _, language := range preferred {
-		for _, track := range tracks {
-			if !isCueTrack(track) || track.Forced {
+		for i, track := range tracks {
+			if !isCueTrack(track) || track.Forced || track.External {
 				continue
 			}
 			if languageMatches(track.Language, language) {
-				return track, true
+				return i, true
 			}
 		}
 	}
-	for _, track := range tracks {
-		if isCueTrack(track) && !track.Forced {
-			return track, true
+	for i, track := range tracks {
+		if isCueTrack(track) && !track.Forced && !track.External {
+			return i, true
 		}
 	}
-	return models.SubtitleTrack{}, false
+	return 0, false
+}
+
+// cueTrack returns the text track whose cues are read: the first in a
+// preferred language, else the first text track that is not forced. An
+// external entry names a sidecar file, which this reader does not open, so it
+// is not a cue track.
+func cueTrack(tracks []models.SubtitleTrack) (models.SubtitleTrack, bool) {
+	i, ok := cueTrackIndex(tracks)
+	if !ok {
+		return models.SubtitleTrack{}, false
+	}
+	return tracks[i], true
 }
 
 // languageMatches reports whether a track's language is the one wanted,
@@ -150,11 +168,11 @@ func isCueTrack(track models.SubtitleTrack) bool {
 
 // FileCues reads the cues of the candidate's text track.
 func (e *SubtitleCueExtractor) FileCues(ctx context.Context, candidate Candidate) ([]subtitleCue, bool, error) {
-	track, ok := cueTrack(candidate.SubtitleTracks)
+	ordinal, ok := cueTrackIndex(candidate.SubtitleTracks)
 	if !ok || candidate.FilePath == "" {
 		return nil, false, nil
 	}
-	data, err := playback.ExtractSubtitleWithFormat(ctx, candidate.FilePath, track.Index, "srt", e.config.FFmpegPath)
+	data, err := playback.ExtractSubtitleWithFormat(ctx, candidate.FilePath, ordinal, "srt", e.config.FFmpegPath)
 	if err != nil {
 		return nil, false, fmt.Errorf("extracting subtitle cues from file %d: %w", candidate.FileID, err)
 	}
