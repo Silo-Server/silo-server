@@ -21,6 +21,20 @@ import (
 // http.ErrAbortHandler passes through unchanged, so net/http still breaks the
 // connection of an aborted response.
 func Recoverer(next http.Handler) http.Handler {
+	return RecovererRedactingPath(nil)(next)
+}
+
+// RecovererRedactingPath is Recoverer for a listener whose paths carry a
+// credential that is not a {token} or {secret} parameter, such as the play
+// session ID in a Jellyfin HLS path. redact, when set, is applied to the
+// logged path after those parameters are redacted.
+func RecovererRedactingPath(redact func(path string) string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return recoverer(next, redact)
+	}
+}
+
+func recoverer(next http.Handler, redact func(path string) string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			rec := recover()
@@ -34,9 +48,13 @@ func Recoverer(next http.Handler) http.Handler {
 			// log it redacted, as the request and activity logs do. The panic
 			// value can too, as an error's text (desc = api_key=...), and the
 			// log handler redacts by key only, so it is masked here.
+			path := activitylog.RedactSecretPathParams(r, r.URL.Path)
+			if redact != nil {
+				path = redact(path)
+			}
 			slog.ErrorContext(r.Context(), "panic serving request", "component", "api",
 				"request_id", chimw.GetReqID(r.Context()), "method", r.Method,
-				"path", activitylog.RedactSecretPathParams(r, r.URL.Path),
+				"path", path,
 				"panic", logredact.SanitizeText(fmt.Sprint(rec)), "stack", string(debug.Stack()))
 			w.WriteHeader(http.StatusInternalServerError)
 		}()

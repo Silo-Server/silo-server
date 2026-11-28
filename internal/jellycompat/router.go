@@ -14,6 +14,7 @@ import (
 	"gopkg.in/natefinch/lumberjack.v2"
 
 	"github.com/Silo-Server/silo-server/internal/activitylog"
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
@@ -37,6 +38,9 @@ func NewRouter(deps Dependencies) chi.Router {
 	r.Use(httpstream.NoSniff)
 	r.Use(stripSlashesExceptWeb)
 	r.Use(middleware.RequestID)
+	// This Recoverer answers a panic in the recording middleware below, as the
+	// native listener's does. A handler's panic is answered by the innermost one.
+	r.Use(middleware.Recoverer)
 	r.Use(observeCompatRequest)
 	if deps.ClientIPResolver != nil {
 		r.Use(clientip.Middleware(deps.ClientIPResolver))
@@ -79,7 +83,12 @@ func NewRouter(deps Dependencies) chi.Router {
 	}
 	r.Use(compatImageProxyTagVariantMiddleware(deps.IDCodec))
 	r.Use(requestLoggerMiddleware)
-	r.Use(middleware.Recoverer)
+	// A handler's panic becomes its 500 here, inside the request metrics, the
+	// activity log and the request logger, so each records it as that 500. chi's
+	// Recoverer writes no status for a Connection: Upgrade request, which those
+	// recorders then kept as a 200 (#5236); this one writes it for every request.
+	// Its log redacts the HLS play session ID, as the request logger does.
+	r.Use(apimw.RecovererRedactingPath(redactHLSPlaySessionID))
 
 	artworkHandler := deps.ArtworkHandler
 	if artworkHandler == nil {
