@@ -38,15 +38,16 @@ func TranscodeStartNearStoredEnd(requestedSeconds, durationSeconds float64) bool
 }
 
 // transcodeStartProbeBacksteps are how far before the end of the file the
-// probe looks again when the packets after its first seek hold no video
-// keyframe. MPEG-TS seeks forward, to the first packet at or after the
-// target, so a seek to the end lands past the last keyframe; and a tail
-// longer than a step leaves that step past the video too. A start the window
-// lets through can lie a whole window past the video, whose last keyframe is
-// up to a group of pictures earlier, so the last step goes back twice the
-// window. These are offsets from the seek target; ffprobe reads from where its
-// seek lands to the end of the file.
-var transcodeStartProbeBacksteps = []float64{10, 2 * TranscodeTailProbeWindowSeconds}
+// probe looks again, in turn, when the packets after its previous seek hold
+// no video keyframe. MPEG-TS seeks forward, to the first packet at or after
+// the target, so a seek to the end lands past the last keyframe; and a tail
+// longer than a step leaves that step past the video too. The steps are
+// offsets from the seek target, and ffprobe reads from where each seek lands
+// to the end of the file, so the probe stops at the first step that finds a
+// keyframe: a tail of a few seconds reads 10 to 30 s. The last step covers a
+// tail of up to twice the window less a group of pictures; a longer tail
+// keeps the requested start.
+var transcodeStartProbeBacksteps = []float64{10, 30, 2 * TranscodeTailProbeWindowSeconds}
 
 // ResolveTranscodeStart returns where an encoded transcode asked to start at
 // requestedSeconds should start. That is requestedSeconds itself, unless its
