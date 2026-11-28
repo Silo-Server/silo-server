@@ -517,8 +517,10 @@ next, as progress and replan do:
 | Anything else (idle expiry, the client's own stop, an abort) | `404`: start a new attempt at the saved position if the viewer is still watching |
 
 Only the session's account (and profile, when the request selects one) gets
-the `410`; anyone else gets the `404`. A proxy node has no attempt store and
-answers every refused token-verified serve with a plain-text `410`, so a
+the `410`; anyone else gets the `404`. Two refusals answer `410` for every
+end: a request authorized only by the plan URL's `st` reference (a Cast
+receiver, which sends no credential), and a proxy node, which has no attempt
+store and answers every refused token-verified serve with a plain-text `410`. So a
 client asks the server after a media `404` or `410` (a replan or a progress
 post) and acts on that answer
 ([playback protocol v3 §6](architecture/playback-protocol-v3.md#6-replan)).

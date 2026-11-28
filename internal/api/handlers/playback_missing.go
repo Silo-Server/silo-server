@@ -72,10 +72,11 @@ func writePlaybackSessionNotFound(w http.ResponseWriter) {
 }
 
 // playbackSessionEndedErrorCode is the answer for a session the player must
-// leave: an administrator or the paused timeout ended it, or (on media) no
-// rebuild can serve the playlist it holds. A session's stream deny marker
-// stops every token from serving or reconstructing it, however it ended; see
-// writeDeniedPlaybackSession for the answer a denied request gets.
+// not resume: an administrator or the paused timeout ended it, or (on media)
+// no rebuild can serve the playlist it holds or the transport it names is
+// denied. A session's stream deny marker stops every token from serving or
+// reconstructing it, however it ended; see writeDeniedPlaybackSession for the
+// answer a request for a denied session gets.
 const playbackSessionEndedErrorCode = "playback_session_ended"
 
 var errPlaybackSessionEnded = errors.New("playback session has ended")

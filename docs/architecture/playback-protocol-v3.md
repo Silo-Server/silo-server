@@ -419,9 +419,10 @@ A client therefore:
    `410 playback_session_paused_timeout` (§6.3). Media requests for an ended
    session answer the same way: `410 playback_session_ended` after an
    administrator's or the paused timeout's end, `404` after any other
-   ([Playback API](../playback-api.md#revocation)). A proxy node answers
-   every ended session `410`, so a client confirms a media `404` or `410`
-   with a replan or progress post before it leaves.
+   ([Playback API](../playback-api.md#revocation)). A proxy node, and a
+   request authorized only by the plan URL's `st`, answer every ended session
+   `410`, so a client confirms a media `404` or `410` with a replan or
+   progress post before it leaves.
 4. If it opens the control socket, answers every command it receives with a
    `result` before the command's `deadline_ms` (below).
 

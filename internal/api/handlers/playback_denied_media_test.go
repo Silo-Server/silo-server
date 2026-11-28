@@ -19,10 +19,11 @@ import (
 // position instead of giving up. The marker withholds the bytes either way.
 func TestDeniedSessionMediaAnswersByHowTheSessionEnded(t *testing.T) {
 	for _, tc := range []struct {
-		name   string
-		stopID func(sessionID string) string
-		owner  int
-		want   int
+		name    string
+		stopID  func(sessionID string) string
+		owner   int
+		profile string
+		want    int
 	}{
 		{name: "idle expiry", stopID: expiredStopID, owner: 1, want: http.StatusNotFound},
 		{name: "client stop", stopID: func(string) string { return uuid.NewString() }, owner: 1, want: http.StatusNotFound},
@@ -31,13 +32,18 @@ func TestDeniedSessionMediaAnswersByHowTheSessionEnded(t *testing.T) {
 		{name: "paused timeout", stopID: pausedTimeoutStopID, owner: 1, want: http.StatusGone},
 		// Only the owner learns how a session ended.
 		{name: "administrator, another account", stopID: adminStopID, owner: 2, want: http.StatusNotFound},
+		{name: "administrator, another profile", stopID: adminStopID, owner: 1, profile: "profile-2", want: http.StatusNotFound},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			sessionID := uuid.NewString()
+			profile := tc.profile
+			if profile == "" {
+				profile = "profile-1"
+			}
 			store := playback.NewMemoryPlanStoreV3()
 			deny := relayStreamDeny(t)
 			if err := store.SaveAttempt(context.Background(), playback.AttemptRecordV3{
-				PlaybackAttemptID: uuid.NewString(), SessionID: sessionID, UserID: tc.owner, ProfileID: "profile-1",
+				PlaybackAttemptID: uuid.NewString(), SessionID: sessionID, UserID: tc.owner, ProfileID: profile,
 				RequestedMediaFileID: 100, EffectiveMediaFileID: 100, ExpiresAt: time.Now().Add(time.Hour),
 			}); err != nil {
 				t.Fatal(err)
