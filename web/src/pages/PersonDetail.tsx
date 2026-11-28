@@ -142,6 +142,10 @@ export default function PersonDetail() {
     );
   }
 
+  // The bio keeps its line breaks, so trim its edges: leading or trailing breaks,
+  // or a bio of only whitespace, would otherwise show as empty space.
+  const bio = person.bio?.trim();
+
   return (
     <div>
       {/* Person Header */}
@@ -233,9 +237,9 @@ export default function PersonDetail() {
             </div>
 
             {/* Bio */}
-            {person.bio && (
+            {bio && (
               <p className="text-muted-foreground max-w-2xl text-sm leading-relaxed whitespace-pre-line">
-                {person.bio}
+                {bio}
               </p>
             )}
           </div>
