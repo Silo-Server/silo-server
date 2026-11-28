@@ -71,9 +71,12 @@ func writePlaybackSessionNotFound(w http.ResponseWriter) {
 	writeError(w, http.StatusNotFound, playbackSessionNotFoundErrorCode, "Playback session not found")
 }
 
-// playbackSessionEndedErrorCode is the answer for a session whose stream deny
-// marker is set: it has been stopped, expired, or terminated, and no token
-// may serve or reconstruct it.
+// playbackSessionEndedErrorCode is the answer for a session the player must
+// not resume: an administrator or the paused timeout ended it, or (on media)
+// no rebuild can serve the playlist it holds or the transport it names is
+// denied. A session's stream deny marker stops every token from serving or
+// reconstructing it, however it ended; see writeDeniedPlaybackSession for the
+// answer a request for a denied session gets.
 const playbackSessionEndedErrorCode = "playback_session_ended"
 
 var errPlaybackSessionEnded = errors.New("playback session has ended")
@@ -82,14 +85,49 @@ func writePlaybackSessionEnded(w http.ResponseWriter) {
 	writeError(w, http.StatusGone, playbackSessionEndedErrorCode, "Playback session has ended")
 }
 
-func writePlaybackSessionEndedError(w http.ResponseWriter, err error) bool {
-	// A session whose keyframe playlist can't be rebuilt is over too: no
-	// rebuild can serve the playlist its player holds.
-	if !errors.Is(err, errPlaybackSessionEnded) && !errors.Is(err, playback.ErrKeyframePlanChanged) {
+// writePlaybackSessionEndedError answers a serve error that ends the session
+// for this request: the deny marker (errPlaybackSessionEnded), answered as
+// writeDeniedPlaybackSession does, or a keyframe playlist that can't be
+// rebuilt, which is over too because no rebuild can serve the playlist its
+// player holds.
+func writePlaybackSessionEndedError(w http.ResponseWriter, r *http.Request, store playback.PlanStoreV3, sessionID string, err error) bool {
+	switch {
+	case errors.Is(err, errPlaybackSessionEnded):
+		writeDeniedPlaybackSession(w, r, store, sessionID)
+	case errors.Is(err, playback.ErrKeyframePlanChanged):
+		writePlaybackSessionEnded(w)
+	default:
 		return false
 	}
-	writePlaybackSessionEnded(w)
 	return true
+}
+
+// writeDeniedPlaybackSession answers a media request for a session whose
+// stream deny marker is set. The marker withholds the bytes for every way a
+// session ends; the status tells the owner which end it was, the way progress
+// and replan answer (docs/playback-api.md): 410 playback_session_ended when an
+// administrator or the paused timeout ended the attempt, so the player
+// leaves, and 404 for any other end (an idle expiry, the client's own stop,
+// an abort), so a player resuming after a long pause starts over at its
+// position instead of giving up (issue #5500).
+func writeDeniedPlaybackSession(w http.ResponseWriter, r *http.Request, store playback.PlanStoreV3, sessionID string) {
+	writeAPIError(w, deniedPlaybackSessionError(r.Context(), store, sessionID))
+}
+
+// deniedPlaybackSessionError is writeDeniedPlaybackSession's answer as an
+// error. Only the attempt's account (and profile, when the request selects
+// one, as requireOwningProfile admits) learns that the end was final; anyone
+// else, an unknown attempt and an unreadable store get the 404.
+func deniedPlaybackSessionError(ctx context.Context, store playback.PlanStoreV3, sessionID string) *APIError {
+	if store != nil {
+		record, err := store.GetAttempt(ctx, sessionID)
+		profileID := apimw.GetProfileID(ctx)
+		if err == nil && record != nil && record.UserID == apimw.GetUserID(ctx) &&
+			(profileID == "" || record.ProfileID == profileID) && endedAttemptError(record) != nil {
+			return apiError(http.StatusGone, playbackSessionEndedErrorCode, "Playback session has ended")
+		}
+	}
+	return apiError(http.StatusNotFound, playbackSessionNotFoundErrorCode, "Playback session not found")
 }
 
 var errPlaybackTransportSuperseded = errors.New("playback transport superseded")

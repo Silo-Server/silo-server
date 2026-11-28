@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
+	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 
 	"github.com/Silo-Server/silo-server/internal/nodeauth"
@@ -63,8 +64,10 @@ func TestRelayMoveOfATokenSessionStoresTheCardForItsNewNode(t *testing.T) {
 }
 
 // The relays, not the nodes, enforce the deny marker: a denied playback
-// session or transport gets 410 although its node runtime is alive (its stop
-// failed), and the node is never asked.
+// session or transport is refused although its node runtime is alive (its stop
+// failed), and the node is never asked. A denied transport answers 410; a
+// denied session with no administrator or paused-timeout end recorded answers
+// the 404 a player starts over from.
 func TestRelayRefusesADeniedSessionWithoutAskingTheNode(t *testing.T) {
 	node, hits := countingNode(t, http.StatusOK)
 	f := newRehomeFixture(t, []*nodepool.Node{pooledNode(1, node.URL)}, "ffmpeg")
@@ -74,14 +77,18 @@ func TestRelayRefusesADeniedSessionWithoutAskingTheNode(t *testing.T) {
 	if rr := f.segment("seg_00001.ts"); rr.Code != http.StatusOK || hits.Load() != 1 {
 		t.Fatalf("live session = %d (node hits %d), want it relayed", rr.Code, hits.Load())
 	}
-	for _, denied := range []string{rehomeTestTransport, f.session.ID} {
+	for _, tc := range []struct {
+		denied string
+		want   int
+	}{{rehomeTestTransport, http.StatusGone}, {f.session.ID, http.StatusNotFound}} {
+		denied, want := tc.denied, tc.want
 		deny.Deny(t.Context(), denied)
 		segment := f.segment("seg_00002.ts")
 		manifest := httptest.NewRecorder()
 		f.handler.HandleGetTranscodeManifest(manifest, playbackTestRequest(http.MethodGet,
 			"/api/v2/playback/transcode/"+f.session.ID+"/master.m3u8?st="+f.token, nil, map[string]string{"session_id": f.session.ID}))
-		if segment.Code != http.StatusGone || manifest.Code != http.StatusGone {
-			t.Fatalf("denied %q: segment %d, manifest %d, want 410", denied, segment.Code, manifest.Code)
+		if segment.Code != want || manifest.Code != want {
+			t.Fatalf("denied %q: segment %d, manifest %d, want %d", denied, segment.Code, manifest.Code, want)
 		}
 	}
 	if got := hits.Load(); got != 1 {
@@ -90,7 +97,8 @@ func TestRelayRefusesADeniedSessionWithoutAskingTheNode(t *testing.T) {
 }
 
 // A stop can land while a move starts the transport on another node. The
-// move then commits nothing, stops what it started, and the client gets 410.
+// move then commits nothing, stops what it started, and the client is
+// refused: 410 for an administrator's stop.
 func TestRelayMoveRefusesASessionStoppedWhileItRan(t *testing.T) {
 	gated := newFakeRehomeNode(t, true)
 	f := newRehomeFixture(t, []*nodepool.Node{
@@ -99,6 +107,12 @@ func TestRelayMoveRefusesASessionStoppedWhileItRan(t *testing.T) {
 	}, "ffmpeg")
 	deny := relayStreamDeny(t)
 	f.handler.StreamDeny = deny
+	if err := f.handler.PlanStoreV3.SaveAttempt(t.Context(), playback.AttemptRecordV3{
+		PlaybackAttemptID: uuid.NewString(), SessionID: f.session.ID, UserID: 1, ProfileID: "profile-1",
+		RequestedMediaFileID: 42, EffectiveMediaFileID: 42, ExpiresAt: time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	done := make(chan *httptest.ResponseRecorder, 1)
 	go func() { done <- f.segment("seg_00003.ts") }()
@@ -110,7 +124,7 @@ func TestRelayMoveRefusesASessionStoppedWhileItRan(t *testing.T) {
 		time.Sleep(5 * time.Millisecond) //nolint:forbidigo // polls observable state: the gated node's start counter
 
 	}
-	deny.Deny(t.Context(), f.session.ID)
+	claimNativeEnd(t.Context(), f.handler.PlanStoreV3, deny, f.session.ID, adminStopID(f.session.ID))
 	close(gated.release)
 
 	rr := <-done

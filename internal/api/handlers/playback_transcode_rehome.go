@@ -132,6 +132,17 @@ func (h *PlaybackHandler) moveDeniedV3(ctx context.Context, sessionID, transport
 	return h.StreamDeny.Denied(ctx, sessionID) || (transportID != sessionID && h.StreamDeny.Denied(ctx, transportID))
 }
 
+// writeMoveDenied answers a move the deny marker stopped: as a denied session
+// when the playback session's own marker is set, and with transportDenied's
+// 410 when only the transport it rebuilds is denied.
+func (h *PlaybackHandler) writeMoveDenied(w http.ResponseWriter, r *http.Request, sessionID string) {
+	if h.StreamDeny.Denied(r.Context(), sessionID) {
+		writeDeniedPlaybackSession(w, r, h.PlanStoreV3, sessionID)
+		return
+	}
+	writePlaybackSessionEnded(w)
+}
+
 // remoteTransportDenied answers 410 when the deny marker revokes the remote
 // transport a relay is about to sign a node request for. The serve lookup
 // already checked the playback session id; a plan-scoped transport has an id
@@ -280,7 +291,7 @@ func (h *PlaybackHandler) relayOrRehomeTranscode(
 		return h.moveTranscodeOffNodeV3(ctx, session.ID, dead, card, requestedSegment)
 	})
 	if errors.Is(moveErr, errPlaybackSessionEnded) {
-		writePlaybackSessionEnded(w)
+		h.writeMoveDenied(w, r, session.ID)
 		return nil, true
 	}
 	if moveErr != nil {
@@ -296,7 +307,7 @@ func (h *PlaybackHandler) relayOrRehomeTranscode(
 	// a move another request led, or found the session already moved. The
 	// session's deny check ran before the move, which can take a while.
 	if h.moveDeniedV3(r.Context(), session.ID, remoteTransportID(session)) {
-		writePlaybackSessionEnded(w)
+		h.writeMoveDenied(w, r, session.ID)
 		return nil, true
 	}
 	if runtime := h.tm.GetTranscodeSession(session.ID); runtime != nil {

@@ -277,8 +277,9 @@ func (w *playbackDeliveryWriter) problemType(status int) ProblemType {
 }
 
 // playbackDeliveryProblemType maps a pre-body failure status of a v1 media
-// handler onto the catalog. A 410 is the stream deny marker (the session was
-// stopped or expired), which has its own corrective action: start again. A
+// handler onto the catalog. A 410 is the stream deny marker for a session an
+// administrator or the paused timeout ended, which the player leaves; any
+// other ended session is a plain 404 (see writeDeniedPlaybackSession). A
 // 502 is a relay whose transcode node could not serve it (unreachable, keyless,
 // or refusing the relay's signature): the node is unavailable, not the server.
 //
