@@ -498,8 +498,9 @@ func (s *Service) UpdateToAvailableVersion(ctx context.Context, installationID i
 		PluginID:     installation.PluginID,
 		Version:      targetVersion,
 	}, installation)
-	// The repository can also go while the catalog resolves the release,
-	// which fetches its index. That happens before any download or stop.
+	// The repository can also go while the catalog resolves the release or
+	// the package downloads. Either refuses before the replacement commits,
+	// so the installed plugin keeps running.
 	if errors.Is(err, ErrRepositoryNotFound) {
 		return nil, fmt.Errorf("%w %q: its repository was removed", ErrNoUpdateAvailable, installation.PluginID)
 	}

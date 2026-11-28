@@ -132,9 +132,11 @@ func TestUpdateToAvailableVersionRefusesAnOfferWithNoRepository(t *testing.T) {
 	}
 }
 
-// A repository deleted after UpdateToAvailableVersion read the installation,
-// while the catalog resolves the release, also leaves nowhere to install
-// from: ErrNoUpdateAvailable, before any download or stop (#5237).
+// A repository deleted after UpdateToAvailableVersion read the installation
+// also leaves nowhere to install from. While the catalog resolves the release
+// it answers ErrNoUpdateAvailable before any download or stop; while the
+// package downloads, the replacement's write answers ErrRepositoryNotFound,
+// which the service maps the same way (#5237).
 func TestUpdateToAvailableVersionRefusesAnOfferWhoseRepositoryGoesMeanwhileDB(t *testing.T) {
 	pool := builtinGuardTestPool(t)
 	ctx := t.Context()
@@ -169,6 +171,16 @@ func TestUpdateToAvailableVersionRefusesAnOfferWhoseRepositoryGoesMeanwhileDB(t 
 	}
 	if len(events) != 0 {
 		t.Fatalf("events = %v, want none", events)
+	}
+
+	// The replacement writes the repository it resolved before the download.
+	installed := seedResidentQueryInstallation(t, pool, true)
+	version := "2.0.0"
+	err = NewInstallationStore(pool).Update(ctx, installed, UpdateInstallationInput{
+		Version: &version, SetRepository: true, RepositoryID: &repository.ID,
+	})
+	if !errors.Is(err, ErrRepositoryNotFound) {
+		t.Fatalf("Update() with the deleted repository = %v, want ErrRepositoryNotFound", err)
 	}
 }
 

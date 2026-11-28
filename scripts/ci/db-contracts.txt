@@ -952,7 +952,7 @@
 ./internal/plugins TestNotifyPluginUpdateSkipsAPluginUninstalledMeanwhileDB
 
 # Applying a recorded update whose repository was deleted while the catalog
-# resolved it is a conflict, not a server error.
+# resolved or downloaded it is a conflict, not a server error.
 ./internal/plugins TestUpdateToAvailableVersionRefusesAnOfferWhoseRepositoryGoesMeanwhileDB
 
 # A plugin build stored for another platform is served only for the package it
