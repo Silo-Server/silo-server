@@ -81,6 +81,10 @@ type probeLimits struct {
 	// inputOptions are extra ffprobe options for the stream probe, such as a
 	// longer analysis window (see deepProbeLimits).
 	inputOptions []string
+	// unsettledTailFails fails the probe when the read of the file's end
+	// settles nothing, instead of treating the file as whole
+	// (checkMediaReachesEnd).
+	unsettledTailFails bool
 }
 
 var defaultProbeLimits = probeLimits{
@@ -112,7 +116,9 @@ func probeTimedOut(ctx, runCtx context.Context) bool {
 
 // ProbeFile runs ffprobe on the given file and returns parsed ProbeData.
 // ffprobePath is the path to the ffprobe binary. filePath is the media file to probe.
-// A PQ primary video also has its first frame read for HDR10+ metadata.
+// A PQ primary video also has its first frame read for HDR10+ metadata, and
+// an MP4 or Matroska file has its last second read to check that its data
+// reaches the end its header gives (checkMediaReachesEnd).
 // A run that does not finish within its deadline is killed and fails with a
 // timeout, which IsProbeRejection does not count against the file.
 func ProbeFile(ctx context.Context, ffprobePath string, filePath string) (*ProbeData, error) {
@@ -122,9 +128,13 @@ func ProbeFile(ctx context.Context, ffprobePath string, filePath string) (*Probe
 // probeFileStreamsOnly is ProbeFile without the first-frame read. Playback's
 // probe repair runs under a short budget and does not need HDR10+ status (an
 // unchecked HDR10+ file plays as HDR10), so it leaves the track unchecked for
-// the next library scan.
+// the next library scan. It still checks that the file's data reaches its
+// end, and fails when that check settles nothing: a repair probe that skipped
+// it would clear the damaged mark of a file cut short.
 func probeFileStreamsOnly(ctx context.Context, ffprobePath string, filePath string) (*ProbeData, error) {
-	return probeMediaFile(ctx, ffprobePath, filePath, defaultProbeLimits, false)
+	limits := defaultProbeLimits
+	limits.unsettledTailFails = true
+	return probeMediaFile(ctx, ffprobePath, filePath, limits, false)
 }
 
 func probeFileWithin(ctx context.Context, ffprobePath string, filePath string, limits probeLimits) (*ProbeData, error) {
@@ -164,6 +174,9 @@ func probeMediaFile(ctx context.Context, ffprobePath string, filePath string, li
 		if err := confirmContainer(ctx, ffprobePath, filePath, demuxer, raw.Format, limits); err != nil {
 			return nil, err
 		}
+	}
+	if err := checkMediaReachesEnd(ctx, ffprobePath, filePath, &raw, limits); err != nil {
+		return nil, err
 	}
 	if readFrameSideData {
 		if err := applyPrimaryVideoFrameSideData(ctx, ffprobePath, filePath, raw.Streams); err != nil {
@@ -292,7 +305,8 @@ func runFormatProbe(ctx context.Context, ffprobePath, filePath string, limits pr
 // this process can read, with no sign that ffprobe itself hit a read failure.
 // Zero-byte, corrupt, and truncated media end this way, and so does a file
 // whose format ffprobe only guessed and whose own container demuxer then
-// refused it (confirmContainer).
+// refused it (confirmContainer). A file cut short behind an intact header,
+// which ffprobe reads without an error, counts too (errTruncatedMedia).
 //
 // ffprobe exits the same way when it cannot read the file (permission denied,
 // an I/O error or timeout on a network mount, a stale handle, a file that
@@ -310,16 +324,21 @@ func IsProbeRejection(ctx context.Context, filePath string, err error) bool {
 	if err == nil || ctx.Err() != nil {
 		return false
 	}
+	var accessErr error
 	var exitErr *exec.ExitError
-	if !errors.As(err, &exitErr) {
+	switch {
+	case errors.Is(err, errTruncatedMedia):
+		// checkMediaReachesEnd already ruled out a read error ffprobe reported.
+	case !errors.As(err, &exitErr):
 		return false
+	default:
+		// ffprobe refuses input with exit status 1; 126 and 127 come from the
+		// shell or the dynamic loader when ffprobe itself cannot start.
+		if code := exitErr.ExitCode(); code <= 0 || code == 126 || code == 127 {
+			return false
+		}
+		accessErr = probeStderrAccessFailure(exitErr.Stderr)
 	}
-	// ffprobe refuses input with exit status 1; 126 and 127 come from the
-	// shell or the dynamic loader when ffprobe itself cannot start.
-	if code := exitErr.ExitCode(); code <= 0 || code == 126 || code == 127 {
-		return false
-	}
-	accessErr := probeStderrAccessFailure(exitErr.Stderr)
 	if accessErr == nil {
 		accessErr = boundedProbeInputReadable(ctx, filePath)
 	}

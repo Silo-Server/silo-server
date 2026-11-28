@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"math"
 	"os"
@@ -196,55 +197,64 @@ var errMatroskaTracksReadBusy = errors.New("too many Matroska track reads are wa
 // holds one of matroskaTracksReadSlots until then; with every slot held the
 // read is refused with errMatroskaTracksReadBusy.
 func readMatroskaTracks(ctx context.Context, path string) ([]mediaprobe.MatroskaTrack, os.FileInfo, error) {
+	return readMatroskaHeader(ctx, path, mediaprobe.ReadMatroskaTracks)
+}
+
+// readMatroskaHeader opens path and runs read on it under the bounds
+// readMatroskaTracks describes: read must touch only the file's header
+// elements, as mediaprobe.ReadMatroskaTracks and MatroskaHasCues do.
+func readMatroskaHeader[T any](ctx context.Context, path string, read func(io.ReaderAt, int64) (T, error)) (T, os.FileInfo, error) {
 	type readResult struct {
-		tracks []mediaprobe.MatroskaTrack
-		info   os.FileInfo
-		err    error
+		value T
+		info  os.FileInfo
+		err   error
 	}
+	var zero T
 	// One read of the setting: the goroutine must release the slot it took.
 	slots := matroskaTracksReadSlots
 	select {
 	case slots <- struct{}{}:
 	default:
-		return nil, nil, errMatroskaTracksReadBusy
+		return zero, nil, errMatroskaTracksReadBusy
 	}
 	done := make(chan readResult, 1)
 	go func() {
-		tracks, info, err := readMatroskaTracksFile(path)
+		value, info, err := readMatroskaHeaderFile(path, read)
 		<-slots
-		done <- readResult{tracks, info, err}
+		done <- readResult{value, info, err}
 	}()
 	timer := time.NewTimer(matroskaTracksReadTimeout)
 	defer timer.Stop()
 	select {
 	case r := <-done:
-		return r.tracks, r.info, r.err
+		return r.value, r.info, r.err
 	case <-timer.C:
-		return nil, nil, errMatroskaTracksReadTimeout
+		return zero, nil, errMatroskaTracksReadTimeout
 	case <-ctx.Done():
-		return nil, nil, ctx.Err()
+		return zero, nil, ctx.Err()
 	}
 }
 
-func readMatroskaTracksFile(path string) ([]mediaprobe.MatroskaTrack, os.FileInfo, error) {
+func readMatroskaHeaderFile[T any](path string, read func(io.ReaderAt, int64) (T, error)) (T, os.FileInfo, error) {
+	var zero T
 	f, err := fspath.Open(path)
 	if err != nil {
-		return nil, nil, err
+		return zero, nil, err
 	}
 	defer func() { _ = f.Close() }()
 	info, err := f.Stat()
 	if err != nil {
-		return nil, nil, err
+		return zero, nil, err
 	}
-	tracks, err := mediaprobe.ReadMatroskaTracks(f, info.Size())
+	value, err := read(f, info.Size())
 	// Stat again after the read: a file written while it was read reports its
 	// new size or mtime, so the caller sees it changed instead of trusting
-	// tracks read from a revision that no longer exists.
+	// what was read from a revision that no longer exists.
 	info, statErr := f.Stat()
 	if statErr != nil {
-		return nil, nil, statErr
+		return zero, nil, statErr
 	}
-	return tracks, info, err
+	return value, info, err
 }
 
 // applyMatroskaSubtitleTracks fills what FFprobe leaves out of probed

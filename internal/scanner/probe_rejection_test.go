@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/matroska"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -165,6 +166,9 @@ func TestIsProbeRejectionWithRealFFprobe(t *testing.T) {
 	}
 	broken, healthy := writeGuessedFormatFiles(t, dir, random[:4096])
 	cases = append(cases, broken...)
+	cut, whole := writeCutShortFiles(t, dir)
+	cases = append(cases, cut...)
+	healthy = append(healthy, whole...)
 	for _, path := range cases {
 		_, err := ProbeFile(t.Context(), ffprobe, path)
 		if err == nil || !IsProbeRejection(t.Context(), path, err) {
@@ -239,6 +243,48 @@ func writeTruncatedMP4(t *testing.T, dir string) (string, bool) {
 		t.Fatal(err)
 	}
 	return truncated, true
+}
+
+// writeCutShortFiles returns, as cut, files from issue #5339 that lost the
+// end of their data but kept a readable header, so ffprobe reads them without
+// an error: an MP4 with its index at the front, the same with a timecode
+// track, and a Matroska file, each cut to 40% of its bytes. As whole it
+// returns the same files uncut and a fragmented MP4, which carries no index
+// up front. It returns nothing when
+// ffmpeg is unavailable.
+func writeCutShortFiles(t *testing.T, dir string) (cut, whole []string) {
+	t.Helper()
+	ffmpeg, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		return nil, nil
+	}
+	encode := func(name string, args ...string) string {
+		path := filepath.Join(dir, name)
+		args = append([]string{"-v", "error", "-f", "lavfi", "-i", "testsrc=duration=10:size=320x240:rate=24",
+			"-f", "lavfi", "-i", "sine=frequency=440:duration=10", "-c:v", "mpeg4", "-c:a", "aac"}, append(args, "-y", path)...)
+		if out, err := exec.Command(ffmpeg, args...).CombinedOutput(); err != nil {
+			t.Fatalf("encode %s: %v: %s", name, err, out)
+		}
+		return path
+	}
+	whole = []string{
+		encode("whole-faststart.mp4", "-movflags", "+faststart"),
+		encode("whole-timecode.mov", "-movflags", "+faststart", "-timecode", "01:00:00:00"),
+		encode("whole.mkv"),
+		encode("whole-fragmented.mp4", "-movflags", "+frag_keyframe+empty_moov"),
+	}
+	for _, path := range whole[:3] {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		short := filepath.Join(dir, "cut-"+filepath.Base(path))
+		if err := os.WriteFile(short, data[:len(data)*2/5], 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cut = append(cut, short)
+	}
+	return cut, whole
 }
 
 // ffprobe also exits non-zero when it cannot read the file at all. That is a
@@ -526,5 +572,155 @@ func TestBoundedProbeInputReadablePassesThroughTheCheck(t *testing.T) {
 	}
 	if err := boundedProbeInputReadable(t.Context(), filepath.Join(dir, "missing.mkv")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("missing file = %v, want os.ErrNotExist", err)
+	}
+}
+
+// A file cut short behind an intact header (issue #5339) reads without an
+// error, so ProbeFile reads its last seconds too. Only data that stops well
+// short of the header's length, with ffprobe finding nothing there or saying
+// the file ended early, makes it a rejection. A whole file whose header
+// overstates its length, a container whose duration is only an estimate, a
+// read the storage failed, and a first read that a second one contradicts are
+// not. A storage failure fails the probe, so it is retried later.
+func TestProbeFileRejectsFilesCutShortBehindTheirHeader(t *testing.T) {
+	ctx := t.Context()
+	media := filepath.Join(t.TempDir(), "Movie (2020).mp4")
+	if err := os.WriteFile(media, []byte("readable header bytes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	const noPackets = `{"packets": []}`
+	const cutAtFour = `{"packets": [{"pts_time": "3.958333", "dts_time": "3.958333", "duration_time": "0.041667"}]}`
+	const toTheEnd = `{"packets": [{"pts_time": "59.958333", "duration_time": "0.041667"}]}`
+	const ioError = "Movie (2020).mp4: Input/output error"
+	for _, tc := range []struct {
+		name       string
+		format     string
+		tail       string
+		tailStderr string
+		tailExit   int
+		// secondTail is what a second read of the end prints; empty means
+		// the same as tail.
+		secondTail  string
+		wantRejects bool
+	}{
+		{"MP4 index past the end of the file", "mov,mp4,m4a,3gp,3g2,mj2", noPackets, "", 0, "", true},
+		{"Matroska that ended early", "matroska,webm", cutAtFour, "[matroska,webm @ 0x1] File ended prematurely", 0, "", true},
+		{"MP4 sample past the end of the file", "mov,mp4,m4a,3gp,3g2,mj2", cutAtFour, "[mov,mp4,m4a,3gp,3g2,mj2 @ 0x1] stream 1, offset 0x651bed: partial file", 0, "", true},
+		{"whole file", "matroska,webm", toTheEnd, "", 0, "", false},
+		{"header overstates a whole file", "matroska,webm", cutAtFour, "", 0, "", false},
+		{"cut inside the last seconds", "matroska,webm", `{"packets": [{"pts_time": "56.5"}]}`, "File ended prematurely", 0, "", false},
+		{"estimated duration", "mpegts", noPackets, "", 0, "", false},
+		{"storage failed the read", "mov,mp4,m4a,3gp,3g2,mj2", noPackets, ioError, 0, "", false},
+		{"storage failed the read and ffprobe", "mov,mp4,m4a,3gp,3g2,mj2", noPackets, ioError, 1, "", false},
+		{"subtitle outlasts the cut", "matroska,webm", `{"packets": [{"stream_index": 0, "pts_time": "3.9", "duration_time": "0.1"}, {"stream_index": 1, "pts_time": "8.1", "duration_time": "51.9"}]}`, "File ended prematurely", 0, "", true},
+		{"subtitle outlasts a whole file's audio", "matroska,webm", `{"packets": [{"stream_index": 1, "pts_time": "54.0", "duration_time": "6.0"}]}`, "", 0, "", false},
+		{"Matroska cue before the seek in a whole file", "matroska,webm", `{"packets": [{"stream_index": 1, "pts_time": "54.0", "duration_time": "0.5"}]}`, "", 0, "", false},
+		{"MP4 timecode sample at the front", "mov,mp4,m4a,3gp,3g2,mj2", `{"packets": [{"stream_index": 2, "pts_time": "0.000000", "duration_time": "60.000000"}]}`, "", 0, "", true},
+		{"MP4 subtitle cue before the cut", "mov,mp4,m4a,3gp,3g2,mj2", `{"packets": [{"stream_index": 1, "pts_time": "20.0", "duration_time": "2.0"}]}`, "", 0, "", true},
+		{"tail read failed", "mov,mp4,m4a,3gp,3g2,mj2", noPackets, "Could not seek", 1, "", false},
+		{"tail read without packet output", "mov,mp4,m4a,3gp,3g2,mj2", `{}`, "", 0, "", false},
+		{"first read cut short by storage", "mov,mp4,m4a,3gp,3g2,mj2", noPackets, "", 0, toTheEnd, false},
+	} {
+		if tc.secondTail == "" {
+			tc.secondTail = tc.tail
+		}
+		ffprobe := filepath.Join(t.TempDir(), "ffprobe")
+		writeFakeTool(t, ffprobe, fmt.Sprintf(`#!/bin/sh
+if [ "$1" = "-read_intervals" ]; then
+	echo '%s' >&2
+	if [ -e "$0.read" ]; then
+		printf '%%s\n' '%s'
+	else
+		: > "$0.read"
+		printf '%%s\n' '%s'
+	fi
+	exit %d
+fi
+printf '%%s\n' '{"format":{"format_name":"%s","probe_score":100,"start_time":"0.000000","duration":"60.000000"},"streams":[{"index":0,"codec_type":"audio","codec_name":"aac","duration":"60.000000"},{"index":1,"codec_type":"subtitle","codec_name":"subrip"},{"index":2,"codec_type":"data","codec_name":"none"}]}'
+`, tc.tailStderr, tc.secondTail, tc.tail, tc.tailExit, tc.format))
+		_, err := ProbeFile(ctx, ffprobe, media)
+		wantFailure := tc.wantRejects || tc.tailStderr == ioError
+		if got := err != nil && IsProbeRejection(ctx, media, err); got != tc.wantRejects || (err != nil) != wantFailure {
+			t.Fatalf("%s: err = %v, rejection = %v, want rejection %v", tc.name, err, got, tc.wantRejects)
+		}
+	}
+}
+
+// Playing a file marked damaged probes it again (issue #5339): the repair
+// probe must check the end of the file too, or a file cut short behind an
+// intact header would lose its mark and be offered as playable. A read of the
+// end that settles nothing, such as one ffprobe fails, must not clear the
+// mark either: the repair fails and is retried.
+func TestPlaybackProbeEnsurerKeepsFileCutShortMarked(t *testing.T) {
+	media := filepath.Join(t.TempDir(), "Movie (2020).mp4")
+	if err := os.WriteFile(media, []byte("readable header bytes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name     string
+		tail     string
+		tailExit int
+		wantErr  bool
+	}{
+		{"cut short", `{"packets": []}`, 0, false},
+		{"tail read failed", `{}`, 1, true},
+	} {
+		ffprobe := filepath.Join(t.TempDir(), "ffprobe")
+		writeFakeTool(t, ffprobe, fmt.Sprintf(`#!/bin/sh
+if [ "$1" = "-read_intervals" ]; then
+	printf '%%s\n' '%s'
+	exit %d
+fi
+printf '%%s\n' '{"format":{"format_name":"mov,mp4,m4a,3gp,3g2,mj2","probe_score":100,"start_time":"0.000000","duration":"60.000000"},"streams":[{"codec_type":"audio","codec_name":"aac","duration":"60.000000"}]}'
+`, tc.tail, tc.tailExit))
+		markedAt := time.Now().UTC()
+		file := &models.MediaFile{ID: 10, FilePath: media, ProbeFailedAt: &markedAt}
+		repo := &probeRepairTestRepository{files: map[int]*models.MediaFile{file.ID: file}}
+		ensurer := &PlaybackProbeEnsurer{fileRepo: repo, ffprobePath: ffprobe, timeout: 5 * time.Second}
+
+		got, err := ensurer.Ensure(t.Context(), file)
+		if (err != nil) != tc.wantErr {
+			t.Fatalf("%s: Ensure error = %v, want error %v", tc.name, err, tc.wantErr)
+		}
+		if stored := repo.files[file.ID]; stored.ProbeFailedAt == nil || stored.ProbeUpdatedAt != nil || (err == nil && !got.ProbeRejected()) {
+			t.Fatalf("%s: Ensure returned %+v, stored %+v, want the file still marked damaged", tc.name, got, stored)
+		}
+	}
+}
+
+// A Matroska file that names no Cues ahead of its clusters, as one written to
+// a pipe, is not read at its end: FFmpeg would read every cluster to get
+// there. One whose seek head names Cues is.
+func TestProbeFileChecksMatroskaEndOnlyWithCues(t *testing.T) {
+	ctx := t.Context()
+	ffprobe := filepath.Join(t.TempDir(), "ffprobe")
+	writeFakeTool(t, ffprobe, `#!/bin/sh
+if [ "$1" = "-read_intervals" ]; then
+	printf '%s\n' '{"packets": []}'
+	exit 0
+fi
+printf '%s\n' '{"format":{"format_name":"matroska,webm","probe_score":100,"start_time":"0.000000","duration":"60.000000"},"streams":[{"index":0,"codec_type":"audio","codec_name":"aac"}]}'
+`)
+	header := matroska.AppendElement(nil, matroska.IDEBML, matroska.AppendElement(nil, matroska.IDDocType, []byte("matroska")))
+	cluster := matroska.AppendElement(nil, matroska.IDCluster, make([]byte, 16))
+	seekHead := matroska.AppendElement(nil, matroska.IDSeekHead, matroska.AppendElement(nil, matroska.IDSeek,
+		append(matroska.AppendElement(nil, matroska.IDSeekID, []byte{0x1C, 0x53, 0xBB, 0x6B}), matroska.AppendUint(nil, matroska.IDSeekPosition, 1<<20)...)))
+	for _, tc := range []struct {
+		name        string
+		segment     []byte
+		wantRejects bool
+	}{
+		{"no Cues", cluster, false},
+		{"seek head names Cues", append(slices.Clone(seekHead), cluster...), true},
+	} {
+		media := filepath.Join(t.TempDir(), "Movie (2020).mkv")
+		file := matroska.AppendElement(slices.Clone(header), matroska.IDSegment, tc.segment)
+		if err := os.WriteFile(media, file, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		_, err := ProbeFile(ctx, ffprobe, media)
+		if got := err != nil && IsProbeRejection(ctx, media, err); got != tc.wantRejects || (err != nil) != tc.wantRejects {
+			t.Fatalf("%s: err = %v, rejection = %v, want rejection %v", tc.name, err, got, tc.wantRejects)
+		}
 	}
 }
