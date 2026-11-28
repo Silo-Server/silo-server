@@ -1359,11 +1359,11 @@ func (r *Repository) deleteIntegration(ctx context.Context, tx pgx.Tx, id string
 	// Checked after the routes: disabling a server a route still sends to
 	// would not let its delete through, so it is not the advice to give.
 	if liveRequests > 0 && enabled {
-		inProgress := "1 request is still in progress"
+		detail := "1 request is still in progress on this server. Let it finish, or disable the server first: deleting a disabled server marks it failed so it can be retried."
 		if liveRequests > 1 {
-			inProgress = strconv.Itoa(liveRequests) + " requests are still in progress"
+			detail = strconv.Itoa(liveRequests) + " requests are still in progress on this server. Let them finish, or disable the server first: deleting a disabled server marks them failed so they can be retried."
 		}
-		return &InvalidStateError{Detail: inProgress + " on this server. Let them finish, or disable the server first: deleting a disabled server marks them failed so they can be retried."}
+		return &InvalidStateError{Detail: detail}
 	}
 
 	if liveRequests > 0 {
