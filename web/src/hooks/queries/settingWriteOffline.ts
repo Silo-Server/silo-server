@@ -117,6 +117,12 @@ interface UnsettledPreference {
   stored: { value: unknown; change: number; cached: string | null };
   /** Whether the newest change failed and `stored` is shown in its place. */
   restored: boolean;
+  /**
+   * Whether a change a newer one replaced failed in a way that may have
+   * stored it. `stored` can then be older than what the server holds, so a
+   * restore also owes a reconcile.
+   */
+  replacedMayHaveSaved: boolean;
 }
 
 /**
@@ -129,7 +135,8 @@ interface UnsettledPreference {
  * nothing picked since, is then shown. Callers' sync effects re-run only when
  * the stored value changes, which a failed save never does. When the newest
  * change failed in a way that may have saved, `reconcile` shows what the
- * server holds instead.
+ * server holds instead; so it does after a restore when a change the newest
+ * one replaced failed that way.
  *
  * `read` is the state of the settings read the caller shows. A reconcile
  * waits for it to succeed: when the re-read after the failure failed too, or
@@ -189,6 +196,7 @@ export function useShowThenSave(
           cached: cacheKey ? appearanceCache.get(cacheKey, cacheOwner) : null,
         },
         restored: false,
+        replacedMayHaveSaved: false,
       };
       const change = ++pending.made;
       pending.latest = token;
@@ -233,7 +241,18 @@ export function useShowThenSave(
             } else {
               pending.restored = true;
               showStored();
+              // An earlier change may have saved: the server can hold more
+              // than what was just put back.
+              if (pending.replacedMayHaveSaved && reconcile) {
+                owedReconciles.current.set(cacheOwner, reconcile);
+              }
             }
+          } else if (!unsaved(error)) {
+            // A replaced change that may have saved. A newer one that saves
+            // supersedes it; one that is rejected puts back `stored`, which
+            // may be older than this change, so the reconcile is owed then.
+            pending.replacedMayHaveSaved = true;
+            if (pending.restored && reconcile) owedReconciles.current.set(cacheOwner, reconcile);
           }
           checkOwedReconcile();
         },
