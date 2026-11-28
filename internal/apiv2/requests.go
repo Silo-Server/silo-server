@@ -805,6 +805,9 @@ func requestProblem(err error) *Problem {
 	case errors.Is(err, mediarequests.ErrNotFound):
 		return NewProblem(TypeNotFound, "The request was not found.")
 	case errors.Is(err, mediarequests.ErrInvalidState):
+		if blocked, ok := errors.AsType[*mediarequests.InvalidStateError](err); ok && blocked.Detail != "" {
+			return NewProblem(TypeConflict, blocked.Detail)
+		}
 		return NewProblem(TypeConflict, "The request is not in a state that allows this action.")
 	case errors.Is(err, mediarequests.ErrIntegrationUnreachable):
 		// Detail is a host-written sentence; the underlying cause stays out.

@@ -112,7 +112,11 @@ Sonarr/Radarr plugin's terms, with the plugin's own anime overlay off, so the
 existing plugin follows the route without knowing about routing. Each target
 records the route that sent it. A server a route sends to cannot be deleted
 until the route stops using it, so deleting a server never silently reroutes
-titles, and it cannot be switched to the type the route's media type cannot use
+titles. An enabled server with queued or downloading targets cannot be deleted
+either, since it can still finish them. A disabled server is never asked about
+its targets again, so deleting one fails its queued and downloading targets and
+settles their requests from what is left, leaving them retryable. A server also
+cannot be switched to the type the route's media type cannot use
 (Sonarr for movies, Radarr for series) or stop taking that media type. A chosen
 server that is disabled, not set up (no installation, or no key when its plugin
 needs one; see [Without a router](#without-a-router)), of the wrong type

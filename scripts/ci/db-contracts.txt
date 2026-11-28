@@ -666,6 +666,7 @@
 ./internal/catalog/reattribute TestMovedHistoryKeepsItsCutoffsDB
 ./internal/metadata TestRenameContentIDKeepsUnmarkOnLeftoverCutoffDB
 ./internal/requests TestEditorIntegrationsDatabase
+./internal/requests TestDeleteServerWithLiveTargetsDatabase
 ./internal/requests TestIntegrationKeyStaysWithItsAddressDatabase
 ./internal/requests TestClosingRequestForgetsFollowsDatabase
 ./internal/requests TestDiscoverLayoutDatabase
