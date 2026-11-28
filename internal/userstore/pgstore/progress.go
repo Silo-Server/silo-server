@@ -1516,7 +1516,9 @@ func (s *PostgresUserStore) AddHistoryIfMissing(ctx context.Context, entry users
 	// ($10), as imports always were, unless that second is at or before the
 	// watermark; then it keeps its precise time to stay visible. Any row in the
 	// same second counts as the same play, whichever precision it was kept at,
-	// except a play an unmark kept in history at or before the watermark.
+	// except a play an unmark kept in history at or before the watermark, and
+	// except a partial row for a completion: a stop earlier in the second must
+	// not hide the play's completion.
 	tag, err := tx.Exec(ctx, `
         WITH visible AS (
             SELECT CASE
@@ -1535,6 +1537,7 @@ func (s *PostgresUserStore) AddHistoryIfMissing(ctx context.Context, entry users
             SELECT 1 FROM user_watch_history h
             WHERE h.user_id = $2 AND h.profile_id = $3 AND h.media_item_id = $4
               AND h.watched_at >= $10::timestamptz AND h.watched_at < $10::timestamptz + interval '1 second'
+              AND (h.completed OR NOT $7::boolean)
               AND NOT EXISTS (
                 SELECT 1 FROM user_history_hidden_items hhi
                 WHERE hhi.user_id = h.user_id AND hhi.profile_id = h.profile_id
