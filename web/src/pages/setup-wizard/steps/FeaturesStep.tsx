@@ -176,7 +176,7 @@ export function FeaturesStep() {
               { value: "on_demand", label: t("web.setup.features.storageOnDemand") },
             ]}
             value={onlineMarkerStorage}
-            onChange={(value) => form.setValue("markers.online_storage", value)}
+            onChange={(value) => markerDraft.setOnlineStorage(value)}
           />
         ) : null}
         <SettingField
