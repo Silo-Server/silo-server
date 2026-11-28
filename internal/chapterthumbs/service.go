@@ -1582,10 +1582,16 @@ func classifyProbeError(err error) string {
 // its own start, which still has a frame when the chapter starts on or before
 // the last packet (#5317). A chapter that starts after the video ends fails
 // at both times and keeps its failure.
+//
+// Only a generic extraction failure is retried. A failure with its own reason
+// (invalid data, a timeout, tone mapping, a node) keeps it, so the backoff it
+// sets doesn't change. When the retry fails too, the capture time's reason is
+// kept for the same reason, and the error carries both failures.
 func (s *Service) extractChapterFrame(ctx context.Context, file *models.MediaFile, chapter models.MediaChapter, hdrPolicy string) ([]byte, string, error) {
 	capture := chapterCaptureTime(chapter)
 	frame, reason, err := s.extractFrame(ctx, file, capture, hdrPolicy)
-	if err == nil || !noFrameAtSeek(err) || capture <= chapter.StartSeconds || chapter.StartSeconds < 0 {
+	if err == nil || reason != reasonChapterExtractFailed || ctx.Err() != nil || !noFrameAtSeek(err) ||
+		capture <= chapter.StartSeconds || chapter.StartSeconds < 0 {
 		return frame, reason, err
 	}
 	slog.InfoContext(ctx,
@@ -1595,9 +1601,9 @@ func (s *Service) extractChapterFrame(ctx context.Context, file *models.MediaFil
 		"capture_seconds", capture,
 		"start_seconds", chapter.StartSeconds,
 	)
-	retryFrame, retryReason, retryErr := s.extractFrame(ctx, file, chapter.StartSeconds, hdrPolicy)
+	retryFrame, _, retryErr := s.extractFrame(ctx, file, chapter.StartSeconds, hdrPolicy)
 	if retryErr != nil {
-		return nil, retryReason, fmt.Errorf("%w; at the chapter start: %w", err, retryErr)
+		return nil, reason, fmt.Errorf("%w; at the chapter start: %w", err, retryErr)
 	}
 	return retryFrame, "", nil
 }
