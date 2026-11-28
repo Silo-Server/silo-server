@@ -547,7 +547,7 @@ func (s *Service) processRequest(ctx context.Context, req ChapterThumbnailReques
 
 	for _, candidate := range selected {
 		chapter := updated.Chapters[candidate.offset]
-		frame, reason, err := s.extractFrame(ctx, &updated, chapterCaptureTime(chapter), hdrPolicy)
+		frame, reason, err := s.extractChapterFrame(ctx, &updated, chapter, hdrPolicy)
 		if err != nil {
 			slog.WarnContext(ctx,
 				"chapter thumbnail extract failed", "component", "chapterthumbs",
@@ -1574,6 +1574,59 @@ func classifyProbeError(err error) string {
 	}
 	return "probe_failed"
 }
+
+// extractChapterFrame extracts a chapter's thumbnail at its capture time.
+// The capture time lies up to 5 seconds into the chapter, so for a chapter
+// that starts near the end of the video it can fall after the last video
+// packet, where ffmpeg finds no frame. Such a chapter is tried once more at
+// its own start, which still has a frame when the chapter starts on or before
+// the last packet (#5317). A chapter that starts after the video ends fails
+// at both times and keeps its failure.
+//
+// Only a generic extraction failure is retried. A failure with its own reason
+// (invalid data, a timeout, tone mapping, a node) keeps it, so the backoff it
+// sets doesn't change. When the retry fails too, the capture time's reason is
+// kept for the same reason, and the error carries both failures.
+func (s *Service) extractChapterFrame(ctx context.Context, file *models.MediaFile, chapter models.MediaChapter, hdrPolicy string) ([]byte, string, error) {
+	capture := chapterCaptureTime(chapter)
+	frame, reason, err := s.extractFrame(ctx, file, capture, hdrPolicy)
+	if err == nil || reason != reasonChapterExtractFailed || ctx.Err() != nil || !noFrameAtSeek(err) ||
+		capture <= chapter.StartSeconds || chapter.StartSeconds < 0 {
+		return frame, reason, err
+	}
+	slog.InfoContext(ctx,
+		"chapter thumbnail capture time is past the video; retrying at the chapter start", "component", "chapterthumbs",
+		"file_id", file.ID,
+		"chapter_index", chapter.Index,
+		"capture_seconds", capture,
+		"start_seconds", chapter.StartSeconds,
+	)
+	retryFrame, _, retryErr := s.extractFrame(ctx, file, chapter.StartSeconds, hdrPolicy)
+	if retryErr != nil {
+		return nil, reason, fmt.Errorf("%w; at the chapter start: %w", err, retryErr)
+	}
+	return retryFrame, "", nil
+}
+
+// noFrameAtSeek reports an extraction that found no video frame at or after
+// its seek time: ffmpeg exits with "received no packets" when the seek lands
+// after the last video packet, and mediasample reports ReasonEmpty when ffmpeg
+// succeeds without writing the image. A transcode node's error arrives as
+// text, so the text of both is checked too.
+func noFrameAtSeek(err error) bool {
+	if err == nil {
+		return false
+	}
+	var runErr *mediasample.Error
+	if errors.As(err, &runErr) && runErr.Reason == mediasample.ReasonEmpty {
+		return true
+	}
+	message := err.Error()
+	return strings.Contains(message, "received no packets") || strings.Contains(message, emptySamplingFailure)
+}
+
+// emptySamplingFailure is how a mediasample.Error with ReasonEmpty starts.
+var emptySamplingFailure = (&mediasample.Error{Reason: mediasample.ReasonEmpty}).Error()
 
 func chapterCaptureTime(chapter models.MediaChapter) float64 {
 	duration := chapter.EndSeconds - chapter.StartSeconds
