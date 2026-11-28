@@ -30,6 +30,10 @@ type fakeAdminHistoryImports struct {
 	// runErr, when set, is what both answer with.
 	runOpts []historyimport.AdminRunOptions
 	runErr  error
+
+	// mappingSources records the source each mappings list asked for; nil
+	// means every source.
+	mappingSources []*int
 }
 
 func fixtureAdminHistoryImports() *fakeAdminHistoryImports {
@@ -158,8 +162,30 @@ func TestAdminHistoryListCursorAndAuthority(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodGet, Prefix+"/admin/history-imports/mappings?source_id=1&cursor="+page.Page.NextCursor, "", actingRequestAdmin), TypeInvalidCursor)
 }
 
-func (f *fakeAdminHistoryImports) ListMappings(context.Context, int) ([]historyimport.UserMapping, error) {
+func (f *fakeAdminHistoryImports) ListMappings(_ context.Context, source *int) ([]historyimport.UserMapping, error) {
+	f.mappingSources = append(f.mappingSources, source)
 	return []historyimport.UserMapping{f.mapping}, nil
+}
+
+// source_id is optional in the spec: without it the list names every
+// source's mappings, as the runs list does, and with it only that source's.
+func TestAdminHistoryMappingsListWithoutSourceListsEverySource(t *testing.T) {
+	f := fixtureAdminHistoryImports()
+	h := adminHistoryHandler(f)
+	path := Prefix + "/admin/history-imports/mappings"
+
+	all := do(t, h, http.MethodGet, path, "", actingRequestAdmin)
+	if all.Code != http.StatusOK || !strings.Contains(all.Body.String(), `"id":"2"`) {
+		t.Fatal(all.Code, all.Body.String())
+	}
+	one := do(t, h, http.MethodGet, path+"?source_id=1", "", actingRequestAdmin)
+	if one.Code != http.StatusOK {
+		t.Fatal(one.Code, one.Body.String())
+	}
+	if len(f.mappingSources) != 2 || f.mappingSources[0] != nil || f.mappingSources[1] == nil || *f.mappingSources[1] != 1 {
+		t.Fatalf("mappings lists asked for %v, want every source and then source 1", f.mappingSources)
+	}
+	requireProblem(t, do(t, h, http.MethodGet, path+"?source_id=0", "", actingRequestAdmin), TypeValidationFailed)
 }
 
 func (f *fakeAdminHistoryImports) CancelAdminRun(context.Context, string) error {

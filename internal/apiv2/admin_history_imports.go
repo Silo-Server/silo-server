@@ -22,7 +22,7 @@ type AdminHistoryImportService interface {
 	DeleteSourceConditional(context.Context, int, int64) error
 	SetSourceAdminTokenConditional(context.Context, int, string, int64) (*historyimport.Source, error)
 	ClearSourceAdminTokenConditional(context.Context, int, int64) (*historyimport.Source, error)
-	ListMappings(context.Context, int) ([]historyimport.UserMapping, error)
+	ListMappings(context.Context, *int) ([]historyimport.UserMapping, error)
 	GetMapping(context.Context, int) (*historyimport.UserMapping, error)
 	CreateMapping(context.Context, historyimport.CreateMappingInput) (*historyimport.UserMapping, error)
 	UpdateMappingConditional(context.Context, int, historyimport.UpdateMappingInput, int64) (*historyimport.UserMapping, error)

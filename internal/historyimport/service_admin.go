@@ -47,8 +47,9 @@ func (s *Service) CreateMapping(ctx context.Context, input CreateMappingInput) (
 	return s.repo.CreateMapping(ctx, input)
 }
 
-// ListMappings returns all mappings for a source, enriched with Silo user/profile names.
-func (s *Service) ListMappings(ctx context.Context, sourceID int) ([]UserMapping, error) {
+// ListMappings returns a source's mappings, or every source's when sourceID is
+// nil, enriched with Silo user/profile names.
+func (s *Service) ListMappings(ctx context.Context, sourceID *int) ([]UserMapping, error) {
 	return s.repo.ListMappingsForSource(ctx, sourceID)
 }
 

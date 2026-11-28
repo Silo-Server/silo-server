@@ -59905,7 +59905,7 @@ export interface operations {
         cursor?: string;
         /** @description Page size; default 50, maximum 200 */
         limit?: number;
-        /** @description Opaque identifier */
+        /** @description Lists only this history import source's rows; absent, every source's are listed */
         source_id?: string;
       };
       header?: {
@@ -60863,7 +60863,7 @@ export interface operations {
         cursor?: string;
         /** @description Page size; default 50, maximum 200 */
         limit?: number;
-        /** @description Opaque identifier */
+        /** @description Lists only this history import source's rows; absent, every source's are listed */
         source_id?: string;
       };
       header?: {

@@ -55,16 +55,18 @@ func (r *Repository) CreateMapping(ctx context.Context, input CreateMappingInput
 	return r.createMappingChecked(ctx, input)
 }
 
-func (r *Repository) ListMappingsForSource(ctx context.Context, sourceID int) ([]UserMapping, error) {
+// ListMappingsForSource lists one source's mappings, or every source's when
+// sourceID is nil.
+func (r *Repository) ListMappingsForSource(ctx context.Context, sourceID *int) ([]UserMapping, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT m.id, m.source_id, m.external_user_id, m.external_user_name,
 		       m.silo_user_id, m.silo_profile_id, m.last_imported_at,
 		       m.created_at, m.updated_at, m.revision
 		FROM history_import_user_mappings m
-		WHERE m.source_id = $1
+		WHERE $1::integer IS NULL OR m.source_id = $1
 		ORDER BY m.external_user_name ASC, m.id ASC`, sourceID)
 	if err != nil {
-		return nil, fmt.Errorf("listing mappings for source %d: %w", sourceID, err)
+		return nil, fmt.Errorf("listing mappings: %w", err)
 	}
 	defer rows.Close()
 
