@@ -91,9 +91,7 @@ export default function SeriesContent({
   const [editOpen, setEditOpen] = useState(false);
   const [matchOpen, setMatchOpen] = useState(false);
   const [splitOpen, setSplitOpen] = useState(false);
-  // The episode order dialog, on the layout the series uses or on Custom
-  // (Manage → Arrange seasons).
-  const [orderOpen, setOrderOpen] = useState<false | "saved" | "custom">(false);
+  const [orderOpen, setOrderOpen] = useState(false);
   const [requestSeasonsOpen, setRequestSeasonsOpen] = useState(false);
   const tmdbID = Number(item.tmdb_id) || 0;
   const canRequestSeasons = useMissingSeasonsRequestable(Boolean(currentProfile?.id) && tmdbID > 0);
@@ -248,8 +246,7 @@ export default function SeriesContent({
                 onEditMetadata={canCurateMetadata ? () => setEditOpen(true) : undefined}
                 onMatchItem={canCurateMetadata ? () => setMatchOpen(true) : undefined}
                 onSplitItem={canCurateMetadata ? () => setSplitOpen(true) : undefined}
-                onEpisodeOrder={canCurateMetadata ? () => setOrderOpen("saved") : undefined}
-                onArrangeSeasons={canCurateMetadata ? () => setOrderOpen("custom") : undefined}
+                onArrangeShow={canCurateMetadata ? () => setOrderOpen(true) : undefined}
                 onRequestSeasons={canRequestSeasons ? () => setRequestSeasonsOpen(true) : undefined}
                 onShuffle={
                   episodeCount > 1
@@ -313,7 +310,7 @@ export default function SeriesContent({
                 <div className="mt-4">
                   <EpisodeOrderSummary
                     contentId={item.content_id}
-                    onChange={() => setOrderOpen("saved")}
+                    onChange={() => setOrderOpen(true)}
                   />
                 </div>
               )}
@@ -339,9 +336,8 @@ export default function SeriesContent({
             <EpisodeOrderDialog
               contentId={item.content_id}
               title={title}
-              open={orderOpen !== false}
-              initialLayout={orderOpen === "custom" ? "custom" : undefined}
-              onOpenChange={(next) => !next && setOrderOpen(false)}
+              open={orderOpen}
+              onOpenChange={setOrderOpen}
             />
           )}
           {canCurateMetadata && (

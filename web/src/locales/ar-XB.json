@@ -117609,10 +117609,10 @@
       "value": "profiles"
     }
   ],
-  "web.detail.actions.arrangeSeasons": [
+  "web.detail.actions.arrangeShow": [
     {
       "type": 0,
-      "value": "\u200F\u202EArrange seasons\u202C"
+      "value": "\u200F\u202EArrange Show\u202C"
     }
   ],
   "web.detail.actions.browseSeries": [
@@ -117637,12 +117637,6 @@
     {
       "type": 0,
       "value": "\u200F\u202EEdit Metadata\u202C"
-    }
-  ],
-  "web.detail.actions.episodeOrder": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EEpisode order\u202C"
     }
   ],
   "web.detail.actions.favorite": [
@@ -131910,7 +131904,7 @@
   "web.item.episodeOrder.title": [
     {
       "type": 0,
-      "value": "\u200F\u202EEpisode order\u202C"
+      "value": "\u200F\u202EArrange show\u202C"
     }
   ],
   "web.item.images.allProviders": [

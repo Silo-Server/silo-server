@@ -31,7 +31,6 @@ import {
   MoreVertical,
   Play,
   RefreshCw,
-  LayoutList,
   ListOrdered,
   Scissors,
   RotateCcw,
@@ -257,8 +256,7 @@ export interface ActionBarProps {
   onEditMetadata?: () => void;
   onMatchItem?: () => void;
   onSplitItem?: () => void;
-  onEpisodeOrder?: () => void;
-  onArrangeSeasons?: () => void;
+  onArrangeShow?: () => void;
   onShowMediaInfo?: () => void;
   isAdmin?: boolean;
   canCurateMetadata?: boolean;
@@ -358,8 +356,7 @@ export default function ActionBar({
   onEditMetadata,
   onMatchItem,
   onSplitItem,
-  onEpisodeOrder,
-  onArrangeSeasons,
+  onArrangeShow,
   onShowMediaInfo,
   isAdmin = false,
   canCurateMetadata = false,
@@ -983,24 +980,14 @@ export default function ActionBar({
           {t("web.detail.actions.splitVersions")}
         </DetailOverflowMenuItem>
       ),
-      canCurateMetadata && onEpisodeOrder && (
+      canCurateMetadata && onArrangeShow && (
         <DetailOverflowMenuItem
-          key="episode-order"
+          key="arrange-show"
           closeMenu={closeOverflowMenu}
-          onAction={onEpisodeOrder}
+          onAction={onArrangeShow}
         >
           <ListOrdered className="size-4" />
-          {t("web.detail.actions.episodeOrder")}
-        </DetailOverflowMenuItem>
-      ),
-      canCurateMetadata && onArrangeSeasons && (
-        <DetailOverflowMenuItem
-          key="arrange-seasons"
-          closeMenu={closeOverflowMenu}
-          onAction={onArrangeSeasons}
-        >
-          <LayoutList className="size-4" />
-          {t("web.detail.actions.arrangeSeasons")}
+          {t("web.detail.actions.arrangeShow")}
         </DetailOverflowMenuItem>
       ),
     ],

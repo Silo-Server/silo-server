@@ -1,8 +1,8 @@
 // Per-series episode order in one dialog: which provider and order number the
 // show and which order its file names follow (the header), and how its seasons
 // are laid out: as the order lists them, as one absolute list, or arranged by
-// hand. Opened from the series page's Manage menu (admins and metadata
-// curators).
+// hand. Opened from the series page's Manage → Arrange Show (admins and
+// metadata curators).
 import { useState } from "react";
 import { toast } from "sonner";
 import { History, Loader2 } from "lucide-react";
@@ -14,7 +14,6 @@ import {
   LayoutSwitch,
   OrderPicker,
   type Draft,
-  type Layout,
   type Source,
 } from "@/components/EpisodeOrderPickers";
 import { SeasonArranger } from "@/components/SeasonArranger";
@@ -74,36 +73,24 @@ export default function EpisodeOrderDialog({
   title,
   open,
   onOpenChange,
-  initialLayout,
 }: {
   contentId: string;
   title: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** Opens on this layout instead of the saved one (Manage → Arrange seasons). */
-  initialLayout?: Layout;
 }) {
   // Mounted only while open, so every opening starts from the saved order.
   if (!open) return null;
-  return (
-    <Editor
-      contentId={contentId}
-      title={title}
-      initialLayout={initialLayout}
-      onClose={() => onOpenChange(false)}
-    />
-  );
+  return <Editor contentId={contentId} title={title} onClose={() => onOpenChange(false)} />;
 }
 
 function Editor({
   contentId,
   title,
-  initialLayout,
   onClose,
 }: {
   contentId: string;
   title: string;
-  initialLayout?: Layout;
   onClose: () => void;
 }) {
   const t = useT();
@@ -111,7 +98,7 @@ function Editor({
   const state = stateQuery.data;
   const [edited, setEdited] = useState<Draft | null>(null);
   const saved = state ? draftOf(state) : null;
-  const draft = edited ?? (saved && initialLayout ? { ...saved, layout: initialLayout } : saved);
+  const draft = edited ?? saved;
   const libraryProvider = asProvider(state?.library_provider);
   const choice = draft ? choiceOf(draft, libraryProvider) : undefined;
   const savedChoice = saved ? choiceOf(saved, libraryProvider) : undefined;

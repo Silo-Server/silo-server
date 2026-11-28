@@ -121585,10 +121585,10 @@
       "value": "~~~~~⟧"
     }
   ],
-  "web.detail.actions.arrangeSeasons": [
+  "web.detail.actions.arrangeShow": [
     {
       "type": 0,
-      "value": "⟦Åŕŕåñĝé šéåšöñš~~~~~~⟧"
+      "value": "⟦Åŕŕåñĝé Šĥöŵ~~~~~⟧"
     }
   ],
   "web.detail.actions.browseSeries": [
@@ -121613,12 +121613,6 @@
     {
       "type": 0,
       "value": "⟦Éđîţ Ṁéţåđåţå~~~~~~⟧"
-    }
-  ],
-  "web.detail.actions.episodeOrder": [
-    {
-      "type": 0,
-      "value": "⟦Éþîšöđé öŕđéŕ~~~~~~⟧"
     }
   ],
   "web.detail.actions.favorite": [
@@ -136490,7 +136484,7 @@
   "web.item.episodeOrder.title": [
     {
       "type": 0,
-      "value": "⟦Éþîšöđé öŕđéŕ~~~~~~⟧"
+      "value": "⟦Åŕŕåñĝé šĥöŵ~~~~~⟧"
     }
   ],
   "web.item.images.allProviders": [
