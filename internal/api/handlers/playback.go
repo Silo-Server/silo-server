@@ -170,6 +170,16 @@ type copySeekAnchorResolver func(
 	segmentDuration int,
 ) (float64, int, error)
 
+// transcodeStartResolver is playback.ResolveTranscodeStart's signature.
+type transcodeStartResolver func(
+	ctx context.Context,
+	ffmpegPath string,
+	inputPath string,
+	requestedSeconds float64,
+	durationSeconds float64,
+	segmentDuration int,
+) (float64, error)
+
 // PlaybackHandler handles playback session HTTP endpoints.
 type PlaybackHandler struct {
 	Connections *connectionstore.Store
@@ -282,6 +292,8 @@ type PlaybackHandler struct {
 	PlaybackConfig func() config.PlaybackConfig
 	FFmpegLogSink  playback.FFmpegLogSink
 	copySeekAnchor copySeekAnchorResolver
+	// transcodeStart is a test seam; nil uses playback.ResolveTranscodeStart.
+	transcodeStart transcodeStartResolver
 	// autoTranscodePipelineV3 is a test seam for the hw_accel=auto fallback
 	// pipeline; nil uses playback.NewAutoTranscodePipeline.
 	autoTranscodePipelineV3 func(context.Context, playback.TranscodeOpts) *playback.AutoTranscodePipeline

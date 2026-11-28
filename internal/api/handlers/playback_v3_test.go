@@ -5372,3 +5372,53 @@ func TestReusedHLSTransportKeepsTheMarkerOfTheURLItRepublishes(t *testing.T) {
 		}
 	}
 }
+
+// A transcode resume saved past the end of a file's video (its stored
+// duration runs longer, #5127) starts at the last segment that holds video,
+// so the player's first segment has media. A probe that fails keeps the
+// requested start.
+func TestTranscodeTimelineStartsATailResumeAtTheLastVideoSegment(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		resolved  float64
+		probeErr  error
+		wantStart float64
+		wantSeek  float64
+		wantSeg   int
+	}{
+		{name: "inside the tail", resolved: 18, wantStart: 18, wantSeek: 18, wantSeg: 9},
+		{name: "probe failed", resolved: 0, probeErr: errors.New("ffmpeg failed"), wantStart: 24, wantSeek: 24, wantSeg: 12},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0))
+			var probed []float64
+			handler.transcodeStart = func(_ context.Context, _ string, inputPath string, requested, duration float64, segmentDuration int) (float64, error) {
+				if inputPath != "/media/tail.mkv" || duration != 30 || segmentDuration != playback.DefaultSegmentDuration {
+					t.Errorf("probe input = %q, duration %v, segment %d", inputPath, duration, segmentDuration)
+				}
+				probed = append(probed, requested)
+				return tc.resolved, tc.probeErr
+			}
+			plan := &playback.PlanV3{Delivery: playback.DeliveryTranscodeHLSV3, Timeline: playback.TimelineV3{SourceStartSeconds: 24}}
+			result := playback.PlannerResultV3{
+				Plan:                 plan,
+				TargetVideoCodec:     "h264",
+				FrozenSourceMetadata: &playback.SourceExecutionMetadataV3{DurationSeconds: 30},
+			}
+			file := &models.MediaFile{ID: 1, FilePath: "/media/tail.mkv", Duration: 30}
+			timeline, timelineErr := handler.prepareTransportTimelineV3(context.Background(), &playback.Session{ID: "tail-resume"}, file, result)
+			if timelineErr != nil {
+				t.Fatalf("prepare timeline: %v", timelineErr)
+			}
+			if len(probed) != 1 || probed[0] != 24 {
+				t.Fatalf("probed starts = %v, want [24]", probed)
+			}
+			if timeline.seekSeconds != tc.wantSeek || timeline.startSegmentNumber != tc.wantSeg {
+				t.Fatalf("timeline = %#v, want seek %v at segment %d", timeline, tc.wantSeek, tc.wantSeg)
+			}
+			if plan.Timeline.SourceStartSeconds != tc.wantStart || plan.Timeline.PlayerStartSeconds != tc.wantStart {
+				t.Fatalf("plan timeline = %#v, want source and player start %v", plan.Timeline, tc.wantStart)
+			}
+		})
+	}
+}
