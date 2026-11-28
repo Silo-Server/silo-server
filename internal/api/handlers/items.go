@@ -1123,8 +1123,8 @@ func (h *ItemsHandler) listEpisodeFiles(ctx context.Context, episodeIDs []string
 	if h.fileRepo == nil || len(episodeIDs) == 0 {
 		return nil
 	}
-	if batchProvider, ok := h.fileRepo.(batchEpisodeFileProvider); ok {
-		files, err := batchProvider.ListByEpisodeIDs(ctx, episodeIDs)
+	if _, ok := h.fileRepo.(batchEpisodeFileProvider); ok {
+		files, err := h.listEpisodeFilesStrict(ctx, episodeIDs)
 		if err != nil {
 			return nil
 		}
@@ -1137,6 +1137,26 @@ func (h *ItemsHandler) listEpisodeFiles(ctx context.Context, episodeIDs []string
 		}
 	}
 	return files
+}
+
+// listEpisodeFilesStrict is listEpisodeFiles for callers that must not act on
+// a partial answer: any failed lookup is returned.
+func (h *ItemsHandler) listEpisodeFilesStrict(ctx context.Context, episodeIDs []string) (map[string][]*models.MediaFile, error) {
+	if h.fileRepo == nil || len(episodeIDs) == 0 {
+		return nil, nil
+	}
+	if batchProvider, ok := h.fileRepo.(batchEpisodeFileProvider); ok {
+		return batchProvider.ListByEpisodeIDs(ctx, episodeIDs)
+	}
+	files := make(map[string][]*models.MediaFile, len(episodeIDs))
+	for _, id := range episodeIDs {
+		list, err := h.fileRepo.GetByEpisodeID(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		files[id] = list
+	}
+	return files, nil
 }
 
 // listEpisodeListFiles fetches the file fields the episode list renders,
@@ -2370,7 +2390,12 @@ func (h *ItemsHandler) resolveWatchedTargets(ctx context.Context, contentID stri
 	default:
 		var files []*models.MediaFile
 		if h.fileRepo != nil {
-			files, _ = h.fileRepo.GetByEpisodeID(ctx, target.Episode.ContentID)
+			// These files also decide whether the episode's row plays later
+			// episodes, so a failed lookup fails the update.
+			var err error
+			if files, err = h.fileRepo.GetByEpisodeID(ctx, target.Episode.ContentID); err != nil {
+				return "", "", nil, err
+			}
 		}
 		targets := []watchedLeafTarget{{
 			ContentID:       target.Episode.ContentID,
@@ -2409,7 +2434,12 @@ func (h *ItemsHandler) foldedEpisodeTargets(ctx context.Context, episode *models
 			candidates = append(candidates, ep)
 		}
 	}
-	served := h.listEpisodeFiles(ctx, episodeContentIDs(candidates))
+	// A failed lookup fails the update: treating it as "no files" would mark
+	// the row's first episode and silently skip the episodes it plays.
+	served, err := h.listEpisodeFilesStrict(ctx, episodeContentIDs(candidates))
+	if err != nil {
+		return nil, err
+	}
 	parts, _ := catalog.FoldSpannedEpisodes(candidates, served)
 	targets := make([]watchedLeafTarget, 0, len(parts[episode.ContentID]))
 	for _, part := range parts[episode.ContentID] {

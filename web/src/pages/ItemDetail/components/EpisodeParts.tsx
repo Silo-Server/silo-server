@@ -15,6 +15,7 @@ export default function EpisodeParts({
   hideOverviews,
   onRevealOverview,
   clamp,
+  firstOverview,
   translating,
   onTranslate,
   machineTranslated,
@@ -23,6 +24,11 @@ export default function EpisodeParts({
   hideOverviews: boolean;
   onRevealOverview?: () => void;
   clamp?: boolean;
+  /**
+   * The description the page resolved for the first episode: its on-view
+   * translation, or the series description when the episode has none.
+   */
+  firstOverview?: string;
   /** The first episode's translation state, as the plain description shows it. */
   translating?: boolean;
   onTranslate?: () => void;
@@ -33,7 +39,7 @@ export default function EpisodeParts({
     content_id: episode.content_id,
     episode_number: episode.episode_number,
     title: episode.title,
-    overview: episode.overview,
+    overview: firstOverview ?? episode.overview,
   };
   const parts = [first, ...(episode.spanned_episodes ?? [])];
   const [selectedId, setSelectedId] = useState(first.content_id);

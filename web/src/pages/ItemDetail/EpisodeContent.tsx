@@ -389,6 +389,7 @@ export default function EpisodeContent({
                 hideOverviews={overviewHidden}
                 onRevealOverview={() => setRevealedOverviewId(item.content_id)}
                 clamp
+                firstOverview={overviewSource?.overview}
                 translating={overviewTranslating}
                 onTranslate={onTranslateOverview}
                 machineTranslated={hasMachineTranslation(overviewSource?.machine_translated_fields)}
