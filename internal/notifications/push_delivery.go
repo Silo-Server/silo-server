@@ -404,6 +404,14 @@ func (r *PushDeviceRepository) FinalizePushAttempt(ctx context.Context, claimed 
 		defer cancel()
 		_ = tx.Rollback(rollbackCtx)
 	}()
+	if failure != nil {
+		// Lock the device before the attempt, in the order a device delete
+		// takes them (the device, then its attempts through the cascade), so
+		// the two can't deadlock.
+		if _, err := tx.Exec(ctx, `SELECT 1 FROM push_devices WHERE id = $1 FOR NO KEY UPDATE`, failure.deviceID); err != nil {
+			return nil, fmt.Errorf("finalize push attempt: %w", err)
+		}
+	}
 	rows, err := tx.Query(ctx, `
 		UPDATE push_delivery_attempts
 		SET outcome = $2,
@@ -546,11 +554,6 @@ const recordPushFailureSQL = `
 		    enabled = CASE WHEN $3 THEN false ELSE enabled END,
 		    updated_at = now()
 		WHERE id = $1`
-
-func (r *PushDeviceRepository) RecordPushFailure(ctx context.Context, deviceID, code string, disable bool) error {
-	_, err := r.pool.Exec(ctx, recordPushFailureSQL, deviceID, code, disable)
-	return err
-}
 
 func defaultString(value, fallback string) string {
 	if value == "" {
