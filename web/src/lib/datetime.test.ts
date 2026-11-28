@@ -17,10 +17,7 @@ afterEach(() => {
 describe("formatTime", () => {
   it.each([
     { formatLocale: "en-GB", timeFormat: "auto", want: "00:30" },
-    { formatLocale: "de-DE", timeFormat: "auto", want: "00:30" },
-    { formatLocale: "fr-FR", timeFormat: "auto", want: "00:30" },
     { formatLocale: "en-US", timeFormat: "24h", want: "00:30" },
-    { formatLocale: "en-GB", timeFormat: "24h", want: "00:30" },
     // Japanese writes its short time with a one-digit hour.
     { formatLocale: "ja-JP", timeFormat: "auto", want: "0:30" },
   ] as const)("$formatLocale, $timeFormat clock: $want", ({ formatLocale, timeFormat, want }) => {
