@@ -13,6 +13,7 @@ import DetailOverview from "./DetailOverview";
 export default function EpisodeParts({
   episode,
   hideOverviews,
+  firstHidden = hideOverviews,
   onRevealOverview,
   clamp,
   firstOverview,
@@ -21,7 +22,14 @@ export default function EpisodeParts({
   machineTranslated,
 }: {
   episode: EpisodeListItem;
+  /** Spoiler protection for the episodes' descriptions. */
   hideOverviews: boolean;
+  /**
+   * Spoiler protection for the first tab, which can show the series
+   * description (it reveals nothing about the episode) when the first episode
+   * has none of its own.
+   */
+  firstHidden?: boolean;
   onRevealOverview?: () => void;
   clamp?: boolean;
   /**
@@ -102,7 +110,7 @@ export default function EpisodeParts({
             key={selected.content_id}
             overview={selected.overview}
             clamp={clamp}
-            hidden={hideOverviews}
+            hidden={isFirst ? firstHidden : hideOverviews}
             onReveal={onRevealOverview}
             translating={isFirst && translating}
             onTranslate={isFirst ? onTranslate : undefined}

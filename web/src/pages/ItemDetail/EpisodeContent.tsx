@@ -132,11 +132,11 @@ export default function EpisodeContent({
   const overviewSource = hasOwnOverview ? item : series;
   const { translating: overviewTranslating, onTranslate: onTranslateOverview } =
     useOnViewTranslation(overviewSource);
-  const overviewHidden =
-    hasOwnOverview &&
-    hideOverviews &&
-    isEpisodeUnwatched(item.user_data) &&
-    revealedOverviewId !== item.content_id;
+  // Episode tabs describe the episodes the video plays, so they follow the
+  // spoiler setting even when this episode has no description of its own.
+  const partsHidden =
+    hideOverviews && isEpisodeUnwatched(item.user_data) && revealedOverviewId !== item.content_id;
+  const overviewHidden = hasOwnOverview && partsHidden;
   const [selectedEditionKey, setSelectedEditionKey] = useState<string | undefined>(undefined);
   const defaultSelectedVersion = useMemo(
     () =>
@@ -386,7 +386,8 @@ export default function EpisodeContent({
               <EpisodeParts
                 key={partTabsRow.content_id}
                 episode={partTabsRow}
-                hideOverviews={overviewHidden}
+                hideOverviews={partsHidden}
+                firstHidden={overviewHidden}
                 onRevealOverview={() => setRevealedOverviewId(item.content_id)}
                 clamp
                 firstOverview={overviewSource?.overview}
