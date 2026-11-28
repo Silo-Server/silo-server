@@ -159,6 +159,13 @@ func (w *taskWorker) setTriggers(configs []TriggerConfig, factory func(TriggerCo
 	if w.isRetired() {
 		configs = nil
 	}
+	// A run that completed after the caller chose lastResult rearmed no
+	// triggers, so count from it instead. An interrupted result stays where
+	// scheduleBase put it.
+	if lastResult != nil && w.lastResult != nil && !w.lastResult.IsInterrupted() &&
+		w.lastResult.CompletedAt.After(lastResult.CompletedAt) {
+		lastResult = w.lastResult
+	}
 	spread := startSpread(w.task)
 	for _, cfg := range configs {
 		tr := factory(cfg)
