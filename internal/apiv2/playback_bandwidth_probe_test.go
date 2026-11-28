@@ -2,6 +2,7 @@ package apiv2
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"testing"
@@ -83,4 +84,29 @@ func TestPlaybackBandwidthProbe(t *testing.T) {
 			requireProblem(t, do(t, handler, http.MethodGet, path+"?size="+size, "", bearer(memberToken)), TypeValidationFailed)
 		})
 	}
+}
+
+func TestPlaybackBandwidthProbeDocumentsOptionalDeviceHeader(t *testing.T) {
+	spec, err := GenerateOpenAPI()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Paths map[string]map[string]struct {
+			Parameters []struct {
+				Name     string `json:"name"`
+				In       string `json:"in"`
+				Required bool   `json:"required"`
+			} `json:"parameters"`
+		} `json:"paths"`
+	}
+	if err := json.Unmarshal(spec, &doc); err != nil {
+		t.Fatal(err)
+	}
+	for _, param := range doc.Paths[Prefix+"/playback/bandwidth-probe"]["get"].Parameters {
+		if param.In == "header" && param.Name == "X-Silo-Device-Id" && !param.Required {
+			return
+		}
+	}
+	t.Fatal("bandwidth probe contract has no optional X-Silo-Device-Id request header")
 }

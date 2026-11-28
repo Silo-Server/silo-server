@@ -1189,6 +1189,8 @@
 ./internal/api/handlers TestLearnedLimitMarksOnlyAReplanItLoweredDB
 ./internal/api/handlers TestConnectionReadingsDB
 ./internal/api/handlers TestDirectStartPassesUseMediaHostKeyDB
+./internal/api/handlers TestDirectStartClearRemovesTheServingConnectionsLimitDB
+./internal/api/handlers TestSourceRefusedRecoveryPlansUnderTheServingHostsKeyDB
 ./internal/api/handlers TestProbeReceiptRecordsUnderReceiptKeyDB
 ./internal/api/handlers TestPairedProbeOnOneAccount
 ./internal/playback/planstore TestSummaryResolvesReplacedPlanDelivery

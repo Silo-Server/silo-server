@@ -3306,7 +3306,7 @@ func main() {
 			slog.ErrorContext(appCtx, "direct connections: coordination store unavailable", "component", "directconn", "error", storeErr)
 		} else {
 			defer closeCoordinationStore()
-			directCoordination = newDirectCoordination(appCtx, deps.DB, directconn.CoordinationConfig{
+			directCoordination = newDirectCoordination(appCtx, deps.DB, userStoreProvider, directconn.CoordinationConfig{
 				Store: coordinationStore, AuthSecret: cfg.Auth.JWTSecret, Logger: slog.Default(),
 				Host: directConn, TLSPin: lanTLS.Pin(), ACKDecimation: tuningCfg.DirectACKDecimation, ReceiveWindowMiB: tuningCfg.DirectReceiveWindowMiB,
 			})
@@ -5801,12 +5801,16 @@ func newDirectCoordinationStore(cfg config.RedisConfig, fence string) (directcon
 
 // newDirectCoordination builds direct-connection enrollment from cfg. With a
 // database, enrollments write their audit rows to db and check their login
-// session there after they write. A build failure is logged and returns nil: the
-// server then runs without enrollment.
-func newDirectCoordination(ctx context.Context, db *pgxpool.Pool, cfg directconn.CoordinationConfig) *directconn.Coordination {
+// session there after they write; with a user store provider they also check
+// that their household profile still exists. A build failure is logged and
+// returns nil: the server then runs without enrollment.
+func newDirectCoordination(ctx context.Context, db *pgxpool.Pool, users userstore.UserStoreProvider, cfg directconn.CoordinationConfig) *directconn.Coordination {
 	if db != nil {
 		cfg.Audit = directconn.NewEnrollmentAudit(db)
 		cfg.SessionActive = auth.NewSessionRepository(db).IsValid
+	}
+	if users != nil {
+		cfg.ProfileActive = profileExists(users)
 	}
 	coordination, err := directconn.NewCoordination(cfg)
 	if err != nil {
@@ -5814,6 +5818,22 @@ func newDirectCoordination(ctx context.Context, db *pgxpool.Pool, cfg directconn
 		return nil
 	}
 	return coordination
+}
+
+// profileExists reports whether a household profile of an account still exists.
+// A store that returns no profile and no error means the profile was deleted.
+func profileExists(users userstore.UserStoreProvider) func(ctx context.Context, userID int, profileID string) (bool, error) {
+	return func(ctx context.Context, userID int, profileID string) (bool, error) {
+		store, err := users.ForUser(ctx, userID)
+		if err != nil {
+			return false, fmt.Errorf("open user store: %w", err)
+		}
+		profile, err := store.GetProfile(ctx, profileID)
+		if err != nil {
+			return false, fmt.Errorf("get profile: %w", err)
+		}
+		return profile != nil, nil
+	}
 }
 
 // accountSessionsRevoked is the hook that runs after every login session of an

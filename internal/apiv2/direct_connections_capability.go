@@ -20,7 +20,7 @@ const directCoordinationURL = Prefix + "/direct-connections"
 
 // directRetryAfterSeconds is the retry hint, in seconds, of the 503 answers of
 // the direct-connection operations.
-const directRetryAfterSeconds = 5
+const directRetryAfterSeconds = directconn.RetryAfterSeconds
 
 // DirectCoordinationService describes direct connections to clients and enrolls
 // their devices.
@@ -208,6 +208,8 @@ func directCoordinationProblem(err error) *Problem {
 		return NewProblem(TypeDependencyUnavailable, "The direct-connection store is unavailable; try again shortly.").WithRetryAfter(directRetryAfterSeconds)
 	case errors.Is(err, directconn.ErrSessionEnded):
 		return NewProblem(TypeSessionExpired, "This login session has ended.")
+	case errors.Is(err, directconn.ErrProfileGone):
+		return NewProblem(TypeNotFound, "Profile not found.")
 	case errors.Is(err, directconn.ErrDraining):
 		return NewProblem(TypeDependencyUnavailable, "This server is shutting down; enroll again shortly.").WithRetryAfter(directRetryAfterSeconds)
 	case errors.Is(err, directconn.ErrSettingsNotRead):

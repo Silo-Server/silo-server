@@ -215,6 +215,12 @@
       "value": "זה כבר מקושר לחשבון הזה."
     }
   ],
+  "error.app_code_invalid": [
+    {
+      "type": 0,
+      "value": "הקוד הזה לא מוכר, כבר נוצל או שפג תוקפו. יש לקבל קוד חדש מהדף של השרת."
+    }
+  ],
   "error.authentication_required": [
     {
       "type": 0,
@@ -333,6 +339,12 @@
     {
       "type": 0,
       "value": "לערך הזה יש סוג שגוי."
+    }
+  ],
+  "error.field.key_enrolled": [
+    {
+      "type": 0,
+      "value": "המפתח הזה כבר בשימוש בשרת הזה."
     }
   ],
   "error.field.malformed_form": [
@@ -2545,6 +2557,30 @@
     {
       "type": 0,
       "value": "אוטומטי"
+    }
+  ],
+  "settingsManifest.playback.connection_path.description": [
+    {
+      "type": 0,
+      "value": "גם באפשרות ”ישיר בלבד” נעשה שימוש בחיבור דרך הרשת המקומית כשהוא זמין."
+    }
+  ],
+  "settingsManifest.playback.connection_path.label": [
+    {
+      "type": 0,
+      "value": "נתיב החיבור"
+    }
+  ],
+  "settingsManifest.playback.connection_path.option.automatic": [
+    {
+      "type": 0,
+      "value": "אוטומטי"
+    }
+  ],
+  "settingsManifest.playback.connection_path.option.direct_only": [
+    {
+      "type": 0,
+      "value": "ישיר בלבד"
     }
   ],
   "settingsManifest.playback.intro_skip_mode.description": [
@@ -25871,6 +25907,95 @@
       }
     }
   ],
+  "web.admin.common.adminUserSignIn.unlinkConfirm.text": [
+    {
+      "type": 5,
+      "value": "last_way",
+      "options": {
+        "yes": {
+          "value": [
+            {
+              "type": 0,
+              "value": "המשתמש "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " כבר לא יוכל להתחבר עם החשבון הזה אצל הספק. המשתמש "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " לא יוכל להתחבר עד שתוגדר סיסמה או שספק יחובר מחדש."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "המשתמש "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " כבר לא יוכל להתחבר עם החשבון הזה אצל הספק."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 5,
+      "value": "keys",
+      "options": {
+        "yes": {
+          "value": [
+            {
+              "type": 0,
+              "value": " המפתחות של אפליקציית Silo של המשתמש "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " שקשורים לחשבון הזה אצל הספק יוסרו, והמכשירים האלה יתנתקו."
+            }
+          ]
+        },
+        "unknown": {
+          "value": [
+            {
+              "type": 0,
+              "value": " אם למשתמש "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " יש מפתחות של אפליקציית Silo שקשורים לחשבון הזה אצל הספק, הם יוסרו והמכשירים שלהם יתנתקו."
+            }
+          ]
+        },
+        "other": {
+          "value": []
+        }
+      }
+    }
+  ],
   "web.admin.common.adminUserSignIn.unlinkConfirm.title": [
     {
       "type": 0,
@@ -28283,6 +28408,18 @@
     {
       "type": 0,
       "value": "יוצר את התמונות הממוזערות שהנגנים מציגים בזמן מעבר למיקום אחר, באחסון הנכסים הציבורי שהוגדר. הקבצים מעובדים ברקע בעדיפות נמוכה. כיבוי האפשרות מוחק את התצוגות המקדימות של הספרייה."
+    }
+  ],
+  "web.admin.common.libraryEditor.advanced.trickplayGenerate": [
+    {
+      "type": 0,
+      "value": "יצירת תצוגות מקדימות חסרות עם FFmpeg"
+    }
+  ],
+  "web.admin.common.libraryEditor.advanced.trickplayGenerateDescription": [
+    {
+      "type": 0,
+      "value": "קבצים נלווים קיימים מסוג \u200E.trickplay ו-\u200E.bif שנמצאים ליד קובצי המדיה משמשים קודם. אפשר לכבות את האפשרות הזו כדי לייבא קבצים נלווים בלבד ולדלג על היצירה עם FFmpeg."
     }
   ],
   "web.admin.common.libraryEditor.advanced.trickplayUnavailable": [
@@ -32749,6 +32886,48 @@
       "value": "ניהול – משתמשים"
     }
   ],
+  "web.admin.common.trickplay.badge.awaitingSidecarCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "קובץ אחד ממתין לקובץ נלווה"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " קבצים ממתינים לקובץ נלווה"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " קבצים ממתינים לקובץ נלווה"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.common.trickplay.badge.detail": [
     {
       "type": 0,
@@ -32903,6 +33082,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.common.trickplay.badge.sidecarsOnly": [
+    {
+      "type": 0,
+      "value": "קבצים נלווים בלבד"
     }
   ],
   "web.admin.common.trickplay.badge.srDetail": [
@@ -33087,6 +33272,42 @@
     {
       "type": 0,
       "value": "הנגנים ממשיכים להשתמש בתצוגות המקדימות הנוכחיות עד שהחדשות יהיו מוכנות."
+    }
+  ],
+  "web.admin.common.trickplay.sidecarStatus.awaiting_sidecar": [
+    {
+      "type": 0,
+      "value": "ממתין לקובץ נלווה"
+    }
+  ],
+  "web.admin.common.trickplay.sidecarStatus.sidecar_invalid": [
+    {
+      "type": 0,
+      "value": "קובץ נלווה לא תקין"
+    }
+  ],
+  "web.admin.common.trickplay.sidecarStatus.sidecar_stale": [
+    {
+      "type": 0,
+      "value": "קובץ נלווה לא עדכני"
+    }
+  ],
+  "web.admin.common.trickplay.source.generated": [
+    {
+      "type": 0,
+      "value": "נוצר ב-Silo"
+    }
+  ],
+  "web.admin.common.trickplay.source.sidecar_bif": [
+    {
+      "type": 0,
+      "value": "קובץ נלווה (\u200E.bif)"
+    }
+  ],
+  "web.admin.common.trickplay.source.sidecar_trickplay": [
+    {
+      "type": 0,
+      "value": "קובץ נלווה (\u200E.trickplay)"
     }
   ],
   "web.admin.common.trickplay.state.off": [
@@ -35097,7 +35318,7 @@
   "web.admin.dashboard.widgets.apiClients.confirmDescription": [
     {
       "type": 0,
-      "value": "פעולה זו מסיימת סשן התחברות אחד של "
+      "value": "הפעולה מסיימת סשן התחברות אחד של החשבון "
     },
     {
       "type": 1,
@@ -35105,7 +35326,7 @@
     },
     {
       "type": 0,
-      "value": ". שאר המכשירים של החשבון יישארו מחוברים. הלקוח יוכל להתחבר שוב עם סיסמת החשבון."
+      "value": ". שאר המכשירים של החשבון יישארו מחוברים. הלקוח יוכל להתחבר שוב."
     }
   ],
   "web.admin.dashboard.widgets.apiClients.confirmLabel": [
@@ -48500,6 +48721,12 @@
       "value": "פרופיל"
     }
   ],
+  "web.admin.history.column.progress": [
+    {
+      "type": 0,
+      "value": "התקדמות"
+    }
+  ],
   "web.admin.history.column.status": [
     {
       "type": 0,
@@ -48534,6 +48761,12 @@
     {
       "type": 0,
       "value": "יומני הסשן"
+    }
+  ],
+  "web.admin.history.detail.backToPlay": [
+    {
+      "type": 0,
+      "value": "חזרה להפעלה המאוחדת"
     }
   ],
   "web.admin.history.detail.column.delivered": [
@@ -48644,6 +48877,12 @@
       "value": "זמן צפייה"
     }
   ],
+  "web.admin.history.detail.inspectSitting": [
+    {
+      "type": 0,
+      "value": "בדיקה"
+    }
+  ],
   "web.admin.history.detail.keyboardHint": [
     {
       "type": 0,
@@ -48728,6 +48967,12 @@
       "value": "למה לא בוצעה הפעלה ישירה"
     }
   ],
+  "web.admin.history.detail.section.sessions": [
+    {
+      "type": 0,
+      "value": "הסשנים בהפעלה הזו"
+    }
+  ],
   "web.admin.history.detail.section.streams": [
     {
       "type": 0,
@@ -48738,6 +48983,102 @@
     {
       "type": 0,
       "value": "תזמון והתקדמות הצפייה"
+    }
+  ],
+  "web.admin.history.detail.sessionsCapped": [
+    {
+      "type": 0,
+      "value": "מוצגים "
+    },
+    {
+      "type": 1,
+      "value": "shown"
+    },
+    {
+      "type": 0,
+      "value": " הסשנים הראשונים מתוך "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": " בהפעלה הזו."
+    }
+  ],
+  "web.admin.history.detail.sessionsNotice": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "בהפעלה הזו יש סשן אחד. פרטי ההזרמה, המכשיר והנתיב שלמטה מתייחסים אליו."
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ההפעלה הזו כוללת "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " סשנים. פרטי ההזרמה, המכשיר והנתיב שלמטה מתייחסים לסשן הראשי שלה; אפשר לבחור כל סשן למטה כדי לבדוק אותו בנפרד."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ההפעלה הזו כוללת "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " סשנים. פרטי ההזרמה, המכשיר והנתיב שלמטה מתייחסים לסשן הראשי שלה; אפשר לבחור כל סשן למטה כדי לבדוק אותו בנפרד."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.ended": [
+    {
+      "type": 0,
+      "value": "סיום"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.method": [
+    {
+      "type": 0,
+      "value": "שיטה"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.started": [
+    {
+      "type": 0,
+      "value": "התחלה"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.watched": [
+    {
+      "type": 0,
+      "value": "זמן צפייה"
     }
   ],
   "web.admin.history.detail.subtitlesBurnIn": [
@@ -48966,6 +49307,12 @@
       "value": "כל הרשתות"
     }
   ],
+  "web.admin.history.filter.allMediaTypes": [
+    {
+      "type": 0,
+      "value": "כל המדיה"
+    }
+  ],
   "web.admin.history.filter.allMethods": [
     {
       "type": 0,
@@ -49002,6 +49349,24 @@
       "value": "הושלמה"
     }
   ],
+  "web.admin.history.filter.episodes": [
+    {
+      "type": 0,
+      "value": "פרקים"
+    }
+  ],
+  "web.admin.history.filter.hideShort": [
+    {
+      "type": 0,
+      "value": "הסתרת <30 שנ׳"
+    }
+  ],
+  "web.admin.history.filter.hideShortTitle": [
+    {
+      "type": 0,
+      "value": "הסתרת סשנים שלא הסתיימו ונמשכו פחות מ-30 שניות"
+    }
+  ],
   "web.admin.history.filter.locationLocal": [
     {
       "type": 0,
@@ -49012,6 +49377,12 @@
     {
       "type": 0,
       "value": "מרוחק"
+    }
+  ],
+  "web.admin.history.filter.movies": [
+    {
+      "type": 0,
+      "value": "סרטים"
     }
   ],
   "web.admin.history.filter.partial": [
@@ -49224,6 +49595,12 @@
       "value": "הפעלות אחרונות"
     }
   ],
+  "web.admin.history.row.burnInBadgeTitle": [
+    {
+      "type": 0,
+      "value": "כתוביות צרובות בווידאו"
+    }
+  ],
   "web.admin.history.row.completed": [
     {
       "type": 0,
@@ -49244,6 +49621,56 @@
     {
       "type": 0,
       "value": "הערכה (נרשם לפני שזמן הצפייה המדויק נמדד)"
+    }
+  ],
+  "web.admin.history.row.groupedSessionsTitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "איחוד של סשן אחד"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "איחוד של "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " סשנים"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "איחוד של "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " סשנים"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.history.row.meta": [
@@ -49276,6 +49703,12 @@
       "value": "חלקית"
     }
   ],
+  "web.admin.history.row.progressLabel": [
+    {
+      "type": 0,
+      "value": "התקדמות ההפעלה"
+    }
+  ],
   "web.admin.history.row.started": [
     {
       "type": 0,
@@ -49286,16 +49719,100 @@
       "value": "time"
     }
   ],
+  "web.admin.history.stats.accountsCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "חשבון אחד"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " חשבונות"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " חשבונות"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.history.stats.completed": [
     {
       "type": 0,
       "value": "הושלמה"
     }
   ],
+  "web.admin.history.stats.completionBreakdown": [
+    {
+      "type": 0,
+      "value": "הושלמו: "
+    },
+    {
+      "type": 1,
+      "value": "completed"
+    },
+    {
+      "type": 0,
+      "value": " · חלקיות: "
+    },
+    {
+      "type": 1,
+      "value": "partial"
+    }
+  ],
   "web.admin.history.stats.partial": [
     {
       "type": 0,
       "value": "חלקית"
+    }
+  ],
+  "web.admin.history.stats.totalPlays": [
+    {
+      "type": 0,
+      "value": "סך ההפעלות"
+    }
+  ],
+  "web.admin.history.stats.totalSessions": [
+    {
+      "type": 0,
+      "value": "סך הסשנים"
+    }
+  ],
+  "web.admin.history.stats.uniqueProfiles": [
+    {
+      "type": 0,
+      "value": "פרופילים ייחודיים"
+    }
+  ],
+  "web.admin.history.stats.uniqueTitles": [
+    {
+      "type": 0,
+      "value": "פריטים ייחודיים"
     }
   ],
   "web.admin.history.stats.visibleRows": [
@@ -49314,6 +49831,24 @@
     {
       "type": 0,
       "value": "היסטוריית הפעלה"
+    }
+  ],
+  "web.admin.history.view.label": [
+    {
+      "type": 0,
+      "value": "תצוגת ההיסטוריה"
+    }
+  ],
+  "web.admin.history.view.plays": [
+    {
+      "type": 0,
+      "value": "הפעלות"
+    }
+  ],
+  "web.admin.history.view.sessions": [
+    {
+      "type": 0,
+      "value": "כל הסשנים"
     }
   ],
   "web.admin.historyImport.conflict.message": [
@@ -93535,6 +94070,234 @@
       "value": "count"
     }
   ],
+  "web.admin.users.detail.appKeys.confirm.denyDescription": [
+    {
+      "type": 0,
+      "value": "המכשיר "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " לא יוכל להתחבר לחשבון של המשתמש "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": ". אם המכשיר שייך למשתמש, אפשר להוסיף אותו שוב באפליקציית Silo."
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKey": [
+    {
+      "type": 0,
+      "value": "הסרת המפתח"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKeyDescription": [
+    {
+      "type": 0,
+      "value": "מכשירים שכבר מחוברים ימשיכו לעבוד עד שיוסרו. לא ניתן יהיה להוסיף מכשירים חדשים עם המפתח הזה, ומכשירים שהוא הוסיף ועדיין ממתינים יידחו. אפליקציית Silo של המשתמש "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " תגדיר מפתח חדש בפעם הבאה שהמשתמש יוסיף מכשיר כשהוא מחובר."
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKeyTitle": [
+    {
+      "type": 0,
+      "value": "להסיר את מפתח החשבון של המשתמש "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.removeDescription": [
+    {
+      "type": 0,
+      "value": "הסרת המכשיר "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " מנתקת אותו מהחשבון של המשתמש "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " כבר עכשיו ומשביתה את המפתח שלו: המכשיר לא יוכל להתחבר איתו שוב. כדי להשתמש במכשיר שוב, המשתמש "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " צריך להוסיף אותו מחדש באפליקציית Silo."
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.withdrawDescription": [
+    {
+      "type": 0,
+      "value": "המכשיר "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " לא יוכל להשתמש באישור הזה כדי להתחבר לחשבון של המשתמש "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.detail.appKeys.description": [
+    {
+      "type": 0,
+      "value": "מכשירים ואפליקציות שמתחברים לחשבון של המשתמש "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " דרך אפליקציית Silo, בלי סיסמה."
+    }
+  ],
+  "web.admin.users.detail.appKeys.empty": [
+    {
+      "type": 0,
+      "value": "אין מכשירים שמשתמשים באפליקציית Silo בחשבון הזה."
+    }
+  ],
+  "web.admin.users.detail.appKeys.loadFailed": [
+    {
+      "type": 0,
+      "value": "לא ניתן היה לטעון את המכשירים."
+    }
+  ],
+  "web.admin.users.detail.appKeys.off": [
+    {
+      "type": 0,
+      "value": "ההתחברות דרך אפליקציית Silo כבויה בשרת הזה, ולכן המכשירים האלה לא יכולים להתחבר. עדיין אפשר להסיר אותם."
+    }
+  ],
+  "web.admin.users.detail.appKeys.ownerOnly": [
+    {
+      "type": 0,
+      "value": "שינוי המכשירים של מנהל אחר או של הבעלים אפשרי רק לבעלים של השרת."
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.description": [
+    {
+      "type": 0,
+      "value": "אפליקציית Silo משתמשת במפתח הזה כדי להוסיף מכשירים חדשים של המשתמש "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": ". הוגדר: "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.none": [
+    {
+      "type": 0,
+      "value": "אין מפתח חשבון. אפליקציית Silo של המשתמש "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " תגדיר מפתח בפעם הבאה שהמשתמש יוסיף מכשיר כשהוא מחובר."
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.remove": [
+    {
+      "type": 0,
+      "value": "הסרת מפתח החשבון"
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKeyRemoved": [
+    {
+      "type": 0,
+      "value": "מפתח החשבון הוסר"
+    }
+  ],
+  "web.admin.users.detail.appKeys.preapprovals.description": [
+    {
+      "type": 0,
+      "value": "התחברויות שהמשתמש "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " אישר למכשיר שעדיין לא התחבר."
+    }
+  ],
+  "web.admin.users.detail.appKeys.waiting.description": [
+    {
+      "type": 0,
+      "value": "מכשיר חדש בחשבון מנהל ממתין עד שהמשתמש "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " יאשר אותו ממכשיר שהוא מחובר בו. אפשר לדחות אותו כאן."
+    }
+  ],
+  "web.admin.users.detail.appKeys.waiting.title": [
+    {
+      "type": 0,
+      "value": "ממתינים לאישור"
+    }
+  ],
   "web.admin.users.detail.common.allProfiles": [
     {
       "type": 0,
@@ -97391,6 +98154,12 @@
       "value": "החשבון הגיע למגבלת הפרופילים"
     }
   ],
+  "web.admin.users.detail.profiles.badge.changedHere": [
+    {
+      "type": 0,
+      "value": "שונה כאן"
+    }
+  ],
   "web.admin.users.detail.profiles.badge.kids": [
     {
       "type": 0,
@@ -97588,6 +98357,656 @@
     {
       "type": 0,
       "value": "שמירת קוד ה-PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowAgain": [
+    {
+      "type": 0,
+      "value": "אישור מחדש"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowAgainAria": [
+    {
+      "type": 0,
+      "value": "מתן אפשרות לפרופיל "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " לחזור לשרת הזה"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowDescription": [
+    {
+      "type": 0,
+      "value": "האפליקציה של בעל החשבון תוכל להוסיף מחדש את הפרופיל "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " בסנכרון הבא, כפרופיל חדש בלי ההיסטוריה שלו בשרת הזה, אם הפרופילים שלה עדיין כוללים את הפרופיל "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " ויש בחשבון הזה מקום לפרופיל נוסף."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowTitle": [
+    {
+      "type": 0,
+      "value": "לאשר מחדש את הפרופיל "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.alreadyCleared": [
+    {
+      "type": 0,
+      "value": "השינוי הזה כבר נוקה, או שהמשתמש "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " שינה אותו שוב. הרשימה מעודכנת."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedBy": [
+    {
+      "type": 0,
+      "value": "שונה על ידי המשתמש "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " בתאריך "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedSinceOpened": [
+    {
+      "type": 0,
+      "value": "השינוי הזה עודכן אחרי שנפתח, ולכן שום דבר לא נוקה. יש לקרוא אותו שוב ברשימה, ואז לנקות אותו אם עדיין יש בכך צורך."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedWhileRunning": [
+    {
+      "type": 0,
+      "value": "הפרופילים השתנו בזמן שהפעולה רצה, ולכן שום דבר לא שונה. הרשימה מעודכנת; אפשר לנסות שוב אם עדיין יש בכך צורך."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clear": [
+    {
+      "type": 0,
+      "value": "ניקוי"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearAndRemovePin": [
+    {
+      "type": 0,
+      "value": "ניקוי והסרת ה-PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearAria": [
+    {
+      "type": 0,
+      "value": "ניקוי השינוי בשדה "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " בפרופיל "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearFailed": [
+    {
+      "type": 0,
+      "value": "לא ניתן היה לנקות את השינוי."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearInherit": [
+    {
+      "type": 0,
+      "value": "השדה "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " בפרופיל "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " יחזור לערך שהפרופיל יורש כעת, כפי שהאפליקציה של בעל החשבון מבקשת. שינויים מהאפליקציה של בעל החשבון יחולו עליו שוב."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearLater": [
+    {
+      "type": 0,
+      "value": "השדה "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " יישאר כמו שהוא עד שהאפליקציה של בעל החשבון תשלח אותו בפעם הבאה. לאחר מכן, שינויים מהאפליקציה של בעל החשבון יחולו עליו שוב."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearNow": [
+    {
+      "type": 0,
+      "value": "הפרופיל "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " יחזור כעת לערך מהאפליקציה של בעל החשבון, ושינויים מהאפליקציה של בעל החשבון יחולו עליו שוב."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearNowValue": [
+    {
+      "type": 0,
+      "value": "השדה "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " בפרופיל "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " יחזור כעת לערך "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": ", הערך מהאפליקציה של בעל החשבון. שינויים מהאפליקציה של בעל החשבון יחולו עליו שוב."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearPin": [
+    {
+      "type": 0,
+      "value": "הפרופיל "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " ישמור על ה-PIN שהגדרת עד שהאפליקציה של בעל החשבון תשלח PIN בפעם הבאה. לאחר מכן, שינויים מהאפליקציה של בעל החשבון יחולו עליו שוב."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearPinRemoves": [
+    {
+      "type": 0,
+      "value": "האפליקציה של בעל החשבון שולחת את הפרופיל "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " בלי PIN, ולכן הניקוי יסיר כעת את ה-PIN שהגדרת. לאחר מכן כל מי שמשתמש בחשבון הזה יוכל לפתוח את הפרופיל "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " בלי PIN."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearTitle": [
+    {
+      "type": 0,
+      "value": "לנקות את השינוי בשדה "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " בפרופיל "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.deletedAccount": [
+    {
+      "type": 0,
+      "value": "חשבון שנמחק"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.description": [
+    {
+      "type": 0,
+      "value": "הפרופילים האלה מגיעים מהאפליקציה של המשתמש "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ". שינוי שביצעת כאן נשאר בשרת הזה עד שהוא מנוקה. זו לא נעילה: גם המשתמש "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " יכול לשנות כאן את אותו הדבר."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismiss": [
+    {
+      "type": 0,
+      "value": "סגירה"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismissAria": [
+    {
+      "type": 0,
+      "value": "סגירת ההערה על השדה "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " בפרופיל "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismissFailed": [
+    {
+      "type": 0,
+      "value": "לא ניתן היה לסגור את ההערה."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.isChild": [
+    {
+      "type": 0,
+      "value": "פרופיל ילדים"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.maxAdvisoryAge": [
+    {
+      "type": 0,
+      "value": "הגבלת גיל"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.maxContentRating": [
+    {
+      "type": 0,
+      "value": "הגבלת סיווג התוכן"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.name": [
+    {
+      "type": 0,
+      "value": "שם"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.picture": [
+    {
+      "type": 0,
+      "value": "תמונה"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.pin": [
+    {
+      "type": 0,
+      "value": "PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.requests": [
+    {
+      "type": 0,
+      "value": "בקשות"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.requireAdvisoryAge": [
+    {
+      "type": 0,
+      "value": "דרישת סיווג גיל"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.fieldValue": [
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.hidden": [
+    {
+      "type": 0,
+      "value": "הוסר מהשרת הזה על ידי המשתמש "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " בתאריך "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": ". האפליקציה של בעל החשבון לא תוסיף אותו מחדש עד שיינתן אישור לכך."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.loadFailed": [
+    {
+      "type": 0,
+      "value": "לא ניתן היה לטעון את השינויים שבוצעו בשרת הזה."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.nameTaken": [
+    {
+      "type": 0,
+      "value": "לא ניתן להחזיר את הפרופיל "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " לשם "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " מהאפליקציה של בעל החשבון, כי לפרופיל אחר כאן יש את השם הזה. יש לשנות קודם את השם של הפרופיל האחר, ואז לנקות שוב."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeHiddenNextSync": [
+    {
+      "type": 0,
+      "value": "הפרופיל "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " יוכל לחזור בפעם הבאה שהאפליקציה של המשתמש "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " תסתנכרן, אם הפרופילים שלה עדיין כוללים אותו."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeHiddenWoken": [
+    {
+      "type": 0,
+      "value": "הפרופיל "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " יוכל לחזור בסנכרון הבא של האפליקציה של בעל החשבון, אם הפרופילים שלה עדיין כוללים אותו. נשלחה בקשת סנכרון לטלפון של המשתמש "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeNextSync": [
+    {
+      "type": 0,
+      "value": "השינוי נוקה. הוא יגיע לאפליקציה של המשתמש "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " בסנכרון הבא שלה."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeWoken": [
+    {
+      "type": 0,
+      "value": "השינוי נוקה. נשלחה בקשת סנכרון לטלפון של המשתמש "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.removedBy": [
+    {
+      "type": 0,
+      "value": "הוסר על ידי המשתמש "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " בתאריך "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.replacedOwner": [
+    {
+      "type": 0,
+      "value": "השינוי הזה החליף את הערך שהגדרת."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.setBy": [
+    {
+      "type": 0,
+      "value": "הוגדר על ידי המשתמש "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " בתאריך "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.settled": [
+    {
+      "type": 0,
+      "value": "המשתמש "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " שינה את זה בתאריך "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "; הערך שהגדרת כבר לא חל."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.title": [
+    {
+      "type": 0,
+      "value": "שונה בשרת הזה"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.inherited": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (בירושה)"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.noPicture": [
+    {
+      "type": 0,
+      "value": "אין תמונה"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.none": [
+    {
+      "type": 0,
+      "value": "אין"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.off": [
+    {
+      "type": 0,
+      "value": "כבוי"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.on": [
+    {
+      "type": 0,
+      "value": "מופעל"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.picture": [
+    {
+      "type": 0,
+      "value": "תמונה מותאמת אישית"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.pinNone": [
+    {
+      "type": 0,
+      "value": "אין PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.pinSet": [
+    {
+      "type": 0,
+      "value": "הוגדר PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.requestsAllowed": [
+    {
+      "type": 0,
+      "value": "מותרות"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.requestsBlocked": [
+    {
+      "type": 0,
+      "value": "חסומות"
     }
   ],
   "web.admin.users.detail.profiles.setPin": [
@@ -98863,6 +100282,144 @@
     {
       "type": 0,
       "value": "הגדרת סיסמה"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.action": [
+    {
+      "type": 0,
+      "value": "יצירת קישור התחברות"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.actionHint": [
+    {
+      "type": 0,
+      "value": "כל המכשירים אבדו"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.description": [
+    {
+      "type": 0,
+      "value": "קישור חד-פעמי למשתמש "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " אם כל המכשירים שלו אבדו. הקישור פותח דף שנותן קוד לאפליקציית Silo, או מאפשר לבחור סיסמה. הוא תקף למשך 24 שעות, וקישור חדש מחליף את הקודם."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailAction": [
+    {
+      "type": 0,
+      "value": "שליחה באימייל"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHint": [
+    {
+      "type": 0,
+      "value": "אפשר ליצור את הקישור כדי להעתיק ולשלוח אותו בעצמך, או לשלוח אותו באימייל ל-"
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHintNoAddress": [
+    {
+      "type": 0,
+      "value": "יש ליצור את הקישור, ואז להעתיק ולשלוח אותו בעצמך. אין לחשבון הזה כתובת אימייל לשליחה."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHintNoMail": [
+    {
+      "type": 0,
+      "value": "יש ליצור את הקישור, ואז להעתיק ולשלוח אותו בעצמך. כדי לשלוח אותו מכאן, יש להגדיר אימייל בהגדרות."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailSent": [
+    {
+      "type": 0,
+      "value": "הקישור נשלח ל-"
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": ". תוקפו יפוג: "
+    },
+    {
+      "type": 1,
+      "value": "expires"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailUnconfirmed": [
+    {
+      "type": 0,
+      "value": "שרת הדואר לא אישר את המסירה. הקישור שלמטה עדיין עובד: אפשר להעתיק אותו ולשלוח אותו בדרך אחרת."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.failed": [
+    {
+      "type": 0,
+      "value": "לא ניתן היה ליצור קישור התחברות."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.linkShare": [
+    {
+      "type": 0,
+      "value": "יש לשלוח את הקישור הזה רק למשתמש "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": ". כל מי שהקישור אצלו יכול להתחבר לחשבון הזה עד שייעשה בו שימוש או עד שיפוג תוקפו ("
+    },
+    {
+      "type": 1,
+      "value": "expires"
+    },
+    {
+      "type": 0,
+      "value": ")."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.providerRequired": [
+    {
+      "type": 0,
+      "value": "ההתחברות עם סיסמה מקומית כבויה בשרת הזה, ולכן קישור התחברות יעקוף את ספק ההתחברות שלו. יש לבקש מהמשתמש "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " להתחבר עם הספק באתר של השרת הזה, ואז להשתמש באפשרות ”פתיחה ב-Silo” בהגדרות החשבון שלו."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.title": [
+    {
+      "type": 0,
+      "value": "קישור התחברות למשתמש "
+    },
+    {
+      "type": 1,
+      "value": "username"
     }
   ],
   "web.audiobooks.chapter.fallbackTitle": [
@@ -100911,6 +102468,120 @@
       "value": "אישור ההתחברות"
     }
   ],
+  "web.auth.appCode.code": [
+    {
+      "type": 0,
+      "value": "קוד"
+    }
+  ],
+  "web.auth.appCode.codeCopied": [
+    {
+      "type": 0,
+      "value": "הקוד הועתק"
+    }
+  ],
+  "web.auth.appCode.copyCode": [
+    {
+      "type": 0,
+      "value": "העתקת הקוד"
+    }
+  ],
+  "web.auth.appCode.copyFailed": [
+    {
+      "type": 0,
+      "value": "לא ניתן היה להעתיק את הקוד. יש לבחור אותו ולהעתיק אותו ידנית."
+    }
+  ],
+  "web.auth.appCode.expired": [
+    {
+      "type": 0,
+      "value": "תוקף הקוד הזה פג."
+    }
+  ],
+  "web.auth.appCode.failed": [
+    {
+      "type": 0,
+      "value": "יצירת הקוד ב-Silo נכשלה. אפשר לנסות שוב."
+    }
+  ],
+  "web.auth.appCode.instructions": [
+    {
+      "type": 0,
+      "value": "יש ללחוץ על ”פתיחת Silo” כדי להמשיך באפליקציית Silo במכשיר הזה. אם האפליקציה לא מותקנת, יש להתקין אותה, לחזור לכרטיסייה הזו וללחוץ שוב על ”פתיחת Silo”."
+    }
+  ],
+  "web.auth.appCode.noScanCode": [
+    {
+      "type": 0,
+      "value": "הכתובת של השרת הזה ארוכה מדי לקוד סריקה. יש להקליד את כתובת השרת ואת הקוד באפליקציית Silo, או להעתיק את הקוד ולהדביק אותו שם."
+    }
+  ],
+  "web.auth.appCode.open": [
+    {
+      "type": 0,
+      "value": "פתיחת Silo"
+    }
+  ],
+  "web.auth.appCode.renew": [
+    {
+      "type": 0,
+      "value": "קבלת קוד חדש"
+    }
+  ],
+  "web.auth.appCode.scanCodeLabel": [
+    {
+      "type": 0,
+      "value": "קוד סריקה לאפליקציית Silo"
+    }
+  ],
+  "web.auth.appCode.scanCodeUnavailable": [
+    {
+      "type": 0,
+      "value": "אי אפשר להציג קוד סריקה לשרת הזה. יש להקליד את כתובת השרת ואת הקוד באפליקציית Silo, או להעתיק את הקוד ולהדביק אותו שם."
+    }
+  ],
+  "web.auth.appCode.scanHint": [
+    {
+      "type": 0,
+      "value": "אפשר לסרוק את הקוד הזה עם הסורק באפליקציית Silo, או להקליד או להעתיק את כתובת השרת ואת הקוד שלמטה."
+    }
+  ],
+  "web.auth.appCode.serverAddress": [
+    {
+      "type": 0,
+      "value": "כתובת השרת"
+    }
+  ],
+  "web.auth.appCode.singleUse": [
+    {
+      "type": 0,
+      "value": "הקוד הזה תקף לשימוש אחד בלבד, ותוקפו פג אחרי כמה דקות."
+    }
+  ],
+  "web.auth.appCode.title": [
+    {
+      "type": 0,
+      "value": "פתיחת Silo"
+    }
+  ],
+  "web.auth.appCode.typeInstructions": [
+    {
+      "type": 0,
+      "value": "באפליקציית Silo בטלפון או בטאבלט שלך, יש להוסיף את השרת הזה לפי הכתובת שלו ולהקליד את הקוד הזה כדי ליצור את החשבון שלך. כל מי שיש לו את הקוד יכול להצטרף במקומך, לכן אין לשתף אותו."
+    }
+  ],
+  "web.auth.appCode.typeTitle": [
+    {
+      "type": 0,
+      "value": "הצטרפות עם הקוד הזה"
+    }
+  ],
+  "web.auth.appCode.webLink": [
+    {
+      "type": 0,
+      "value": "פתיחה דרך הקישור של siloserver.org במקום זאת"
+    }
+  ],
   "web.auth.card.rememberedIt": [
     {
       "type": 0,
@@ -101113,10 +102784,50 @@
       ]
     }
   ],
+  "web.auth.invite.appAccountEmail": [
+    {
+      "type": 0,
+      "value": "החשבון שלך ישתמש בכתובת "
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.auth.invite.appContinue": [
+    {
+      "type": 0,
+      "value": "המשך"
+    }
+  ],
+  "web.auth.invite.appEmailHint": [
+    {
+      "type": 0,
+      "value": "עם כתובת אימייל, השרת הזה יוכל לשלוח לך קישור התחברות אם המכשירים שלך יאבדו."
+    }
+  ],
   "web.auth.invite.appMissing": [
     {
       "type": 0,
       "value": "לא קורה כלום? האפליקציה לא מותקנת – אפשר פשוט להמשיך למטה."
+    }
+  ],
+  "web.auth.invite.appProviderOnly": [
+    {
+      "type": 0,
+      "value": "השרת "
+    },
+    {
+      "type": 1,
+      "value": "server"
+    },
+    {
+      "type": 0,
+      "value": " מוסיף אנשים דרך ספק ההתחברות שלו. יש להתחבר באמצעותו באתר הזה, ואז לפתוח את Silo מהגדרות החשבון שלך."
     }
   ],
   "web.auth.invite.created": [
@@ -101145,6 +102856,18 @@
       "value": "יש להזין את כתובת האימייל שלך ולבחור סיסמה. ההתחברות תתבצע עם כתובת האימייל שלך."
     }
   ],
+  "web.auth.invite.descriptionWithApp": [
+    {
+      "type": 0,
+      "value": "אפשר להצטרף עם אפליקציית Silo בטלפון או בטאבלט שלך, או לבחור סיסמה להתחברות."
+    }
+  ],
+  "web.auth.invite.emailOptional": [
+    {
+      "type": 0,
+      "value": "אימייל (לא חובה)"
+    }
+  ],
   "web.auth.invite.emailPlaceholder": [
     {
       "type": 0,
@@ -101165,6 +102888,18 @@
     {
       "type": 1,
       "value": "inviter"
+    }
+  ],
+  "web.auth.invite.joinWithApp": [
+    {
+      "type": 0,
+      "value": "הצטרפות עם אפליקציית Silo"
+    }
+  ],
+  "web.auth.invite.joinWithAppInstead": [
+    {
+      "type": 0,
+      "value": "הצטרפות עם אפליקציית Silo במקום זאת"
     }
   ],
   "web.auth.invite.loadFailed": [
@@ -101265,6 +103000,30 @@
     {
       "type": 0,
       "value": "ההזמנה לא זמינה"
+    }
+  ],
+  "web.auth.invite.usePassword": [
+    {
+      "type": 0,
+      "value": "שימוש בסיסמה במקום זאת"
+    }
+  ],
+  "web.auth.invite.usernameIsAddress": [
+    {
+      "type": 0,
+      "value": "שם משתמש עם @ חייב להיות כתובת האימייל שמוזנת למטה."
+    }
+  ],
+  "web.auth.invite.usernameRequired": [
+    {
+      "type": 0,
+      "value": "יש לבחור שם משתמש."
+    }
+  ],
+  "web.auth.invite.usernameTaken": [
+    {
+      "type": 0,
+      "value": "שם המשתמש הזה כבר בשימוש. יש לבחור שם אחר."
     }
   ],
   "web.auth.languagePicker.label": [
@@ -102261,6 +104020,126 @@
     {
       "type": 0,
       "value": "התחברות"
+    }
+  ],
+  "web.auth.signInLink.backToCode": [
+    {
+      "type": 0,
+      "value": "חזרה לקוד"
+    }
+  ],
+  "web.auth.signInLink.codeExpired": [
+    {
+      "type": 0,
+      "value": "כדי לקבל קוד נוסף, יש לבקש קישור חדש ממנהל של השרת הזה."
+    }
+  ],
+  "web.auth.signInLink.documentTitle": [
+    {
+      "type": 0,
+      "value": "קישור התחברות"
+    }
+  ],
+  "web.auth.signInLink.failed": [
+    {
+      "type": 0,
+      "value": "לא ניתן היה לפתוח את הקישור הזה ב-Silo. אפשר לנסות שוב."
+    }
+  ],
+  "web.auth.signInLink.installFirst": [
+    {
+      "type": 0,
+      "value": "הקישור פועל פעם אחת, והקוד תקף לכמה דקות. קודם יש להתקין את אפליקציית Silo בטלפון או בטאבלט שלך, ואז ללחוץ על ”המשך”."
+    }
+  ],
+  "web.auth.signInLink.intro": [
+    {
+      "type": 0,
+      "value": "מנהל שלח לך את הקישור הזה כדי לאפשר לך להתחבר שוב. אפשר להמשיך כדי לקבל קוד לאפליקציית Silo, או כדי לבחור סיסמה."
+    }
+  ],
+  "web.auth.signInLink.keepOpen": [
+    {
+      "type": 0,
+      "value": "יש להשאיר את הדף הזה פתוח עד לסיום. הקישור כבר נוצל, ולכן רענון או יציאה מהדף יגרמו לאובדן מה שהתקבל ממנו."
+    }
+  ],
+  "web.auth.signInLink.leaveAction": [
+    {
+      "type": 0,
+      "value": "יציאה"
+    }
+  ],
+  "web.auth.signInLink.leaveDescription": [
+    {
+      "type": 0,
+      "value": "הקישור כבר נוצל. אחרי יציאה מהדף, הקוד לאפליקציית Silo והאפשרות להגדיר סיסמה לא יהיו זמינים עוד, ויהיה צורך בקישור חדש."
+    }
+  ],
+  "web.auth.signInLink.leaveTitle": [
+    {
+      "type": 0,
+      "value": "לצאת מהדף הזה?"
+    }
+  ],
+  "web.auth.signInLink.noCodeAdministrator": [
+    {
+      "type": 0,
+      "value": "זה חשבון של מנהל, ולכן הקישור הזה רק מגדיר סיסמה. יש להגדיר סיסמה, להתחבר באתר של השרת הזה, ואז לפתוח את אפליקציית Silo מהגדרות החשבון שלך שם."
+    }
+  ],
+  "web.auth.signInLink.noCodeAppKeysOff": [
+    {
+      "type": 0,
+      "value": "אפליקציית Silo לא יכולה להתחבר לשרת הזה כרגע, ולכן הקישור הזה רק מגדיר סיסמה."
+    }
+  ],
+  "web.auth.signInLink.passwordDescription": [
+    {
+      "type": 0,
+      "value": "השמירה מנתקת את החשבון הזה בכל המכשירים. מכשירים שמחוברים עם אפליקציית Silo יתחברו מחדש באופן אוטומטי."
+    }
+  ],
+  "web.auth.signInLink.passwordSet": [
+    {
+      "type": 0,
+      "value": "הסיסמה שלך נשמרה. יש להתחבר איתה."
+    }
+  ],
+  "web.auth.signInLink.passwordSetLostDevices": [
+    {
+      "type": 0,
+      "value": "מכשירים שאבדו והשתמשו באפליקציית Silo עדיין יכולים להתחבר עד שהם יוסרו. אחרי ההתחברות, יש להסיר אותם מרשימת המכשירים שלך בהגדרות החשבון."
+    }
+  ],
+  "web.auth.signInLink.passwordTitle": [
+    {
+      "type": 0,
+      "value": "בחירת סיסמה"
+    }
+  ],
+  "web.auth.signInLink.providerRequired": [
+    {
+      "type": 0,
+      "value": "השרת הזה מחבר משתמשים דרך ספק ההתחברות שלו, ולכן הקישור הזה לא פועל. במקום זאת, יש להתחבר דרך הספק."
+    }
+  ],
+  "web.auth.signInLink.setPasswordInstead": [
+    {
+      "type": 0,
+      "value": "הגדרת סיסמה במקום זאת"
+    }
+  ],
+  "web.auth.signInLink.title": [
+    {
+      "type": 0,
+      "value": "חזרה לחשבון שלך"
+    }
+  ],
+  "web.auth.signInLink.unavailable": [
+    {
+      "type": 0,
+      "value": "הקישור הזה כבר נוצל, הוחלף בקישור חדש יותר או שפג תוקפו. אפשר לבקש קישור חדש ממנהל של השרת הזה."
     }
   ],
   "web.auth.signup.closed": [
@@ -144119,7 +145998,7 @@
   "web.settings.account.password.signOutOthersDescription": [
     {
       "type": 0,
-      "value": "בדפדפנים ובאפליקציות אחרים יהיה צורך להתחבר מחדש עם הסיסמה החדשה. הדפדפן הזה יישאר מחובר, ומפתחות API ימשיכו לפעול."
+      "value": "דפדפנים ואפליקציות אחרים ינותקו. הדפדפן הזה יישאר מחובר, ומפתחות API ימשיכו לפעול."
     }
   ],
   "web.settings.account.password.title": [
@@ -144996,6 +146875,512 @@
     {
       "type": 0,
       "value": "איך להשתמש במפתח הזה"
+    }
+  ],
+  "web.settings.appKeys.actionFailed": [
+    {
+      "type": 0,
+      "value": "לא ניתן היה לבצע את השינוי. אפשר לנסות שוב."
+    }
+  ],
+  "web.settings.appKeys.approveMainOnly": [
+    {
+      "type": 0,
+      "value": "רק הפרופיל הראשי של משק הבית יכול לאשר מכשיר. כדי לאשר, יש לעבור אליו."
+    }
+  ],
+  "web.settings.appKeys.approved": [
+    {
+      "type": 0,
+      "value": "המכשיר "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " אושר"
+    }
+  ],
+  "web.settings.appKeys.confirm.approve": [
+    {
+      "type": 0,
+      "value": "אישור המכשיר"
+    }
+  ],
+  "web.settings.appKeys.confirm.approveDescription": [
+    {
+      "type": 0,
+      "value": "המכשיר "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " יוכל להתחבר לחשבון שלך עם אפליקציית Silo עד שיוסר. יש לאשר אותו רק אם הגדרת אותו זה עתה."
+    }
+  ],
+  "web.settings.appKeys.confirm.approveTitle": [
+    {
+      "type": 0,
+      "value": "לאשר את המכשיר "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.settings.appKeys.confirm.deny": [
+    {
+      "type": 0,
+      "value": "דחיית המכשיר"
+    }
+  ],
+  "web.settings.appKeys.confirm.denyDescription": [
+    {
+      "type": 0,
+      "value": "המכשיר "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " לא יוכל להתחבר לחשבון שלך. אם הוא היה שלך, אפשר להוסיף אותו שוב באפליקציית Silo."
+    }
+  ],
+  "web.settings.appKeys.confirm.denyTitle": [
+    {
+      "type": 0,
+      "value": "לדחות את המכשיר "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.settings.appKeys.confirm.remove": [
+    {
+      "type": 0,
+      "value": "הסרת המכשיר"
+    }
+  ],
+  "web.settings.appKeys.confirm.removeDescription": [
+    {
+      "type": 0,
+      "value": "הסרת המכשיר "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " מנתקת אותו עכשיו ומשביתה את המפתח שלו: המכשיר לא יוכל להתחבר איתו שוב. כדי להשתמש בו שוב, יש להוסיף אותו מחדש באפליקציית Silo."
+    }
+  ],
+  "web.settings.appKeys.confirm.removeTitle": [
+    {
+      "type": 0,
+      "value": "להסיר את המכשיר "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.settings.appKeys.confirm.withdraw": [
+    {
+      "type": 0,
+      "value": "ביטול האישור"
+    }
+  ],
+  "web.settings.appKeys.confirm.withdrawDescription": [
+    {
+      "type": 0,
+      "value": "המכשיר "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " לא יוכל להשתמש באישור הזה כדי להתחבר לחשבון שלך."
+    }
+  ],
+  "web.settings.appKeys.confirm.withdrawTitle": [
+    {
+      "type": 0,
+      "value": "לבטל את האישור למכשיר "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.settings.appKeys.confirm.working": [
+    {
+      "type": 0,
+      "value": "מתבצעת שמירה…"
+    }
+  ],
+  "web.settings.appKeys.denied": [
+    {
+      "type": 0,
+      "value": "המכשיר "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " נדחה"
+    }
+  ],
+  "web.settings.appKeys.description": [
+    {
+      "type": 0,
+      "value": "מכשירים ואפליקציות שמתחברים לחשבון שלך עם אפליקציית Silo, בלי סיסמה."
+    }
+  ],
+  "web.settings.appKeys.devices.title": [
+    {
+      "type": 0,
+      "value": "מכשירים"
+    }
+  ],
+  "web.settings.appKeys.empty": [
+    {
+      "type": 0,
+      "value": "אין מכשירים שמשתמשים באפליקציית Silo בחשבון שלך."
+    }
+  ],
+  "web.settings.appKeys.footnote": [
+    {
+      "type": 0,
+      "value": "הסרת מכשיר מנתקת אותו ומשביתה את המפתח שלו. התנתקות מסשן לא מסירה את המכשיר: הוא מתחבר שוב בעזרת המפתח שלו."
+    }
+  ],
+  "web.settings.appKeys.loadFailed": [
+    {
+      "type": 0,
+      "value": "לא ניתן היה לטעון את המכשירים שלך."
+    }
+  ],
+  "web.settings.appKeys.loading": [
+    {
+      "type": 0,
+      "value": "המכשירים בטעינה…"
+    }
+  ],
+  "web.settings.appKeys.off": [
+    {
+      "type": 0,
+      "value": "התחברות עם אפליקציית Silo כבויה בשרת הזה, ולכן המכשירים האלה לא יכולים להתחבר ולא ניתן לאשר מכשירים ממתינים. עדיין אפשר להסיר אותם."
+    }
+  ],
+  "web.settings.appKeys.personKey.description": [
+    {
+      "type": 0,
+      "value": "אפליקציית Silo שלך משתמשת במפתח הזה כדי להוסיף מכשירים חדשים שלך. תאריך ההגדרה: "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.settings.appKeys.personKey.none": [
+    {
+      "type": 0,
+      "value": "אין מפתח חשבון. אפליקציית Silo שלך תגדיר מפתח בפעם הבאה שיתווסף מכשיר בזמן שהחשבון מחובר."
+    }
+  ],
+  "web.settings.appKeys.personKey.title": [
+    {
+      "type": 0,
+      "value": "מפתח חשבון"
+    }
+  ],
+  "web.settings.appKeys.pinDescription": [
+    {
+      "type": 0,
+      "value": "יש להזין את קוד ה-PIN של הפרופיל הראשי כדי לאשר את המכשיר הזה."
+    }
+  ],
+  "web.settings.appKeys.preapprovals.description": [
+    {
+      "type": 0,
+      "value": "התחברויות שאישרת למכשיר שעדיין לא התחבר."
+    }
+  ],
+  "web.settings.appKeys.preapprovals.loadFailed": [
+    {
+      "type": 0,
+      "value": "לא ניתן היה לטעון את ההתחברויות שאושרו מראש."
+    }
+  ],
+  "web.settings.appKeys.preapprovals.title": [
+    {
+      "type": 0,
+      "value": "אושרו מראש"
+    }
+  ],
+  "web.settings.appKeys.refreshLabel": [
+    {
+      "type": 0,
+      "value": "רענון המכשירים של אפליקציית Silo"
+    }
+  ],
+  "web.settings.appKeys.removed": [
+    {
+      "type": 0,
+      "value": "המכשיר "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " הוסר"
+    }
+  ],
+  "web.settings.appKeys.row.allowedBy": [
+    {
+      "type": 0,
+      "value": "ניתנה הרשאה על ידי המשתמש "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "web.settings.appKeys.row.approve": [
+    {
+      "type": 0,
+      "value": "אישור"
+    }
+  ],
+  "web.settings.appKeys.row.approveLabel": [
+    {
+      "type": 0,
+      "value": "אישור המכשיר "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.row.deny": [
+    {
+      "type": 0,
+      "value": "דחייה"
+    }
+  ],
+  "web.settings.appKeys.row.denyLabel": [
+    {
+      "type": 0,
+      "value": "דחיית המכשיר "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.row.enrolledFrom": [
+    {
+      "type": 0,
+      "value": "מכתובת "
+    },
+    {
+      "type": 1,
+      "value": "address"
+    }
+  ],
+  "web.settings.appKeys.row.identityGone": [
+    {
+      "type": 0,
+      "value": "לא ניתן להתחבר: החשבון אצל ספק ההתחברות כבר לא מקושר"
+    }
+  ],
+  "web.settings.appKeys.row.kindApp": [
+    {
+      "type": 0,
+      "value": "אפליקציה אחרת"
+    }
+  ],
+  "web.settings.appKeys.row.kindDevice": [
+    {
+      "type": 0,
+      "value": "אפליקציית Silo"
+    }
+  ],
+  "web.settings.appKeys.row.lastUsed": [
+    {
+      "type": 0,
+      "value": "התחברות אחרונה: "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.settings.appKeys.row.notUsed": [
+    {
+      "type": 0,
+      "value": "עדיין לא בוצעה התחברות עם המפתח"
+    }
+  ],
+  "web.settings.appKeys.row.preapproval": [
+    {
+      "type": 0,
+      "value": "אישור מראש · תפוגה: "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.settings.appKeys.row.provider": [
+    {
+      "type": 0,
+      "value": "נבדק מול ספק ההתחברות"
+    }
+  ],
+  "web.settings.appKeys.row.remove": [
+    {
+      "type": 0,
+      "value": "הסרה"
+    }
+  ],
+  "web.settings.appKeys.row.removeLabel": [
+    {
+      "type": 0,
+      "value": "הסרת המכשיר "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.row.viaAppCode": [
+    {
+      "type": 0,
+      "value": "נוסף עם קוד חד-פעמי מדף האינטרנט של השרת"
+    }
+  ],
+  "web.settings.appKeys.row.viaPersonKey": [
+    {
+      "type": 0,
+      "value": "נוסף על ידי אפליקציית Silo במכשיר אחר"
+    }
+  ],
+  "web.settings.appKeys.row.viaSession": [
+    {
+      "type": 0,
+      "value": "נוסף מתוך סשן מחובר"
+    }
+  ],
+  "web.settings.appKeys.row.waitingUntil": [
+    {
+      "type": 0,
+      "value": "ממתין לאישור עד "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.settings.appKeys.row.withdraw": [
+    {
+      "type": 0,
+      "value": "ביטול האישור"
+    }
+  ],
+  "web.settings.appKeys.row.withdrawLabel": [
+    {
+      "type": 0,
+      "value": "ביטול האישור למכשיר "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.signsBackIn": [
+    {
+      "type": 0,
+      "value": "מכשירים שמחוברים עם אפליקציית Silo מתחברים מחדש בעצמם. כדי לעצור זאת, יש "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "להסיר את המכשיר"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.settings.appKeys.title": [
+    {
+      "type": 0,
+      "value": "מכשירים עם אפליקציית Silo"
+    }
+  ],
+  "web.settings.appKeys.unavailable": [
+    {
+      "type": 0,
+      "value": "התחברות עם אפליקציית Silo לא זמינה בשרת הזה, ולכן המכשירים האלה לא יכולים להתחבר. עדיין אפשר להסיר אותם."
+    }
+  ],
+  "web.settings.appKeys.waiting.description": [
+    {
+      "type": 0,
+      "value": "מכשיר חדש ביקש להתחבר לחשבון שלך עם אפליקציית Silo. יש לאשר אותו רק אם הגדרת אותו זה עתה."
+    }
+  ],
+  "web.settings.appKeys.waiting.title": [
+    {
+      "type": 0,
+      "value": "ממתינים לאישור שלך"
+    }
+  ],
+  "web.settings.appKeys.withdrawn": [
+    {
+      "type": 0,
+      "value": "האישור בוטל"
     }
   ],
   "web.settings.cardOverlay.adjust": [
@@ -150208,6 +152593,54 @@
       "value": "אין חיבור לאינטרנט, ולכן השינוי לא נשמר"
     }
   ],
+  "web.settings.openInSilo.action": [
+    {
+      "type": 0,
+      "value": "קבלת קוד לאפליקציית Silo"
+    }
+  ],
+  "web.settings.openInSilo.codeInstructions": [
+    {
+      "type": 0,
+      "value": "באפליקציית Silo בטלפון או בטאבלט, יש להוסיף את השרת הזה לפי הכתובת שלו ולהקליד את הקוד הזה. כל מי שיש לו את הקוד יכול להתחבר לחשבון הזה, ולכן אין לשתף אותו."
+    }
+  ],
+  "web.settings.openInSilo.codeTitle": [
+    {
+      "type": 0,
+      "value": "קוד לאפליקציית Silo"
+    }
+  ],
+  "web.settings.openInSilo.description": [
+    {
+      "type": 0,
+      "value": "התחברות של אפליקציית Silo בטלפון או בטאבלט לחשבון הזה, בלי סיסמה."
+    }
+  ],
+  "web.settings.openInSilo.loadFailed": [
+    {
+      "type": 0,
+      "value": "לא ניתן היה לבדוק אם הדפדפן הזה יכול לקבל קוד לאפליקציית Silo."
+    }
+  ],
+  "web.settings.openInSilo.mainProfileOnly": [
+    {
+      "type": 0,
+      "value": "רק הפרופיל הראשי של משק הבית יכול לקבל קוד לאפליקציית Silo. יש לעבור אליו ולנסות שוב."
+    }
+  ],
+  "web.settings.openInSilo.pinDescription": [
+    {
+      "type": 0,
+      "value": "יש להזין את קוד ה-PIN של הפרופיל הראשי כדי לקבל קוד לאפליקציית Silo."
+    }
+  ],
+  "web.settings.openInSilo.title": [
+    {
+      "type": 0,
+      "value": "אפליקציית Silo"
+    }
+  ],
   "web.settings.overlays.accent.amber": [
     {
       "type": 0,
@@ -153292,6 +155725,12 @@
       "value": "התחברות"
     }
   ],
+  "web.settings.sessions.row.signsBackIn": [
+    {
+      "type": 0,
+      "value": "המכשיר הזה מתחבר מחדש בעצמו"
+    }
+  ],
   "web.settings.sessions.row.summary": [
     {
       "type": 8,
@@ -153378,6 +155817,24 @@
     {
       "type": 0,
       "value": "הגדרות"
+    }
+  ],
+  "web.settings.signInAgain.action": [
+    {
+      "type": 0,
+      "value": "התחברות מחדש"
+    }
+  ],
+  "web.settings.signInAgain.manageDevices": [
+    {
+      "type": 0,
+      "value": "כדי לנהל את המכשירים שלך, יש להתחבר מחדש"
+    }
+  ],
+  "web.settings.signInAgain.useApp": [
+    {
+      "type": 0,
+      "value": "אפשר לנהל את המכשירים שלך באפליקציית Silo."
     }
   ],
   "web.settings.signedInSessions.loadFailed": [

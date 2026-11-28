@@ -215,6 +215,12 @@
       "value": "Se on jo linkitetty tähän tiliin."
     }
   ],
+  "error.app_code_invalid": [
+    {
+      "type": 0,
+      "value": "Tämä koodi on tuntematon, käytetty tai vanhentunut. Hae uusi koodi palvelimen sivulta."
+    }
+  ],
   "error.authentication_required": [
     {
       "type": 0,
@@ -333,6 +339,12 @@
     {
       "type": 0,
       "value": "Tämän arvon tyyppi on väärä."
+    }
+  ],
+  "error.field.key_enrolled": [
+    {
+      "type": 0,
+      "value": "Tämä avain on jo käytössä tällä palvelimella."
     }
   ],
   "error.field.malformed_form": [
@@ -2521,6 +2533,30 @@
     {
       "type": 0,
       "value": "Automaattinen"
+    }
+  ],
+  "settingsManifest.playback.connection_path.description": [
+    {
+      "type": 0,
+      "value": "Vaihtoehto Vain suora käyttää silti lähiverkkoyhteyttä, kun sellainen on saatavilla."
+    }
+  ],
+  "settingsManifest.playback.connection_path.label": [
+    {
+      "type": 0,
+      "value": "Yhteysreitti"
+    }
+  ],
+  "settingsManifest.playback.connection_path.option.automatic": [
+    {
+      "type": 0,
+      "value": "Automaattinen"
+    }
+  ],
+  "settingsManifest.playback.connection_path.option.direct_only": [
+    {
+      "type": 0,
+      "value": "Vain suora"
     }
   ],
   "settingsManifest.playback.intro_skip_mode.description": [
@@ -23613,6 +23649,87 @@
       }
     }
   ],
+  "web.admin.common.adminUserSignIn.unlinkConfirm.text": [
+    {
+      "type": 5,
+      "value": "last_way",
+      "options": {
+        "yes": {
+          "value": [
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " ei voi enää kirjautua tällä palvelun tilillä. "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " ei voi kirjautua, ennen kuin asetat salasanan tai yhdistät palvelun uudelleen."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " ei voi enää kirjautua tällä palvelun tilillä."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 5,
+      "value": "keys",
+      "options": {
+        "yes": {
+          "value": [
+            {
+              "type": 0,
+              "value": " Käyttäjän "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " tähän palvelun tiliin sidotut Silo-sovelluksen avaimet poistetaan, ja näiden laitteiden kirjautuminen päättyy."
+            }
+          ]
+        },
+        "unknown": {
+          "value": [
+            {
+              "type": 0,
+              "value": " Mahdolliset käyttäjän "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " tähän palvelun tiliin sidotut Silo-sovelluksen avaimet poistetaan, ja näiden laitteiden kirjautuminen päättyy."
+            }
+          ]
+        },
+        "other": {
+          "value": []
+        }
+      }
+    }
+  ],
   "web.admin.common.adminUserSignIn.unlinkConfirm.title": [
     {
       "type": 0,
@@ -25903,6 +26020,18 @@
     {
       "type": 0,
       "value": "Luo pikkukuvat, joita soittimet näyttävät kelattaessa, määritettyyn julkiseen resurssitallennustilaan. Tiedostot käsitellään taustalla matalalla prioriteetilla. Kun tämä poistetaan käytöstä, kirjaston esikatselukuvat poistetaan."
+    }
+  ],
+  "web.admin.common.libraryEditor.advanced.trickplayGenerate": [
+    {
+      "type": 0,
+      "value": "Puuttuvien esikatselujen luonti FFmpegillä"
+    }
+  ],
+  "web.admin.common.libraryEditor.advanced.trickplayGenerateDescription": [
+    {
+      "type": 0,
+      "value": "Mediatiedostojen vieressä olevia .trickplay- ja .bif-sivutiedostoja käytetään ensin. Poista tämä käytöstä, jos haluat tuoda vain sivutiedostot ja ohittaa FFmpegillä luomisen."
     }
   ],
   "web.admin.common.libraryEditor.advanced.trickplayUnavailable": [
@@ -29963,6 +30092,40 @@
       "value": "Hallinta – Käyttäjät"
     }
   ],
+  "web.admin.common.trickplay.badge.awaitingSidecarCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " odottaa sivutiedostoa"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " odottaa sivutiedostoa"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.common.trickplay.badge.detail": [
     {
       "type": 0,
@@ -30093,6 +30256,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.common.trickplay.badge.sidecarsOnly": [
+    {
+      "type": 0,
+      "value": "vain sivutiedostot"
     }
   ],
   "web.admin.common.trickplay.badge.srDetail": [
@@ -30257,6 +30426,42 @@
     {
       "type": 0,
       "value": "Soittimet käyttävät nykyisiä esikatseluja, kunnes uudet ovat valmiita."
+    }
+  ],
+  "web.admin.common.trickplay.sidecarStatus.awaiting_sidecar": [
+    {
+      "type": 0,
+      "value": "Odottaa sivutiedostoa"
+    }
+  ],
+  "web.admin.common.trickplay.sidecarStatus.sidecar_invalid": [
+    {
+      "type": 0,
+      "value": "Virheellinen sivutiedosto"
+    }
+  ],
+  "web.admin.common.trickplay.sidecarStatus.sidecar_stale": [
+    {
+      "type": 0,
+      "value": "Vanhentunut sivutiedosto"
+    }
+  ],
+  "web.admin.common.trickplay.source.generated": [
+    {
+      "type": 0,
+      "value": "Luotu"
+    }
+  ],
+  "web.admin.common.trickplay.source.sidecar_bif": [
+    {
+      "type": 0,
+      "value": "Sivutiedosto (.bif)"
+    }
+  ],
+  "web.admin.common.trickplay.source.sidecar_trickplay": [
+    {
+      "type": 0,
+      "value": "Sivutiedosto (.trickplay)"
     }
   ],
   "web.admin.common.trickplay.state.off": [
@@ -32108,7 +32313,7 @@
     },
     {
       "type": 0,
-      "value": ". Tilin muut laitteet pysyvät kirjautuneina. Asiakasohjelma voi kirjautua uudelleen tilin salasanalla."
+      "value": ". Tilin muut laitteet pysyvät kirjautuneina. Asiakasohjelma voi kirjautua uudelleen."
     }
   ],
   "web.admin.dashboard.widgets.apiClients.confirmLabel": [
@@ -43874,6 +44079,12 @@
       "value": "Profiili"
     }
   ],
+  "web.admin.history.column.progress": [
+    {
+      "type": 0,
+      "value": "Edistyminen"
+    }
+  ],
   "web.admin.history.column.status": [
     {
       "type": 0,
@@ -43908,6 +44119,12 @@
     {
       "type": 0,
       "value": "Istunnon lokit"
+    }
+  ],
+  "web.admin.history.detail.backToPlay": [
+    {
+      "type": 0,
+      "value": "Takaisin yhdistettyyn toistokertaan"
     }
   ],
   "web.admin.history.detail.column.delivered": [
@@ -44018,6 +44235,12 @@
       "value": "Katseluaika"
     }
   ],
+  "web.admin.history.detail.inspectSitting": [
+    {
+      "type": 0,
+      "value": "Tarkastele"
+    }
+  ],
   "web.admin.history.detail.keyboardHint": [
     {
       "type": 0,
@@ -44102,6 +44325,12 @@
       "value": "Miksi suoraa toistoa ei käytetty"
     }
   ],
+  "web.admin.history.detail.section.sessions": [
+    {
+      "type": 0,
+      "value": "Tämän toistokerran istunnot"
+    }
+  ],
   "web.admin.history.detail.section.streams": [
     {
       "type": 0,
@@ -44112,6 +44341,94 @@
     {
       "type": 0,
       "value": "Ajoitus ja katselun edistyminen"
+    }
+  ],
+  "web.admin.history.detail.sessionsCapped": [
+    {
+      "type": 0,
+      "value": "Näytetään tämän toistokerran istunnoista ensimmäiset "
+    },
+    {
+      "type": 1,
+      "value": "shown"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.history.detail.sessionsNotice": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Tässä toistokerrassa on "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " istunto. Alla olevat suoratoisto-, laite- ja reittitiedot koskevat sitä."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Tämä toistokerta koostuu "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " istunnosta. Alla olevat suoratoisto-, laite- ja reittitiedot koskevat sen ensisijaista istuntoa; valitse mikä tahansa alla olevista istunnoista, niin voit tarkastella sitä erikseen."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.ended": [
+    {
+      "type": 0,
+      "value": "Päättyi"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.method": [
+    {
+      "type": 0,
+      "value": "Tapa"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.started": [
+    {
+      "type": 0,
+      "value": "Alkoi"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.watched": [
+    {
+      "type": 0,
+      "value": "Katsottu"
     }
   ],
   "web.admin.history.detail.subtitlesBurnIn": [
@@ -44340,6 +44657,12 @@
       "value": "Kaikki verkot"
     }
   ],
+  "web.admin.history.filter.allMediaTypes": [
+    {
+      "type": 0,
+      "value": "Kaikki mediat"
+    }
+  ],
   "web.admin.history.filter.allMethods": [
     {
       "type": 0,
@@ -44376,6 +44699,24 @@
       "value": "Valmiit"
     }
   ],
+  "web.admin.history.filter.episodes": [
+    {
+      "type": 0,
+      "value": "Jaksot"
+    }
+  ],
+  "web.admin.history.filter.hideShort": [
+    {
+      "type": 0,
+      "value": "Piilota <30 s"
+    }
+  ],
+  "web.admin.history.filter.hideShortTitle": [
+    {
+      "type": 0,
+      "value": "Piilota keskeneräiset alle 30 sekunnin istunnot"
+    }
+  ],
   "web.admin.history.filter.locationLocal": [
     {
       "type": 0,
@@ -44386,6 +44727,12 @@
     {
       "type": 0,
       "value": "Etä"
+    }
+  ],
+  "web.admin.history.filter.movies": [
+    {
+      "type": 0,
+      "value": "Elokuvat"
     }
   ],
   "web.admin.history.filter.partial": [
@@ -44582,6 +44929,12 @@
       "value": "Viimeisimmät toistot"
     }
   ],
+  "web.admin.history.row.burnInBadgeTitle": [
+    {
+      "type": 0,
+      "value": "Tekstitys poltettu videokuvaan"
+    }
+  ],
   "web.admin.history.row.completed": [
     {
       "type": 0,
@@ -44602,6 +44955,48 @@
     {
       "type": 0,
       "value": "Arvioitu (tallennettu ennen tarkan katseluajan mittaamista)"
+    }
+  ],
+  "web.admin.history.row.groupedSessionsTitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Yhdistetty "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " istunnosta"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Yhdistetty "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " istunnosta"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.history.row.meta": [
@@ -44634,6 +45029,12 @@
       "value": "Osittainen"
     }
   ],
+  "web.admin.history.row.progressLabel": [
+    {
+      "type": 0,
+      "value": "Toiston edistyminen"
+    }
+  ],
   "web.admin.history.row.started": [
     {
       "type": 0,
@@ -44644,16 +45045,92 @@
       "value": "time"
     }
   ],
+  "web.admin.history.stats.accountsCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " tili"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " tiliä"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.history.stats.completed": [
     {
       "type": 0,
       "value": "Valmiit"
     }
   ],
+  "web.admin.history.stats.completionBreakdown": [
+    {
+      "type": 0,
+      "value": "Valmiit: "
+    },
+    {
+      "type": 1,
+      "value": "completed"
+    },
+    {
+      "type": 0,
+      "value": " · osittaiset: "
+    },
+    {
+      "type": 1,
+      "value": "partial"
+    }
+  ],
   "web.admin.history.stats.partial": [
     {
       "type": 0,
       "value": "Osittaiset"
+    }
+  ],
+  "web.admin.history.stats.totalPlays": [
+    {
+      "type": 0,
+      "value": "Toistokertoja yhteensä"
+    }
+  ],
+  "web.admin.history.stats.totalSessions": [
+    {
+      "type": 0,
+      "value": "Istuntoja yhteensä"
+    }
+  ],
+  "web.admin.history.stats.uniqueProfiles": [
+    {
+      "type": 0,
+      "value": "Eri profiilit"
+    }
+  ],
+  "web.admin.history.stats.uniqueTitles": [
+    {
+      "type": 0,
+      "value": "Eri nimikkeet"
     }
   ],
   "web.admin.history.stats.visibleRows": [
@@ -44672,6 +45149,24 @@
     {
       "type": 0,
       "value": "Toistohistoria"
+    }
+  ],
+  "web.admin.history.view.label": [
+    {
+      "type": 0,
+      "value": "Historianäkymä"
+    }
+  ],
+  "web.admin.history.view.plays": [
+    {
+      "type": 0,
+      "value": "Toistokerrat"
+    }
+  ],
+  "web.admin.history.view.sessions": [
+    {
+      "type": 0,
+      "value": "Kaikki istunnot"
     }
   ],
   "web.admin.historyImport.conflict.message": [
@@ -86419,6 +86914,234 @@
       "value": "count"
     }
   ],
+  "web.admin.users.detail.appKeys.confirm.denyDescription": [
+    {
+      "type": 0,
+      "value": "Laite "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " ei voi kirjautua käyttäjän "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " tilille. Jos laite oli käyttäjän oma, hän lisää sen uudelleen Silo-sovelluksessa."
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKey": [
+    {
+      "type": 0,
+      "value": "Poista avain"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKeyDescription": [
+    {
+      "type": 0,
+      "value": "Jo kirjautuneet laitteet toimivat edelleen, kunnes poistat ne. Tällä avaimella ei voi enää lisätä uusia laitteita, ja sen lisäämät vielä odottavat laitteet hylätään. Käyttäjän "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " Silo-sovellus luo uuden avaimen, kun hän seuraavan kerran lisää laitteen kirjautuneena."
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKeyTitle": [
+    {
+      "type": 0,
+      "value": "Poistetaanko käyttäjän "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " tiliavain?"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.removeDescription": [
+    {
+      "type": 0,
+      "value": "Laitteen "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " poistaminen kirjaa sen heti ulos käyttäjän "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " tililtä ja mitätöi sen avaimen: laite ei voi enää kirjautua sillä. Jotta laitetta voi käyttää uudelleen, käyttäjä "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " lisää sen uudelleen Silo-sovelluksessa."
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.withdrawDescription": [
+    {
+      "type": 0,
+      "value": "Laite "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " ei voi käyttää tätä hyväksyntää kirjautuakseen käyttäjän "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " tilille."
+    }
+  ],
+  "web.admin.users.detail.appKeys.description": [
+    {
+      "type": 0,
+      "value": "Laitteet ja sovellukset, jotka kirjautuvat käyttäjän "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " tilille Silo-sovelluksella ilman salasanaa."
+    }
+  ],
+  "web.admin.users.detail.appKeys.empty": [
+    {
+      "type": 0,
+      "value": "Mikään laite ei käytä Silo-sovellusta tällä tilillä."
+    }
+  ],
+  "web.admin.users.detail.appKeys.loadFailed": [
+    {
+      "type": 0,
+      "value": "Laitteiden lataaminen epäonnistui."
+    }
+  ],
+  "web.admin.users.detail.appKeys.off": [
+    {
+      "type": 0,
+      "value": "Silo-sovelluksella kirjautuminen on poistettu käytöstä tällä palvelimella, joten nämä laitteet eivät voi kirjautua. Voit silti poistaa ne."
+    }
+  ],
+  "web.admin.users.detail.appKeys.ownerOnly": [
+    {
+      "type": 0,
+      "value": "Vain palvelimen omistaja voi muuttaa toisen ylläpitäjän tai omistajan laitteita."
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.description": [
+    {
+      "type": 0,
+      "value": "Silo-sovellus lisää käyttäjän "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " uudet laitteet tällä avaimella. Luotu "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.none": [
+    {
+      "type": 0,
+      "value": "Ei tiliavainta. Käyttäjän "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " Silo-sovellus luo avaimen, kun hän seuraavan kerran lisää laitteen kirjautuneena."
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.remove": [
+    {
+      "type": 0,
+      "value": "Poista tiliavain"
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKeyRemoved": [
+    {
+      "type": 0,
+      "value": "Tiliavain poistettu"
+    }
+  ],
+  "web.admin.users.detail.appKeys.preapprovals.description": [
+    {
+      "type": 0,
+      "value": "Kirjautumiset, jotka käyttäjä "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " on hyväksynyt laitteelle, joka ei ole vielä muodostanut yhteyttä."
+    }
+  ],
+  "web.admin.users.detail.appKeys.waiting.description": [
+    {
+      "type": 0,
+      "value": "Ylläpitäjän tilin uusi laite odottaa, kunnes käyttäjä "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " hyväksyy sen laitteelta, jolla hän on kirjautuneena. Voit hylätä sen täällä."
+    }
+  ],
+  "web.admin.users.detail.appKeys.waiting.title": [
+    {
+      "type": 0,
+      "value": "Odottaa hyväksyntää"
+    }
+  ],
   "web.admin.users.detail.common.allProfiles": [
     {
       "type": 0,
@@ -89975,6 +90698,12 @@
       "value": "Tili on saavuttanut profiilien enimmäismäärän"
     }
   ],
+  "web.admin.users.detail.profiles.badge.changedHere": [
+    {
+      "type": 0,
+      "value": "Muutettu täällä"
+    }
+  ],
   "web.admin.users.detail.profiles.badge.kids": [
     {
       "type": 0,
@@ -90176,6 +90905,676 @@
     {
       "type": 0,
       "value": "Tallenna PIN-koodi"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowAgain": [
+    {
+      "type": 0,
+      "value": "Salli uudelleen"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowAgainAria": [
+    {
+      "type": 0,
+      "value": "Salli profiilin "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " palata tälle palvelimelle"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowDescription": [
+    {
+      "type": 0,
+      "value": "Käyttäjän sovellus voi lisätä profiilin "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " takaisin seuraavan synkronoinnin yhteydessä uutena profiilina ilman sen historiaa tällä palvelimella, jos sovelluksen profiileissa on yhä profiili "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " ja tälle tilille mahtuu vielä yksi profiili."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowTitle": [
+    {
+      "type": 0,
+      "value": "Sallitaanko profiili "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " uudelleen?"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.alreadyCleared": [
+    {
+      "type": 0,
+      "value": "Muutos oli jo tyhjennetty, tai "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " muutti sitä uudelleen. Luettelo on ajan tasalla."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedBy": [
+    {
+      "type": 0,
+      "value": "Muutettu "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": " (muuttaja: "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedSinceOpened": [
+    {
+      "type": 0,
+      "value": "Tätä muutosta päivitettiin sen jälkeen, kun avasit sen, joten mitään ei tyhjennetty. Lue se uudelleen luettelosta ja tyhjennä se sitten, jos haluat yhä."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedWhileRunning": [
+    {
+      "type": 0,
+      "value": "Profiilit muuttuivat toiminnon aikana, joten mitään ei muutettu. Luettelo on ajan tasalla; yritä uudelleen, jos haluat yhä."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clear": [
+    {
+      "type": 0,
+      "value": "Tyhjennä"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearAndRemovePin": [
+    {
+      "type": 0,
+      "value": "Tyhjennä ja poista PIN-koodi"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearAria": [
+    {
+      "type": 0,
+      "value": "Tyhjennä kentän "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " muutos profiilissa "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearFailed": [
+    {
+      "type": 0,
+      "value": "Muutoksen tyhjentäminen epäonnistui."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearInherit": [
+    {
+      "type": 0,
+      "value": "Profiilin "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " asetus "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " palaa arvoon, jonka profiili "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " nyt perii, kuten käyttäjän sovellus pyytää. Sovelluksen muutokset koskevat sitä taas."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearLater": [
+    {
+      "type": 0,
+      "value": "Kenttä "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " pysyy ennallaan, kunnes käyttäjän sovellus seuraavan kerran lähettää sen. Sen jälkeen sovelluksen muutokset koskevat sitä taas."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearNow": [
+    {
+      "type": 0,
+      "value": "Profiili "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " palaa heti käyttäjän sovelluksesta tulevaan arvoon, ja sovelluksen muutokset koskevat sitä taas."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearNowValue": [
+    {
+      "type": 0,
+      "value": "Profiilin "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " kenttä "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " palaa heti arvoon "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": ", joka tulee käyttäjän sovelluksesta. Sovelluksen muutokset koskevat sitä taas."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearPin": [
+    {
+      "type": 0,
+      "value": "Profiili "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " säilyttää asettamasi PIN-koodin, kunnes käyttäjän sovellus seuraavan kerran lähettää PIN-koodin. Sen jälkeen sovelluksen muutokset koskevat sitä taas."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearPinRemoves": [
+    {
+      "type": 0,
+      "value": "Käyttäjän sovellus lähettää profiilin "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " ilman PIN-koodia, joten tyhjentäminen poistaa asettamasi PIN-koodin heti. Kuka tahansa tämän tilin käyttäjä voi sen jälkeen avata profiilin "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " ilman PIN-koodia."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearTitle": [
+    {
+      "type": 0,
+      "value": "Tyhjennetäänkö kentän "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " muutos profiilissa "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.deletedAccount": [
+    {
+      "type": 0,
+      "value": "poistettu tili"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.description": [
+    {
+      "type": 0,
+      "value": "Nämä profiilit tulevat käyttäjän "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " sovelluksesta. Täällä tekemäsi muutos säilyy tällä palvelimella, kunnes tyhjennät sen. Se ei ole lukitus: "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " voi myös muuttaa saman asian täällä."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismiss": [
+    {
+      "type": 0,
+      "value": "Kuittaa"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismissAria": [
+    {
+      "type": 0,
+      "value": "Kuittaa huomautus kentästä "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " profiilissa "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismissFailed": [
+    {
+      "type": 0,
+      "value": "Huomautuksen kuittaaminen epäonnistui."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.isChild": [
+    {
+      "type": 0,
+      "value": "Lasten profiili"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.maxAdvisoryAge": [
+    {
+      "type": 0,
+      "value": "Ikäraja"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.maxContentRating": [
+    {
+      "type": 0,
+      "value": "Sisältöluokituksen raja"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.name": [
+    {
+      "type": 0,
+      "value": "Nimi"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.picture": [
+    {
+      "type": 0,
+      "value": "Kuva"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.pin": [
+    {
+      "type": 0,
+      "value": "PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.requests": [
+    {
+      "type": 0,
+      "value": "Pyynnöt"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.requireAdvisoryAge": [
+    {
+      "type": 0,
+      "value": "Ikäraja pakollinen"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.fieldValue": [
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.hidden": [
+    {
+      "type": 0,
+      "value": "Poistettu tältä palvelimelta "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": " (poistaja: "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "). Käyttäjän sovellus ei lisää sitä takaisin, ennen kuin sallit sen."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.loadFailed": [
+    {
+      "type": 0,
+      "value": "Tällä palvelimella tehtyjen muutosten lataaminen epäonnistui."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.nameTaken": [
+    {
+      "type": 0,
+      "value": "Profiilia "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " ei voi palauttaa käyttäjän sovelluksen käyttämään nimeen "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", koska toisella profiililla täällä on jo tämä nimi. Nimeä ensin kyseinen profiili uudelleen ja tyhjennä tämä sitten uudelleen."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeHiddenNextSync": [
+    {
+      "type": 0,
+      "value": "Profiili "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " voi palata, kun käyttäjän "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " sovellus seuraavan kerran synkronoi, jos sovelluksen profiileissa on se yhä."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeHiddenWoken": [
+    {
+      "type": 0,
+      "value": "Profiili "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " voi palata, kun käyttäjän sovellus seuraavan kerran synkronoi, jos sovelluksen profiileissa on se yhä. Käyttäjän "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " puhelinta on pyydetty synkronoimaan."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeNextSync": [
+    {
+      "type": 0,
+      "value": "Tyhjennetty. Muutos välittyy käyttäjän "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " sovellukseen seuraavan synkronoinnin yhteydessä."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeWoken": [
+    {
+      "type": 0,
+      "value": "Tyhjennetty. Käyttäjän "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " puhelinta on pyydetty synkronoimaan."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.removedBy": [
+    {
+      "type": 0,
+      "value": "Poistettu "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": " (poistaja: "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.replacedOwner": [
+    {
+      "type": 0,
+      "value": "Tämä korvasi asettamasi arvon."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.setBy": [
+    {
+      "type": 0,
+      "value": "Asetettu "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": " (asettaja: "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.settled": [
+    {
+      "type": 0,
+      "value": "Muutettu "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": " (muuttaja: "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "); asettamasi arvo ei ole enää voimassa."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.title": [
+    {
+      "type": 0,
+      "value": "Muutettu tällä palvelimella"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.inherited": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (peritty)"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.noPicture": [
+    {
+      "type": 0,
+      "value": "Ei kuvaa"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.none": [
+    {
+      "type": 0,
+      "value": "Ei rajaa"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.off": [
+    {
+      "type": 0,
+      "value": "Pois"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.on": [
+    {
+      "type": 0,
+      "value": "Päällä"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.picture": [
+    {
+      "type": 0,
+      "value": "Mukautettu kuva"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.pinNone": [
+    {
+      "type": 0,
+      "value": "Ei PIN-koodia"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.pinSet": [
+    {
+      "type": 0,
+      "value": "PIN-koodi asetettu"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.requestsAllowed": [
+    {
+      "type": 0,
+      "value": "Sallittu"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.requestsBlocked": [
+    {
+      "type": 0,
+      "value": "Estetty"
     }
   ],
   "web.admin.users.detail.profiles.setPin": [
@@ -91423,6 +92822,144 @@
     {
       "type": 0,
       "value": "Aseta salasana"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.action": [
+    {
+      "type": 0,
+      "value": "Luo kirjautumislinkki"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.actionHint": [
+    {
+      "type": 0,
+      "value": "Kaikki laitteet kadonneet"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.description": [
+    {
+      "type": 0,
+      "value": "Kertakäyttöinen linkki käyttäjälle "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": ", jos hän on kadottanut kaikki laitteensa. Linkki avaa sivun, joka antaa hänelle koodin Silo-sovellusta varten tai jolla hän voi valita salasanan. Linkki toimii 24 tuntia, ja uusi linkki korvaa edellisen."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailAction": [
+    {
+      "type": 0,
+      "value": "Lähetä sähköpostilla"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHint": [
+    {
+      "type": 0,
+      "value": "Luo linkki, kopioi se ja lähetä se itse, tai lähetä se sähköpostilla osoitteeseen "
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHintNoAddress": [
+    {
+      "type": 0,
+      "value": "Luo linkki, kopioi se ja lähetä se itse. Tällä tilillä ei ole sähköpostiosoitetta, johon sen voisi lähettää."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHintNoMail": [
+    {
+      "type": 0,
+      "value": "Luo linkki, kopioi se ja lähetä se itse. Määritä sähköposti kohdassa Asetukset, jotta voit lähettää sen täältä."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailSent": [
+    {
+      "type": 0,
+      "value": "Linkki lähetettiin osoitteeseen "
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": ". Se vanhenee "
+    },
+    {
+      "type": 1,
+      "value": "expires"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Sähköpostipalvelin ei vahvistanut toimitusta. Alla oleva linkki toimii silti: kopioi se ja lähetä se muulla tavalla."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.failed": [
+    {
+      "type": 0,
+      "value": "Kirjautumislinkin luominen epäonnistui."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.linkShare": [
+    {
+      "type": 0,
+      "value": "Lähetä tämä linkki vain käyttäjälle "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": ". Kuka tahansa, jolla linkki on, voi kirjautua tälle tilille, kunnes linkki on käytetty tai se vanhenee "
+    },
+    {
+      "type": 1,
+      "value": "expires"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.providerRequired": [
+    {
+      "type": 0,
+      "value": "Paikallinen salasanalla kirjautuminen on poistettu käytöstä tällä palvelimella, joten kirjautumislinkki ohittaisi palvelimen kirjautumispalvelun. Pyydä käyttäjää "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " kirjautumaan sisään kirjautumispalvelun kautta tämän palvelimen sivustolla ja käyttämään sitten tiliasetusten toimintoa Avaa Silossa."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.title": [
+    {
+      "type": 0,
+      "value": "Kirjautumislinkki käyttäjälle "
+    },
+    {
+      "type": 1,
+      "value": "username"
     }
   ],
   "web.audiobooks.chapter.fallbackTitle": [
@@ -93203,6 +94740,120 @@
       "value": "Hyväksy kirjautuminen"
     }
   ],
+  "web.auth.appCode.code": [
+    {
+      "type": 0,
+      "value": "Koodi"
+    }
+  ],
+  "web.auth.appCode.codeCopied": [
+    {
+      "type": 0,
+      "value": "Koodi kopioitu"
+    }
+  ],
+  "web.auth.appCode.copyCode": [
+    {
+      "type": 0,
+      "value": "Kopioi koodi"
+    }
+  ],
+  "web.auth.appCode.copyFailed": [
+    {
+      "type": 0,
+      "value": "Koodin kopioiminen epäonnistui. Valitse se ja kopioi käsin."
+    }
+  ],
+  "web.auth.appCode.expired": [
+    {
+      "type": 0,
+      "value": "Tämä koodi on vanhentunut."
+    }
+  ],
+  "web.auth.appCode.failed": [
+    {
+      "type": 0,
+      "value": "Silo ei voinut luoda koodia. Yritä uudelleen."
+    }
+  ],
+  "web.auth.appCode.instructions": [
+    {
+      "type": 0,
+      "value": "Jatka tämän laitteen Silo-sovelluksessa valitsemalla Avaa Silo. Jos sovellusta ei ole asennettu, asenna se, palaa tähän välilehteen ja valitse Avaa Silo uudelleen."
+    }
+  ],
+  "web.auth.appCode.noScanCode": [
+    {
+      "type": 0,
+      "value": "Tämän palvelimen osoite on liian pitkä skannauskoodiin. Kirjoita palvelimen osoite ja koodi Silo-sovellukseen tai kopioi koodi ja liitä se sinne."
+    }
+  ],
+  "web.auth.appCode.open": [
+    {
+      "type": 0,
+      "value": "Avaa Silo"
+    }
+  ],
+  "web.auth.appCode.renew": [
+    {
+      "type": 0,
+      "value": "Hae uusi koodi"
+    }
+  ],
+  "web.auth.appCode.scanCodeLabel": [
+    {
+      "type": 0,
+      "value": "Skannauskoodi Silo-sovellukselle"
+    }
+  ],
+  "web.auth.appCode.scanCodeUnavailable": [
+    {
+      "type": 0,
+      "value": "Tälle palvelimelle ei voi näyttää skannauskoodia. Kirjoita palvelimen osoite ja koodi Silo-sovellukseen tai kopioi koodi ja liitä se sinne."
+    }
+  ],
+  "web.auth.appCode.scanHint": [
+    {
+      "type": 0,
+      "value": "Skannaa tämä Silo-sovelluksen skannerilla tai kirjoita tai kopioi alla oleva palvelimen osoite ja koodi."
+    }
+  ],
+  "web.auth.appCode.serverAddress": [
+    {
+      "type": 0,
+      "value": "Palvelimen osoite"
+    }
+  ],
+  "web.auth.appCode.singleUse": [
+    {
+      "type": 0,
+      "value": "Tämä koodi toimii kerran ja vanhenee muutaman minuutin kuluttua."
+    }
+  ],
+  "web.auth.appCode.title": [
+    {
+      "type": 0,
+      "value": "Avaa Silo"
+    }
+  ],
+  "web.auth.appCode.typeInstructions": [
+    {
+      "type": 0,
+      "value": "Lisää tämä palvelin sen osoitteella puhelimesi tai tablettisi Silo-sovellukseen ja luo tilisi kirjoittamalla tämä koodi. Kuka tahansa, jolla on koodi, voi liittyä sinun sijastasi, joten älä jaa sitä."
+    }
+  ],
+  "web.auth.appCode.typeTitle": [
+    {
+      "type": 0,
+      "value": "Liity tällä koodilla"
+    }
+  ],
+  "web.auth.appCode.webLink": [
+    {
+      "type": 0,
+      "value": "Avaa sen sijaan siloserver.org-linkillä"
+    }
+  ],
   "web.auth.card.rememberedIt": [
     {
       "type": 0,
@@ -93405,10 +95056,50 @@
       ]
     }
   ],
+  "web.auth.invite.appAccountEmail": [
+    {
+      "type": 0,
+      "value": "Tilisi käyttää osoitetta "
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.auth.invite.appContinue": [
+    {
+      "type": 0,
+      "value": "Jatka"
+    }
+  ],
+  "web.auth.invite.appEmailHint": [
+    {
+      "type": 0,
+      "value": "Kun annat sähköpostiosoitteen, tämä palvelin voi lähettää sinulle kirjautumislinkin, jos kadotat laitteesi."
+    }
+  ],
   "web.auth.invite.appMissing": [
     {
       "type": 0,
       "value": "Eikö mitään tapahdu? Sovellusta ei ole asennettu – jatka alla."
+    }
+  ],
+  "web.auth.invite.appProviderOnly": [
+    {
+      "type": 0,
+      "value": "Palvelin "
+    },
+    {
+      "type": 1,
+      "value": "server"
+    },
+    {
+      "type": 0,
+      "value": " lisää käyttäjät kirjautumispalvelunsa kautta. Kirjaudu sisään sen kautta tällä sivustolla ja avaa sitten Silo tilisi asetuksista."
     }
   ],
   "web.auth.invite.created": [
@@ -93437,6 +95128,18 @@
       "value": "Anna sähköpostiosoitteesi ja valitse salasana. Kirjaudut sisään sähköpostiosoitteellasi."
     }
   ],
+  "web.auth.invite.descriptionWithApp": [
+    {
+      "type": 0,
+      "value": "Liity puhelimesi tai tablettisi Silo-sovelluksella tai valitse salasana, jolla kirjaudut sisään."
+    }
+  ],
+  "web.auth.invite.emailOptional": [
+    {
+      "type": 0,
+      "value": "Sähköposti (valinnainen)"
+    }
+  ],
   "web.auth.invite.emailPlaceholder": [
     {
       "type": 0,
@@ -93457,6 +95160,18 @@
     {
       "type": 1,
       "value": "inviter"
+    }
+  ],
+  "web.auth.invite.joinWithApp": [
+    {
+      "type": 0,
+      "value": "Liity Silo-sovelluksella"
+    }
+  ],
+  "web.auth.invite.joinWithAppInstead": [
+    {
+      "type": 0,
+      "value": "Liity sen sijaan Silo-sovelluksella"
     }
   ],
   "web.auth.invite.loadFailed": [
@@ -93557,6 +95272,30 @@
     {
       "type": 0,
       "value": "Kutsu ei ole käytettävissä"
+    }
+  ],
+  "web.auth.invite.usePassword": [
+    {
+      "type": 0,
+      "value": "Käytä sen sijaan salasanaa"
+    }
+  ],
+  "web.auth.invite.usernameIsAddress": [
+    {
+      "type": 0,
+      "value": "Jos käyttäjänimessä on @, sen on oltava alla antamasi sähköpostiosoite."
+    }
+  ],
+  "web.auth.invite.usernameRequired": [
+    {
+      "type": 0,
+      "value": "Valitse käyttäjänimi."
+    }
+  ],
+  "web.auth.invite.usernameTaken": [
+    {
+      "type": 0,
+      "value": "Käyttäjänimi on jo käytössä. Valitse toinen."
     }
   ],
   "web.auth.languagePicker.label": [
@@ -94509,6 +96248,126 @@
     {
       "type": 0,
       "value": "Kirjaudu sisään"
+    }
+  ],
+  "web.auth.signInLink.backToCode": [
+    {
+      "type": 0,
+      "value": "Takaisin koodiin"
+    }
+  ],
+  "web.auth.signInLink.codeExpired": [
+    {
+      "type": 0,
+      "value": "Saat uuden koodin pyytämällä tämän palvelimen ylläpitäjältä uutta linkkiä."
+    }
+  ],
+  "web.auth.signInLink.documentTitle": [
+    {
+      "type": 0,
+      "value": "Kirjautumislinkki"
+    }
+  ],
+  "web.auth.signInLink.failed": [
+    {
+      "type": 0,
+      "value": "Silo ei voinut avata tätä linkkiä. Yritä uudelleen."
+    }
+  ],
+  "web.auth.signInLink.installFirst": [
+    {
+      "type": 0,
+      "value": "Linkki toimii kerran, ja koodi on voimassa muutaman minuutin. Asenna ensin Silo-sovellus puhelimeesi tai tablettiisi ja valitse sitten Jatka."
+    }
+  ],
+  "web.auth.signInLink.intro": [
+    {
+      "type": 0,
+      "value": "Ylläpitäjä lähetti sinulle tämän linkin, jotta voit kirjautua uudelleen sisään. Jatka saadaksesi koodin Silo-sovellukseen tai valitaksesi salasanan."
+    }
+  ],
+  "web.auth.signInLink.keepOpen": [
+    {
+      "type": 0,
+      "value": "Pidä tämä sivu auki, kunnes olet valmis. Linkki on käytetty, joten jos lataat sivun uudelleen tai poistut, menetät sen, mitä linkki antoi."
+    }
+  ],
+  "web.auth.signInLink.leaveAction": [
+    {
+      "type": 0,
+      "value": "Poistu"
+    }
+  ],
+  "web.auth.signInLink.leaveDescription": [
+    {
+      "type": 0,
+      "value": "Linkki on käytetty. Jos poistut, Silo-sovelluksen koodi ja mahdollisuus asettaa salasana menetetään, ja tarvitset uuden linkin."
+    }
+  ],
+  "web.auth.signInLink.leaveTitle": [
+    {
+      "type": 0,
+      "value": "Poistutaanko tältä sivulta?"
+    }
+  ],
+  "web.auth.signInLink.noCodeAdministrator": [
+    {
+      "type": 0,
+      "value": "Tämä on ylläpitäjän tili, joten tällä linkillä voi vain asettaa salasanan. Aseta salasana, kirjaudu sisään tämän palvelimen sivustolla ja avaa sitten Silo-sovellus siellä tilisi asetuksista."
+    }
+  ],
+  "web.auth.signInLink.noCodeAppKeysOff": [
+    {
+      "type": 0,
+      "value": "Silo-sovellus ei voi juuri nyt kirjautua sisään tällä palvelimella, joten tällä linkillä voi vain asettaa salasanan."
+    }
+  ],
+  "web.auth.signInLink.passwordDescription": [
+    {
+      "type": 0,
+      "value": "Tallentaminen kirjaa tämän tilin ulos kaikilla laitteilla. Silo-sovelluksella kirjautuneet laitteet kirjautuvat takaisin sisään itsestään."
+    }
+  ],
+  "web.auth.signInLink.passwordSet": [
+    {
+      "type": 0,
+      "value": "Salasanasi on tallennettu. Kirjaudu sisään sillä."
+    }
+  ],
+  "web.auth.signInLink.passwordSetLostDevices": [
+    {
+      "type": 0,
+      "value": "Kadonneet laitteet, jotka käyttivät Silo-sovellusta, voivat yhä kirjautua sisään, kunnes poistat ne. Kun olet kirjautunut sisään, poista ne laitteistasi tilisi asetuksissa."
+    }
+  ],
+  "web.auth.signInLink.passwordTitle": [
+    {
+      "type": 0,
+      "value": "Valitse salasana"
+    }
+  ],
+  "web.auth.signInLink.providerRequired": [
+    {
+      "type": 0,
+      "value": "Tämä palvelin kirjaa käyttäjät sisään kirjautumispalvelunsa kautta, joten tämä linkki ei toimi. Kirjaudu sen sijaan sisään palvelun kautta."
+    }
+  ],
+  "web.auth.signInLink.setPasswordInstead": [
+    {
+      "type": 0,
+      "value": "Aseta sen sijaan salasana"
+    }
+  ],
+  "web.auth.signInLink.title": [
+    {
+      "type": 0,
+      "value": "Palaa tilillesi"
+    }
+  ],
+  "web.auth.signInLink.unavailable": [
+    {
+      "type": 0,
+      "value": "Tämä linkki on jo käytetty, korvattu uudemmalla tai vanhentunut. Pyydä tämän palvelimen ylläpitäjältä uusi linkki."
     }
   ],
   "web.auth.signup.closed": [
@@ -133986,7 +135845,7 @@
   "web.settings.account.password.signOutOthersDescription": [
     {
       "type": 0,
-      "value": "Muiden selainten ja sovellusten on kirjauduttava uudelleen sisään uudella salasanalla. Tämä selain pysyy kirjautuneena, ja API-avaimet toimivat edelleen."
+      "value": "Muut selaimet ja sovellukset kirjataan ulos. Tämä selain pysyy kirjautuneena, ja API-avaimet toimivat edelleen."
     }
   ],
   "web.settings.account.password.title": [
@@ -134847,6 +136706,524 @@
     {
       "type": 0,
       "value": "Avaimen käyttö"
+    }
+  ],
+  "web.settings.appKeys.actionFailed": [
+    {
+      "type": 0,
+      "value": "Muutoksen tekeminen epäonnistui. Yritä uudelleen."
+    }
+  ],
+  "web.settings.appKeys.approveMainOnly": [
+    {
+      "type": 0,
+      "value": "Vain kotitalouden pääprofiili voi hyväksyä laitteen. Vaihda siihen, niin voit hyväksyä laitteen."
+    }
+  ],
+  "web.settings.appKeys.approved": [
+    {
+      "type": 0,
+      "value": "Laite "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " hyväksytty"
+    }
+  ],
+  "web.settings.appKeys.confirm.approve": [
+    {
+      "type": 0,
+      "value": "Hyväksy laite"
+    }
+  ],
+  "web.settings.appKeys.confirm.approveDescription": [
+    {
+      "type": 0,
+      "value": "Laite "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " voi kirjautua sisään tilillesi Silo-sovelluksella, kunnes poistat sen. Hyväksy se vain, jos otit sen juuri käyttöön."
+    }
+  ],
+  "web.settings.appKeys.confirm.approveTitle": [
+    {
+      "type": 0,
+      "value": "Hyväksytäänkö laite "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.settings.appKeys.confirm.deny": [
+    {
+      "type": 0,
+      "value": "Hylkää laite"
+    }
+  ],
+  "web.settings.appKeys.confirm.denyDescription": [
+    {
+      "type": 0,
+      "value": "Laite "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " ei voi kirjautua sisään tilillesi. Jos laite oli sinun, lisää se uudelleen Silo-sovelluksessa."
+    }
+  ],
+  "web.settings.appKeys.confirm.denyTitle": [
+    {
+      "type": 0,
+      "value": "Hylätäänkö laite "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.settings.appKeys.confirm.remove": [
+    {
+      "type": 0,
+      "value": "Poista laite"
+    }
+  ],
+  "web.settings.appKeys.confirm.removeDescription": [
+    {
+      "type": 0,
+      "value": "Laitteen "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " poistaminen kirjaa sen heti ulos ja lopettaa sen avaimen toiminnan: laite ei voi enää kirjautua sisään sillä. Jos haluat käyttää laitetta uudelleen, lisää se uudelleen Silo-sovelluksessa."
+    }
+  ],
+  "web.settings.appKeys.confirm.removeTitle": [
+    {
+      "type": 0,
+      "value": "Poistetaanko laite "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.settings.appKeys.confirm.withdraw": [
+    {
+      "type": 0,
+      "value": "Peru hyväksyntä"
+    }
+  ],
+  "web.settings.appKeys.confirm.withdrawDescription": [
+    {
+      "type": 0,
+      "value": "Laite "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " ei voi käyttää tätä hyväksyntää kirjautuakseen sisään tilillesi."
+    }
+  ],
+  "web.settings.appKeys.confirm.withdrawTitle": [
+    {
+      "type": 0,
+      "value": "Perutaanko laitteen "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " hyväksyntä?"
+    }
+  ],
+  "web.settings.appKeys.confirm.working": [
+    {
+      "type": 0,
+      "value": "Tallennetaan…"
+    }
+  ],
+  "web.settings.appKeys.denied": [
+    {
+      "type": 0,
+      "value": "Laite "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " hylätty"
+    }
+  ],
+  "web.settings.appKeys.description": [
+    {
+      "type": 0,
+      "value": "Laitteet ja sovellukset, jotka kirjautuvat sisään tilillesi Silo-sovelluksella ilman salasanaa."
+    }
+  ],
+  "web.settings.appKeys.devices.title": [
+    {
+      "type": 0,
+      "value": "Laitteet"
+    }
+  ],
+  "web.settings.appKeys.empty": [
+    {
+      "type": 0,
+      "value": "Tililläsi ei ole laitteita, jotka käyttävät Silo-sovellusta."
+    }
+  ],
+  "web.settings.appKeys.footnote": [
+    {
+      "type": 0,
+      "value": "Laitteen poistaminen kirjaa sen ulos ja lopettaa sen avaimen toiminnan. Istunnon uloskirjaus ei poista laitetta: laite kirjautuu takaisin sisään avaimellaan."
+    }
+  ],
+  "web.settings.appKeys.loadFailed": [
+    {
+      "type": 0,
+      "value": "Laitteidesi lataaminen epäonnistui."
+    }
+  ],
+  "web.settings.appKeys.loading": [
+    {
+      "type": 0,
+      "value": "Ladataan laitteita…"
+    }
+  ],
+  "web.settings.appKeys.off": [
+    {
+      "type": 0,
+      "value": "Silo-sovelluksella kirjautuminen on poissa käytöstä tällä palvelimella, joten nämä laitteet eivät voi kirjautua sisään eikä odottavia laitteita voi hyväksyä. Voit silti poistaa ne."
+    }
+  ],
+  "web.settings.appKeys.personKey.description": [
+    {
+      "type": 0,
+      "value": "Silo-sovelluksesi lisää uudet laitteesi tällä avaimella. Otettu käyttöön "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.settings.appKeys.personKey.none": [
+    {
+      "type": 0,
+      "value": "Ei tiliavainta. Silo-sovelluksesi luo sellaisen, kun seuraavan kerran lisäät laitteen sisäänkirjautuneena."
+    }
+  ],
+  "web.settings.appKeys.personKey.title": [
+    {
+      "type": 0,
+      "value": "Tiliavain"
+    }
+  ],
+  "web.settings.appKeys.pinDescription": [
+    {
+      "type": 0,
+      "value": "Hyväksy tämä laite antamalla pääprofiilin PIN-koodi."
+    }
+  ],
+  "web.settings.appKeys.preapprovals.description": [
+    {
+      "type": 0,
+      "value": "Kirjautumiset, jotka hyväksyit laitteelle, joka ei ole vielä muodostanut yhteyttä."
+    }
+  ],
+  "web.settings.appKeys.preapprovals.loadFailed": [
+    {
+      "type": 0,
+      "value": "Etukäteen hyväksyttyjen kirjautumisten lataaminen epäonnistui."
+    }
+  ],
+  "web.settings.appKeys.preapprovals.title": [
+    {
+      "type": 0,
+      "value": "Hyväksytty etukäteen"
+    }
+  ],
+  "web.settings.appKeys.refreshLabel": [
+    {
+      "type": 0,
+      "value": "Päivitä Silo-sovelluksen laitteet"
+    }
+  ],
+  "web.settings.appKeys.removed": [
+    {
+      "type": 0,
+      "value": "Laite "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " poistettu"
+    }
+  ],
+  "web.settings.appKeys.row.allowedBy": [
+    {
+      "type": 0,
+      "value": "Käyttäjän "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " sallima"
+    }
+  ],
+  "web.settings.appKeys.row.approve": [
+    {
+      "type": 0,
+      "value": "Hyväksy"
+    }
+  ],
+  "web.settings.appKeys.row.approveLabel": [
+    {
+      "type": 0,
+      "value": "Hyväksy laite "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.row.deny": [
+    {
+      "type": 0,
+      "value": "Hylkää"
+    }
+  ],
+  "web.settings.appKeys.row.denyLabel": [
+    {
+      "type": 0,
+      "value": "Hylkää laite "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.row.enrolledFrom": [
+    {
+      "type": 0,
+      "value": "Osoitteesta "
+    },
+    {
+      "type": 1,
+      "value": "address"
+    }
+  ],
+  "web.settings.appKeys.row.identityGone": [
+    {
+      "type": 0,
+      "value": "Ei voi kirjautua sisään: sen kirjautumispalvelun tiliä ei ole enää linkitetty"
+    }
+  ],
+  "web.settings.appKeys.row.kindApp": [
+    {
+      "type": 0,
+      "value": "Muu sovellus"
+    }
+  ],
+  "web.settings.appKeys.row.kindDevice": [
+    {
+      "type": 0,
+      "value": "Silo-sovellus"
+    }
+  ],
+  "web.settings.appKeys.row.lastUsed": [
+    {
+      "type": 0,
+      "value": "Viimeksi kirjautunut sisään "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.settings.appKeys.row.notUsed": [
+    {
+      "type": 0,
+      "value": "Ei vielä kirjautunut sisään avaimellaan"
+    }
+  ],
+  "web.settings.appKeys.row.preapproval": [
+    {
+      "type": 0,
+      "value": "Hyväksytty etukäteen · vanhenee "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.settings.appKeys.row.provider": [
+    {
+      "type": 0,
+      "value": "Tarkistettu kirjautumispalvelussa"
+    }
+  ],
+  "web.settings.appKeys.row.remove": [
+    {
+      "type": 0,
+      "value": "Poista"
+    }
+  ],
+  "web.settings.appKeys.row.removeLabel": [
+    {
+      "type": 0,
+      "value": "Poista laite "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.row.viaAppCode": [
+    {
+      "type": 0,
+      "value": "Lisätty palvelimen verkkosivun kertakäyttökoodilla"
+    }
+  ],
+  "web.settings.appKeys.row.viaPersonKey": [
+    {
+      "type": 0,
+      "value": "Lisätty toisen laitteen Silo-sovelluksella"
+    }
+  ],
+  "web.settings.appKeys.row.viaSession": [
+    {
+      "type": 0,
+      "value": "Lisätty sisäänkirjautuneena"
+    }
+  ],
+  "web.settings.appKeys.row.waitingUntil": [
+    {
+      "type": 0,
+      "value": "Odottaa hyväksyntää "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": " asti"
+    }
+  ],
+  "web.settings.appKeys.row.withdraw": [
+    {
+      "type": 0,
+      "value": "Peru"
+    }
+  ],
+  "web.settings.appKeys.row.withdrawLabel": [
+    {
+      "type": 0,
+      "value": "Peru laitteen "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " hyväksyntä"
+    }
+  ],
+  "web.settings.appKeys.signsBackIn": [
+    {
+      "type": 0,
+      "value": "Silo-sovelluksella kirjautuneet laitteet kirjautuvat takaisin sisään itsestään. "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Poista laite"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", jos haluat estää sen."
+    }
+  ],
+  "web.settings.appKeys.title": [
+    {
+      "type": 0,
+      "value": "Silo-sovelluksen laitteet"
+    }
+  ],
+  "web.settings.appKeys.unavailable": [
+    {
+      "type": 0,
+      "value": "Silo-sovelluksella kirjautuminen ei ole käytettävissä tällä palvelimella, joten nämä laitteet eivät voi kirjautua sisään. Voit silti poistaa ne."
+    }
+  ],
+  "web.settings.appKeys.waiting.description": [
+    {
+      "type": 0,
+      "value": "Uusi laite pyysi lupaa kirjautua sisään tilillesi Silo-sovelluksella. Hyväksy se vain, jos otit sen juuri käyttöön."
+    }
+  ],
+  "web.settings.appKeys.waiting.title": [
+    {
+      "type": 0,
+      "value": "Odottaa hyväksyntääsi"
+    }
+  ],
+  "web.settings.appKeys.withdrawn": [
+    {
+      "type": 0,
+      "value": "Hyväksyntä peruttu"
     }
   ],
   "web.settings.cardOverlay.adjust": [
@@ -139897,6 +142274,54 @@
       "value": "Olet offline-tilassa, joten muutosta ei tallennettu"
     }
   ],
+  "web.settings.openInSilo.action": [
+    {
+      "type": 0,
+      "value": "Hae koodi Silo-sovellukselle"
+    }
+  ],
+  "web.settings.openInSilo.codeInstructions": [
+    {
+      "type": 0,
+      "value": "Lisää tämä palvelin sen osoitteella puhelimesi tai tablettisi Silo-sovelluksessa ja kirjoita tämä koodi. Kuka tahansa, jolla on koodi, voi kirjautua sisään tälle tilille, joten älä jaa sitä."
+    }
+  ],
+  "web.settings.openInSilo.codeTitle": [
+    {
+      "type": 0,
+      "value": "Koodi Silo-sovellukselle"
+    }
+  ],
+  "web.settings.openInSilo.description": [
+    {
+      "type": 0,
+      "value": "Kirjaudu puhelimesi tai tablettisi Silo-sovellukseen tällä tilillä ilman salasanaa."
+    }
+  ],
+  "web.settings.openInSilo.loadFailed": [
+    {
+      "type": 0,
+      "value": "Ei voitu tarkistaa, voiko tämä selain hakea koodin Silo-sovellukselle."
+    }
+  ],
+  "web.settings.openInSilo.mainProfileOnly": [
+    {
+      "type": 0,
+      "value": "Vain kotitalouden pääprofiili voi hakea koodin Silo-sovellukselle. Vaihda siihen ja yritä uudelleen."
+    }
+  ],
+  "web.settings.openInSilo.pinDescription": [
+    {
+      "type": 0,
+      "value": "Hae koodi Silo-sovellukselle antamalla pääprofiilin PIN-koodi."
+    }
+  ],
+  "web.settings.openInSilo.title": [
+    {
+      "type": 0,
+      "value": "Silo-sovellus"
+    }
+  ],
   "web.settings.overlays.accent.amber": [
     {
       "type": 0,
@@ -142849,6 +145274,12 @@
       "value": "Kirjautunut sisään"
     }
   ],
+  "web.settings.sessions.row.signsBackIn": [
+    {
+      "type": 0,
+      "value": "Tämä laite kirjautuu takaisin sisään itsestään"
+    }
+  ],
   "web.settings.sessions.row.summary": [
     {
       "type": 8,
@@ -142931,6 +145362,24 @@
     {
       "type": 0,
       "value": "Asetukset"
+    }
+  ],
+  "web.settings.signInAgain.action": [
+    {
+      "type": 0,
+      "value": "Kirjaudu uudelleen sisään"
+    }
+  ],
+  "web.settings.signInAgain.manageDevices": [
+    {
+      "type": 0,
+      "value": "Kirjaudu uudelleen sisään hallitaksesi laitteitasi"
+    }
+  ],
+  "web.settings.signInAgain.useApp": [
+    {
+      "type": 0,
+      "value": "Hallitse laitteitasi Silo-sovelluksessa."
     }
   ],
   "web.settings.signedInSessions.loadFailed": [

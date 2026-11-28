@@ -215,6 +215,12 @@
       "value": "รายการนี้ลิงก์กับบัญชีนี้อยู่แล้ว"
     }
   ],
+  "error.app_code_invalid": [
+    {
+      "type": 0,
+      "value": "ไม่รู้จักรหัสนี้ หรือรหัสนี้ใช้ไปแล้วหรือหมดอายุแล้ว โปรดรับรหัสใหม่จากหน้าของเซิร์ฟเวอร์"
+    }
+  ],
   "error.authentication_required": [
     {
       "type": 0,
@@ -333,6 +339,12 @@
     {
       "type": 0,
       "value": "ค่านี้มีประเภทไม่ถูกต้อง"
+    }
+  ],
+  "error.field.key_enrolled": [
+    {
+      "type": 0,
+      "value": "คีย์นี้มีการใช้งานอยู่แล้วในเซิร์ฟเวอร์นี้"
     }
   ],
   "error.field.malformed_form": [
@@ -2488,6 +2500,30 @@
     {
       "type": 0,
       "value": "อัตโนมัติ"
+    }
+  ],
+  "settingsManifest.playback.connection_path.description": [
+    {
+      "type": 0,
+      "value": "ตัวเลือก “โดยตรงเท่านั้น” ยังคงใช้การเชื่อมต่อผ่านเครือข่ายภายในเมื่อมีให้ใช้"
+    }
+  ],
+  "settingsManifest.playback.connection_path.label": [
+    {
+      "type": 0,
+      "value": "เส้นทางการเชื่อมต่อ"
+    }
+  ],
+  "settingsManifest.playback.connection_path.option.automatic": [
+    {
+      "type": 0,
+      "value": "อัตโนมัติ"
+    }
+  ],
+  "settingsManifest.playback.connection_path.option.direct_only": [
+    {
+      "type": 0,
+      "value": "โดยตรงเท่านั้น"
     }
   ],
   "settingsManifest.playback.intro_skip_mode.description": [
@@ -21704,6 +21740,87 @@
       }
     }
   ],
+  "web.admin.common.adminUserSignIn.unlinkConfirm.text": [
+    {
+      "type": 5,
+      "value": "last_way",
+      "options": {
+        "yes": {
+          "value": [
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " จะลงชื่อเข้าใช้ด้วยบัญชีของผู้ให้บริการนี้ไม่ได้อีก "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " จะลงชื่อเข้าใช้ไม่ได้จนกว่าคุณจะตั้งรหัสผ่านหรือเชื่อมต่อผู้ให้บริการอีกครั้ง"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " จะลงชื่อเข้าใช้ด้วยบัญชีของผู้ให้บริการนี้ไม่ได้อีก"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 5,
+      "value": "keys",
+      "options": {
+        "yes": {
+          "value": [
+            {
+              "type": 0,
+              "value": " ระบบจะนำคีย์แอป Silo ของ "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " ที่ผูกกับบัญชีของผู้ให้บริการนี้ออก และอุปกรณ์เหล่านั้นจะออกจากระบบ"
+            }
+          ]
+        },
+        "unknown": {
+          "value": [
+            {
+              "type": 0,
+              "value": " หากมีคีย์แอป Silo ของ "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " ที่ผูกกับบัญชีของผู้ให้บริการนี้ ระบบจะนำคีย์ออก และอุปกรณ์เหล่านั้นจะออกจากระบบ"
+            }
+          ]
+        },
+        "other": {
+          "value": []
+        }
+      }
+    }
+  ],
   "web.admin.common.adminUserSignIn.unlinkConfirm.title": [
     {
       "type": 0,
@@ -23836,6 +23953,18 @@
     {
       "type": 0,
       "value": "สร้างภาพขนาดย่อที่เครื่องเล่นแสดงขณะกรอ ในพื้นที่จัดเก็บแอสเซ็ตสาธารณะที่กำหนดค่าไว้ ระบบประมวลผลไฟล์ในเบื้องหลังด้วยลำดับความสำคัญต่ำ การปิดตัวเลือกนี้จะลบภาพพรีวิวของคลังนี้"
+    }
+  ],
+  "web.admin.common.libraryEditor.advanced.trickplayGenerate": [
+    {
+      "type": 0,
+      "value": "สร้างภาพตัวอย่างที่ขาดหายด้วย FFmpeg"
+    }
+  ],
+  "web.admin.common.libraryEditor.advanced.trickplayGenerateDescription": [
+    {
+      "type": 0,
+      "value": "ระบบจะใช้ไฟล์ประกอบ .trickplay และ .bif ที่มีอยู่ข้างไฟล์สื่อก่อน ปิดตัวเลือกนี้เพื่อนำเข้าเฉพาะไฟล์ประกอบและข้ามการสร้างด้วย FFmpeg"
     }
   ],
   "web.admin.common.libraryEditor.advanced.trickplayUnavailable": [
@@ -27482,6 +27611,32 @@
       "value": "ผู้ดูแลระบบ: ผู้ใช้ทั้งหมด"
     }
   ],
+  "web.admin.common.trickplay.badge.awaitingSidecarCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "รอไฟล์ประกอบ "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " รายการ"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.common.trickplay.badge.detail": [
     {
       "type": 0,
@@ -27588,6 +27743,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.common.trickplay.badge.sidecarsOnly": [
+    {
+      "type": 0,
+      "value": "ไฟล์ประกอบเท่านั้น"
     }
   ],
   "web.admin.common.trickplay.badge.srDetail": [
@@ -27736,6 +27897,42 @@
     {
       "type": 0,
       "value": "เครื่องเล่นจะใช้ภาพพรีวิวปัจจุบันจนกว่าภาพพรีวิวใหม่จะพร้อม"
+    }
+  ],
+  "web.admin.common.trickplay.sidecarStatus.awaiting_sidecar": [
+    {
+      "type": 0,
+      "value": "รอไฟล์ประกอบ"
+    }
+  ],
+  "web.admin.common.trickplay.sidecarStatus.sidecar_invalid": [
+    {
+      "type": 0,
+      "value": "ไฟล์ประกอบไม่ถูกต้อง"
+    }
+  ],
+  "web.admin.common.trickplay.sidecarStatus.sidecar_stale": [
+    {
+      "type": 0,
+      "value": "ไฟล์ประกอบล้าสมัย"
+    }
+  ],
+  "web.admin.common.trickplay.source.generated": [
+    {
+      "type": 0,
+      "value": "สร้างโดย Silo"
+    }
+  ],
+  "web.admin.common.trickplay.source.sidecar_bif": [
+    {
+      "type": 0,
+      "value": "ไฟล์ประกอบ (.bif)"
+    }
+  ],
+  "web.admin.common.trickplay.source.sidecar_trickplay": [
+    {
+      "type": 0,
+      "value": "ไฟล์ประกอบ (.trickplay)"
     }
   ],
   "web.admin.common.trickplay.state.off": [
@@ -29402,7 +29599,7 @@
     },
     {
       "type": 0,
-      "value": " อุปกรณ์อื่นจะยังคงลงชื่อเข้าใช้อยู่ ไคลเอ็นต์จะลงชื่อเข้าใช้อีกครั้งได้ด้วยรหัสผ่านของบัญชี"
+      "value": " อุปกรณ์อื่นของผู้ใช้นี้จะยังคงลงชื่อเข้าใช้อยู่ ไคลเอ็นต์จะลงชื่อเข้าใช้อีกครั้งได้"
     }
   ],
   "web.admin.dashboard.widgets.apiClients.confirmLabel": [
@@ -39515,6 +39712,12 @@
       "value": "โปรไฟล์"
     }
   ],
+  "web.admin.history.column.progress": [
+    {
+      "type": 0,
+      "value": "ความคืบหน้า"
+    }
+  ],
   "web.admin.history.column.status": [
     {
       "type": 0,
@@ -39549,6 +39752,12 @@
     {
       "type": 0,
       "value": "ล็อกเซสชัน"
+    }
+  ],
+  "web.admin.history.detail.backToPlay": [
+    {
+      "type": 0,
+      "value": "กลับไปยังการเล่นแบบรวม"
     }
   ],
   "web.admin.history.detail.column.delivered": [
@@ -39659,6 +39868,12 @@
       "value": "เวลาที่ดู"
     }
   ],
+  "web.admin.history.detail.inspectSitting": [
+    {
+      "type": 0,
+      "value": "ตรวจสอบ"
+    }
+  ],
   "web.admin.history.detail.keyboardHint": [
     {
       "type": 0,
@@ -39743,6 +39958,12 @@
       "value": "เหตุผลที่ไม่ได้เล่นโดยตรง"
     }
   ],
+  "web.admin.history.detail.section.sessions": [
+    {
+      "type": 0,
+      "value": "เซสชันในการเล่นนี้"
+    }
+  ],
   "web.admin.history.detail.section.streams": [
     {
       "type": 0,
@@ -39753,6 +39974,78 @@
     {
       "type": 0,
       "value": "เวลาและความคืบหน้าการดู"
+    }
+  ],
+  "web.admin.history.detail.sessionsCapped": [
+    {
+      "type": 0,
+      "value": "แสดง "
+    },
+    {
+      "type": 1,
+      "value": "shown"
+    },
+    {
+      "type": 0,
+      "value": " เซสชันแรกจากทั้งหมด "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": " เซสชันในการเล่นนี้"
+    }
+  ],
+  "web.admin.history.detail.sessionsNotice": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "การเล่นนี้ครอบคลุม "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " เซสชัน รายละเอียดสตรีม อุปกรณ์ และเส้นทางด้านล่างมาจากเซสชันหลัก เลือกเซสชันใดก็ได้ด้านล่างเพื่อตรวจสอบแยกกัน"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.ended": [
+    {
+      "type": 0,
+      "value": "สิ้นสุด"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.method": [
+    {
+      "type": 0,
+      "value": "วิธีการ"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.started": [
+    {
+      "type": 0,
+      "value": "เริ่ม"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.watched": [
+    {
+      "type": 0,
+      "value": "เวลาที่ดู"
     }
   ],
   "web.admin.history.detail.subtitlesBurnIn": [
@@ -39981,6 +40274,12 @@
       "value": "ทุกเครือข่าย"
     }
   ],
+  "web.admin.history.filter.allMediaTypes": [
+    {
+      "type": 0,
+      "value": "สื่อทั้งหมด"
+    }
+  ],
   "web.admin.history.filter.allMethods": [
     {
       "type": 0,
@@ -40017,6 +40316,24 @@
       "value": "เล่นจบแล้ว"
     }
   ],
+  "web.admin.history.filter.episodes": [
+    {
+      "type": 0,
+      "value": "ตอน"
+    }
+  ],
+  "web.admin.history.filter.hideShort": [
+    {
+      "type": 0,
+      "value": "ซ่อน <30 วิ"
+    }
+  ],
+  "web.admin.history.filter.hideShortTitle": [
+    {
+      "type": 0,
+      "value": "ซ่อนเซสชันที่ยังไม่จบซึ่งสั้นกว่า 30 วินาที"
+    }
+  ],
   "web.admin.history.filter.locationLocal": [
     {
       "type": 0,
@@ -40027,6 +40344,12 @@
     {
       "type": 0,
       "value": "ระยะไกล"
+    }
+  ],
+  "web.admin.history.filter.movies": [
+    {
+      "type": 0,
+      "value": "ภาพยนตร์"
     }
   ],
   "web.admin.history.filter.partial": [
@@ -40200,6 +40523,12 @@
       "value": "การเล่นล่าสุด"
     }
   ],
+  "web.admin.history.row.burnInBadgeTitle": [
+    {
+      "type": 0,
+      "value": "ฝังคำบรรยายในวิดีโอ"
+    }
+  ],
   "web.admin.history.row.completed": [
     {
       "type": 0,
@@ -40220,6 +40549,32 @@
     {
       "type": 0,
       "value": "ค่าประมาณ (บันทึกไว้ก่อนที่จะมีการติดตามเวลารับชมที่แน่นอน)"
+    }
+  ],
+  "web.admin.history.row.groupedSessionsTitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "รวมจาก "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " เซสชัน"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.history.row.meta": [
@@ -40252,6 +40607,12 @@
       "value": "เล่นบางส่วน"
     }
   ],
+  "web.admin.history.row.progressLabel": [
+    {
+      "type": 0,
+      "value": "ความคืบหน้าการเล่น"
+    }
+  ],
   "web.admin.history.row.started": [
     {
       "type": 0,
@@ -40262,16 +40623,80 @@
       "value": "time"
     }
   ],
+  "web.admin.history.stats.accountsCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " บัญชี"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.history.stats.completed": [
     {
       "type": 0,
       "value": "เล่นจบแล้ว"
     }
   ],
+  "web.admin.history.stats.completionBreakdown": [
+    {
+      "type": 0,
+      "value": "เล่นจบแล้ว "
+    },
+    {
+      "type": 1,
+      "value": "completed"
+    },
+    {
+      "type": 0,
+      "value": " · เล่นบางส่วน "
+    },
+    {
+      "type": 1,
+      "value": "partial"
+    }
+  ],
   "web.admin.history.stats.partial": [
     {
       "type": 0,
       "value": "เล่นบางส่วน"
+    }
+  ],
+  "web.admin.history.stats.totalPlays": [
+    {
+      "type": 0,
+      "value": "การเล่นทั้งหมด"
+    }
+  ],
+  "web.admin.history.stats.totalSessions": [
+    {
+      "type": 0,
+      "value": "เซสชันทั้งหมด"
+    }
+  ],
+  "web.admin.history.stats.uniqueProfiles": [
+    {
+      "type": 0,
+      "value": "โปรไฟล์ที่ไม่ซ้ำ"
+    }
+  ],
+  "web.admin.history.stats.uniqueTitles": [
+    {
+      "type": 0,
+      "value": "เรื่องที่ไม่ซ้ำ"
     }
   ],
   "web.admin.history.stats.visibleRows": [
@@ -40290,6 +40715,24 @@
     {
       "type": 0,
       "value": "ประวัติการเล่น"
+    }
+  ],
+  "web.admin.history.view.label": [
+    {
+      "type": 0,
+      "value": "มุมมองประวัติ"
+    }
+  ],
+  "web.admin.history.view.plays": [
+    {
+      "type": 0,
+      "value": "การเล่น"
+    }
+  ],
+  "web.admin.history.view.sessions": [
+    {
+      "type": 0,
+      "value": "เซสชันทั้งหมด"
     }
   ],
   "web.admin.historyImport.conflict.message": [
@@ -79864,6 +80307,262 @@
       "value": " รายการ"
     }
   ],
+  "web.admin.users.detail.appKeys.confirm.denyDescription": [
+    {
+      "type": 0,
+      "value": "อุปกรณ์ "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " จะลงชื่อเข้าใช้บัญชีของ "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " ไม่ได้ หากเป็นอุปกรณ์ของ "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " ให้ "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " เพิ่มอุปกรณ์นี้อีกครั้งในแอป Silo"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKey": [
+    {
+      "type": 0,
+      "value": "นำคีย์ออก"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKeyDescription": [
+    {
+      "type": 0,
+      "value": "อุปกรณ์ที่ลงชื่อเข้าใช้อยู่แล้วจะยังใช้งานได้จนกว่าคุณจะนำออก จะเพิ่มอุปกรณ์ใหม่ด้วยคีย์นี้ไม่ได้ และระบบจะปฏิเสธอุปกรณ์ที่คีย์นี้เพิ่มไว้ซึ่งยังรอการอนุมัติ แอป Silo ของ "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " จะตั้งค่าคีย์ใหม่ในครั้งถัดไปที่ "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " เพิ่มอุปกรณ์ขณะลงชื่อเข้าใช้อยู่"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKeyTitle": [
+    {
+      "type": 0,
+      "value": "นำคีย์บัญชีของ "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " ออกใช่ไหม"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.removeDescription": [
+    {
+      "type": 0,
+      "value": "การนำอุปกรณ์ "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " ออกจะทำให้อุปกรณ์ออกจากระบบบัญชีของ "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " ทันทีและปิดใช้คีย์ของอุปกรณ์: อุปกรณ์จะลงชื่อเข้าใช้ด้วยคีย์นั้นอีกไม่ได้ หากต้องการใช้อุปกรณ์อีกครั้ง "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " ต้องเพิ่มอุปกรณ์นี้อีกครั้งในแอป Silo"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.withdrawDescription": [
+    {
+      "type": 0,
+      "value": "อุปกรณ์ "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " จะใช้การอนุมัตินี้เพื่อลงชื่อเข้าใช้บัญชีของ "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " ไม่ได้"
+    }
+  ],
+  "web.admin.users.detail.appKeys.description": [
+    {
+      "type": 0,
+      "value": "อุปกรณ์และแอปที่ลงชื่อเข้าใช้บัญชีของ "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " ด้วยแอป Silo โดยไม่ใช้รหัสผ่าน"
+    }
+  ],
+  "web.admin.users.detail.appKeys.empty": [
+    {
+      "type": 0,
+      "value": "ไม่มีอุปกรณ์ที่ใช้แอป Silo ในบัญชีนี้"
+    }
+  ],
+  "web.admin.users.detail.appKeys.loadFailed": [
+    {
+      "type": 0,
+      "value": "โหลดอุปกรณ์ไม่ได้"
+    }
+  ],
+  "web.admin.users.detail.appKeys.off": [
+    {
+      "type": 0,
+      "value": "การลงชื่อเข้าใช้ด้วยแอป Silo ปิดอยู่ในเซิร์ฟเวอร์นี้ อุปกรณ์เหล่านี้จึงลงชื่อเข้าใช้ไม่ได้ แต่คุณยังนำอุปกรณ์ออกได้"
+    }
+  ],
+  "web.admin.users.detail.appKeys.ownerOnly": [
+    {
+      "type": 0,
+      "value": "เฉพาะเจ้าของเซิร์ฟเวอร์เท่านั้นที่เปลี่ยนอุปกรณ์ของผู้ดูแลระบบคนอื่นหรือของเจ้าของได้"
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.description": [
+    {
+      "type": 0,
+      "value": "แอป Silo ใช้คีย์นี้เพื่อเพิ่มอุปกรณ์ใหม่ของ "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " ตั้งค่าเมื่อ "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.none": [
+    {
+      "type": 0,
+      "value": "ไม่มีคีย์บัญชี แอป Silo ของ "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " จะตั้งค่าคีย์ในครั้งถัดไปที่ "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " เพิ่มอุปกรณ์ขณะลงชื่อเข้าใช้อยู่"
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.remove": [
+    {
+      "type": 0,
+      "value": "นำคีย์บัญชีออก"
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKeyRemoved": [
+    {
+      "type": 0,
+      "value": "นำคีย์บัญชีออกแล้ว"
+    }
+  ],
+  "web.admin.users.detail.appKeys.preapprovals.description": [
+    {
+      "type": 0,
+      "value": "การลงชื่อเข้าใช้ที่ "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " อนุมัติไว้สำหรับอุปกรณ์ที่ยังไม่ได้เชื่อมต่อ"
+    }
+  ],
+  "web.admin.users.detail.appKeys.waiting.description": [
+    {
+      "type": 0,
+      "value": "อุปกรณ์ใหม่ในบัญชีผู้ดูแลระบบจะรอจนกว่า "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " จะอนุมัติจากอุปกรณ์ที่ลงชื่อเข้าใช้อยู่ คุณปฏิเสธอุปกรณ์ได้ที่นี่"
+    }
+  ],
+  "web.admin.users.detail.appKeys.waiting.title": [
+    {
+      "type": 0,
+      "value": "รอการอนุมัติ"
+    }
+  ],
   "web.admin.users.detail.common.allProfiles": [
     {
       "type": 0,
@@ -83124,6 +83823,12 @@
       "value": "บัญชีนี้มีโปรไฟล์ครบตามขีดจำกัดแล้ว"
     }
   ],
+  "web.admin.users.detail.profiles.badge.changedHere": [
+    {
+      "type": 0,
+      "value": "เปลี่ยนที่นี่"
+    }
+  ],
   "web.admin.users.detail.profiles.badge.kids": [
     {
       "type": 0,
@@ -83321,6 +84026,636 @@
     {
       "type": 0,
       "value": "บันทึก PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowAgain": [
+    {
+      "type": 0,
+      "value": "อนุญาตอีกครั้ง"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowAgainAria": [
+    {
+      "type": 0,
+      "value": "ให้โปรไฟล์ "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " กลับมาในเซิร์ฟเวอร์นี้"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowDescription": [
+    {
+      "type": 0,
+      "value": "แอปของผู้ใช้นี้เพิ่มโปรไฟล์ "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " กลับมาได้ในการซิงค์ครั้งถัดไป เป็นโปรไฟล์ใหม่ที่ไม่มีประวัติในเซิร์ฟเวอร์นี้ หากโปรไฟล์ในแอปยังมี "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " อยู่และบัญชีนี้ยังเพิ่มโปรไฟล์ได้อีก"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowTitle": [
+    {
+      "type": 0,
+      "value": "อนุญาตโปรไฟล์ "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " อีกครั้งใช่ไหม"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.alreadyCleared": [
+    {
+      "type": 0,
+      "value": "มีการล้างการเปลี่ยนแปลงนั้นไปแล้ว หรือ "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " เปลี่ยนอีกครั้ง รายการเป็นข้อมูลล่าสุดแล้ว"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedBy": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " เปลี่ยนเมื่อ "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedSinceOpened": [
+    {
+      "type": 0,
+      "value": "การเปลี่ยนแปลงนี้มีการอัปเดตหลังจากที่คุณเปิด จึงไม่มีการล้างใด ๆ โปรดอ่านอีกครั้งในรายการ แล้วล้างหากยังต้องการ"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedWhileRunning": [
+    {
+      "type": 0,
+      "value": "โปรไฟล์เปลี่ยนไประหว่างดำเนินการ จึงไม่มีการเปลี่ยนแปลงใด ๆ รายการเป็นข้อมูลล่าสุดแล้ว โปรดลองอีกครั้งหากยังต้องการ"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clear": [
+    {
+      "type": 0,
+      "value": "ล้าง"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearAndRemovePin": [
+    {
+      "type": 0,
+      "value": "ล้างและนำ PIN ออก"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearAria": [
+    {
+      "type": 0,
+      "value": "ล้างการเปลี่ยนแปลง "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " ของโปรไฟล์ "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearFailed": [
+    {
+      "type": 0,
+      "value": "ล้างการเปลี่ยนแปลงไม่ได้"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearInherit": [
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " ของโปรไฟล์ "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " จะกลับไปเป็นค่าที่ "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " สืบทอดในตอนนี้ตามที่แอปของผู้ใช้นี้ขอ การเปลี่ยนแปลงจากแอปจะมีผลกับค่านี้อีกครั้ง"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearLater": [
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " จะคงเดิมจนกว่าแอปของผู้ใช้นี้จะส่งค่ามาครั้งถัดไป หลังจากนั้นการเปลี่ยนแปลงจากแอปจะมีผลกับค่านี้อีกครั้ง"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearNow": [
+    {
+      "type": 0,
+      "value": "โปรไฟล์ "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " จะกลับไปใช้ค่าจากแอปของผู้ใช้นี้ทันที และการเปลี่ยนแปลงจากแอปจะมีผลกับค่านี้อีกครั้ง"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearNowValue": [
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " ของโปรไฟล์ "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " จะกลับไปเป็น "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " ซึ่งเป็นค่าจากแอปของผู้ใช้นี้ทันที การเปลี่ยนแปลงจากแอปจะมีผลกับค่านี้อีกครั้ง"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearPin": [
+    {
+      "type": 0,
+      "value": "โปรไฟล์ "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " จะคง PIN ที่คุณตั้งไว้จนกว่าแอปของผู้ใช้นี้จะส่ง PIN มาครั้งถัดไป หลังจากนั้นการเปลี่ยนแปลงจากแอปจะมีผลกับ PIN อีกครั้ง"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearPinRemoves": [
+    {
+      "type": 0,
+      "value": "แอปของผู้ใช้นี้ส่งโปรไฟล์ "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " มาโดยไม่มี PIN การล้างจึงนำ PIN ที่คุณตั้งไว้ออกทันที หลังจากนั้นทุกคนที่ใช้บัญชีนี้จะเปิดโปรไฟล์ "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " ได้โดยไม่ต้องใช้ PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearTitle": [
+    {
+      "type": 0,
+      "value": "ล้างการเปลี่ยนแปลง "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " ของโปรไฟล์ "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " ใช่ไหม"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.deletedAccount": [
+    {
+      "type": 0,
+      "value": "บัญชีที่ลบแล้ว"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.description": [
+    {
+      "type": 0,
+      "value": "โปรไฟล์เหล่านี้มาจากแอปของ "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " การเปลี่ยนแปลงที่คุณทำที่นี่จะคงอยู่ในเซิร์ฟเวอร์นี้จนกว่าคุณจะล้าง แต่ไม่ใช่การล็อก: "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " ก็เปลี่ยนสิ่งเดียวกันที่นี่ได้เช่นกัน"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismiss": [
+    {
+      "type": 0,
+      "value": "นำออก"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismissAria": [
+    {
+      "type": 0,
+      "value": "นำหมายเหตุเกี่ยวกับ "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " ของโปรไฟล์ "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " ออก"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismissFailed": [
+    {
+      "type": 0,
+      "value": "นำหมายเหตุออกไม่ได้"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.isChild": [
+    {
+      "type": 0,
+      "value": "โปรไฟล์เด็ก"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.maxAdvisoryAge": [
+    {
+      "type": 0,
+      "value": "ขีดจำกัดอายุ"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.maxContentRating": [
+    {
+      "type": 0,
+      "value": "ขีดจำกัดเรตเนื้อหา"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.name": [
+    {
+      "type": 0,
+      "value": "ชื่อ"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.picture": [
+    {
+      "type": 0,
+      "value": "รูปภาพ"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.pin": [
+    {
+      "type": 0,
+      "value": "PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.requests": [
+    {
+      "type": 0,
+      "value": "คำขอ"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.requireAdvisoryAge": [
+    {
+      "type": 0,
+      "value": "ต้องมีเรตอายุ"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.fieldValue": [
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.hidden": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " นำออกจากเซิร์ฟเวอร์นี้เมื่อ "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": " แอปของผู้ใช้นี้จะไม่เพิ่มกลับมาจนกว่าคุณจะอนุญาต"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.loadFailed": [
+    {
+      "type": 0,
+      "value": "โหลดการเปลี่ยนแปลงที่ทำในเซิร์ฟเวอร์นี้ไม่ได้"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.nameTaken": [
+    {
+      "type": 0,
+      "value": "โปรไฟล์ "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " กลับไปใช้ชื่อ "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " จากแอปของผู้ใช้นี้ไม่ได้ เนื่องจากมีโปรไฟล์อื่นในบัญชีนี้ใช้ชื่อนั้นอยู่ โปรดเปลี่ยนชื่อโปรไฟล์นั้นก่อน แล้วล้างอีกครั้ง"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeHiddenNextSync": [
+    {
+      "type": 0,
+      "value": "โปรไฟล์ "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " กลับมาได้ในครั้งถัดไปที่แอปของ "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " ซิงค์ หากโปรไฟล์ในแอปยังมีโปรไฟล์นี้อยู่"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeHiddenWoken": [
+    {
+      "type": 0,
+      "value": "โปรไฟล์ "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " กลับมาได้เมื่อแอปของผู้ใช้นี้ซิงค์ครั้งถัดไป หากโปรไฟล์ในแอปยังมีโปรไฟล์นี้อยู่ ส่งคำขอให้โทรศัพท์ของ "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " ซิงค์แล้ว"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeNextSync": [
+    {
+      "type": 0,
+      "value": "ล้างแล้ว การเปลี่ยนแปลงจะไปถึงแอปของ "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " ในการซิงค์ครั้งถัดไป"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeWoken": [
+    {
+      "type": 0,
+      "value": "ล้างแล้ว ส่งคำขอให้โทรศัพท์ของ "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " ซิงค์แล้ว"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.removedBy": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " นำออกเมื่อ "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.replacedOwner": [
+    {
+      "type": 0,
+      "value": "การเปลี่ยนแปลงนี้แทนที่ค่าที่คุณตั้งไว้"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.setBy": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " ตั้งค่าเมื่อ "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.settled": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " เปลี่ยนค่านี้เมื่อ "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": " ค่าที่คุณตั้งไว้จึงไม่มีผลแล้ว"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.title": [
+    {
+      "type": 0,
+      "value": "เปลี่ยนในเซิร์ฟเวอร์นี้"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.inherited": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (สืบทอด)"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.noPicture": [
+    {
+      "type": 0,
+      "value": "ไม่มีรูปภาพ"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.none": [
+    {
+      "type": 0,
+      "value": "ไม่มี"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.off": [
+    {
+      "type": 0,
+      "value": "ปิด"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.on": [
+    {
+      "type": 0,
+      "value": "เปิด"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.picture": [
+    {
+      "type": 0,
+      "value": "รูปภาพที่กำหนดเอง"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.pinNone": [
+    {
+      "type": 0,
+      "value": "ไม่มี PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.pinSet": [
+    {
+      "type": 0,
+      "value": "ตั้ง PIN แล้ว"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.requestsAllowed": [
+    {
+      "type": 0,
+      "value": "อนุญาต"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.requestsBlocked": [
+    {
+      "type": 0,
+      "value": "บล็อก"
     }
   ],
   "web.admin.users.detail.profiles.setPin": [
@@ -84546,6 +85881,132 @@
     {
       "type": 0,
       "value": "ตั้งรหัสผ่าน"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.action": [
+    {
+      "type": 0,
+      "value": "สร้างลิงก์ลงชื่อเข้าใช้"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.actionHint": [
+    {
+      "type": 0,
+      "value": "อุปกรณ์หายทั้งหมด"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.description": [
+    {
+      "type": 0,
+      "value": "ลิงก์ใช้ครั้งเดียวสำหรับ "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " หากอุปกรณ์หายทั้งหมด ลิงก์นี้จะเปิดหน้าที่ให้รหัสสำหรับแอป Silo หรือให้เลือกรหัสผ่าน ลิงก์ใช้งานได้ 24 ชั่วโมง และลิงก์ใหม่จะแทนที่ลิงก์ก่อนหน้า"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailAction": [
+    {
+      "type": 0,
+      "value": "ส่งทางอีเมล"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHint": [
+    {
+      "type": 0,
+      "value": "สร้างลิงก์เพื่อคัดลอกและส่งเอง หรือส่งทางอีเมลไปที่ "
+    },
+    {
+      "type": 1,
+      "value": "email"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHintNoAddress": [
+    {
+      "type": 0,
+      "value": "สร้างลิงก์ แล้วคัดลอกและส่งเอง บัญชีนี้ไม่มีอีเมลสำหรับส่งลิงก์"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHintNoMail": [
+    {
+      "type": 0,
+      "value": "สร้างลิงก์ แล้วคัดลอกและส่งเอง ตั้งค่าอีเมลในการตั้งค่าเพื่อส่งลิงก์จากที่นี่"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailSent": [
+    {
+      "type": 0,
+      "value": "ส่งลิงก์ไปที่ "
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": " แล้ว ลิงก์จะหมดอายุ "
+    },
+    {
+      "type": 1,
+      "value": "expires"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailUnconfirmed": [
+    {
+      "type": 0,
+      "value": "เซิร์ฟเวอร์อีเมลไม่ได้ยืนยันการส่ง ลิงก์ด้านล่างยังใช้งานได้: คัดลอกแล้วส่งด้วยวิธีอื่น"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.failed": [
+    {
+      "type": 0,
+      "value": "สร้างลิงก์ลงชื่อเข้าใช้ไม่ได้"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.linkShare": [
+    {
+      "type": 0,
+      "value": "ส่งลิงก์นี้ให้ "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " เท่านั้น ทุกคนที่มีลิงก์นี้จะลงชื่อเข้าใช้บัญชีนี้ได้จนกว่าจะมีการใช้ลิงก์หรือลิงก์หมดอายุ "
+    },
+    {
+      "type": 1,
+      "value": "expires"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.providerRequired": [
+    {
+      "type": 0,
+      "value": "การลงชื่อเข้าใช้ด้วยรหัสผ่านในเครื่องปิดอยู่ในเซิร์ฟเวอร์นี้ ลิงก์ลงชื่อเข้าใช้จึงจะข้ามผู้ให้บริการลงชื่อเข้าใช้ของเซิร์ฟเวอร์ โปรดขอให้ "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " ลงชื่อเข้าใช้ด้วยผู้ให้บริการในเว็บไซต์ของเซิร์ฟเวอร์นี้ แล้วใช้ “เปิดใน Silo” ในการตั้งค่าบัญชี"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.title": [
+    {
+      "type": 0,
+      "value": "ลิงก์ลงชื่อเข้าใช้สำหรับ "
+    },
+    {
+      "type": 1,
+      "value": "username"
     }
   ],
   "web.audiobooks.chapter.fallbackTitle": [
@@ -86167,6 +87628,120 @@
       "value": "อนุมัติการลงชื่อเข้าใช้"
     }
   ],
+  "web.auth.appCode.code": [
+    {
+      "type": 0,
+      "value": "รหัส"
+    }
+  ],
+  "web.auth.appCode.codeCopied": [
+    {
+      "type": 0,
+      "value": "คัดลอกรหัสแล้ว"
+    }
+  ],
+  "web.auth.appCode.copyCode": [
+    {
+      "type": 0,
+      "value": "คัดลอกรหัส"
+    }
+  ],
+  "web.auth.appCode.copyFailed": [
+    {
+      "type": 0,
+      "value": "คัดลอกรหัสไม่ได้ โปรดเลือกรหัสแล้วคัดลอกเอง"
+    }
+  ],
+  "web.auth.appCode.expired": [
+    {
+      "type": 0,
+      "value": "รหัสนี้หมดอายุแล้ว"
+    }
+  ],
+  "web.auth.appCode.failed": [
+    {
+      "type": 0,
+      "value": "Silo สร้างรหัสไม่ได้ โปรดลองอีกครั้ง"
+    }
+  ],
+  "web.auth.appCode.instructions": [
+    {
+      "type": 0,
+      "value": "กด “เปิด Silo” เพื่อดำเนินการต่อในแอป Silo บนอุปกรณ์นี้ หากยังไม่ได้ติดตั้งแอป ให้ติดตั้งแล้วกลับมาที่แท็บนี้และกด “เปิด Silo” อีกครั้ง"
+    }
+  ],
+  "web.auth.appCode.noScanCode": [
+    {
+      "type": 0,
+      "value": "ที่อยู่ของเซิร์ฟเวอร์นี้ยาวเกินกว่าจะใส่ในคิวอาร์โค้ดได้ โปรดพิมพ์ที่อยู่เซิร์ฟเวอร์และรหัสในแอป Silo หรือคัดลอกรหัสแล้ววางในแอป"
+    }
+  ],
+  "web.auth.appCode.open": [
+    {
+      "type": 0,
+      "value": "เปิด Silo"
+    }
+  ],
+  "web.auth.appCode.renew": [
+    {
+      "type": 0,
+      "value": "รับรหัสใหม่"
+    }
+  ],
+  "web.auth.appCode.scanCodeLabel": [
+    {
+      "type": 0,
+      "value": "คิวอาร์โค้ดสำหรับแอป Silo"
+    }
+  ],
+  "web.auth.appCode.scanCodeUnavailable": [
+    {
+      "type": 0,
+      "value": "แสดงคิวอาร์โค้ดสำหรับเซิร์ฟเวอร์นี้ไม่ได้ โปรดพิมพ์ที่อยู่เซิร์ฟเวอร์และรหัสในแอป Silo หรือคัดลอกรหัสแล้ววางในแอป"
+    }
+  ],
+  "web.auth.appCode.scanHint": [
+    {
+      "type": 0,
+      "value": "สแกนโค้ดนี้ด้วยเครื่องสแกนในแอป Silo หรือพิมพ์หรือคัดลอกที่อยู่เซิร์ฟเวอร์และรหัสด้านล่าง"
+    }
+  ],
+  "web.auth.appCode.serverAddress": [
+    {
+      "type": 0,
+      "value": "ที่อยู่เซิร์ฟเวอร์"
+    }
+  ],
+  "web.auth.appCode.singleUse": [
+    {
+      "type": 0,
+      "value": "รหัสนี้ใช้ได้ครั้งเดียวและจะหมดอายุภายในไม่กี่นาที"
+    }
+  ],
+  "web.auth.appCode.title": [
+    {
+      "type": 0,
+      "value": "เปิด Silo"
+    }
+  ],
+  "web.auth.appCode.typeInstructions": [
+    {
+      "type": 0,
+      "value": "ในแอป Silo บนโทรศัพท์หรือแท็บเล็ต ให้เพิ่มเซิร์ฟเวอร์นี้ด้วยที่อยู่และพิมพ์รหัสนี้เพื่อสร้างบัญชี ทุกคนที่มีรหัสนี้เข้าร่วมแทนคุณได้ จึงไม่ควรแชร์รหัส"
+    }
+  ],
+  "web.auth.appCode.typeTitle": [
+    {
+      "type": 0,
+      "value": "เข้าร่วมด้วยรหัสนี้"
+    }
+  ],
+  "web.auth.appCode.webLink": [
+    {
+      "type": 0,
+      "value": "เปิดด้วยลิงก์ siloserver.org แทน"
+    }
+  ],
   "web.auth.card.rememberedIt": [
     {
       "type": 0,
@@ -86369,10 +87944,46 @@
       ]
     }
   ],
+  "web.auth.invite.appAccountEmail": [
+    {
+      "type": 0,
+      "value": "บัญชีจะใช้ "
+    },
+    {
+      "type": 1,
+      "value": "email"
+    }
+  ],
+  "web.auth.invite.appContinue": [
+    {
+      "type": 0,
+      "value": "ดำเนินการต่อ"
+    }
+  ],
+  "web.auth.invite.appEmailHint": [
+    {
+      "type": 0,
+      "value": "หากมีอีเมล เซิร์ฟเวอร์นี้จะส่งลิงก์ลงชื่อเข้าใช้ให้คุณได้หากอุปกรณ์หาย"
+    }
+  ],
   "web.auth.invite.appMissing": [
     {
       "type": 0,
       "value": "ไม่มีอะไรเกิดขึ้นใช่ไหม แสดงว่ายังไม่ได้ติดตั้งแอป ดำเนินการต่อด้านล่างได้"
+    }
+  ],
+  "web.auth.invite.appProviderOnly": [
+    {
+      "type": 0,
+      "value": "เซิร์ฟเวอร์ "
+    },
+    {
+      "type": 1,
+      "value": "server"
+    },
+    {
+      "type": 0,
+      "value": " เพิ่มผู้ใช้ผ่านผู้ให้บริการลงชื่อเข้าใช้ของเซิร์ฟเวอร์ โปรดลงชื่อเข้าใช้ด้วยผู้ให้บริการนั้นในเว็บไซต์นี้ แล้วเปิด Silo จากการตั้งค่าบัญชี"
     }
   ],
   "web.auth.invite.created": [
@@ -86401,6 +88012,18 @@
       "value": "ป้อนอีเมลและตั้งรหัสผ่าน คุณจะลงชื่อเข้าใช้ด้วยอีเมล"
     }
   ],
+  "web.auth.invite.descriptionWithApp": [
+    {
+      "type": 0,
+      "value": "เข้าร่วมด้วยแอป Silo บนโทรศัพท์หรือแท็บเล็ต หรือตั้งรหัสผ่านเพื่อลงชื่อเข้าใช้"
+    }
+  ],
+  "web.auth.invite.emailOptional": [
+    {
+      "type": 0,
+      "value": "อีเมล (ไม่บังคับ)"
+    }
+  ],
   "web.auth.invite.emailPlaceholder": [
     {
       "type": 0,
@@ -86421,6 +88044,18 @@
     {
       "type": 1,
       "value": "inviter"
+    }
+  ],
+  "web.auth.invite.joinWithApp": [
+    {
+      "type": 0,
+      "value": "เข้าร่วมด้วยแอป Silo"
+    }
+  ],
+  "web.auth.invite.joinWithAppInstead": [
+    {
+      "type": 0,
+      "value": "เข้าร่วมด้วยแอป Silo แทน"
     }
   ],
   "web.auth.invite.loadFailed": [
@@ -86521,6 +88156,30 @@
     {
       "type": 0,
       "value": "คำเชิญใช้ไม่ได้"
+    }
+  ],
+  "web.auth.invite.usePassword": [
+    {
+      "type": 0,
+      "value": "ใช้รหัสผ่านแทน"
+    }
+  ],
+  "web.auth.invite.usernameIsAddress": [
+    {
+      "type": 0,
+      "value": "ชื่อผู้ใช้ที่มี @ ต้องเป็นอีเมลที่คุณป้อนด้านล่าง"
+    }
+  ],
+  "web.auth.invite.usernameRequired": [
+    {
+      "type": 0,
+      "value": "โปรดเลือกชื่อผู้ใช้"
+    }
+  ],
+  "web.auth.invite.usernameTaken": [
+    {
+      "type": 0,
+      "value": "ชื่อผู้ใช้นี้มีผู้ใช้แล้ว โปรดเลือกชื่ออื่น"
     }
   ],
   "web.auth.languagePicker.label": [
@@ -87403,6 +89062,126 @@
     {
       "type": 0,
       "value": "ลงชื่อเข้าใช้"
+    }
+  ],
+  "web.auth.signInLink.backToCode": [
+    {
+      "type": 0,
+      "value": "กลับไปที่รหัส"
+    }
+  ],
+  "web.auth.signInLink.codeExpired": [
+    {
+      "type": 0,
+      "value": "โปรดขอลิงก์ใหม่จากผู้ดูแลระบบของเซิร์ฟเวอร์นี้เพื่อรับรหัสอีกครั้ง"
+    }
+  ],
+  "web.auth.signInLink.documentTitle": [
+    {
+      "type": 0,
+      "value": "ลิงก์ลงชื่อเข้าใช้"
+    }
+  ],
+  "web.auth.signInLink.failed": [
+    {
+      "type": 0,
+      "value": "Silo เปิดลิงก์นี้ไม่ได้ โปรดลองอีกครั้ง"
+    }
+  ],
+  "web.auth.signInLink.installFirst": [
+    {
+      "type": 0,
+      "value": "ลิงก์นี้ใช้ได้ครั้งเดียว และรหัสจะใช้ได้เพียงไม่กี่นาที โปรดติดตั้งแอป Silo บนโทรศัพท์หรือแท็บเล็ตก่อน แล้วกด “ดำเนินการต่อ”"
+    }
+  ],
+  "web.auth.signInLink.intro": [
+    {
+      "type": 0,
+      "value": "ผู้ดูแลระบบส่งลิงก์นี้ให้คุณเพื่อให้ลงชื่อเข้าใช้ได้อีกครั้ง ดำเนินการต่อเพื่อรับรหัสสำหรับแอป Silo หรือเพื่อตั้งรหัสผ่าน"
+    }
+  ],
+  "web.auth.signInLink.keepOpen": [
+    {
+      "type": 0,
+      "value": "เปิดหน้านี้ไว้จนกว่าจะเสร็จ ลิงก์นี้ใช้ไปแล้ว การโหลดซ้ำหรือออกจากหน้านี้จะทำให้สิ่งที่ได้จากลิงก์หายไป"
+    }
+  ],
+  "web.auth.signInLink.leaveAction": [
+    {
+      "type": 0,
+      "value": "ออก"
+    }
+  ],
+  "web.auth.signInLink.leaveDescription": [
+    {
+      "type": 0,
+      "value": "ลิงก์นี้ใช้ไปแล้ว หากออกจากหน้านี้ รหัสสำหรับแอป Silo และโอกาสในการตั้งรหัสผ่านจะหายไป และคุณจะต้องใช้ลิงก์ใหม่"
+    }
+  ],
+  "web.auth.signInLink.leaveTitle": [
+    {
+      "type": 0,
+      "value": "ออกจากหน้านี้ใช่ไหม"
+    }
+  ],
+  "web.auth.signInLink.noCodeAdministrator": [
+    {
+      "type": 0,
+      "value": "นี่คือบัญชีของผู้ดูแลระบบ ลิงก์นี้จึงใช้ตั้งรหัสผ่านได้เท่านั้น โปรดตั้งรหัสผ่าน ลงชื่อเข้าใช้ในเว็บไซต์ของเซิร์ฟเวอร์นี้ แล้วเปิดแอป Silo จากการตั้งค่าบัญชีในเว็บไซต์นั้น"
+    }
+  ],
+  "web.auth.signInLink.noCodeAppKeysOff": [
+    {
+      "type": 0,
+      "value": "ขณะนี้แอป Silo ลงชื่อเข้าใช้เซิร์ฟเวอร์นี้ไม่ได้ ลิงก์นี้จึงใช้ตั้งรหัสผ่านได้เท่านั้น"
+    }
+  ],
+  "web.auth.signInLink.passwordDescription": [
+    {
+      "type": 0,
+      "value": "การบันทึกจะทำให้บัญชีนี้ออกจากระบบในทุกอุปกรณ์ อุปกรณ์ที่ลงชื่อเข้าใช้ด้วยแอป Silo จะลงชื่อเข้าใช้อีกครั้งเอง"
+    }
+  ],
+  "web.auth.signInLink.passwordSet": [
+    {
+      "type": 0,
+      "value": "บันทึกรหัสผ่านแล้ว โปรดลงชื่อเข้าใช้ด้วยรหัสผ่านนี้"
+    }
+  ],
+  "web.auth.signInLink.passwordSetLostDevices": [
+    {
+      "type": 0,
+      "value": "อุปกรณ์ที่หายซึ่งใช้แอป Silo จะยังลงชื่อเข้าใช้ได้จนกว่าคุณจะนำออก หลังจากลงชื่อเข้าใช้แล้ว ให้นำอุปกรณ์เหล่านั้นออกจากรายการอุปกรณ์ในการตั้งค่าบัญชี"
+    }
+  ],
+  "web.auth.signInLink.passwordTitle": [
+    {
+      "type": 0,
+      "value": "ตั้งรหัสผ่าน"
+    }
+  ],
+  "web.auth.signInLink.providerRequired": [
+    {
+      "type": 0,
+      "value": "เซิร์ฟเวอร์นี้ให้ผู้ใช้ลงชื่อเข้าใช้ผ่านผู้ให้บริการลงชื่อเข้าใช้ ลิงก์นี้จึงใช้ไม่ได้ โปรดลงชื่อเข้าใช้ด้วยผู้ให้บริการแทน"
+    }
+  ],
+  "web.auth.signInLink.setPasswordInstead": [
+    {
+      "type": 0,
+      "value": "ตั้งรหัสผ่านแทน"
+    }
+  ],
+  "web.auth.signInLink.title": [
+    {
+      "type": 0,
+      "value": "กลับเข้าสู่บัญชี"
+    }
+  ],
+  "web.auth.signInLink.unavailable": [
+    {
+      "type": 0,
+      "value": "ลิงก์นี้ใช้ไปแล้ว มีลิงก์ใหม่กว่ามาแทนแล้ว หรือหมดอายุแล้ว โปรดขอลิงก์ใหม่จากผู้ดูแลระบบของเซิร์ฟเวอร์นี้"
     }
   ],
   "web.auth.signup.closed": [
@@ -123532,7 +125311,7 @@
   "web.settings.account.password.signOutOthersDescription": [
     {
       "type": 0,
-      "value": "เบราว์เซอร์และแอปอื่นต้องลงชื่อเข้าใช้อีกครั้งด้วยรหัสผ่านใหม่ เบราว์เซอร์นี้จะยังลงชื่อเข้าใช้อยู่ และคีย์ API จะยังใช้งานได้"
+      "value": "เบราว์เซอร์และแอปอื่นจะออกจากระบบ เบราว์เซอร์นี้จะยังลงชื่อเข้าใช้อยู่ และคีย์ API จะยังใช้งานได้"
     }
   ],
   "web.settings.account.password.title": [
@@ -124385,6 +126164,500 @@
     {
       "type": 0,
       "value": "วิธีใช้คีย์นี้"
+    }
+  ],
+  "web.settings.appKeys.actionFailed": [
+    {
+      "type": 0,
+      "value": "ทำการเปลี่ยนแปลงนั้นไม่ได้ โปรดลองอีกครั้ง"
+    }
+  ],
+  "web.settings.appKeys.approveMainOnly": [
+    {
+      "type": 0,
+      "value": "โปรไฟล์หลักของครัวเรือนเท่านั้นที่อนุมัติอุปกรณ์ได้ สลับไปใช้โปรไฟล์หลักเพื่ออนุมัติ"
+    }
+  ],
+  "web.settings.appKeys.approved": [
+    {
+      "type": 0,
+      "value": "อนุมัติ "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " แล้ว"
+    }
+  ],
+  "web.settings.appKeys.confirm.approve": [
+    {
+      "type": 0,
+      "value": "อนุมัติอุปกรณ์"
+    }
+  ],
+  "web.settings.appKeys.confirm.approveDescription": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " จะลงชื่อเข้าใช้บัญชีของคุณด้วยแอป Silo ได้จนกว่าคุณจะนำออก อนุมัติเฉพาะเมื่อคุณเพิ่งตั้งค่าอุปกรณ์นี้เท่านั้น"
+    }
+  ],
+  "web.settings.appKeys.confirm.approveTitle": [
+    {
+      "type": 0,
+      "value": "อนุมัติ "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " ใช่ไหม"
+    }
+  ],
+  "web.settings.appKeys.confirm.deny": [
+    {
+      "type": 0,
+      "value": "ปฏิเสธอุปกรณ์"
+    }
+  ],
+  "web.settings.appKeys.confirm.denyDescription": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " จะลงชื่อเข้าใช้บัญชีของคุณไม่ได้ หากเป็นอุปกรณ์ของคุณ ให้เพิ่มอีกครั้งในแอป Silo"
+    }
+  ],
+  "web.settings.appKeys.confirm.denyTitle": [
+    {
+      "type": 0,
+      "value": "ปฏิเสธ "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " ใช่ไหม"
+    }
+  ],
+  "web.settings.appKeys.confirm.remove": [
+    {
+      "type": 0,
+      "value": "นำอุปกรณ์ออก"
+    }
+  ],
+  "web.settings.appKeys.confirm.removeDescription": [
+    {
+      "type": 0,
+      "value": "การนำ "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " ออกจะทำให้อุปกรณ์ออกจากระบบทันทีและหยุดคีย์ของอุปกรณ์ จึงลงชื่อเข้าใช้ด้วยคีย์นั้นอีกไม่ได้ หากต้องการใช้อีกครั้ง ให้เพิ่มอีกครั้งในแอป Silo"
+    }
+  ],
+  "web.settings.appKeys.confirm.removeTitle": [
+    {
+      "type": 0,
+      "value": "นำ "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " ออกใช่ไหม"
+    }
+  ],
+  "web.settings.appKeys.confirm.withdraw": [
+    {
+      "type": 0,
+      "value": "ถอนการอนุมัติ"
+    }
+  ],
+  "web.settings.appKeys.confirm.withdrawDescription": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " จะใช้การอนุมัตินี้เพื่อลงชื่อเข้าใช้บัญชีของคุณไม่ได้"
+    }
+  ],
+  "web.settings.appKeys.confirm.withdrawTitle": [
+    {
+      "type": 0,
+      "value": "ถอนการอนุมัติสำหรับ "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " ใช่ไหม"
+    }
+  ],
+  "web.settings.appKeys.confirm.working": [
+    {
+      "type": 0,
+      "value": "กำลังบันทึก…"
+    }
+  ],
+  "web.settings.appKeys.denied": [
+    {
+      "type": 0,
+      "value": "ปฏิเสธ "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " แล้ว"
+    }
+  ],
+  "web.settings.appKeys.description": [
+    {
+      "type": 0,
+      "value": "อุปกรณ์และแอปที่ลงชื่อเข้าใช้บัญชีของคุณด้วยแอป Silo โดยไม่ต้องใช้รหัสผ่าน"
+    }
+  ],
+  "web.settings.appKeys.devices.title": [
+    {
+      "type": 0,
+      "value": "อุปกรณ์"
+    }
+  ],
+  "web.settings.appKeys.empty": [
+    {
+      "type": 0,
+      "value": "ไม่มีอุปกรณ์ที่ใช้แอป Silo ในบัญชีของคุณ"
+    }
+  ],
+  "web.settings.appKeys.footnote": [
+    {
+      "type": 0,
+      "value": "การนำอุปกรณ์ออกจะทำให้อุปกรณ์ออกจากระบบและคีย์ของอุปกรณ์ใช้งานไม่ได้อีก การออกจากระบบเซสชันไม่ได้นำอุปกรณ์ออก อุปกรณ์จะลงชื่อเข้าใช้อีกครั้งด้วยคีย์ของตัวเอง"
+    }
+  ],
+  "web.settings.appKeys.loadFailed": [
+    {
+      "type": 0,
+      "value": "โหลดอุปกรณ์ไม่ได้"
+    }
+  ],
+  "web.settings.appKeys.loading": [
+    {
+      "type": 0,
+      "value": "กำลังโหลดอุปกรณ์…"
+    }
+  ],
+  "web.settings.appKeys.off": [
+    {
+      "type": 0,
+      "value": "การลงชื่อเข้าใช้ด้วยแอป Silo ปิดอยู่ในเซิร์ฟเวอร์นี้ อุปกรณ์เหล่านี้จึงลงชื่อเข้าใช้ไม่ได้ และอนุมัติอุปกรณ์ที่รออยู่ไม่ได้ คุณยังนำอุปกรณ์ออกได้"
+    }
+  ],
+  "web.settings.appKeys.personKey.description": [
+    {
+      "type": 0,
+      "value": "แอป Silo ใช้คีย์นี้เพื่อเพิ่มอุปกรณ์ใหม่ของคุณ ตั้งค่าเมื่อ "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.settings.appKeys.personKey.none": [
+    {
+      "type": 0,
+      "value": "ไม่มีคีย์บัญชี แอป Silo จะตั้งค่าคีย์ในครั้งถัดไปที่คุณเพิ่มอุปกรณ์ขณะลงชื่อเข้าใช้อยู่"
+    }
+  ],
+  "web.settings.appKeys.personKey.title": [
+    {
+      "type": 0,
+      "value": "คีย์บัญชี"
+    }
+  ],
+  "web.settings.appKeys.pinDescription": [
+    {
+      "type": 0,
+      "value": "ป้อน PIN ของโปรไฟล์หลักเพื่ออนุมัติอุปกรณ์นี้"
+    }
+  ],
+  "web.settings.appKeys.preapprovals.description": [
+    {
+      "type": 0,
+      "value": "การลงชื่อเข้าใช้ที่คุณอนุมัติให้อุปกรณ์ที่ยังไม่ได้เชื่อมต่อ"
+    }
+  ],
+  "web.settings.appKeys.preapprovals.loadFailed": [
+    {
+      "type": 0,
+      "value": "โหลดการลงชื่อเข้าใช้ที่อนุมัติล่วงหน้าไม่ได้"
+    }
+  ],
+  "web.settings.appKeys.preapprovals.title": [
+    {
+      "type": 0,
+      "value": "อนุมัติล่วงหน้าแล้ว"
+    }
+  ],
+  "web.settings.appKeys.refreshLabel": [
+    {
+      "type": 0,
+      "value": "รีเฟรชอุปกรณ์แอป Silo"
+    }
+  ],
+  "web.settings.appKeys.removed": [
+    {
+      "type": 0,
+      "value": "นำ "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " ออกแล้ว"
+    }
+  ],
+  "web.settings.appKeys.row.allowedBy": [
+    {
+      "type": 0,
+      "value": "อนุญาตโดย "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "web.settings.appKeys.row.approve": [
+    {
+      "type": 0,
+      "value": "อนุมัติ"
+    }
+  ],
+  "web.settings.appKeys.row.approveLabel": [
+    {
+      "type": 0,
+      "value": "อนุมัติ "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.row.deny": [
+    {
+      "type": 0,
+      "value": "ปฏิเสธ"
+    }
+  ],
+  "web.settings.appKeys.row.denyLabel": [
+    {
+      "type": 0,
+      "value": "ปฏิเสธ "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.row.enrolledFrom": [
+    {
+      "type": 0,
+      "value": "จาก "
+    },
+    {
+      "type": 1,
+      "value": "address"
+    }
+  ],
+  "web.settings.appKeys.row.identityGone": [
+    {
+      "type": 0,
+      "value": "ลงชื่อเข้าใช้ไม่ได้: บัญชีผู้ให้บริการลงชื่อเข้าใช้ของอุปกรณ์นี้ไม่ได้ลิงก์อยู่แล้ว"
+    }
+  ],
+  "web.settings.appKeys.row.kindApp": [
+    {
+      "type": 0,
+      "value": "แอปอื่น"
+    }
+  ],
+  "web.settings.appKeys.row.kindDevice": [
+    {
+      "type": 0,
+      "value": "แอป Silo"
+    }
+  ],
+  "web.settings.appKeys.row.lastUsed": [
+    {
+      "type": 0,
+      "value": "ลงชื่อเข้าใช้ล่าสุดเมื่อ "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.settings.appKeys.row.notUsed": [
+    {
+      "type": 0,
+      "value": "ยังไม่ได้ลงชื่อเข้าใช้ด้วยคีย์ของอุปกรณ์"
+    }
+  ],
+  "web.settings.appKeys.row.preapproval": [
+    {
+      "type": 0,
+      "value": "อนุมัติล่วงหน้าแล้ว · หมดอายุ "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.settings.appKeys.row.provider": [
+    {
+      "type": 0,
+      "value": "ตรวจสอบกับผู้ให้บริการลงชื่อเข้าใช้แล้ว"
+    }
+  ],
+  "web.settings.appKeys.row.remove": [
+    {
+      "type": 0,
+      "value": "นำออก"
+    }
+  ],
+  "web.settings.appKeys.row.removeLabel": [
+    {
+      "type": 0,
+      "value": "นำ "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " ออก"
+    }
+  ],
+  "web.settings.appKeys.row.viaAppCode": [
+    {
+      "type": 0,
+      "value": "เพิ่มด้วยรหัสแบบใช้ครั้งเดียวจากหน้าเว็บของเซิร์ฟเวอร์"
+    }
+  ],
+  "web.settings.appKeys.row.viaPersonKey": [
+    {
+      "type": 0,
+      "value": "เพิ่มโดยแอป Silo ในอุปกรณ์อื่น"
+    }
+  ],
+  "web.settings.appKeys.row.viaSession": [
+    {
+      "type": 0,
+      "value": "เพิ่มขณะลงชื่อเข้าใช้อยู่"
+    }
+  ],
+  "web.settings.appKeys.row.waitingUntil": [
+    {
+      "type": 0,
+      "value": "รอการอนุมัติจนถึง "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.settings.appKeys.row.withdraw": [
+    {
+      "type": 0,
+      "value": "ถอน"
+    }
+  ],
+  "web.settings.appKeys.row.withdrawLabel": [
+    {
+      "type": 0,
+      "value": "ถอนการอนุมัติสำหรับ "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.signsBackIn": [
+    {
+      "type": 0,
+      "value": "อุปกรณ์ที่ลงชื่อเข้าใช้ด้วยแอป Silo จะลงชื่อเข้าใช้อีกครั้งเอง "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "นำอุปกรณ์ออก"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "เพื่อหยุดการลงชื่อเข้าใช้"
+    }
+  ],
+  "web.settings.appKeys.title": [
+    {
+      "type": 0,
+      "value": "อุปกรณ์แอป Silo"
+    }
+  ],
+  "web.settings.appKeys.unavailable": [
+    {
+      "type": 0,
+      "value": "การลงชื่อเข้าใช้ด้วยแอป Silo ใช้ไม่ได้ในเซิร์ฟเวอร์นี้ อุปกรณ์เหล่านี้จึงลงชื่อเข้าใช้ไม่ได้ คุณยังนำอุปกรณ์ออกได้"
+    }
+  ],
+  "web.settings.appKeys.waiting.description": [
+    {
+      "type": 0,
+      "value": "อุปกรณ์ใหม่ขอลงชื่อเข้าใช้บัญชีของคุณด้วยแอป Silo อนุมัติเฉพาะเมื่อคุณเพิ่งตั้งค่าอุปกรณ์นี้เท่านั้น"
+    }
+  ],
+  "web.settings.appKeys.waiting.title": [
+    {
+      "type": 0,
+      "value": "รอการอนุมัติจากคุณ"
+    }
+  ],
+  "web.settings.appKeys.withdrawn": [
+    {
+      "type": 0,
+      "value": "ถอนการอนุมัติแล้ว"
     }
   ],
   "web.settings.cardOverlay.adjust": [
@@ -129217,6 +131490,54 @@
       "value": "คุณออฟไลน์อยู่ จึงไม่ได้บันทึกการเปลี่ยนแปลงนี้"
     }
   ],
+  "web.settings.openInSilo.action": [
+    {
+      "type": 0,
+      "value": "รับรหัสสำหรับแอป Silo"
+    }
+  ],
+  "web.settings.openInSilo.codeInstructions": [
+    {
+      "type": 0,
+      "value": "ในแอป Silo บนโทรศัพท์หรือแท็บเล็ต ให้เพิ่มเซิร์ฟเวอร์นี้ด้วยที่อยู่ของเซิร์ฟเวอร์และพิมพ์รหัสนี้ ทุกคนที่มีรหัสนี้จะลงชื่อเข้าใช้บัญชีนี้ได้ ดังนั้นอย่าแชร์รหัส"
+    }
+  ],
+  "web.settings.openInSilo.codeTitle": [
+    {
+      "type": 0,
+      "value": "รหัสสำหรับแอป Silo"
+    }
+  ],
+  "web.settings.openInSilo.description": [
+    {
+      "type": 0,
+      "value": "ลงชื่อเข้าใช้บัญชีนี้ในแอป Silo บนโทรศัพท์หรือแท็บเล็ตโดยไม่ต้องใช้รหัสผ่าน"
+    }
+  ],
+  "web.settings.openInSilo.loadFailed": [
+    {
+      "type": 0,
+      "value": "ตรวจสอบไม่ได้ว่าเบราว์เซอร์นี้รับรหัสสำหรับแอป Silo ได้หรือไม่"
+    }
+  ],
+  "web.settings.openInSilo.mainProfileOnly": [
+    {
+      "type": 0,
+      "value": "โปรไฟล์หลักของครัวเรือนเท่านั้นที่รับรหัสสำหรับแอป Silo ได้ สลับไปใช้โปรไฟล์หลักแล้วลองอีกครั้ง"
+    }
+  ],
+  "web.settings.openInSilo.pinDescription": [
+    {
+      "type": 0,
+      "value": "ป้อน PIN ของโปรไฟล์หลักเพื่อรับรหัสสำหรับแอป Silo"
+    }
+  ],
+  "web.settings.openInSilo.title": [
+    {
+      "type": 0,
+      "value": "แอป Silo"
+    }
+  ],
   "web.settings.overlays.accent.amber": [
     {
       "type": 0,
@@ -132034,6 +134355,12 @@
       "value": "ลงชื่อเข้าใช้เมื่อ"
     }
   ],
+  "web.settings.sessions.row.signsBackIn": [
+    {
+      "type": 0,
+      "value": "อุปกรณ์นี้ลงชื่อเข้าใช้อีกครั้งเอง"
+    }
+  ],
   "web.settings.sessions.row.summary": [
     {
       "type": 8,
@@ -132116,6 +134443,24 @@
     {
       "type": 0,
       "value": "การตั้งค่า"
+    }
+  ],
+  "web.settings.signInAgain.action": [
+    {
+      "type": 0,
+      "value": "ลงชื่อเข้าใช้อีกครั้ง"
+    }
+  ],
+  "web.settings.signInAgain.manageDevices": [
+    {
+      "type": 0,
+      "value": "ลงชื่อเข้าใช้อีกครั้งเพื่อจัดการอุปกรณ์"
+    }
+  ],
+  "web.settings.signInAgain.useApp": [
+    {
+      "type": 0,
+      "value": "จัดการอุปกรณ์ในแอป Silo"
     }
   ],
   "web.settings.signedInSessions.loadFailed": [

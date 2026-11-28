@@ -60,6 +60,9 @@ func registerPlaybackBandwidthProbe(reg *Registry) {
 		"Download random bytes to measure throughput to this server. Clients time the transfer and send the result as bandwidth_estimate_kbps; the bytes count as transfer egress, not playback. A server runs at most 4 probes at once; an account may run two of them and draw up to 2,000,000,000 bytes per 10 minutes. Beyond any limit the request gets 429 with Retry-After.")
 	op.Parameters = append(params, &huma.Param{Name: "media_path", In: playbackParamQuery, Description: "Use the client media egress route.", Schema: &huma.Schema{Type: huma.TypeBoolean}},
 		&huma.Param{Name: playbackMediaTransportParam, In: playbackParamQuery, Description: "The transport the client asks the probe to measure: regular or direct. Omitted means regular.", Schema: &huma.Schema{Type: huma.TypeString, Enum: []any{playback.MediaTransportRegularV3, playback.MediaTransportDirectV3}}})
+	op.Parameters = append(op.Parameters, &huma.Param{Name: playbackDeviceIDHeader, In: playbackParamHeader,
+		Description: "The client's stable device identifier. A device the server holds a direct enrollment for names itself here so the probe is measured, and receipted, on the path its media takes. Optional.",
+		Schema:      &huma.Schema{Type: huma.TypeString, MaxLength: new(128)}})
 	op.Responses = responses
 	raw := RawOperation{Operation: Operation{Operation: op, Class: ClassAuthenticated}, Protocol: "bandwidth-probe",
 		Reason: "A throughput measurement needs an unbuffered, uncompressible byte stream the client can time and abandon mid-transfer."}

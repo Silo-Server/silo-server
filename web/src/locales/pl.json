@@ -215,6 +215,12 @@
       "value": "To jest już połączone z tym kontem."
     }
   ],
+  "error.app_code_invalid": [
+    {
+      "type": 0,
+      "value": "Ten kod jest nieznany, został już użyty lub wygasł. Pobierz nowy ze strony serwera."
+    }
+  ],
   "error.authentication_required": [
     {
       "type": 0,
@@ -333,6 +339,12 @@
     {
       "type": 0,
       "value": "Ta wartość ma nieprawidłowy typ."
+    }
+  ],
+  "error.field.key_enrolled": [
+    {
+      "type": 0,
+      "value": "Ten klucz jest już używany na tym serwerze."
     }
   ],
   "error.field.malformed_form": [
@@ -2587,6 +2599,30 @@
     {
       "type": 0,
       "value": "Automatycznie"
+    }
+  ],
+  "settingsManifest.playback.connection_path.description": [
+    {
+      "type": 0,
+      "value": "Przy opcji Tylko bezpośrednio nadal używane jest połączenie w sieci lokalnej, gdy jest dostępne."
+    }
+  ],
+  "settingsManifest.playback.connection_path.label": [
+    {
+      "type": 0,
+      "value": "Ścieżka połączenia"
+    }
+  ],
+  "settingsManifest.playback.connection_path.option.automatic": [
+    {
+      "type": 0,
+      "value": "Automatycznie"
+    }
+  ],
+  "settingsManifest.playback.connection_path.option.direct_only": [
+    {
+      "type": 0,
+      "value": "Tylko bezpośrednio"
     }
   ],
   "settingsManifest.playback.intro_skip_mode.description": [
@@ -28895,6 +28931,87 @@
       }
     }
   ],
+  "web.admin.common.adminUserSignIn.unlinkConfirm.text": [
+    {
+      "type": 5,
+      "value": "last_way",
+      "options": {
+        "yes": {
+          "value": [
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " nie może już logować się przez to konto u dostawcy. "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " nie zaloguje się, dopóki nie ustawisz hasła lub ponownie nie połączysz dostawcy."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " nie może już logować się przez to konto u dostawcy."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 5,
+      "value": "keys",
+      "options": {
+        "yes": {
+          "value": [
+            {
+              "type": 0,
+              "value": " Klucze aplikacji Silo konta "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " powiązane z tym kontem u dostawcy zostaną usunięte, a te urządzenia wylogowane."
+            }
+          ]
+        },
+        "unknown": {
+          "value": [
+            {
+              "type": 0,
+              "value": " Jeśli konto "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " ma klucze aplikacji Silo powiązane z tym kontem u dostawcy, zostaną one usunięte, a te urządzenia wylogowane."
+            }
+          ]
+        },
+        "other": {
+          "value": []
+        }
+      }
+    }
+  ],
   "web.admin.common.adminUserSignIn.unlinkConfirm.title": [
     {
       "type": 0,
@@ -31569,6 +31686,18 @@
     {
       "type": 0,
       "value": "Tworzy miniatury wyświetlane przez odtwarzacze podczas przewijania, w skonfigurowanym publicznym magazynie zasobów. Pliki są przetwarzane w tle z niskim priorytetem. Wyłączenie tej opcji usuwa podglądy biblioteki."
+    }
+  ],
+  "web.admin.common.libraryEditor.advanced.trickplayGenerate": [
+    {
+      "type": 0,
+      "value": "Generuj brakujące podglądy za pomocą FFmpeg"
+    }
+  ],
+  "web.admin.common.libraryEditor.advanced.trickplayGenerateDescription": [
+    {
+      "type": 0,
+      "value": "Najpierw używane są istniejące pliki towarzyszące .trickplay i .bif znajdujące się obok plików multimedialnych. Wyłącz tę opcję, aby tylko importować pliki towarzyszące i pominąć generowanie przez FFmpeg."
     }
   ],
   "web.admin.common.libraryEditor.advanced.trickplayUnavailable": [
@@ -36567,6 +36696,64 @@
       "value": "Administracja: użytkownicy"
     }
   ],
+  "web.admin.common.trickplay.badge.awaitingSidecarCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " plik oczekuje na plik towarzyszący"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " pliki oczekują na plik towarzyszący"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " plików oczekuje na plik towarzyszący"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " pliku oczekuje na plik towarzyszący"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.common.trickplay.badge.detail": [
     {
       "type": 0,
@@ -36769,6 +36956,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.common.trickplay.badge.sidecarsOnly": [
+    {
+      "type": 0,
+      "value": "tylko pliki towarzyszące"
     }
   ],
   "web.admin.common.trickplay.badge.srDetail": [
@@ -36981,6 +37174,42 @@
     {
       "type": 0,
       "value": "Odtwarzacze używają obecnych podglądów, dopóki nowe nie będą gotowe."
+    }
+  ],
+  "web.admin.common.trickplay.sidecarStatus.awaiting_sidecar": [
+    {
+      "type": 0,
+      "value": "Oczekuje na plik towarzyszący"
+    }
+  ],
+  "web.admin.common.trickplay.sidecarStatus.sidecar_invalid": [
+    {
+      "type": 0,
+      "value": "Nieprawidłowy plik towarzyszący"
+    }
+  ],
+  "web.admin.common.trickplay.sidecarStatus.sidecar_stale": [
+    {
+      "type": 0,
+      "value": "Nieaktualny plik towarzyszący"
+    }
+  ],
+  "web.admin.common.trickplay.source.generated": [
+    {
+      "type": 0,
+      "value": "Wygenerowano"
+    }
+  ],
+  "web.admin.common.trickplay.source.sidecar_bif": [
+    {
+      "type": 0,
+      "value": "Plik towarzyszący (.bif)"
+    }
+  ],
+  "web.admin.common.trickplay.source.sidecar_trickplay": [
+    {
+      "type": 0,
+      "value": "Plik towarzyszący (.trickplay)"
     }
   ],
   "web.admin.common.trickplay.state.off": [
@@ -39250,7 +39479,7 @@
     },
     {
       "type": 0,
-      "value": "). Pozostałe urządzenia tego konta pozostaną zalogowane. Klient może zalogować się ponownie przy użyciu hasła do konta."
+      "value": "). Pozostałe urządzenia tego konta pozostaną zalogowane. Klient może zalogować się ponownie."
     }
   ],
   "web.admin.dashboard.widgets.apiClients.confirmLabel": [
@@ -54908,6 +55137,12 @@
       "value": "Profil"
     }
   ],
+  "web.admin.history.column.progress": [
+    {
+      "type": 0,
+      "value": "Postęp"
+    }
+  ],
   "web.admin.history.column.status": [
     {
       "type": 0,
@@ -54942,6 +55177,12 @@
     {
       "type": 0,
       "value": "Logi sesji"
+    }
+  ],
+  "web.admin.history.detail.backToPlay": [
+    {
+      "type": 0,
+      "value": "Wróć do połączonego odtworzenia"
     }
   ],
   "web.admin.history.detail.column.delivered": [
@@ -55052,6 +55293,12 @@
       "value": "Czas oglądania"
     }
   ],
+  "web.admin.history.detail.inspectSitting": [
+    {
+      "type": 0,
+      "value": "Sprawdź"
+    }
+  ],
   "web.admin.history.detail.keyboardHint": [
     {
       "type": 0,
@@ -55136,6 +55383,12 @@
       "value": "Dlaczego nie było odtwarzania bezpośredniego"
     }
   ],
+  "web.admin.history.detail.section.sessions": [
+    {
+      "type": 0,
+      "value": "Sesje w tym odtworzeniu"
+    }
+  ],
   "web.admin.history.detail.section.streams": [
     {
       "type": 0,
@@ -55146,6 +55399,126 @@
     {
       "type": 0,
       "value": "Czas i postęp oglądania"
+    }
+  ],
+  "web.admin.history.detail.sessionsCapped": [
+    {
+      "type": 0,
+      "value": "Wyświetlono pierwsze "
+    },
+    {
+      "type": 1,
+      "value": "shown"
+    },
+    {
+      "type": 0,
+      "value": " z "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": " sesji w tym odtworzeniu."
+    }
+  ],
+  "web.admin.history.detail.sessionsNotice": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "To odtworzenie obejmuje "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " sesję. Poniższe szczegóły strumienia, urządzenia i trasy dotyczą tej sesji."
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "To odtworzenie obejmuje "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " sesje. Poniższe szczegóły strumienia, urządzenia i trasy dotyczą sesji głównej; wybierz dowolną sesję poniżej, aby sprawdzić ją osobno."
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "To odtworzenie obejmuje "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " sesji. Poniższe szczegóły strumienia, urządzenia i trasy dotyczą sesji głównej; wybierz dowolną sesję poniżej, aby sprawdzić ją osobno."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "To odtworzenie obejmuje "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " sesji. Poniższe szczegóły strumienia, urządzenia i trasy dotyczą sesji głównej; wybierz dowolną sesję poniżej, aby sprawdzić ją osobno."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.ended": [
+    {
+      "type": 0,
+      "value": "Zakończenie"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.method": [
+    {
+      "type": 0,
+      "value": "Metoda"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.started": [
+    {
+      "type": 0,
+      "value": "Rozpoczęcie"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.watched": [
+    {
+      "type": 0,
+      "value": "Czas oglądania"
     }
   ],
   "web.admin.history.detail.subtitlesBurnIn": [
@@ -55374,6 +55747,12 @@
       "value": "Wszystkie sieci"
     }
   ],
+  "web.admin.history.filter.allMediaTypes": [
+    {
+      "type": 0,
+      "value": "Wszystkie multimedia"
+    }
+  ],
   "web.admin.history.filter.allMethods": [
     {
       "type": 0,
@@ -55410,6 +55789,24 @@
       "value": "Ukończone"
     }
   ],
+  "web.admin.history.filter.episodes": [
+    {
+      "type": 0,
+      "value": "Odcinki"
+    }
+  ],
+  "web.admin.history.filter.hideShort": [
+    {
+      "type": 0,
+      "value": "Ukryj <30 s"
+    }
+  ],
+  "web.admin.history.filter.hideShortTitle": [
+    {
+      "type": 0,
+      "value": "Ukryj nieukończone sesje krótsze niż 30 sekund"
+    }
+  ],
   "web.admin.history.filter.locationLocal": [
     {
       "type": 0,
@@ -55420,6 +55817,12 @@
     {
       "type": 0,
       "value": "Zdalne"
+    }
+  ],
+  "web.admin.history.filter.movies": [
+    {
+      "type": 0,
+      "value": "Filmy"
     }
   ],
   "web.admin.history.filter.partial": [
@@ -55670,6 +56073,12 @@
       "value": "Ostatnie odtwarzania"
     }
   ],
+  "web.admin.history.row.burnInBadgeTitle": [
+    {
+      "type": 0,
+      "value": "Napisy wypalone w obrazie"
+    }
+  ],
   "web.admin.history.row.completed": [
     {
       "type": 0,
@@ -55690,6 +56099,80 @@
     {
       "type": 0,
       "value": "Szacunkowo (zarejestrowano przed wprowadzeniem dokładnego pomiaru czasu oglądania)"
+    }
+  ],
+  "web.admin.history.row.groupedSessionsTitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Połączono z "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " sesji"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Połączono z "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " sesji"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Połączono z "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " sesji"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Połączono z "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " sesji"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.history.row.meta": [
@@ -55722,6 +56205,12 @@
       "value": "Częściowe"
     }
   ],
+  "web.admin.history.row.progressLabel": [
+    {
+      "type": 0,
+      "value": "Postęp odtwarzania"
+    }
+  ],
   "web.admin.history.row.started": [
     {
       "type": 0,
@@ -55732,16 +56221,116 @@
       "value": "time"
     }
   ],
+  "web.admin.history.stats.accountsCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " konto"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " konta"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kont"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " konta"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.history.stats.completed": [
     {
       "type": 0,
       "value": "Ukończone"
     }
   ],
+  "web.admin.history.stats.completionBreakdown": [
+    {
+      "type": 0,
+      "value": "Ukończone: "
+    },
+    {
+      "type": 1,
+      "value": "completed"
+    },
+    {
+      "type": 0,
+      "value": " · częściowe: "
+    },
+    {
+      "type": 1,
+      "value": "partial"
+    }
+  ],
   "web.admin.history.stats.partial": [
     {
       "type": 0,
       "value": "Częściowe"
+    }
+  ],
+  "web.admin.history.stats.totalPlays": [
+    {
+      "type": 0,
+      "value": "Łączna liczba odtworzeń"
+    }
+  ],
+  "web.admin.history.stats.totalSessions": [
+    {
+      "type": 0,
+      "value": "Łączna liczba sesji"
+    }
+  ],
+  "web.admin.history.stats.uniqueProfiles": [
+    {
+      "type": 0,
+      "value": "Unikalne profile"
+    }
+  ],
+  "web.admin.history.stats.uniqueTitles": [
+    {
+      "type": 0,
+      "value": "Unikalne tytuły"
     }
   ],
   "web.admin.history.stats.visibleRows": [
@@ -55760,6 +56349,24 @@
     {
       "type": 0,
       "value": "Historia odtwarzania"
+    }
+  ],
+  "web.admin.history.view.label": [
+    {
+      "type": 0,
+      "value": "Widok historii"
+    }
+  ],
+  "web.admin.history.view.plays": [
+    {
+      "type": 0,
+      "value": "Odtworzenia"
+    }
+  ],
+  "web.admin.history.view.sessions": [
+    {
+      "type": 0,
+      "value": "Wszystkie sesje"
     }
   ],
   "web.admin.historyImport.conflict.message": [
@@ -103037,6 +103644,234 @@
       "value": ")"
     }
   ],
+  "web.admin.users.detail.appKeys.confirm.denyDescription": [
+    {
+      "type": 0,
+      "value": "Urządzenie "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " nie będzie mogło zalogować się na konto "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": ". Jeśli należy do tej osoby, może ona dodać je ponownie w aplikacji Silo."
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKey": [
+    {
+      "type": 0,
+      "value": "Usuń klucz"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKeyDescription": [
+    {
+      "type": 0,
+      "value": "Urządzenia, które są już zalogowane, działają, dopóki ich nie usuniesz. Za pomocą tego klucza nie można dodać żadnego nowego urządzenia, a oczekujące urządzenia dodane tym kluczem zostaną odrzucone. Aplikacja Silo konta "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " skonfiguruje nowy klucz przy następnym dodawaniu urządzenia po zalogowaniu."
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKeyTitle": [
+    {
+      "type": 0,
+      "value": "Usunąć klucz konta "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.removeDescription": [
+    {
+      "type": 0,
+      "value": "Usunięcie urządzenia "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " od razu wyloguje je z konta "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " i unieważni jego klucz: nie będzie mogło się nim ponownie zalogować. Aby znów z niego korzystać, trzeba ponownie dodać je w aplikacji Silo na koncie "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.withdrawDescription": [
+    {
+      "type": 0,
+      "value": "Urządzenie "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " nie będzie mogło użyć tego zatwierdzenia, aby zalogować się na konto "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.detail.appKeys.description": [
+    {
+      "type": 0,
+      "value": "Urządzenia i aplikacje logujące się na konto "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " przez aplikację Silo, bez hasła."
+    }
+  ],
+  "web.admin.users.detail.appKeys.empty": [
+    {
+      "type": 0,
+      "value": "Na tym koncie żadne urządzenie nie korzysta z aplikacji Silo."
+    }
+  ],
+  "web.admin.users.detail.appKeys.loadFailed": [
+    {
+      "type": 0,
+      "value": "Nie udało się wczytać urządzeń."
+    }
+  ],
+  "web.admin.users.detail.appKeys.off": [
+    {
+      "type": 0,
+      "value": "Logowanie przez aplikację Silo jest wyłączone na tym serwerze, więc te urządzenia nie mogą się zalogować. Nadal możesz je usunąć."
+    }
+  ],
+  "web.admin.users.detail.appKeys.ownerOnly": [
+    {
+      "type": 0,
+      "value": "Tylko właściciel serwera może zmieniać urządzenia innego administratora lub właściciela."
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.description": [
+    {
+      "type": 0,
+      "value": "Aplikacja Silo używa tego klucza do dodawania nowych urządzeń konta "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": ". Skonfigurowano: "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.none": [
+    {
+      "type": 0,
+      "value": "Brak klucza konta. Aplikacja Silo konta "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " skonfiguruje go przy następnym dodawaniu urządzenia po zalogowaniu."
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.remove": [
+    {
+      "type": 0,
+      "value": "Usuń klucz konta"
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKeyRemoved": [
+    {
+      "type": 0,
+      "value": "Usunięto klucz konta"
+    }
+  ],
+  "web.admin.users.detail.appKeys.preapprovals.description": [
+    {
+      "type": 0,
+      "value": "Logowania zatwierdzone z konta "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " dla urządzeń, które jeszcze się nie połączyły."
+    }
+  ],
+  "web.admin.users.detail.appKeys.waiting.description": [
+    {
+      "type": 0,
+      "value": "Nowe urządzenie na koncie administratora czeka, aż "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " zatwierdzi je na jednym ze swoich zalogowanych urządzeń. Możesz je tutaj odrzucić."
+    }
+  ],
+  "web.admin.users.detail.appKeys.waiting.title": [
+    {
+      "type": 0,
+      "value": "Oczekuje na zatwierdzenie"
+    }
+  ],
   "web.admin.users.detail.common.allProfiles": [
     {
       "type": 0,
@@ -107161,6 +107996,12 @@
       "value": "Konto osiągnęło limit profili"
     }
   ],
+  "web.admin.users.detail.profiles.badge.changedHere": [
+    {
+      "type": 0,
+      "value": "Zmieniono tutaj"
+    }
+  ],
   "web.admin.users.detail.profiles.badge.kids": [
     {
       "type": 0,
@@ -107358,6 +108199,656 @@
     {
       "type": 0,
       "value": "Zapisz PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowAgain": [
+    {
+      "type": 0,
+      "value": "Zezwól ponownie"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowAgainAria": [
+    {
+      "type": 0,
+      "value": "Pozwól, aby profil "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " wrócił na ten serwer"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowDescription": [
+    {
+      "type": 0,
+      "value": "Aplikacja tej osoby może ponownie dodać profil "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " przy następnej synchronizacji jako nowy profil bez historii z tego serwera, jeśli profile w aplikacji nadal obejmują profil "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": ", a na tym koncie jest miejsce na kolejny profil."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowTitle": [
+    {
+      "type": 0,
+      "value": "Ponownie zezwolić na profil "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.alreadyCleared": [
+    {
+      "type": 0,
+      "value": "Ta zmiana została już wyczyszczona albo ponownie zmieniono ją z konta "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ". Lista jest aktualna."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedBy": [
+    {
+      "type": 0,
+      "value": "Zmieniono z konta "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedSinceOpened": [
+    {
+      "type": 0,
+      "value": "Ta zmiana została zaktualizowana po jej otwarciu, więc nic nie wyczyszczono. Przeczytaj ją ponownie na liście, a potem wyczyść, jeśli nadal chcesz."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedWhileRunning": [
+    {
+      "type": 0,
+      "value": "Profile zmieniły się w trakcie tej operacji, więc nic nie zmieniono. Lista jest aktualna; spróbuj ponownie, jeśli nadal chcesz."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clear": [
+    {
+      "type": 0,
+      "value": "Wyczyść"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearAndRemovePin": [
+    {
+      "type": 0,
+      "value": "Wyczyść i usuń PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearAria": [
+    {
+      "type": 0,
+      "value": "Wyczyść zmianę pola "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " w profilu "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearFailed": [
+    {
+      "type": 0,
+      "value": "Nie udało się wyczyścić zmiany."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearInherit": [
+    {
+      "type": 0,
+      "value": "Pole "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " w profilu "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " wróci do wartości, którą ten profil obecnie dziedziczy, zgodnie z żądaniem aplikacji tej osoby. Zmiany z jej aplikacji znów będą do niego stosowane."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearLater": [
+    {
+      "type": 0,
+      "value": "Pole "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " pozostanie bez zmian, dopóki aplikacja tej osoby ponownie go nie wyśle. Potem zmiany z jej aplikacji znów będą do niego stosowane."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearNow": [
+    {
+      "type": 0,
+      "value": "Profil "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " od razu wróci do wartości z aplikacji tej osoby, a zmiany z jej aplikacji znów będą do niego stosowane."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearNowValue": [
+    {
+      "type": 0,
+      "value": "Pole "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " w profilu "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " od razu wróci do wartości "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " z aplikacji tej osoby. Zmiany z jej aplikacji znów będą do niego stosowane."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearPin": [
+    {
+      "type": 0,
+      "value": "Profil "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " zachowa ustawiony przez ciebie PIN, dopóki aplikacja tej osoby nie wyśle nowego. Potem zmiany z jej aplikacji znów będą do niego stosowane."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearPinRemoves": [
+    {
+      "type": 0,
+      "value": "Aplikacja tej osoby wysyła profil "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " bez PIN-u, więc wyczyszczenie od razu usunie ustawiony przez ciebie PIN. Wtedy każda osoba korzystająca z tego konta będzie mogła otworzyć profil "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " bez PIN-u."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearTitle": [
+    {
+      "type": 0,
+      "value": "Wyczyścić zmianę pola "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " w profilu "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.deletedAccount": [
+    {
+      "type": 0,
+      "value": "(usunięte konto)"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.description": [
+    {
+      "type": 0,
+      "value": "Te profile pochodzą z aplikacji konta "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ". Zmiana wprowadzona tutaj pozostaje na tym serwerze, dopóki jej nie wyczyścisz. To nie jest blokada: "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " również może tu zmienić to samo."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismiss": [
+    {
+      "type": 0,
+      "value": "Odrzuć"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismissAria": [
+    {
+      "type": 0,
+      "value": "Odrzuć notatkę o polu "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " w profilu "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismissFailed": [
+    {
+      "type": 0,
+      "value": "Nie udało się odrzucić notatki."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.isChild": [
+    {
+      "type": 0,
+      "value": "Profil dziecięcy"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.maxAdvisoryAge": [
+    {
+      "type": 0,
+      "value": "Limit wieku"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.maxContentRating": [
+    {
+      "type": 0,
+      "value": "Limit kategorii wiekowej"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.name": [
+    {
+      "type": 0,
+      "value": "Nazwa"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.picture": [
+    {
+      "type": 0,
+      "value": "Obraz"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.pin": [
+    {
+      "type": 0,
+      "value": "PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.requests": [
+    {
+      "type": 0,
+      "value": "Prośby"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.requireAdvisoryAge": [
+    {
+      "type": 0,
+      "value": "Wymagaj oznaczenia wieku"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.fieldValue": [
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.hidden": [
+    {
+      "type": 0,
+      "value": "Usunięto na tym serwerze z konta "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": ". Aplikacja na tym koncie nie doda go ponownie, dopóki na to nie zezwolisz."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.loadFailed": [
+    {
+      "type": 0,
+      "value": "Nie udało się wczytać zmian wprowadzonych na tym serwerze."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.nameTaken": [
+    {
+      "type": 0,
+      "value": "Profil "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " nie może wrócić do nazwy "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " z aplikacji tej osoby, ponieważ inny profil ma tu już tę nazwę. Najpierw zmień nazwę tamtego profilu, a potem ponownie wyczyść tę zmianę."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeHiddenNextSync": [
+    {
+      "type": 0,
+      "value": "Profil "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " może wrócić przy następnej synchronizacji aplikacji konta "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", jeśli profile w aplikacji nadal go obejmują."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeHiddenWoken": [
+    {
+      "type": 0,
+      "value": "Profil "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " może wrócić przy następnej synchronizacji aplikacji, jeśli profile w aplikacji nadal go obejmują. Wysłano do telefonu konta "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " prośbę o synchronizację."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeNextSync": [
+    {
+      "type": 0,
+      "value": "Wyczyszczono. Zmiana dotrze do aplikacji konta "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " przy jej następnej synchronizacji."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeWoken": [
+    {
+      "type": 0,
+      "value": "Wyczyszczono. Wysłano do telefonu konta "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " prośbę o synchronizację."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.removedBy": [
+    {
+      "type": 0,
+      "value": "Usunięto z konta "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.replacedOwner": [
+    {
+      "type": 0,
+      "value": "Zastąpiło to ustawioną przez ciebie wartość."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.setBy": [
+    {
+      "type": 0,
+      "value": "Ustawiono z konta "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.settled": [
+    {
+      "type": 0,
+      "value": "Zmieniono z konta "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "; ustawiona przez ciebie wartość już nie obowiązuje."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.title": [
+    {
+      "type": 0,
+      "value": "Zmieniono na tym serwerze"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.inherited": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (dziedziczone)"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.noPicture": [
+    {
+      "type": 0,
+      "value": "Brak obrazu"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.none": [
+    {
+      "type": 0,
+      "value": "Brak"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.off": [
+    {
+      "type": 0,
+      "value": "Wył."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.on": [
+    {
+      "type": 0,
+      "value": "Wł."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.picture": [
+    {
+      "type": 0,
+      "value": "Własny obraz"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.pinNone": [
+    {
+      "type": 0,
+      "value": "Brak PIN-u"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.pinSet": [
+    {
+      "type": 0,
+      "value": "Ustawiono PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.requestsAllowed": [
+    {
+      "type": 0,
+      "value": "Dozwolone"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.requestsBlocked": [
+    {
+      "type": 0,
+      "value": "Zablokowane"
     }
   ],
   "web.admin.users.detail.profiles.setPin": [
@@ -108653,6 +110144,144 @@
     {
       "type": 0,
       "value": "Ustaw hasło"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.action": [
+    {
+      "type": 0,
+      "value": "Utwórz link logowania"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.actionHint": [
+    {
+      "type": 0,
+      "value": "Utrata wszystkich urządzeń"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.description": [
+    {
+      "type": 0,
+      "value": "Jednorazowy link dla konta "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " na wypadek utraty wszystkich urządzeń. Otwiera stronę z kodem dla aplikacji Silo lub z możliwością wybrania hasła. Działa przez 24 godziny, a nowy link zastępuje poprzedni."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailAction": [
+    {
+      "type": 0,
+      "value": "Wyślij e-mailem"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHint": [
+    {
+      "type": 0,
+      "value": "Utwórz link, aby skopiować go i wysłać samodzielnie, albo wyślij go e-mailem na adres "
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHintNoAddress": [
+    {
+      "type": 0,
+      "value": "Utwórz link, a następnie skopiuj go i wyślij samodzielnie. To konto nie ma adresu e-mail, na który można go wysłać."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHintNoMail": [
+    {
+      "type": 0,
+      "value": "Utwórz link, a następnie skopiuj go i wyślij samodzielnie. Skonfiguruj e-mail w sekcji Ustawienia, aby wysyłać go stąd."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailSent": [
+    {
+      "type": 0,
+      "value": "Wysłano link na adres "
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": ". Wygasa: "
+    },
+    {
+      "type": 1,
+      "value": "expires"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Serwer poczty nie potwierdził dostarczenia. Poniższy link nadal działa: skopiuj go i wyślij w inny sposób."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.failed": [
+    {
+      "type": 0,
+      "value": "Nie udało się utworzyć linku logowania."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.linkShare": [
+    {
+      "type": 0,
+      "value": "Wyślij ten link tylko do osoby z kontem "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": ". Każda osoba, która go ma, może zalogować się na to konto, dopóki link nie zostanie użyty lub nie wygaśnie ("
+    },
+    {
+      "type": 1,
+      "value": "expires"
+    },
+    {
+      "type": 0,
+      "value": ")."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.providerRequired": [
+    {
+      "type": 0,
+      "value": "Lokalne logowanie hasłem jest wyłączone na tym serwerze, więc link logowania pominąłby dostawcę logowania. Poproś osobę z kontem "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": ", aby zalogowała się przez dostawcę na stronie tego serwera, a następnie użyła opcji Otwórz w Silo w ustawieniach konta."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.title": [
+    {
+      "type": 0,
+      "value": "Link logowania dla konta "
+    },
+    {
+      "type": 1,
+      "value": "username"
     }
   ],
   "web.audiobooks.chapter.fallbackTitle": [
@@ -110951,6 +112580,120 @@
       "value": "Zatwierdź logowanie"
     }
   ],
+  "web.auth.appCode.code": [
+    {
+      "type": 0,
+      "value": "Kod"
+    }
+  ],
+  "web.auth.appCode.codeCopied": [
+    {
+      "type": 0,
+      "value": "Skopiowano kod"
+    }
+  ],
+  "web.auth.appCode.copyCode": [
+    {
+      "type": 0,
+      "value": "Skopiuj kod"
+    }
+  ],
+  "web.auth.appCode.copyFailed": [
+    {
+      "type": 0,
+      "value": "Nie udało się skopiować kodu. Zaznacz go i skopiuj ręcznie."
+    }
+  ],
+  "web.auth.appCode.expired": [
+    {
+      "type": 0,
+      "value": "Ten kod wygasł."
+    }
+  ],
+  "web.auth.appCode.failed": [
+    {
+      "type": 0,
+      "value": "Nie udało się utworzyć kodu. Spróbuj ponownie."
+    }
+  ],
+  "web.auth.appCode.instructions": [
+    {
+      "type": 0,
+      "value": "Naciśnij „Otwórz Silo”, aby kontynuować w aplikacji Silo na tym urządzeniu. Jeśli aplikacja nie jest zainstalowana, zainstaluj ją, wróć do tej karty i ponownie naciśnij „Otwórz Silo”."
+    }
+  ],
+  "web.auth.appCode.noScanCode": [
+    {
+      "type": 0,
+      "value": "Adres tego serwera jest za długi na kod do zeskanowania. Wpisz adres serwera i kod w aplikacji Silo albo skopiuj kod i wklej go tam."
+    }
+  ],
+  "web.auth.appCode.open": [
+    {
+      "type": 0,
+      "value": "Otwórz Silo"
+    }
+  ],
+  "web.auth.appCode.renew": [
+    {
+      "type": 0,
+      "value": "Uzyskaj nowy kod"
+    }
+  ],
+  "web.auth.appCode.scanCodeLabel": [
+    {
+      "type": 0,
+      "value": "Kod do zeskanowania w aplikacji Silo"
+    }
+  ],
+  "web.auth.appCode.scanCodeUnavailable": [
+    {
+      "type": 0,
+      "value": "Dla tego serwera nie można wyświetlić kodu do zeskanowania. Wpisz adres serwera i kod w aplikacji Silo albo skopiuj kod i wklej go tam."
+    }
+  ],
+  "web.auth.appCode.scanHint": [
+    {
+      "type": 0,
+      "value": "Zeskanuj go skanerem w aplikacji Silo albo wpisz lub skopiuj adres serwera i kod podane poniżej."
+    }
+  ],
+  "web.auth.appCode.serverAddress": [
+    {
+      "type": 0,
+      "value": "Adres serwera"
+    }
+  ],
+  "web.auth.appCode.singleUse": [
+    {
+      "type": 0,
+      "value": "Ten kod działa jeden raz i wygasa po kilku minutach."
+    }
+  ],
+  "web.auth.appCode.title": [
+    {
+      "type": 0,
+      "value": "Otwórz Silo"
+    }
+  ],
+  "web.auth.appCode.typeInstructions": [
+    {
+      "type": 0,
+      "value": "W aplikacji Silo na telefonie lub tablecie dodaj ten serwer, podając jego adres, i wpisz ten kod, aby utworzyć konto. Każdy, kto zna kod, może dołączyć zamiast ciebie, więc nikomu go nie udostępniaj."
+    }
+  ],
+  "web.auth.appCode.typeTitle": [
+    {
+      "type": 0,
+      "value": "Dołącz za pomocą tego kodu"
+    }
+  ],
+  "web.auth.appCode.webLink": [
+    {
+      "type": 0,
+      "value": "Zamiast tego otwórz za pomocą linku siloserver.org"
+    }
+  ],
   "web.auth.card.rememberedIt": [
     {
       "type": 0,
@@ -111153,10 +112896,50 @@
       ]
     }
   ],
+  "web.auth.invite.appAccountEmail": [
+    {
+      "type": 0,
+      "value": "Konto będzie używać adresu "
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.auth.invite.appContinue": [
+    {
+      "type": 0,
+      "value": "Kontynuuj"
+    }
+  ],
+  "web.auth.invite.appEmailHint": [
+    {
+      "type": 0,
+      "value": "Dzięki adresowi e-mail ten serwer może wysłać ci link do logowania, jeśli stracisz urządzenia."
+    }
+  ],
   "web.auth.invite.appMissing": [
     {
       "type": 0,
       "value": "Nic się nie dzieje? Aplikacja nie jest zainstalowana — kontynuuj poniżej."
+    }
+  ],
+  "web.auth.invite.appProviderOnly": [
+    {
+      "type": 0,
+      "value": "Serwer "
+    },
+    {
+      "type": 1,
+      "value": "server"
+    },
+    {
+      "type": 0,
+      "value": " dodaje osoby przez swojego dostawcę logowania. Zaloguj się przez niego na tej stronie, a następnie otwórz aplikację Silo z ustawień konta."
     }
   ],
   "web.auth.invite.created": [
@@ -111185,6 +112968,18 @@
       "value": "Wpisz adres e-mail i wybierz hasło. Do logowania użyjesz adresu e-mail."
     }
   ],
+  "web.auth.invite.descriptionWithApp": [
+    {
+      "type": 0,
+      "value": "Dołącz przez aplikację Silo na telefonie lub tablecie albo wybierz hasło do logowania."
+    }
+  ],
+  "web.auth.invite.emailOptional": [
+    {
+      "type": 0,
+      "value": "E-mail (opcjonalnie)"
+    }
+  ],
   "web.auth.invite.emailPlaceholder": [
     {
       "type": 0,
@@ -111205,6 +113000,18 @@
     {
       "type": 1,
       "value": "inviter"
+    }
+  ],
+  "web.auth.invite.joinWithApp": [
+    {
+      "type": 0,
+      "value": "Dołącz przez aplikację Silo"
+    }
+  ],
+  "web.auth.invite.joinWithAppInstead": [
+    {
+      "type": 0,
+      "value": "Zamiast tego dołącz przez aplikację Silo"
     }
   ],
   "web.auth.invite.loadFailed": [
@@ -111305,6 +113112,30 @@
     {
       "type": 0,
       "value": "Zaproszenie niedostępne"
+    }
+  ],
+  "web.auth.invite.usePassword": [
+    {
+      "type": 0,
+      "value": "Zamiast tego użyj hasła"
+    }
+  ],
+  "web.auth.invite.usernameIsAddress": [
+    {
+      "type": 0,
+      "value": "Nazwa użytkownika z @ musi być adresem e-mail wpisanym poniżej."
+    }
+  ],
+  "web.auth.invite.usernameRequired": [
+    {
+      "type": 0,
+      "value": "Wybierz nazwę użytkownika."
+    }
+  ],
+  "web.auth.invite.usernameTaken": [
+    {
+      "type": 0,
+      "value": "Ta nazwa użytkownika jest już zajęta. Wybierz inną."
     }
   ],
   "web.auth.languagePicker.label": [
@@ -112377,6 +114208,126 @@
     {
       "type": 0,
       "value": "Zaloguj się"
+    }
+  ],
+  "web.auth.signInLink.backToCode": [
+    {
+      "type": 0,
+      "value": "Wróć do kodu"
+    }
+  ],
+  "web.auth.signInLink.codeExpired": [
+    {
+      "type": 0,
+      "value": "Aby uzyskać kolejny kod, poproś administratora tego serwera o nowy link."
+    }
+  ],
+  "web.auth.signInLink.documentTitle": [
+    {
+      "type": 0,
+      "value": "Link do logowania"
+    }
+  ],
+  "web.auth.signInLink.failed": [
+    {
+      "type": 0,
+      "value": "Nie udało się otworzyć tego linku. Spróbuj ponownie."
+    }
+  ],
+  "web.auth.signInLink.installFirst": [
+    {
+      "type": 0,
+      "value": "Link działa jeden raz, a kod jest ważny przez kilka minut. Najpierw zainstaluj aplikację Silo na telefonie lub tablecie, a potem naciśnij „Kontynuuj”."
+    }
+  ],
+  "web.auth.signInLink.intro": [
+    {
+      "type": 0,
+      "value": "Ten link od administratora pozwala ci ponownie się zalogować. Kontynuuj, aby uzyskać kod do aplikacji Silo lub wybrać hasło."
+    }
+  ],
+  "web.auth.signInLink.keepOpen": [
+    {
+      "type": 0,
+      "value": "Nie zamykaj tej strony, dopóki nie skończysz. Link został już wykorzystany, więc odświeżenie lub opuszczenie strony spowoduje utratę tego, co udostępnił."
+    }
+  ],
+  "web.auth.signInLink.leaveAction": [
+    {
+      "type": 0,
+      "value": "Opuść"
+    }
+  ],
+  "web.auth.signInLink.leaveDescription": [
+    {
+      "type": 0,
+      "value": "Link został już wykorzystany. Jeśli opuścisz stronę, stracisz kod do aplikacji Silo i możliwość ustawienia hasła, a potrzebny będzie nowy link."
+    }
+  ],
+  "web.auth.signInLink.leaveTitle": [
+    {
+      "type": 0,
+      "value": "Opuścić tę stronę?"
+    }
+  ],
+  "web.auth.signInLink.noCodeAdministrator": [
+    {
+      "type": 0,
+      "value": "To konto administratora, więc ten link pozwala tylko ustawić hasło. Ustaw je, zaloguj się na stronie tego serwera, a następnie otwórz tam aplikację Silo z ustawień konta."
+    }
+  ],
+  "web.auth.signInLink.noCodeAppKeysOff": [
+    {
+      "type": 0,
+      "value": "Aplikacja Silo nie może teraz logować się na tym serwerze, więc ten link pozwala tylko ustawić hasło."
+    }
+  ],
+  "web.auth.signInLink.passwordDescription": [
+    {
+      "type": 0,
+      "value": "Zapisanie wyloguje to konto na wszystkich urządzeniach. Urządzenia zalogowane przez aplikację Silo zalogują się ponownie automatycznie."
+    }
+  ],
+  "web.auth.signInLink.passwordSet": [
+    {
+      "type": 0,
+      "value": "Zapisano hasło. Zaloguj się, używając go."
+    }
+  ],
+  "web.auth.signInLink.passwordSetLostDevices": [
+    {
+      "type": 0,
+      "value": "Utracone urządzenia, które używały aplikacji Silo, mogą nadal się logować, dopóki ich nie usuniesz. Po zalogowaniu usuń je z listy urządzeń w ustawieniach konta."
+    }
+  ],
+  "web.auth.signInLink.passwordTitle": [
+    {
+      "type": 0,
+      "value": "Wybierz hasło"
+    }
+  ],
+  "web.auth.signInLink.providerRequired": [
+    {
+      "type": 0,
+      "value": "Ten serwer loguje osoby przez swojego dostawcę logowania, więc ten link nie działa. Zaloguj się przez dostawcę."
+    }
+  ],
+  "web.auth.signInLink.setPasswordInstead": [
+    {
+      "type": 0,
+      "value": "Zamiast tego ustaw hasło"
+    }
+  ],
+  "web.auth.signInLink.title": [
+    {
+      "type": 0,
+      "value": "Odzyskaj dostęp do konta"
+    }
+  ],
+  "web.auth.signInLink.unavailable": [
+    {
+      "type": 0,
+      "value": "Ten link został już użyty, zastąpiony nowszym lub wygasł. Poproś administratora tego serwera o nowy."
     }
   ],
   "web.auth.signup.closed": [
@@ -158260,7 +160211,7 @@
   "web.settings.account.password.signOutOthersDescription": [
     {
       "type": 0,
-      "value": "Inne przeglądarki i aplikacje będą wymagać ponownego logowania nowym hasłem. Ta przeglądarka pozostanie zalogowana, a klucze API będą nadal działać."
+      "value": "Inne przeglądarki i aplikacje zostaną wylogowane. Ta przeglądarka pozostanie zalogowana, a klucze API będą nadal działać."
     }
   ],
   "web.settings.account.password.title": [
@@ -159149,6 +161100,500 @@
     {
       "type": 0,
       "value": "Jak używać tego klucza"
+    }
+  ],
+  "web.settings.appKeys.actionFailed": [
+    {
+      "type": 0,
+      "value": "Nie udało się wprowadzić tej zmiany. Spróbuj ponownie."
+    }
+  ],
+  "web.settings.appKeys.approveMainOnly": [
+    {
+      "type": 0,
+      "value": "Tylko główny profil gospodarstwa domowego może zatwierdzić urządzenie. Przełącz się na niego, aby je zatwierdzić."
+    }
+  ],
+  "web.settings.appKeys.approved": [
+    {
+      "type": 0,
+      "value": "Zatwierdzono urządzenie "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.confirm.approve": [
+    {
+      "type": 0,
+      "value": "Zatwierdź urządzenie"
+    }
+  ],
+  "web.settings.appKeys.confirm.approveDescription": [
+    {
+      "type": 0,
+      "value": "Urządzenie "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " będzie mogło logować się na twoje konto przez aplikację Silo, dopóki go nie usuniesz. Zatwierdź je tylko, jeśli właśnie je konfigurujesz."
+    }
+  ],
+  "web.settings.appKeys.confirm.approveTitle": [
+    {
+      "type": 0,
+      "value": "Zatwierdzić urządzenie "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.settings.appKeys.confirm.deny": [
+    {
+      "type": 0,
+      "value": "Odrzuć urządzenie"
+    }
+  ],
+  "web.settings.appKeys.confirm.denyDescription": [
+    {
+      "type": 0,
+      "value": "Urządzenie "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " nie będzie mogło logować się na twoje konto. Jeśli należało do ciebie, dodaj je ponownie w aplikacji Silo."
+    }
+  ],
+  "web.settings.appKeys.confirm.denyTitle": [
+    {
+      "type": 0,
+      "value": "Odrzucić urządzenie "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.settings.appKeys.confirm.remove": [
+    {
+      "type": 0,
+      "value": "Usuń urządzenie"
+    }
+  ],
+  "web.settings.appKeys.confirm.removeDescription": [
+    {
+      "type": 0,
+      "value": "Usunięcie urządzenia "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " od razu je wyloguje i unieważni jego klucz: nie będzie mogło się nim ponownie zalogować. Aby znów go używać, dodaj je ponownie w aplikacji Silo."
+    }
+  ],
+  "web.settings.appKeys.confirm.removeTitle": [
+    {
+      "type": 0,
+      "value": "Usunąć urządzenie "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.settings.appKeys.confirm.withdraw": [
+    {
+      "type": 0,
+      "value": "Wycofaj zatwierdzenie"
+    }
+  ],
+  "web.settings.appKeys.confirm.withdrawDescription": [
+    {
+      "type": 0,
+      "value": "Urządzenie "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " nie będzie mogło użyć tego zatwierdzenia, aby zalogować się na twoje konto."
+    }
+  ],
+  "web.settings.appKeys.confirm.withdrawTitle": [
+    {
+      "type": 0,
+      "value": "Wycofać zatwierdzenie dla urządzenia "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.settings.appKeys.confirm.working": [
+    {
+      "type": 0,
+      "value": "Zapisywanie…"
+    }
+  ],
+  "web.settings.appKeys.denied": [
+    {
+      "type": 0,
+      "value": "Odrzucono urządzenie "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.description": [
+    {
+      "type": 0,
+      "value": "Urządzenia i aplikacje, które logują się na twoje konto przez aplikację Silo, bez hasła."
+    }
+  ],
+  "web.settings.appKeys.devices.title": [
+    {
+      "type": 0,
+      "value": "Urządzenia"
+    }
+  ],
+  "web.settings.appKeys.empty": [
+    {
+      "type": 0,
+      "value": "Żadne urządzenie nie używa aplikacji Silo na twoim koncie."
+    }
+  ],
+  "web.settings.appKeys.footnote": [
+    {
+      "type": 0,
+      "value": "Usunięcie urządzenia wylogowuje je i unieważnia jego klucz. Wylogowanie sesji nie usuwa urządzenia: loguje się ono ponownie swoim kluczem."
+    }
+  ],
+  "web.settings.appKeys.loadFailed": [
+    {
+      "type": 0,
+      "value": "Nie udało się wczytać twoich urządzeń."
+    }
+  ],
+  "web.settings.appKeys.loading": [
+    {
+      "type": 0,
+      "value": "Wczytywanie urządzeń…"
+    }
+  ],
+  "web.settings.appKeys.off": [
+    {
+      "type": 0,
+      "value": "Logowanie przez aplikację Silo jest wyłączone na tym serwerze, więc te urządzenia nie mogą się logować, a oczekujących urządzeń nie można zatwierdzić. Nadal możesz je usunąć."
+    }
+  ],
+  "web.settings.appKeys.personKey.description": [
+    {
+      "type": 0,
+      "value": "Twoja aplikacja Silo używa tego klucza do dodawania twoich nowych urządzeń. Skonfigurowano: "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.settings.appKeys.personKey.none": [
+    {
+      "type": 0,
+      "value": "Brak klucza konta. Aplikacja Silo skonfiguruje go, gdy następnym razem dodasz urządzenie po zalogowaniu."
+    }
+  ],
+  "web.settings.appKeys.personKey.title": [
+    {
+      "type": 0,
+      "value": "Klucz konta"
+    }
+  ],
+  "web.settings.appKeys.pinDescription": [
+    {
+      "type": 0,
+      "value": "Wpisz PIN głównego profilu, aby zatwierdzić to urządzenie."
+    }
+  ],
+  "web.settings.appKeys.preapprovals.description": [
+    {
+      "type": 0,
+      "value": "Logowania zatwierdzone przez ciebie dla urządzenia, które jeszcze się nie połączyło."
+    }
+  ],
+  "web.settings.appKeys.preapprovals.loadFailed": [
+    {
+      "type": 0,
+      "value": "Nie udało się wczytać logowań zatwierdzonych z wyprzedzeniem."
+    }
+  ],
+  "web.settings.appKeys.preapprovals.title": [
+    {
+      "type": 0,
+      "value": "Zatwierdzone z wyprzedzeniem"
+    }
+  ],
+  "web.settings.appKeys.refreshLabel": [
+    {
+      "type": 0,
+      "value": "Odśwież urządzenia z aplikacją Silo"
+    }
+  ],
+  "web.settings.appKeys.removed": [
+    {
+      "type": 0,
+      "value": "Usunięto urządzenie "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.row.allowedBy": [
+    {
+      "type": 0,
+      "value": "Dostęp przyznany przez: "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "web.settings.appKeys.row.approve": [
+    {
+      "type": 0,
+      "value": "Zatwierdź"
+    }
+  ],
+  "web.settings.appKeys.row.approveLabel": [
+    {
+      "type": 0,
+      "value": "Zatwierdź urządzenie "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.row.deny": [
+    {
+      "type": 0,
+      "value": "Odrzuć"
+    }
+  ],
+  "web.settings.appKeys.row.denyLabel": [
+    {
+      "type": 0,
+      "value": "Odrzuć urządzenie "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.row.enrolledFrom": [
+    {
+      "type": 0,
+      "value": "Z adresu "
+    },
+    {
+      "type": 1,
+      "value": "address"
+    }
+  ],
+  "web.settings.appKeys.row.identityGone": [
+    {
+      "type": 0,
+      "value": "Nie może się zalogować: jego konto u dostawcy logowania nie jest już połączone"
+    }
+  ],
+  "web.settings.appKeys.row.kindApp": [
+    {
+      "type": 0,
+      "value": "Inna aplikacja"
+    }
+  ],
+  "web.settings.appKeys.row.kindDevice": [
+    {
+      "type": 0,
+      "value": "Aplikacja Silo"
+    }
+  ],
+  "web.settings.appKeys.row.lastUsed": [
+    {
+      "type": 0,
+      "value": "Ostatnie logowanie: "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.settings.appKeys.row.notUsed": [
+    {
+      "type": 0,
+      "value": "Jeszcze nie logowano się jego kluczem"
+    }
+  ],
+  "web.settings.appKeys.row.preapproval": [
+    {
+      "type": 0,
+      "value": "Zatwierdzone z wyprzedzeniem · wygasa "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.settings.appKeys.row.provider": [
+    {
+      "type": 0,
+      "value": "Weryfikowane przez dostawcę logowania"
+    }
+  ],
+  "web.settings.appKeys.row.remove": [
+    {
+      "type": 0,
+      "value": "Usuń"
+    }
+  ],
+  "web.settings.appKeys.row.removeLabel": [
+    {
+      "type": 0,
+      "value": "Usuń urządzenie "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.row.viaAppCode": [
+    {
+      "type": 0,
+      "value": "Dodano jednorazowym kodem ze strony internetowej serwera"
+    }
+  ],
+  "web.settings.appKeys.row.viaPersonKey": [
+    {
+      "type": 0,
+      "value": "Dodano przez aplikację Silo na innym urządzeniu"
+    }
+  ],
+  "web.settings.appKeys.row.viaSession": [
+    {
+      "type": 0,
+      "value": "Dodano w zalogowanej sesji"
+    }
+  ],
+  "web.settings.appKeys.row.waitingUntil": [
+    {
+      "type": 0,
+      "value": "Oczekuje na zatwierdzenie do "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.settings.appKeys.row.withdraw": [
+    {
+      "type": 0,
+      "value": "Wycofaj"
+    }
+  ],
+  "web.settings.appKeys.row.withdrawLabel": [
+    {
+      "type": 0,
+      "value": "Wycofaj zatwierdzenie dla urządzenia "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.signsBackIn": [
+    {
+      "type": 0,
+      "value": "Urządzenia zalogowane przez aplikację Silo logują się ponownie same. "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Usuń urządzenie"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", aby to zatrzymać."
+    }
+  ],
+  "web.settings.appKeys.title": [
+    {
+      "type": 0,
+      "value": "Urządzenia z aplikacją Silo"
+    }
+  ],
+  "web.settings.appKeys.unavailable": [
+    {
+      "type": 0,
+      "value": "Logowanie przez aplikację Silo nie jest dostępne na tym serwerze, więc te urządzenia nie mogą się logować. Nadal możesz je usunąć."
+    }
+  ],
+  "web.settings.appKeys.waiting.description": [
+    {
+      "type": 0,
+      "value": "Nowe urządzenie poprosiło o zalogowanie się na twoje konto przez aplikację Silo. Zatwierdź je tylko, jeśli właśnie je konfigurujesz."
+    }
+  ],
+  "web.settings.appKeys.waiting.title": [
+    {
+      "type": 0,
+      "value": "Oczekujące na twoje zatwierdzenie"
+    }
+  ],
+  "web.settings.appKeys.withdrawn": [
+    {
+      "type": 0,
+      "value": "Wycofano zatwierdzenie"
     }
   ],
   "web.settings.cardOverlay.adjust": [
@@ -164635,6 +167080,54 @@
       "value": "Jesteś offline, więc nie zapisano tej zmiany"
     }
   ],
+  "web.settings.openInSilo.action": [
+    {
+      "type": 0,
+      "value": "Uzyskaj kod do aplikacji Silo"
+    }
+  ],
+  "web.settings.openInSilo.codeInstructions": [
+    {
+      "type": 0,
+      "value": "W aplikacji Silo na telefonie lub tablecie dodaj ten serwer, podając jego adres, i wpisz ten kod. Każdy, kto ma ten kod, może zalogować się na to konto, więc nie udostępniaj go."
+    }
+  ],
+  "web.settings.openInSilo.codeTitle": [
+    {
+      "type": 0,
+      "value": "Kod do aplikacji Silo"
+    }
+  ],
+  "web.settings.openInSilo.description": [
+    {
+      "type": 0,
+      "value": "Zaloguj aplikację Silo na telefonie lub tablecie na to konto, bez hasła."
+    }
+  ],
+  "web.settings.openInSilo.loadFailed": [
+    {
+      "type": 0,
+      "value": "Nie udało się sprawdzić, czy ta przeglądarka może uzyskać kod do aplikacji Silo."
+    }
+  ],
+  "web.settings.openInSilo.mainProfileOnly": [
+    {
+      "type": 0,
+      "value": "Tylko główny profil gospodarstwa domowego może uzyskać kod do aplikacji Silo. Przełącz się na niego i spróbuj ponownie."
+    }
+  ],
+  "web.settings.openInSilo.pinDescription": [
+    {
+      "type": 0,
+      "value": "Wpisz PIN głównego profilu, aby uzyskać kod do aplikacji Silo."
+    }
+  ],
+  "web.settings.openInSilo.title": [
+    {
+      "type": 0,
+      "value": "Aplikacja Silo"
+    }
+  ],
   "web.settings.overlays.accent.amber": [
     {
       "type": 0,
@@ -167885,6 +170378,12 @@
       "value": "Zalogowano"
     }
   ],
+  "web.settings.sessions.row.signsBackIn": [
+    {
+      "type": 0,
+      "value": "To urządzenie loguje się ponownie samo"
+    }
+  ],
   "web.settings.sessions.row.summary": [
     {
       "type": 8,
@@ -167971,6 +170470,24 @@
     {
       "type": 0,
       "value": "Ustawienia"
+    }
+  ],
+  "web.settings.signInAgain.action": [
+    {
+      "type": 0,
+      "value": "Zaloguj się ponownie"
+    }
+  ],
+  "web.settings.signInAgain.manageDevices": [
+    {
+      "type": 0,
+      "value": "Zaloguj się ponownie, aby zarządzać urządzeniami"
+    }
+  ],
+  "web.settings.signInAgain.useApp": [
+    {
+      "type": 0,
+      "value": "Zarządzaj urządzeniami w aplikacji Silo."
     }
   ],
   "web.settings.signedInSessions.loadFailed": [

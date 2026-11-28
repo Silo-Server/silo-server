@@ -527,3 +527,35 @@ func TestDirectStateToggleOff(t *testing.T) {
 		}
 	})
 }
+
+func TestPeerConnectedAtUsesEngineObservationTime(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		f := newHostFixture(t, "enabled")
+		defer f.cleanup()
+		principal := f.enrollAndRegister(7, "tv", testNodeKey(1), "automatic")
+		e := f.engines[0]
+		e.stateMu.Lock()
+		e.paths = map[protocol.NodeKey]engine.PathStatus{
+			principal.NodeKey: {Class: pathClassDirect, Endpoint: testDeviceAddr},
+		}
+		e.stateMu.Unlock()
+		reg, err := e.Registration()
+		if err != nil {
+			t.Fatal(err)
+		}
+		reg.Confirmations = []protocol.Confirmation{{
+			Peer: principal.NodeKey, DiscoKey: testDeviceDisco, Endpoint: testDeviceAddr,
+		}}
+		observedAt := time.Now()
+		e.setRegistration(reg, true)
+		synctest.Wait()
+		time.Sleep(time.Second) //nolint:forbidigo // Advance the synctest clock between observation and the first read.
+		peers := f.svc.Peers(t.Context())
+		if len(peers) != 1 {
+			t.Fatalf("peers = %d, want one direct peer", len(peers))
+		}
+		if !peers[0].Since.Equal(observedAt) {
+			t.Fatalf("connected_at = %s, want the engine observation at %s", peers[0].Since, observedAt)
+		}
+	})
+}

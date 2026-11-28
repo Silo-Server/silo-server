@@ -39,7 +39,7 @@ func (h *PlaybackHandler) PlaybackProbeRedirect(ctx context.Context, user int, s
 		defer releaser.ReleaseSession(id)
 	}
 	resolve := func(eligible func(*nodepool.Node) bool) (noderouting.Decision, error) {
-		return noderouting.Resolve(planner, noderouting.ResolveRequest{Request: noderouting.Request{
+		return resolveRouteV3(ctx, planner, noderouting.ResolveRequest{Request: noderouting.Request{
 			Workload: noderouting.WorkloadDirectPlay, Delivery: noderouting.DeliveryDirect, Policy: h.playbackRoutingPolicyForContextV3(ctx), ProxyAllowed: h.JWTSecret != "",
 		}, SessionID: id, ProxyEligible: nodepool.MediaReachableVia(path, direct, eligible)})
 	}

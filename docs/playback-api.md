@@ -76,6 +76,10 @@ browser has only `navigator.connection.downlink`, which Chromium caps at
 count as viewer transfer egress, not playback, and are exempt from stream caps,
 like the Jellyfin-compatible `/Playback/BitrateTest`.
 
+A client may send `X-Silo-Device-Id` with the probe. A device the server holds a
+direct enrollment for names itself so the probe is measured, and receipted, on
+the path its media takes.
+
 Without `media_path` the probe measures the path to the API server, and media
 served from a remote node can take a different one. `media_path=true`, the form
 `bandwidth_probe_url` advertises, measures the media path instead: the server
@@ -629,6 +633,11 @@ the rate the plan's media requests received data. The server keeps the highest
 per device and connection as `playback_sample`, replacing it with a later one
 that is higher or once it is older than the reading lifetime. A manual probe
 result clears it.
+The connection is the session's current media transport when the summary
+arrives, not the transport the reported plan used. A plan ID does not name its
+transport, so after a replan from direct to regular that keeps the recipe, a
+late summary from the direct plan can land on the regular connection. This is
+a known limit.
 
 The admin device detail adds optional `connections`. Each entry has `id`, an
 opaque connection identifier, `connection` (`local`, `remote`,
@@ -662,7 +671,14 @@ client rules.
   `GET /api/v2/playback/connection` read reports the regular connection the
   request arrives on.
 - A device enrolled with `connection_path` `direct_only` gets no media proxy
-  origin from start, replan or the probe redirect: the API host serves its media.
+  origin from start, replan, seek or the probe redirect: the API host serves its
+  media. Where the operator's `proxy_only` egress for every delivery leaves it no
+  legal route, the start or replan ends in the final `routing_policy_unsatisfied`;
+  a start or replan whose enrollment cannot be read answers `503` with
+  `Retry-After` and stores no decision. A replay of an earlier start or replan
+  returns its stored decision, which can still hold a proxy URL. A seek of a
+  session whose plan is `direct` is planned without proxy shapes and stays on the
+  API host.
 - The probe sends the header `Silo-Connection-Receipt` with the bytes when the
   request names its device. The receipt names the account, the device, the host
   and the connection class that carried the bytes, and lasts 2 minutes. A media

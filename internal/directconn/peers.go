@@ -109,6 +109,16 @@ func (t *pathTracker) connectionKey(endpoint netip.AddrPort) string {
 	return "direct:" + hex.EncodeToString(mac.Sum(nil))
 }
 
+// reset forgets every path record and confirmation, which belong to the engine
+// that observed and published them. The device map stays: it follows the peer
+// cache, not an engine.
+func (t *pathTracker) reset() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	clear(t.records)
+	clear(t.confirmed)
+}
+
 // setDevices replaces the (user, device) to node key map with the peer cache's
 // devices and drops records of devices that left it.
 func (t *pathTracker) setDevices(entries []server.PeerEntry) {
@@ -265,11 +275,14 @@ func (s *Service) devicePath(k protocol.NodeKey) (pathRecord, bool) {
 }
 
 // Device implements DirectState. It reads the store once and the engine for the
-// path. It answers ok=false while direct connections are off, from the setting
-// the service already holds, so a caller needs no setting read of its own.
+// path. It answers ok=false once the service has read its settings and found
+// direct connections off, from the setting it already holds, so a caller needs
+// no setting read of its own. Before the first settings read the toggle is
+// unknown, and the store answers: a device another replica enrolled direct_only
+// must not be planned as a regular one.
 func (s *Service) Device(ctx context.Context, userID int, deviceID string) (DeviceDirect, bool, error) {
 	c, paths := s.coordination()
-	if c == nil || !s.enabled() {
+	if c == nil || s.disabled() {
 		return DeviceDirect{}, false, nil
 	}
 	device, err := c.cfg.Store.Device(ctx, deviceRef(userID, deviceID), c.clock())
@@ -289,13 +302,13 @@ func (s *Service) Device(ctx context.Context, userID int, deviceID string) (Devi
 	return out, true, nil
 }
 
-// enabled reports the direct-connections toggle as the service last read it. It
-// is false until the first settings read.
-func (s *Service) enabled() bool {
+// disabled reports that the service has read its settings and direct
+// connections are off. It is false until the first settings read.
+func (s *Service) disabled() bool {
 	l := s.lifecycle
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	return l.values.enabled
+	return l.ready && !l.values.enabled
 }
 
 // PathGeneration implements DirectState.

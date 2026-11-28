@@ -138464,7 +138464,10 @@ export interface operations {
         /** @description Number of bytes to send. A client may close the connection early once it has timed enough of the transfer. */
         size?: number;
       };
-      header?: never;
+      header?: {
+        /** @description The client's stable device identifier. A device the server holds a direct enrollment for names itself here so the probe is measured, and receipted, on the path its media takes. Optional. */
+        "X-Silo-Device-Id"?: string;
+      };
       path?: never;
       cookie?: never;
     };

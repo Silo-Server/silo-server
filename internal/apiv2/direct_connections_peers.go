@@ -41,14 +41,17 @@ func registerDirectConnectionPeers(reg *Registry) {
 }
 
 // peerNameReader reads the names a peer row shows. It reads each account's
-// device list once, however many of its devices are peers.
+// device list once, however many of its devices are peers, and each account's
+// name at most once.
 type peerNameReader struct {
-	reg    *Registry
-	byUser map[int][]handlers.AdminUserDeviceView
+	reg       *Registry
+	byUser    map[int][]handlers.AdminUserDeviceView
+	usernames map[int]string
 }
 
-// read returns the account's username and the device's name; each is empty when
-// the account's device list cannot be read or does not hold the device.
+// read returns the account's username and the device's name. The username is
+// empty when neither the device list nor the account can be read, and the
+// device name when the device list cannot be read or does not hold the device.
 func (r peerNameReader) read(ctx context.Context, userID int, deviceID string) (username, deviceName string) {
 	rows, ok := r.byUser[userID]
 	if !ok {
@@ -63,7 +66,26 @@ func (r peerNameReader) read(ctx context.Context, userID int, deviceID string) (
 			deviceName = row.DeviceName
 		}
 	}
+	if username == "" {
+		username = r.accountName(ctx, userID)
+	}
 	return username, deviceName
+}
+
+// accountName is the account's username, read from the account itself: an
+// account with a direct peer may have no device inventory row to carry it.
+func (r peerNameReader) accountName(ctx context.Context, userID int) string {
+	if name, ok := r.usernames[userID]; ok {
+		return name
+	}
+	var name string
+	if r.reg.deps.AdminAccounts != nil {
+		if account, err := r.reg.deps.AdminAccounts.GetAdminAccount(ctx, userID); err == nil {
+			name = account.User.Username
+		}
+	}
+	r.usernames[userID] = name
+	return name
 }
 
 func (reg *Registry) listAdminDirectConnectionPeers(ctx context.Context, _ *struct{}) (*DirectConnectionPeerCollectionOutput, error) {
@@ -73,7 +95,7 @@ func (reg *Registry) listAdminDirectConnectionPeers(ctx context.Context, _ *stru
 	host := NetworkAccessHostRef{ID: directconn.CapabilityHostID, Role: peerHostRole, Name: "API"}
 	peers := reg.deps.DirectConnections.Peers(ctx)
 	items := make([]DirectConnectionPeer, 0, len(peers))
-	names := peerNameReader{reg: reg, byUser: map[int][]handlers.AdminUserDeviceView{}}
+	names := peerNameReader{reg: reg, byUser: map[int][]handlers.AdminUserDeviceView{}, usernames: map[int]string{}}
 	for _, peer := range peers {
 		family := "ipv6"
 		if peer.Endpoint.Addr().Unmap().Is4() {

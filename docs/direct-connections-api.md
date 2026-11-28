@@ -128,9 +128,11 @@ header `X-Silo-Device-Id` (1 to 128 characters) is required. The body has
   client makes a new key and enrolls again.
 - Enrollment answers `503 dependency_unavailable` with `Retry-After: 5` in four
   cases: the coordination store is unavailable, including when the device's stored
-  entry cannot be read; the login session cannot be read; the replica has not yet
+  entry cannot be read; the login session or the profile cannot be read; the replica has not yet
   read the direct-connection settings once after it starts; and the server has
   begun to shut down. Any other unexpected failure answers `500 internal_error`.
+- Enrollment answers `404 not_found` when the profile was deleted while the request
+  ran; the server withdraws the entry the request wrote.
 
 `DELETE /api/v2/direct-connections/enrollment` withdraws the device named by
 `X-Silo-Device-Id` and answers `204`. A device with no enrollment also gets `204`.
@@ -317,9 +319,21 @@ and `direct`. A missing field means `regular`.
   saved base URL, and only those, through the engine to the API host.
 
 A device enrolled with `connection_path` `direct_only` never gets a proxy origin
-from start, replan or the probe redirect: the API host serves its media. The
+from start, replan, seek or the probe redirect: the API host serves its media. The
 planner reads the device's enrollment once per request. When it cannot read it, the
-planner treats the device as `direct_only`.
+planner treats the device as `direct_only`. When the operator sets `proxy_only`
+egress for every delivery, a `direct_only` device has no legal route for any media
+and the start or replan ends in the final `routing_policy_unsatisfied`; a start or
+replan whose enrollment cannot be read answers `503` `dependency_unavailable` with
+`Retry-After` and stores no decision, so the client sends the same request again.
+A replay of a start or a completed replan made before the device switched to
+`direct_only` returns the stored decision, which can still hold a proxy URL; every
+new start, replan and seek follows the rule.
+
+A seek of a session whose plan is `direct` is planned without proxy shapes: it stays
+on the API host when a legal API route exists and ends in the final
+`routing_policy_unsatisfied` when none does. A seek of a regular session is planned
+as before.
 
 ### Probe Receipt
 
@@ -332,7 +346,8 @@ connection class. It is valid for 2 minutes.
 - The API host sends class `regular` for a request over TCP, even when the
   device also holds a live direct path. It sends class `direct` for a request over
   the direct path only when the peer is the enrolled device of the same account and the
-  API host's path to it is live and confirmed. Otherwise it sends none.
+  API host's path to it is live and confirmed, and still the path the request
+  arrived on. Otherwise it sends none.
 - A media proxy sends class `regular` for a probe token that names a device. A
   proxy serves an enrolled device's probe only when it advertises
   `connection_receipt_v1` and knows its own node ID; otherwise the redirect is
@@ -422,7 +437,8 @@ follows the wire rule.
 9. `421`: a `421` on a media request over the direct path means the path is not
    ready. An `automatic` client replans with `media_transport=regular`. A
    `direct_only` client stops as in rule 5. The client learns no bandwidth
-   limit from it.
+   limit from it. The server treats that replan as a path failure, not a recipe
+   failure, so the plan that was playing stays eligible on the regular path.
 
 ## Protocol Revision
 

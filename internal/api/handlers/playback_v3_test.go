@@ -1688,7 +1688,7 @@ func TestReusedHLSRouteAllowedV3HonorsCurrentHardPolicy(t *testing.T) {
 			if test.mutate != nil {
 				test.mutate(&policy)
 			}
-			if got := reusedHLSRouteAllowedV3(test.session, result, policy, test.proxyAllowed); got != test.want {
+			if got := reusedHLSRouteAllowedV3(t.Context(), test.session, result, policy, test.proxyAllowed); got != test.want {
 				t.Fatalf("reusedHLSRouteAllowedV3() = %t, want %t", got, test.want)
 			}
 		})

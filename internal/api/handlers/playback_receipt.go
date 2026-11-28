@@ -29,7 +29,8 @@ var (
 // A request over TCP gets the regular class, even when the device also holds a
 // live direct path. A request over the direct path gets the direct class only
 // when the peer's node key is enrolled to this account and device, and the API
-// host's path to the device is live and confirmed; otherwise no receipt is sent.
+// host's path to the device is live and confirmed, and it is still the path the
+// request arrived on; otherwise no receipt is sent.
 func (h *PlaybackHandler) ProbeConnectionReceipt(ctx context.Context, user int, device string) string {
 	device = connectionDeviceV3(device)
 	if user <= 0 || device == "" || h.JWTSecret == "" {
@@ -45,6 +46,12 @@ func (h *PlaybackHandler) ProbeConnectionReceipt(ctx context.Context, user int, 
 		}
 		state, enrolled, err := h.DirectState.Device(ctx, user, device)
 		if err != nil || !enrolled || !state.APIReady || state.ConnectionKey == "" || state.PathGeneration == 0 {
+			return ""
+		}
+		// The receipt names the path the request arrived on. A path replaced
+		// since then is not the one the probe bytes measured. An arrival the host
+		// gave no generation has nothing to compare.
+		if peer.PathGeneration != 0 && peer.PathGeneration != state.PathGeneration {
 			return ""
 		}
 		claims.ConnectionClass, claims.ConnectionKey, claims.PathGeneration = streamtoken.ConnectionClassDirect, state.ConnectionKey, state.PathGeneration

@@ -99,6 +99,7 @@ func TestRedisKeyLayout(t *testing.T) {
 		{"device id is unpadded base64url", devKey(urlSafeRef), "silo:direct:dev:42:-_8"},
 		{"registration", regKey(ref), "silo:direct:reg:42:YTpi"},
 		{"confirmation", confKey("api", ref), "silo:direct:conf:api:42:YTpi"},
+		{"confirmation index", confIndexKey("api"), "silo:direct:confidx:api"},
 		{"account index", acctKey("42"), "silo:direct:acct:42"},
 		{"host", hostKey("api"), "silo:direct:host:api"},
 		{"node key is lowercase hex", nkKey(nodeKey), "silo:direct:nk:" + nkHex},

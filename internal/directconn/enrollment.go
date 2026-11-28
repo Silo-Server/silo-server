@@ -27,6 +27,11 @@ const (
 	// cleanupTimeout bounds work that runs past a canceled request: a revocation
 	// and the withdrawal of an entry that must not stay.
 	cleanupTimeout = 10 * time.Second
+	// RetryAfterSeconds is the retry hint, in seconds, of every 503 that reports
+	// the direct-connection store or engine as temporarily unavailable: the
+	// enrollment operations and the playback requests that need the device's
+	// state.
+	RetryAfterSeconds = 5
 )
 
 var (
@@ -38,6 +43,9 @@ var (
 	// ErrSessionEnded refuses an enrollment whose issuing login session ended
 	// before the enrollment finished. The entry it wrote is withdrawn.
 	ErrSessionEnded = errors.New("direct enrollment: the login session that issues it has ended")
+	// ErrProfileGone refuses an enrollment whose household profile was deleted
+	// before the enrollment finished. The entry it wrote is withdrawn.
+	ErrProfileGone = errors.New("direct enrollment: the profile that enrolls it no longer exists")
 )
 
 // devicePolicy is the opaque policy the coordination store keeps for a device.
@@ -93,6 +101,11 @@ type CoordinationConfig struct {
 	// ended meanwhile cannot leave an entry the revocation's listing missed. Nil
 	// checks nothing.
 	SessionActive func(ctx context.Context, sessionID string) (bool, error)
+	// ProfileActive, when set, reports whether a household profile of an account
+	// still exists. Enroll asks it after it has written the entry, as it asks
+	// SessionActive, so a profile deleted meanwhile cannot leave an entry the
+	// deletion's listing missed. Nil checks nothing.
+	ProfileActive func(ctx context.Context, userID int, profileID string) (bool, error)
 }
 
 // Coordination enrolls devices, issues and checks their signaling tickets, and
@@ -164,7 +177,10 @@ type Enrollment struct {
 // When the config has a SessionActive, Enroll asks it after the write, on a
 // context that a canceled request does not end. A session that has ended returns
 // ErrSessionEnded, and one that cannot be checked returns an error wrapping
-// server.ErrUnavailable; either way the entry this call wrote is withdrawn. When
+// server.ErrUnavailable; either way the entry this call wrote is withdrawn. A
+// ProfileActive in the config is asked the same way, after the session check:
+// a deleted profile returns ErrProfileGone and a failed check an error wrapping
+// server.ErrUnavailable, and the entry is withdrawn. When
 // the config has an Audit, every enrollment that is not a renewal of an audited
 // entry with the same key runs it before a ticket is minted; an audit error
 // withdraws the entry this call wrote and is returned, wrapped.
@@ -219,12 +235,35 @@ func (c *Coordination) Enroll(ctx context.Context, req EnrollRequest) (Enrollmen
 	if !replaced.IsZero() {
 		c.log.InfoContext(ctx, "direct connections: enrollment replaced")
 		c.removed(replaced, req.NodeKey)
+		// The audit marker read before the write belongs to the key that write
+		// displaced, so this enrollment is a key replacement and audits. The entry
+		// the write stored still holds that marker, and no audit row stands behind
+		// it: it is cleared now, so that no request takes the entry for an audited
+		// one until this enrollment's audit commits (markAudited). The write that
+		// reported the displaced key is the first point that knows to clear it, so
+		// the entry is marked for one store round trip.
+		carried = false
+		if written.Audited {
+			unaudited := written
+			unaudited.Audited = false
+			if _, err := c.cfg.Store.SwapDevicePolicy(ctx, ref, req.NodeKey, policy, marshalPolicy(unaudited), c.clock()); err != nil {
+				c.withdrawWritten(ctx, ref, req.NodeKey, policy)
+				return Enrollment{}, fmt.Errorf("clear the audit marker of a replaced key: %w", err)
+			}
+			written, policy = unaudited, marshalPolicy(unaudited)
+		}
 	}
 	// A revocation of the login session lists entries after it commits. A write
 	// that this check sees as live therefore came before that commit, and the
 	// listing withdraws it; a write after the commit sees the session ended and
 	// withdraws itself.
 	if err := c.checkSessionActive(ctx, ref, req, policy); err != nil {
+		return Enrollment{}, err
+	}
+	// Deleting a profile lists and withdraws its entries after it commits, so the
+	// same ordering holds: a write this check sees as live is listed, and a write
+	// after the deletion sees the profile gone and withdraws itself.
+	if err := c.checkProfileActive(ctx, ref, req, policy); err != nil {
 		return Enrollment{}, err
 	}
 	// No ticket is minted for an unaudited entry before an audit row for its key
@@ -281,8 +320,31 @@ func (c *Coordination) checkSessionActive(ctx context.Context, ref server.Device
 	return ErrSessionEnded
 }
 
+// checkProfileActive withdraws the entry Enroll just wrote, and refuses the
+// enrollment, when the request's household profile no longer exists or cannot be
+// shown to: ErrProfileGone for a deleted profile, an error wrapping
+// server.ErrUnavailable when the check fails. It checks nothing without a
+// ProfileActive in the config or a profile in the request.
+func (c *Coordination) checkProfileActive(ctx context.Context, ref server.DeviceRef, req EnrollRequest, policy []byte) error {
+	if c.cfg.ProfileActive == nil || req.ProfileID == "" {
+		return nil
+	}
+	checkCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
+	defer cancel()
+	active, err := c.cfg.ProfileActive(checkCtx, req.UserID, req.ProfileID)
+	if err == nil && active {
+		return nil
+	}
+	c.withdrawWritten(ctx, ref, req.NodeKey, policy)
+	if err != nil {
+		return fmt.Errorf("%w: check enrolling profile: %w", server.ErrUnavailable, err)
+	}
+	return ErrProfileGone
+}
+
 // withdrawWritten withdraws the entry Enroll just made when it must not stay: its
-// audit row could not be written, its login session has ended, or the store lost
+// audit row could not be written, its login session has ended, its profile was
+// deleted, or the store lost
 // the reply to its write and so may hold it. It withdraws only while the entry
 // still holds this request's key and policy, and the policy carries this
 // request's revision, so an entry that a later request replaced, renewed or

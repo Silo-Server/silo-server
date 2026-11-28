@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 
@@ -42,6 +43,10 @@ type directRequestV3 struct {
 	// device is direct_only is then unknown, so the request leaves every proxy
 	// out and the API host serves its media.
 	unreadable bool
+	// noProxy is set on a seek of a session that plays over the direct path:
+	// the seek replays the stream of that session, so it takes no proxy origin
+	// whatever the device's policy says.
+	noProxy bool
 }
 
 func directRequestFromContext(ctx context.Context) *directRequestV3 {
@@ -58,8 +63,21 @@ func (d *directRequestV3) media() nodepool.DirectMedia {
 	}
 	return nodepool.DirectMedia{
 		Requested:  d.requested == playback.MediaTransportDirectV3,
-		DirectOnly: d.unreadable || (d.enrolled && d.device.Policy == directPolicyDirectOnlyV3),
+		DirectOnly: d.noProxy || d.unreadable || (d.enrolled && d.device.Policy == directPolicyDirectOnlyV3),
 	}
+}
+
+// withoutProxyV3 is ctx for a request that takes no proxy origin: the route
+// rule leaves every proxy-egress shape out, as it does for a direct_only
+// device. The request's direct state is otherwise the one on ctx.
+func withoutProxyV3(ctx context.Context) context.Context {
+	d := &directRequestV3{}
+	if current := directRequestFromContext(ctx); current != nil {
+		copied := *current
+		d = &copied
+	}
+	d.noProxy = true
+	return context.WithValue(ctx, directRequestKeyV3{}, d)
 }
 
 // apiDirect reports whether the API host serves this request's media over the
@@ -92,33 +110,40 @@ func (h *PlaybackHandler) loadDirectDeviceV3(ctx context.Context, userID int, de
 }
 
 // newDirectRequestV3 reads the device's direct state once for a request that
-// asked for the given transport. With read false it reads nothing: the request
-// reuses a transport whose attribution the session already holds.
-func (h *PlaybackHandler) newDirectRequestV3(ctx context.Context, userID int, device, requested string, read bool) *directRequestV3 {
+// asked for the given transport. Every native request reads it, a seek
+// included: the route rule in playback_route_v3.go needs it before any route is
+// compiled.
+func (h *PlaybackHandler) newDirectRequestV3(ctx context.Context, userID int, device, requested string) *directRequestV3 {
 	if requested != playback.MediaTransportDirectV3 {
 		requested = playback.MediaTransportRegularV3
 	}
 	d := &directRequestV3{requested: requested}
-	if read {
-		var err error
-		d.device, d.enrolled, err = h.loadDirectDeviceV3(ctx, userID, connectionDeviceV3(device))
-		d.unreadable = err != nil
-	}
+	var err error
+	d.device, d.enrolled, err = h.loadDirectDeviceV3(ctx, userID, connectionDeviceV3(device))
+	d.unreadable = err != nil
 	return d
 }
 
 // withDirectRequestV3 records the request's direct state on ctx. The device is
-// the one the caller named in X-Silo-Device-Id. With read false the state is
-// not read, for a replan that reuses its transport.
-func (h *PlaybackHandler) withDirectRequestV3(ctx context.Context, userID int, requested string, read bool) context.Context {
+// the one the caller named in X-Silo-Device-Id.
+func (h *PlaybackHandler) withDirectRequestV3(ctx context.Context, userID int, requested string) context.Context {
+	retry := keyRetryFromContext(ctx)
+	if retry != nil && retry.direct != nil {
+		// The request runs again (see keyRetryV3) on the state its first run read.
+		return context.WithValue(ctx, directRequestKeyV3{}, retry.direct)
+	}
 	device, _ := ctx.Value(playbackConnectionDeviceContextKey{}).(string)
-	return context.WithValue(ctx, directRequestKeyV3{}, h.newDirectRequestV3(ctx, userID, device, requested, read))
+	d := h.newDirectRequestV3(ctx, userID, device, requested)
+	if retry != nil {
+		retry.direct = d
+	}
+	return context.WithValue(ctx, directRequestKeyV3{}, d)
 }
 
 // withDirectProbeV3 is withDirectRequestV3 for the bandwidth probe, which
 // names its device and transport itself.
 func (h *PlaybackHandler) withDirectProbeV3(ctx context.Context, userID int, device, requested string) context.Context {
-	return context.WithValue(ctx, directRequestKeyV3{}, h.newDirectRequestV3(ctx, userID, device, requested, true))
+	return context.WithValue(ctx, directRequestKeyV3{}, h.newDirectRequestV3(ctx, userID, device, requested))
 }
 
 // connectionKeyV3 is key(host) for the request on ctx: the device's direct key
@@ -221,19 +246,25 @@ type keyPassV3 struct {
 	read string
 	// record is the key a clear or an observed rebuffer is written under, and
 	// writes says whether this pass writes at all. Only the first pass writes:
-	// the request's own observations are recorded once.
-	record string
-	writes bool
+	// the request's own observations are recorded once. A clear also removes
+	// the limit of clearAlso, the key of the other host class the start may
+	// serve from.
+	record    string
+	clearAlso string
+	writes    bool
 }
 
-// pinProxyEgressV3 returns r with the egress of every workload pinned to a
-// proxy, so the committed route cannot leave the host class the pass planned
-// for.
+// pinProxyEgressV3 returns r with the egress of every workload the operator
+// leaves open to a proxy pinned to proxy_only, so a route preview cannot leave
+// the host class the pass planned for. A workload set to api_only stays
+// api_only: the pin narrows the operator's policy and never widens it.
 func pinProxyEgressV3(h *PlaybackHandler, r *http.Request) *http.Request {
 	policy := h.playbackRoutingPolicyForContextV3(r.Context())
-	policy.DirectPlayEgress = config.PlaybackEgressProxyOnly
-	policy.RemuxEgress = config.PlaybackEgressProxyOnly
-	policy.VideoTranscodeEgress = config.PlaybackEgressProxyOnly
+	for _, egress := range []*config.PlaybackEgressPreference{&policy.DirectPlayEgress, &policy.RemuxEgress, &policy.VideoTranscodeEgress} {
+		if *egress != config.PlaybackEgressAPIOnly {
+			*egress = config.PlaybackEgressProxyOnly
+		}
+	}
 	return r.WithContext(withPlaybackRoutingPolicySnapshotV3(r.Context(), policy))
 }
 
@@ -270,6 +301,39 @@ func (h *PlaybackHandler) selectMediaHostV3(r *http.Request, mode mediaAuthModeV
 	return mediaHostAPI, true
 }
 
+// keyRetryV3 is the state one start or replan shares across its two runs. A
+// start that planned under the proxy's regular key and previewed that proxy
+// pinned has its commit pinned too (see planUnderKeysV3); if the commit finds the
+// proxy gone, the whole request runs again with unkeyed set, which plans once
+// under no key and commits under the operator's own policy.
+type keyRetryV3 struct {
+	pinned  bool
+	unkeyed bool
+	// direct is the device's direct state the first run read; the second run
+	// plans on it, so a request reads the state once.
+	direct *directRequestV3
+}
+
+type keyRetryKeyV3 struct{}
+
+var errPinnedRouteLostV3 = errors.New("the pinned proxy route was lost at commit")
+
+func withKeyRetryV3(ctx context.Context) (context.Context, *keyRetryV3) {
+	retry := &keyRetryV3{}
+	return context.WithValue(ctx, keyRetryKeyV3{}, retry), retry
+}
+
+func keyRetryFromContext(ctx context.Context) *keyRetryV3 {
+	retry, _ := ctx.Value(keyRetryKeyV3{}).(*keyRetryV3)
+	return retry
+}
+
+// lost reports whether failure ends a pinned commit that has not run again: the
+// route decision that selected nothing, after the plan was made for a proxy.
+func (k *keyRetryV3) lost(failure *transportErrorV3) bool {
+	return k != nil && k.pinned && !k.unkeyed && failure != nil && failure.routeRefusal
+}
+
 // planUnderKeysV3 runs plan under the connection keys of the start policy: at
 // most two plans beyond the first, only for a request assigned direct on the API
 // host.
@@ -277,16 +341,24 @@ func (h *PlaybackHandler) selectMediaHostV3(r *http.Request, mode mediaAuthModeV
 // Pass 1 plans under key(API host) and resolves the route. When the host that
 // route selects has the same key, the plan stands; every regular request ends
 // here, because every host then has the regular key. Otherwise pass 2 plans
-// again from the original request under the selected host's key, with the
-// route's egress pinned to that host class. A pass that fails ends the policy
-// with that pass, so the caller fails the request. When the pinned route does
-// not resolve, a last plan runs under no key at all and the route resolves as
-// it would for any request. The returned request carries the pin of the plan
-// that stands.
+// again from the original request under the selected host's key, and a preview
+// with the route's egress pinned to that host class checks that the plan still
+// resolves there. A pass that fails ends the policy with that pass, so the
+// caller fails the request. When the pinned route does not resolve, a last plan
+// runs under no key at all and the route resolves as it would for any request.
+// The commit resolves under the pinned request, so the second pass's plan, made
+// under the proxy's regular key, is never served from the API host; a commit
+// that finds the proxy gone ends in a route refusal, and the request runs again
+// (see keyRetryV3) with that last plan under no key, committed under the
+// operator's own policy as after pass 1.
 func planUnderKeysV3[T any](h *PlaybackHandler, r *http.Request, record string, plan func(keyPassV3) T, resultOf func(T) playback.PlannerResultV3, modeOf func(T) mediaAuthModeV3, failed func(T) bool) (T, *http.Request) {
+	retry := keyRetryFromContext(r.Context())
+	if retry != nil && retry.unkeyed {
+		return plan(keyPassV3{}), r
+	}
 	apiKey := h.connectionKeyV3(r.Context(), mediaHostAPI)
-	first := plan(keyPassV3{read: apiKey, record: record, writes: true})
 	proxyKey := h.connectionKeyV3(r.Context(), mediaHostProxy)
+	first := plan(keyPassV3{read: apiKey, record: record, clearAlso: proxyKey, writes: true})
 	if proxyKey == apiKey {
 		return first, r
 	}
@@ -300,7 +372,29 @@ func planUnderKeysV3[T any](h *PlaybackHandler, r *http.Request, record string, 
 		return second, r
 	}
 	if host, ok := h.selectMediaHostV3(pinned, modeOf(second), resultOf(second)); ok && host == mediaHostProxy {
+		if retry != nil {
+			retry.pinned = true
+		}
 		return second, pinned
 	}
 	return plan(keyPassV3{}), r
+}
+
+// noLegalRouteV3 is the refusal of a request that no route can serve: its
+// device takes no proxy origin and the operator's policy leaves every delivery
+// to proxies, so the answer does not depend on what the media needs. It is the
+// final routing_policy_unsatisfied, or the 503 when the device's state could not
+// be read. Policies that leave some delivery to the API host are not decided
+// here; the route resolver decides them.
+func (h *PlaybackHandler) noLegalRouteV3(ctx context.Context) *transportErrorV3 {
+	if !directMediaFromContext(ctx).DirectOnly {
+		return nil
+	}
+	policy := h.playbackRoutingPolicyForContextV3(ctx)
+	for _, egress := range []config.PlaybackEgressPreference{policy.DirectPlayEgress, policy.RemuxEgress, policy.VideoTranscodeEgress} {
+		if egress != config.PlaybackEgressProxyOnly {
+			return nil
+		}
+	}
+	return routeRefusalV3(ctx, noderouting.OutcomePolicyUnsatisfied)
 }

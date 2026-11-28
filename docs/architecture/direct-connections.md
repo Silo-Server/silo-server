@@ -373,6 +373,15 @@ the old host with the new holder's confirmation. A device treats a path as ready
 only after its own direct pong from the host, so the mismatch lasts until the
 next netmap.
 
+Each confirmation write also records its key in a per-host index, the sorted set
+`silo:direct:confidx:<label>` scored by expiry on Redis time, the clock the key itself
+expires on, in the same script. Removal reads
+that index and deletes the listed keys in batches; nothing scans the keyspace the
+store shares with other applications. Every script declares each key it touches.
+An index member lapses with its confirmation: each write prunes the members past
+their expiry on Redis time, so a caller whose clock steps cannot drop a live
+confirmation from the index, and the index expires with its longest member.
+
 ## Revocation
 
 The server withdraws entries from the store's list for the account, never from a
@@ -395,7 +404,9 @@ and a changed audit marker does not save an entry the ending session still owns.
 After the third miss the selector judges the last read as well: an entry that no
 longer belongs to the target is skipped and the withdrawal goes on with the next
 entry, while an entry that still belongs to the target and keeps changing ends the
-withdrawal with a logged `entry_changing` reason. Only the withdrawal of a whole account deletes without that check. A revocation runs on a context detached
+withdrawal with a logged `entry_changing` reason. Only the withdrawal of a whole account deletes without that check. An enrollment also checks its login session and its profile after it writes the
+entry, and withdraws the entry when either is gone, so a revocation that ran
+before the write cannot leave an entry its listing missed. A revocation runs on a context detached
 from the request that caused it, and its listing and withdrawals share a bound of
 10 seconds, so a client that disconnects right after it signs out does not stop
 it. A withdrawn or replaced key leaves the peer cache, and
@@ -453,8 +464,13 @@ path included.
 A renewal carries the marker only when the stored entry holds the same key and is
 audited, and then records no row. A new key, a missing entry, or an entry without
 the marker records a row, so an entry whose audit is pending, failed, or was lost
-with its process is audited again. Two overlapping requests can both record a
-row for one key; that duplicate is accepted.
+with its process is audited again. A renewal whose write turns out to replace a
+different key, which another request stored after the renewal read the entry, is a
+key replacement: the write that reports the displaced key is the first point that
+knows, so `Enroll` then clears the marker the write stored, with the same
+compare-before-write, and sets it again only after the row commits. The entry
+holds the marker for one store round trip in that case. Two overlapping requests
+can both record a row for one key; that duplicate is accepted.
 
 When the row cannot be written, `Enroll` returns the error and deletes the entry
 only while it still holds this request's key and policy, revision included, so a
@@ -521,12 +537,41 @@ The serving host decides the class of a path, never the client.
 ## Direct Only Rule
 
 A device enrolled with `connection_path` `direct_only` never gets a regular media
-proxy origin. No proxy offers a direct transport, so `nodepool.MediaReachableVia`
-admits no proxy for the device, `Node.MediaURLFor` returns no URL, and the API
-host serves its media. The rule holds for start, replan and the probe redirect. It
-holds when the device's enrollment cannot be read: the planner treats an unreadable
-device as `direct_only`. Downloads, the Jellyfin-compatible surface and theme
-delivery keep `ClientURLFor`, so the device setting does not reach them.
+proxy origin. No proxy offers a direct transport, so every native route compile
+leaves out the proxy-egress shapes for the device and the API host serves its
+media. The native handlers compile routes only through `deviceRouteRequestV3`,
+`routeCandidatesV3` and `resolveRouteV3` in
+`internal/api/handlers/playback_route_v3.go`, which clear
+`noderouting.Request.ProxyAllowed` for such a device. A `forbidigo` rule in
+`.golangci.yml` fails a call to `noderouting.Candidates` or `noderouting.Resolve`
+anywhere else in the native handlers, so a path that picks, reuses or counts a
+route cannot skip the rule. `nodepool.MediaReachableVia` and `Node.MediaURLFor`
+stay as a second guard at the node and URL level.
+
+The rule holds for start, replan, seek and the probe redirect. A seek reads the
+device like any other replan. It holds when the device's enrollment cannot be read:
+the planner treats an unreadable device as `direct_only`. When the operator's
+egress is `proxy_only` for every delivery (direct play, remux and video
+transcode), a device that takes no proxy has no legal route for anything, whatever
+the media needs, and the request is refused before planning
+(`noLegalRouteV3`): a known `direct_only` device gets the final
+`routing_policy_unsatisfied`, and a device whose enrollment cannot be read gets a
+`503` `dependency_unavailable` with `Retry-After`, from a start or a replan alike,
+because the cause is the state store. The `503` stores no decision, so the same
+replan request ID runs again once the store answers. A policy that leaves some
+delivery to the API host is decided by the route resolver.
+
+A seek of a session that plays over the direct path replays the stream the
+session's attribution describes, so it is planned without proxy shapes, as for a
+`direct_only` device: it stays on the API host when a legal API route exists and
+ends in the final `routing_policy_unsatisfied` when none does. A seek of a
+regular session is planned as before.
+
+A replay of a start or a completed replan returns its stored decision, so a replay
+of an attempt made before a device switched to `direct_only` can still carry its
+old proxy URL. Every new start, replan and seek gets the rule. Downloads, the
+Jellyfin-compatible surface and theme delivery never read the device's state and
+keep their own route inputs, so the device setting does not reach them.
 
 ## Knob Rules
 

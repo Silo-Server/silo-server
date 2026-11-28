@@ -68,6 +68,9 @@ const playbackCapabilityStateAvailable = "available"
 type PlaybackOperationError struct {
 	Status        int
 	Code, Message string
+	// RetryAfter is the retry hint in seconds the v2 adapter sends as
+	// Retry-After; zero sends none.
+	RetryAfter int
 }
 
 func (e *PlaybackOperationError) Error() string { return e.Message }
@@ -312,7 +315,7 @@ func (h *PlaybackHandler) StartPlaybackV2(ctx context.Context, caller PlaybackCa
 	if err != nil {
 		return playback.DecisionResponseV3{}, playbackOperationError(http.StatusBadRequest, "bad_request", "Invalid playback request")
 	}
-	response, err := h.startPlaybackApplicationV3(playbackCallerRequest(ctx, caller), body)
+	response, err := h.startPlaybackWithRetryV3(playbackCallerRequest(ctx, caller), body)
 	if err == nil && response.Outcome == playback.OutcomePlayableV3 {
 		h.recordStartingDevice(ctx, caller.UserID, caller.ProfileID, caller.DeclaredDevice)
 	}

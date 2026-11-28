@@ -625,7 +625,7 @@ func requireDirectReadingsV3(t *testing.T, pool *pgxpool.Pool, user int, connect
 	onDirectPath := netaccess.WithPath(lan, netaccess.Path{Direct: &netaccess.DirectPath{HostID: "api", PeerKey: "nodekey:peer", UserID: user, DeviceID: "tv-1", Class: "direct"}})
 	for name, base := range map[string]context.Context{"on the LAN route": lan, "on the direct path": onDirectPath} {
 		for transport, want := range map[string]int{playback.MediaTransportRegularV3: 30000, playback.MediaTransportDirectV3: 90000} {
-			r := httptest.NewRequest(http.MethodPost, "/", nil).WithContext(h.withDirectRequestV3(base, user, transport, true))
+			r := httptest.NewRequest(http.MethodPost, "/", nil).WithContext(h.withDirectRequestV3(base, user, transport))
 			req := playback.StartRequestV3{QualityPreference: playback.QualityAutoV3, ClientFeatures: []string{playback.FeatureBufferingQualityV1}}
 			if err := h.applyConnectionReading(r, &req, h.connectionKeyV3(r.Context(), mediaHostAPI)); err != nil {
 				t.Fatal(err)

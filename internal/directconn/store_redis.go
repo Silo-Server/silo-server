@@ -24,8 +24,9 @@ const (
 	// storeAttempts bounds the read-then-script loop of PutDevice and
 	// DeleteDevice when the stored node key changes between the two steps.
 	storeAttempts = 3
-	// scanBatch is the SCAN COUNT hint for DeleteHost.
-	scanBatch = 100
+	// confIndexBatch is how many confirmation keys one DeleteHost script call
+	// removes.
+	confIndexBatch = 500
 )
 
 // Script results. The scripts return these strings so the Go side never
@@ -183,6 +184,45 @@ end
 return 'OK'
 `)
 
+// putConfirmationScript writes or clears one confirmation and its entry in the
+// host's index while the engine lease holds the fence.
+// KEYS: lease, confirmation, index. ARGV: fence, value, ttl_ms; a ttl of 0 or
+// less clears the confirmation.
+// The index is a sorted set of the host's confirmation keys scored by their
+// expiry, which DeleteHost reads to find them. Every write drops the members
+// whose expiry has passed, and the index expires with its longest member, so an
+// idle host leaves none. Scores, pruning and the index's lifetime are on Redis
+// time, the clock the confirmation key itself expires on, so a caller whose
+// clock steps cannot drop a live confirmation from the index.
+var putConfirmationScript = redis.NewScript(redisNowLua + `
+if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 'FENCED' end
+redis.call('ZREMRANGEBYSCORE', KEYS[3], '-inf', now)
+if tonumber(ARGV[3]) <= 0 then
+  redis.call('DEL', KEYS[2])
+  redis.call('ZREM', KEYS[3], KEYS[2])
+else
+  redis.call('SET', KEYS[2], ARGV[2], 'PX', ARGV[3])
+  redis.call('ZADD', KEYS[3], now + tonumber(ARGV[3]), KEYS[2])
+end
+local last = redis.call('ZRANGE', KEYS[3], -1, -1, 'WITHSCORES')
+if #last > 0 then
+  redis.call('PEXPIRE', KEYS[3], math.max(1, math.floor(tonumber(last[2]) - now)))
+end
+return 'OK'
+`)
+
+// dropConfirmationsScript deletes confirmation keys and removes them from the
+// host's index while the engine lease holds the fence.
+// KEYS: lease, index, then the confirmation keys. ARGV: fence.
+var dropConfirmationsScript = redis.NewScript(`
+if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 'FENCED' end
+for i = 3, #KEYS do
+  redis.call('DEL', KEYS[i])
+  redis.call('ZREM', KEYS[2], KEYS[i])
+end
+return 'OK'
+`)
+
 // storedRegistration is the registration value. The presence deadline is in
 // Redis time and travels with it, so a read judges presence at the same Redis
 // time as the lease.
@@ -215,13 +255,13 @@ type storedConfirmation struct {
 // "Expiry at now is absent": an entry is absent once Redis time reaches its
 // deadline, whatever the caller's now. Host entries and confirmations stay on
 // the caller's clock, because the engine lease holder is their one writer and
-// reader.
+// reader; the confirmation index is on Redis time (putConfirmationScript).
 //
 // PutHost, PutConfirmation and DeleteHost write only while the engine lease
 // (engineLeaseKey) holds the store's fence, and otherwise return
 // errNotLeaseHolder without writing, so a process that lost the lease cannot
 // replace or remove its successor's entries. The check holds against one Redis
-// primary only.
+// primary only. Every script declares each key it touches in KEYS.
 type redisStore struct {
 	client *redis.Client
 	// labels lists the host labels the store serves, sorted. Hosts and
@@ -271,8 +311,13 @@ func confKey(label string, ref server.DeviceRef) string {
 }
 func acctKey(account server.AccountID) string { return redisKeyPrefix + "acct:" + string(account) }
 func hostKey(label string) string             { return redisKeyPrefix + "host:" + label }
-func nkKey(k protocol.NodeKey) string         { return nkKeyHex(hex.EncodeToString(k[:])) }
-func nkKeyHex(h string) string                { return redisKeyPrefix + "nk:" + h }
+
+// confIndexKey is the sorted set that lists the confirmation keys host label
+// wrote, scored by expiry (putConfirmationScript).
+func confIndexKey(label string) string { return redisKeyPrefix + "confidx:" + label }
+
+func nkKey(k protocol.NodeKey) string { return nkKeyHex(hex.EncodeToString(k[:])) }
+func nkKeyHex(h string) string        { return redisKeyPrefix + "nk:" + h }
 
 // ownerValue is the node-key index value "{uid}:{did}". The account is a
 // decimal user ID, so the first ':' separates the two parts.
@@ -665,9 +710,10 @@ func (s *redisStore) PutHost(ctx context.Context, h server.HostEntry, now time.T
 }
 
 // DeleteHost removes the host entry, then every confirmation that host wrote,
-// one SCAN batch at a time; each step is fenced, so a refusal can leave a
-// later batch in place. Confirmation keys are found with SCAN because no index
-// lists them; this is the only operation that scans.
+// one batch of the host's index at a time; each step is fenced, so a refusal can
+// leave a later batch in place. It reads only the index, so its cost follows the
+// host's confirmations, not the size of the keyspace the store shares with
+// other applications.
 func (s *redisStore) DeleteHost(ctx context.Context, label string) error {
 	if err := s.checkLabel(label); err != nil {
 		return err
@@ -675,30 +721,19 @@ func (s *redisStore) DeleteHost(ctx context.Context, label string) error {
 	if err := s.fencedDelete(ctx, "delete host", hostKey(label)); err != nil {
 		return err
 	}
-	prefix := redisKeyPrefix + "conf:" + label + ":"
-	var cursor uint64
+	index := confIndexKey(label)
 	for {
-		keys, next, err := s.client.Scan(ctx, cursor, prefix+"*", scanBatch).Result()
+		members, err := s.client.ZRange(ctx, index, 0, confIndexBatch-1).Result()
 		if err != nil {
-			return unavailable("scan host confirmations", err)
+			return unavailable("read host confirmation index", err)
 		}
-		stale := keys[:0]
-		for _, key := range keys {
-			// A label may contain ':', so keep only keys of the form
-			// conf:{label}:{uid}:{did}; the prefix then holds exactly one ':'.
-			if strings.Count(strings.TrimPrefix(key, prefix), ":") == 1 {
-				stale = append(stale, key)
-			}
-		}
-		if len(stale) > 0 {
-			if err := s.fencedDelete(ctx, "delete host confirmations", stale...); err != nil {
-				return err
-			}
-		}
-		if next == 0 {
+		if len(members) == 0 {
 			return nil
 		}
-		cursor = next
+		res, err := dropConfirmationsScript.Run(ctx, s.client, append([]string{engineLeaseKey, index}, members...), s.fence).Text()
+		if err = fencedResult("delete host confirmations", res, err); err != nil {
+			return err
+		}
 	}
 }
 
@@ -742,13 +777,20 @@ func (s *redisStore) PutConfirmation(ctx context.Context, hostLabel string, ref 
 	key := confKey(hostLabel, ref)
 	ttl := expires.Sub(now)
 	if c == nil || ttl.Milliseconds() <= 0 {
-		return s.fencedSet(ctx, "delete confirmation", key, "", 0)
+		return s.putConfirmation(ctx, "delete confirmation", hostLabel, key, "", 0)
 	}
 	value, err := json.Marshal(storedConfirmation{ExpiresMS: expires.UnixMilli(), Confirmation: *c})
 	if err != nil {
 		return fmt.Errorf("encode confirmation: %w", err)
 	}
-	return s.fencedSet(ctx, "put confirmation", key, string(value), ttl)
+	return s.putConfirmation(ctx, "put confirmation", hostLabel, key, string(value), ttl)
+}
+
+// putConfirmation runs putConfirmationScript for one confirmation of host label.
+func (s *redisStore) putConfirmation(ctx context.Context, op, label, key, value string, ttl time.Duration) error {
+	res, err := putConfirmationScript.Run(ctx, s.client, []string{engineLeaseKey, key, confIndexKey(label)},
+		s.fence, value, ttl.Milliseconds()).Text()
+	return fencedResult(op, res, err)
 }
 
 func (s *redisStore) Confirmations(ctx context.Context, ref server.DeviceRef, now time.Time) (map[string]protocol.Confirmation, error) {

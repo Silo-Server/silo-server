@@ -215,6 +215,12 @@
       "value": "Ez már össze van kapcsolva ezzel a fiókkal."
     }
   ],
+  "error.app_code_invalid": [
+    {
+      "type": 0,
+      "value": "Ez a kód ismeretlen, már felhasználták, vagy lejárt. Kérjen újat a szerver weboldalán."
+    }
+  ],
   "error.authentication_required": [
     {
       "type": 0,
@@ -333,6 +339,12 @@
     {
       "type": 0,
       "value": "Ennek az értéknek nem megfelelő a típusa."
+    }
+  ],
+  "error.field.key_enrolled": [
+    {
+      "type": 0,
+      "value": "Ez a kulcs már használatban van ezen a szerveren."
     }
   ],
   "error.field.malformed_form": [
@@ -2521,6 +2533,30 @@
     {
       "type": 0,
       "value": "Automatikus"
+    }
+  ],
+  "settingsManifest.playback.connection_path.description": [
+    {
+      "type": 0,
+      "value": "A „Csak közvetlen” lehetőség is a helyi hálózati kapcsolatot használja, ha van ilyen."
+    }
+  ],
+  "settingsManifest.playback.connection_path.label": [
+    {
+      "type": 0,
+      "value": "Kapcsolódási útvonal"
+    }
+  ],
+  "settingsManifest.playback.connection_path.option.automatic": [
+    {
+      "type": 0,
+      "value": "Automatikus"
+    }
+  ],
+  "settingsManifest.playback.connection_path.option.direct_only": [
+    {
+      "type": 0,
+      "value": "Csak közvetlen"
     }
   ],
   "settingsManifest.playback.intro_skip_mode.description": [
@@ -23637,6 +23673,87 @@
       }
     }
   ],
+  "web.admin.common.adminUserSignIn.unlinkConfirm.text": [
+    {
+      "type": 5,
+      "value": "last_way",
+      "options": {
+        "yes": {
+          "value": [
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " ezentúl nem jelentkezhet be ezzel a szolgáltatói fiókkal. "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " addig nem tud bejelentkezni, amíg nem állít be jelszót, vagy újra nem csatlakoztat egy szolgáltatót."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " ezentúl nem jelentkezhet be ezzel a szolgáltatói fiókkal."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 5,
+      "value": "keys",
+      "options": {
+        "yes": {
+          "value": [
+            {
+              "type": 0,
+              "value": " A rendszer eltávolítja "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " ehhez a szolgáltatói fiókhoz kötött Silo-alkalmazáskulcsait, és kijelentkezteti ezeket az eszközöket."
+            }
+          ]
+        },
+        "unknown": {
+          "value": [
+            {
+              "type": 0,
+              "value": " A rendszer eltávolítja "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " minden olyan Silo-alkalmazáskulcsát, amely ehhez a szolgáltatói fiókhoz kötött, ha van ilyen, és kijelentkezteti az érintett eszközöket."
+            }
+          ]
+        },
+        "other": {
+          "value": []
+        }
+      }
+    }
+  ],
   "web.admin.common.adminUserSignIn.unlinkConfirm.title": [
     {
       "type": 0,
@@ -25911,6 +26028,18 @@
     {
       "type": 0,
       "value": "Elkészíti a lejátszók által tekeréskor megjelenített bélyegképeket a beállított nyilvános erőforrástárolóban. A fájlok feldolgozása a háttérben, alacsony prioritással történik. A kikapcsolás törli a könyvtár előnézeteit."
+    }
+  ],
+  "web.admin.common.libraryEditor.advanced.trickplayGenerate": [
+    {
+      "type": 0,
+      "value": "Hiányzó előnézetek létrehozása FFmpeg-gel"
+    }
+  ],
+  "web.admin.common.libraryEditor.advanced.trickplayGenerateDescription": [
+    {
+      "type": 0,
+      "value": "A rendszer elsőként a médiafájlok mellett lévő .trickplay és .bif kísérőfájlokat használja. Kapcsolja ki, ha csak kísérőfájlokat szeretne importálni, FFmpeg-gel történő létrehozás nélkül."
     }
   ],
   "web.admin.common.libraryEditor.advanced.trickplayUnavailable": [
@@ -29951,6 +30080,40 @@
       "value": "Adminisztráció: Felhasználók"
     }
   ],
+  "web.admin.common.trickplay.badge.awaitingSidecarCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " fájl kísérőfájlra vár"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " fájl kísérőfájlra vár"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.common.trickplay.badge.detail": [
     {
       "type": 0,
@@ -30081,6 +30244,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.common.trickplay.badge.sidecarsOnly": [
+    {
+      "type": 0,
+      "value": "csak kísérőfájlok"
     }
   ],
   "web.admin.common.trickplay.badge.srDetail": [
@@ -30245,6 +30414,42 @@
     {
       "type": 0,
       "value": "A lejátszók az új előnézetek elkészültéig a jelenlegieket használják."
+    }
+  ],
+  "web.admin.common.trickplay.sidecarStatus.awaiting_sidecar": [
+    {
+      "type": 0,
+      "value": "Kísérőfájlra vár"
+    }
+  ],
+  "web.admin.common.trickplay.sidecarStatus.sidecar_invalid": [
+    {
+      "type": 0,
+      "value": "Érvénytelen kísérőfájl"
+    }
+  ],
+  "web.admin.common.trickplay.sidecarStatus.sidecar_stale": [
+    {
+      "type": 0,
+      "value": "Elavult kísérőfájl"
+    }
+  ],
+  "web.admin.common.trickplay.source.generated": [
+    {
+      "type": 0,
+      "value": "Létrehozva"
+    }
+  ],
+  "web.admin.common.trickplay.source.sidecar_bif": [
+    {
+      "type": 0,
+      "value": "Kísérőfájl (.bif)"
+    }
+  ],
+  "web.admin.common.trickplay.source.sidecar_trickplay": [
+    {
+      "type": 0,
+      "value": "Kísérőfájl (.trickplay)"
     }
   ],
   "web.admin.common.trickplay.state.off": [
@@ -32072,7 +32277,7 @@
     },
     {
       "type": 0,
-      "value": " egyik bejelentkezési munkamenete. A többi eszköze bejelentkezve marad. A kliens a fiók jelszavával újra bejelentkezhet."
+      "value": " egyik bejelentkezési munkamenete. A többi eszköze bejelentkezve marad. A kliens újra bejelentkezhet."
     }
   ],
   "web.admin.dashboard.widgets.apiClients.confirmLabel": [
@@ -43710,6 +43915,12 @@
       "value": "Profil"
     }
   ],
+  "web.admin.history.column.progress": [
+    {
+      "type": 0,
+      "value": "Előrehaladás"
+    }
+  ],
   "web.admin.history.column.status": [
     {
       "type": 0,
@@ -43744,6 +43955,12 @@
     {
       "type": 0,
       "value": "Munkamenet-naplók"
+    }
+  ],
+  "web.admin.history.detail.backToPlay": [
+    {
+      "type": 0,
+      "value": "Vissza az összevont lejátszáshoz"
     }
   ],
   "web.admin.history.detail.column.delivered": [
@@ -43854,6 +44071,12 @@
       "value": "Megtekintési idő"
     }
   ],
+  "web.admin.history.detail.inspectSitting": [
+    {
+      "type": 0,
+      "value": "Vizsgálat"
+    }
+  ],
   "web.admin.history.detail.keyboardHint": [
     {
       "type": 0,
@@ -43938,6 +44161,12 @@
       "value": "Miért nem volt közvetlen lejátszás"
     }
   ],
+  "web.admin.history.detail.section.sessions": [
+    {
+      "type": 0,
+      "value": "A lejátszás munkamenetei"
+    }
+  ],
   "web.admin.history.detail.section.streams": [
     {
       "type": 0,
@@ -43948,6 +44177,94 @@
     {
       "type": 0,
       "value": "Időzítés és megtekintési előrehaladás"
+    }
+  ],
+  "web.admin.history.detail.sessionsCapped": [
+    {
+      "type": 0,
+      "value": "A lejátszás első "
+    },
+    {
+      "type": 1,
+      "value": "shown"
+    },
+    {
+      "type": 0,
+      "value": " munkamenete látható (összesen: "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": ")."
+    }
+  ],
+  "web.admin.history.detail.sessionsNotice": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ez a lejátszás "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " munkamenetből áll. Az alábbi stream-, eszköz- és útvonaladatok erre vonatkoznak."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ez a lejátszás "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " munkamenetből áll. Az alábbi stream-, eszköz- és útvonaladatok az elsődleges munkamenetre vonatkoznak; egy munkamenet külön vizsgálatához válassza ki alább."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.ended": [
+    {
+      "type": 0,
+      "value": "Befejezés"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.method": [
+    {
+      "type": 0,
+      "value": "Módszer"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.started": [
+    {
+      "type": 0,
+      "value": "Kezdés"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.watched": [
+    {
+      "type": 0,
+      "value": "Megtekintve"
     }
   ],
   "web.admin.history.detail.subtitlesBurnIn": [
@@ -44176,6 +44493,12 @@
       "value": "Összes hálózat"
     }
   ],
+  "web.admin.history.filter.allMediaTypes": [
+    {
+      "type": 0,
+      "value": "Összes média"
+    }
+  ],
   "web.admin.history.filter.allMethods": [
     {
       "type": 0,
@@ -44212,6 +44535,24 @@
       "value": "Befejezve"
     }
   ],
+  "web.admin.history.filter.episodes": [
+    {
+      "type": 0,
+      "value": "Epizódok"
+    }
+  ],
+  "web.admin.history.filter.hideShort": [
+    {
+      "type": 0,
+      "value": "<30 mp elrejtése"
+    }
+  ],
+  "web.admin.history.filter.hideShortTitle": [
+    {
+      "type": 0,
+      "value": "30 másodpercnél rövidebb befejezetlen munkamenetek elrejtése"
+    }
+  ],
   "web.admin.history.filter.locationLocal": [
     {
       "type": 0,
@@ -44222,6 +44563,12 @@
     {
       "type": 0,
       "value": "Távoli"
+    }
+  ],
+  "web.admin.history.filter.movies": [
+    {
+      "type": 0,
+      "value": "Filmek"
     }
   ],
   "web.admin.history.filter.partial": [
@@ -44410,6 +44757,12 @@
       "value": "Legutóbbi lejátszások"
     }
   ],
+  "web.admin.history.row.burnInBadgeTitle": [
+    {
+      "type": 0,
+      "value": "Feliratok a videóba égetve"
+    }
+  ],
   "web.admin.history.row.completed": [
     {
       "type": 0,
@@ -44430,6 +44783,48 @@
     {
       "type": 0,
       "value": "Becsült (a pontos megtekintési idő követése előtt rögzítve)"
+    }
+  ],
+  "web.admin.history.row.groupedSessionsTitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Összevonva "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " munkamenetből"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Összevonva "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " munkamenetből"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.history.row.meta": [
@@ -44462,6 +44857,12 @@
       "value": "Részleges"
     }
   ],
+  "web.admin.history.row.progressLabel": [
+    {
+      "type": 0,
+      "value": "Lejátszási előrehaladás"
+    }
+  ],
   "web.admin.history.row.started": [
     {
       "type": 0,
@@ -44472,16 +44873,92 @@
       "value": "time"
     }
   ],
+  "web.admin.history.stats.accountsCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " fiók"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " fiók"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.history.stats.completed": [
     {
       "type": 0,
       "value": "Befejezve"
     }
   ],
+  "web.admin.history.stats.completionBreakdown": [
+    {
+      "type": 1,
+      "value": "completed"
+    },
+    {
+      "type": 0,
+      "value": " befejezett · "
+    },
+    {
+      "type": 1,
+      "value": "partial"
+    },
+    {
+      "type": 0,
+      "value": " részleges"
+    }
+  ],
   "web.admin.history.stats.partial": [
     {
       "type": 0,
       "value": "Részleges"
+    }
+  ],
+  "web.admin.history.stats.totalPlays": [
+    {
+      "type": 0,
+      "value": "Összes lejátszás"
+    }
+  ],
+  "web.admin.history.stats.totalSessions": [
+    {
+      "type": 0,
+      "value": "Összes munkamenet"
+    }
+  ],
+  "web.admin.history.stats.uniqueProfiles": [
+    {
+      "type": 0,
+      "value": "Egyedi profilok"
+    }
+  ],
+  "web.admin.history.stats.uniqueTitles": [
+    {
+      "type": 0,
+      "value": "Egyedi címek"
     }
   ],
   "web.admin.history.stats.visibleRows": [
@@ -44500,6 +44977,24 @@
     {
       "type": 0,
       "value": "Lejátszási előzmények"
+    }
+  ],
+  "web.admin.history.view.label": [
+    {
+      "type": 0,
+      "value": "Előzmények nézete"
+    }
+  ],
+  "web.admin.history.view.plays": [
+    {
+      "type": 0,
+      "value": "Lejátszások"
+    }
+  ],
+  "web.admin.history.view.sessions": [
+    {
+      "type": 0,
+      "value": "Összes munkamenet"
     }
   ],
   "web.admin.historyImport.conflict.message": [
@@ -86227,6 +86722,234 @@
       "value": ")"
     }
   ],
+  "web.admin.users.detail.appKeys.confirm.denyDescription": [
+    {
+      "type": 0,
+      "value": "A(z) "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " eszköz nem fog tudni bejelentkezni "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " fiókjába. Ha az ő eszköze volt, újra hozzáadhatja a Silo alkalmazásban."
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKey": [
+    {
+      "type": 0,
+      "value": "Kulcs eltávolítása"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKeyDescription": [
+    {
+      "type": 0,
+      "value": "A már bejelentkezett eszközök tovább működnek, amíg el nem távolítja őket. Ezzel a kulccsal nem adható hozzá új eszköz, és a vele hozzáadott, még várakozó eszközöket a rendszer elutasítja. "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " Silo alkalmazása új kulcsot állít be, amikor legközelebb bejelentkezve hozzáad egy eszközt."
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKeyTitle": [
+    {
+      "type": 0,
+      "value": "Eltávolítja "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " fiókkulcsát?"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.removeDescription": [
+    {
+      "type": 0,
+      "value": "A(z) "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " eszköz eltávolításával az eszköz azonnal kijelentkezik "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " fiókjából, és a kulcsa megszűnik: azzal többé nem jelentkezhet be. Az újbóli használathoz "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " újra hozzáadhatja a Silo alkalmazásban."
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.withdrawDescription": [
+    {
+      "type": 0,
+      "value": "A(z) "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " eszköz nem használhatja ezt a jóváhagyást "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " fiókjába való bejelentkezéshez."
+    }
+  ],
+  "web.admin.users.detail.appKeys.description": [
+    {
+      "type": 0,
+      "value": "Eszközök és alkalmazások, amelyek jelszó nélkül, a Silo alkalmazással jelentkeznek be "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " fiókjába."
+    }
+  ],
+  "web.admin.users.detail.appKeys.empty": [
+    {
+      "type": 0,
+      "value": "Ennél a fióknál egyetlen eszköz sem használja a Silo alkalmazást."
+    }
+  ],
+  "web.admin.users.detail.appKeys.loadFailed": [
+    {
+      "type": 0,
+      "value": "Nem sikerült betölteni az eszközöket."
+    }
+  ],
+  "web.admin.users.detail.appKeys.off": [
+    {
+      "type": 0,
+      "value": "A Silo alkalmazással történő bejelentkezés ki van kapcsolva ezen a szerveren, ezért ezek az eszközök nem tudnak bejelentkezni. Ettől még eltávolíthatja őket."
+    }
+  ],
+  "web.admin.users.detail.appKeys.ownerOnly": [
+    {
+      "type": 0,
+      "value": "Más rendszergazda vagy a tulajdonos eszközeit csak a szerver tulajdonosa módosíthatja."
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.description": [
+    {
+      "type": 0,
+      "value": "A Silo alkalmazás ezzel a kulccsal adja hozzá "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " új eszközeit. Beállítva: "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.none": [
+    {
+      "type": 0,
+      "value": "Nincs fiókkulcs. "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " Silo alkalmazása akkor állít be egyet, amikor legközelebb bejelentkezve hozzáad egy eszközt."
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.remove": [
+    {
+      "type": 0,
+      "value": "Fiókkulcs eltávolítása"
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKeyRemoved": [
+    {
+      "type": 0,
+      "value": "Fiókkulcs eltávolítva"
+    }
+  ],
+  "web.admin.users.detail.appKeys.preapprovals.description": [
+    {
+      "type": 0,
+      "value": "Bejelentkezések, amelyeket "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " egy még nem csatlakozott eszköz számára jóváhagyott."
+    }
+  ],
+  "web.admin.users.detail.appKeys.waiting.description": [
+    {
+      "type": 0,
+      "value": "Egy rendszergazdai fiók új eszköze addig vár, amíg "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " jóvá nem hagyja egy olyan eszközről, amelyen be van jelentkezve. Itt elutasíthatja."
+    }
+  ],
+  "web.admin.users.detail.appKeys.waiting.title": [
+    {
+      "type": 0,
+      "value": "Jóváhagyásra vár"
+    }
+  ],
   "web.admin.users.detail.common.allProfiles": [
     {
       "type": 0,
@@ -89747,6 +90470,12 @@
       "value": "A fiók elérte a profilok maximális számát"
     }
   ],
+  "web.admin.users.detail.profiles.badge.changedHere": [
+    {
+      "type": 0,
+      "value": "Itt módosítva"
+    }
+  ],
   "web.admin.users.detail.profiles.badge.kids": [
     {
       "type": 0,
@@ -89944,6 +90673,668 @@
     {
       "type": 0,
       "value": "PIN-kód mentése"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowAgain": [
+    {
+      "type": 0,
+      "value": "Újbóli engedélyezés"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowAgainAria": [
+    {
+      "type": 0,
+      "value": "A(z) "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " nevű profil visszatérésének engedélyezése ezen a szerveren"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowDescription": [
+    {
+      "type": 0,
+      "value": "A felhasználó alkalmazása a következő szinkronizáláskor újra hozzáadhatja a(z) "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " nevű profilt új profilként, az ezen a szerveren lévő előzményei nélkül, ha a profiljai között még szerepel a(z) "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " nevű profil, és ebben a fiókban van hely még egy profilnak."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowTitle": [
+    {
+      "type": 0,
+      "value": "Újra engedélyezi a(z) "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " nevű profilt?"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.alreadyCleared": [
+    {
+      "type": 0,
+      "value": "Ezt a módosítást már visszavonták, vagy "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " újra módosította. A lista naprakész."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedBy": [
+    {
+      "type": 0,
+      "value": "Módosította: "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedSinceOpened": [
+    {
+      "type": 0,
+      "value": "Ez a módosítás megváltozott, miután megnyitotta, ezért semmi sem lett visszavonva. Olvassa el újra a listában, majd vonja vissza, ha továbbra is szeretné."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedWhileRunning": [
+    {
+      "type": 0,
+      "value": "A profilok a művelet futása közben megváltoztak, ezért semmi sem módosult. A lista naprakész; próbálja újra, ha továbbra is szeretné."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clear": [
+    {
+      "type": 0,
+      "value": "Visszavonás"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearAndRemovePin": [
+    {
+      "type": 0,
+      "value": "Visszavonás és a PIN-kód eltávolítása"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearAria": [
+    {
+      "type": 0,
+      "value": "A(z) "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " nevű profil "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " mezőjén végzett módosítás visszavonása"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearFailed": [
+    {
+      "type": 0,
+      "value": "Nem sikerült visszavonni a módosítást."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearInherit": [
+    {
+      "type": 0,
+      "value": "A(z) "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " nevű profil "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " mezője visszaáll arra az értékre, amelyet a(z) "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " nevű profil most örököl, ahogy a felhasználó alkalmazása kéri. A felhasználó alkalmazásából érkező módosítások ismét érvényesek rá."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearLater": [
+    {
+      "type": 0,
+      "value": "A(z) "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " mező úgy marad, ahogy van, amíg a felhasználó alkalmazása legközelebb el nem küldi. Ezután a felhasználó alkalmazásából érkező módosítások ismét érvényesek rá."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearNow": [
+    {
+      "type": 0,
+      "value": "A(z) "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " nevű profil most visszaáll a felhasználó alkalmazásából származó értékre, és az alkalmazásból érkező módosítások ismét érvényesek rá."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearNowValue": [
+    {
+      "type": 0,
+      "value": "A(z) "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " nevű profil "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " mezője most visszaáll a felhasználó alkalmazásából származó értékre: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": ". Az alkalmazásból érkező módosítások ismét érvényesek rá."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearPin": [
+    {
+      "type": 0,
+      "value": "A(z) "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " nevű profil megtartja az Ön által beállított PIN-kódot, amíg a felhasználó alkalmazása legközelebb nem küld egyet. Ezután az alkalmazásból érkező módosítások ismét érvényesek rá."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearPinRemoves": [
+    {
+      "type": 0,
+      "value": "A felhasználó alkalmazása PIN-kód nélkül küldi a(z) "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " nevű profilt, ezért a visszavonás most eltávolítja az Ön által beállított PIN-kódot. Ezután bárki, aki ezt a fiókot használja, PIN-kód nélkül megnyithatja a(z) "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " nevű profilt."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearTitle": [
+    {
+      "type": 0,
+      "value": "Visszavonja a(z) "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " nevű profil "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " mezőjén végzett módosítást?"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.deletedAccount": [
+    {
+      "type": 0,
+      "value": "egy törölt fiók"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.description": [
+    {
+      "type": 0,
+      "value": "Ezek a profilok "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " alkalmazásából származnak. Az itt végzett módosítás ezen a szerveren marad, amíg vissza nem vonja. Ez nem zárolás: "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " is módosíthatja itt ugyanezt."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismiss": [
+    {
+      "type": 0,
+      "value": "Elvetés"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismissAria": [
+    {
+      "type": 0,
+      "value": "A(z) "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " nevű profil "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " mezőjére vonatkozó megjegyzés elvetése"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismissFailed": [
+    {
+      "type": 0,
+      "value": "Nem sikerült elvetni a megjegyzést."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.isChild": [
+    {
+      "type": 0,
+      "value": "Gyerekprofil"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.maxAdvisoryAge": [
+    {
+      "type": 0,
+      "value": "Korhatár"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.maxContentRating": [
+    {
+      "type": 0,
+      "value": "Legmagasabb korhatár-besorolás"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.name": [
+    {
+      "type": 0,
+      "value": "Név"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.picture": [
+    {
+      "type": 0,
+      "value": "Kép"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.pin": [
+    {
+      "type": 0,
+      "value": "PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.requests": [
+    {
+      "type": 0,
+      "value": "Kérések"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.requireAdvisoryAge": [
+    {
+      "type": 0,
+      "value": "Korhatár-besorolás megkövetelése"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.fieldValue": [
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.hidden": [
+    {
+      "type": 0,
+      "value": "Eltávolította ezen a szerveren: "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": ". A felhasználó alkalmazása addig nem adja hozzá újra, amíg nem engedélyezi."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.loadFailed": [
+    {
+      "type": 0,
+      "value": "Nem sikerült betölteni az ezen a szerveren végzett módosításokat."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.nameTaken": [
+    {
+      "type": 0,
+      "value": "A(z) "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " nevű profil nem kaphatja vissza a felhasználó alkalmazásából származó nevet ("
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "), mert itt egy másik profil már ezt a nevet viseli. Előbb nevezze át azt a profilt, majd próbálja újra a visszavonást."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeHiddenNextSync": [
+    {
+      "type": 0,
+      "value": "A(z) "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " nevű profil visszatérhet, amikor "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " alkalmazása legközelebb szinkronizál, ha a profiljai között még szerepel."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeHiddenWoken": [
+    {
+      "type": 0,
+      "value": "A(z) "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " nevű profil visszatérhet, amikor a felhasználó alkalmazása legközelebb szinkronizál, ha a profiljai között még szerepel. A rendszer szinkronizálásra kérte "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " telefonját."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeNextSync": [
+    {
+      "type": 0,
+      "value": "Visszavonva. "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " alkalmazása a következő szinkronizáláskor kapja meg."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeWoken": [
+    {
+      "type": 0,
+      "value": "Visszavonva. A rendszer szinkronizálásra kérte "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " telefonját."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.removedBy": [
+    {
+      "type": 0,
+      "value": "Eltávolította: "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.replacedOwner": [
+    {
+      "type": 0,
+      "value": "Ez felülírta az Ön által beállított értéket."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.setBy": [
+    {
+      "type": 0,
+      "value": "Beállította: "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.settled": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " módosította ezt ekkor: "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "; az Ön által beállított érték már nem érvényes."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.title": [
+    {
+      "type": 0,
+      "value": "Ezen a szerveren módosítva"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.inherited": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (örökölt)"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.noPicture": [
+    {
+      "type": 0,
+      "value": "Nincs kép"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.none": [
+    {
+      "type": 0,
+      "value": "Nincs"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.off": [
+    {
+      "type": 0,
+      "value": "Ki"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.on": [
+    {
+      "type": 0,
+      "value": "Be"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.picture": [
+    {
+      "type": 0,
+      "value": "Egyéni kép"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.pinNone": [
+    {
+      "type": 0,
+      "value": "Nincs PIN-kód"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.pinSet": [
+    {
+      "type": 0,
+      "value": "PIN-kód beállítva"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.requestsAllowed": [
+    {
+      "type": 0,
+      "value": "Engedélyezve"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.requestsBlocked": [
+    {
+      "type": 0,
+      "value": "Letiltva"
     }
   ],
   "web.admin.users.detail.profiles.setPin": [
@@ -91167,6 +92558,148 @@
     {
       "type": 0,
       "value": "Jelszó beállítása"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.action": [
+    {
+      "type": 0,
+      "value": "Bejelentkezési hivatkozás létrehozása"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.actionHint": [
+    {
+      "type": 0,
+      "value": "Minden eszközét elvesztette"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.description": [
+    {
+      "type": 0,
+      "value": "Egyszer használható hivatkozás "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " számára, ha minden eszközét elvesztette. Egy olyan oldalt nyit meg, amely kódot ad a Silo alkalmazáshoz, vagy lehetővé teszi egy jelszó megadását. 24 óráig érvényes, és egy új hivatkozás felváltja az előzőt."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailAction": [
+    {
+      "type": 0,
+      "value": "Küldés e-mailben"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHint": [
+    {
+      "type": 0,
+      "value": "Hozza létre a hivatkozást, majd másolja ki, és küldje el saját maga, vagy küldje el e-mailben ide: "
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHintNoAddress": [
+    {
+      "type": 0,
+      "value": "Hozza létre a hivatkozást, majd másolja ki, és küldje el saját maga. Ennek a fióknak nincs e-mail-címe, amelyre el lehetne küldeni."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHintNoMail": [
+    {
+      "type": 0,
+      "value": "Hozza létre a hivatkozást, majd másolja ki, és küldje el saját maga. Ha innen szeretné elküldeni, állítsa be az e-mailt a Beállításokban."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailSent": [
+    {
+      "type": 0,
+      "value": "Hivatkozás elküldve ide: "
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": ". Lejárat: "
+    },
+    {
+      "type": 1,
+      "value": "expires"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailUnconfirmed": [
+    {
+      "type": 0,
+      "value": "A levelezőszerver nem erősítette meg a kézbesítést. Az alábbi hivatkozás továbbra is működik: másolja ki, és küldje el más módon."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.failed": [
+    {
+      "type": 0,
+      "value": "Nem sikerült létrehozni a bejelentkezési hivatkozást."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.linkShare": [
+    {
+      "type": 0,
+      "value": "Ezt a hivatkozást csak "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " számára küldje el. Bárki, akinél megvan, bejelentkezhet ebbe a fiókba, amíg fel nem használják, de legkésőbb eddig: "
+    },
+    {
+      "type": 1,
+      "value": "expires"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.providerRequired": [
+    {
+      "type": 0,
+      "value": "A helyi jelszavas bejelentkezés ki van kapcsolva ezen a szerveren, így egy bejelentkezési hivatkozás megkerülné a bejelentkezési szolgáltatót. Kérje meg "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " felhasználót, hogy jelentkezzen be a szolgáltatóval a szerver webhelyén, majd használja a fiókbeállításaiban a „Megnyitás a Silóban” lehetőséget."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.title": [
+    {
+      "type": 0,
+      "value": "Bejelentkezési hivatkozás "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " számára"
     }
   ],
   "web.audiobooks.chapter.fallbackTitle": [
@@ -92995,6 +94528,120 @@
       "value": "Bejelentkezés jóváhagyása"
     }
   ],
+  "web.auth.appCode.code": [
+    {
+      "type": 0,
+      "value": "Kód"
+    }
+  ],
+  "web.auth.appCode.codeCopied": [
+    {
+      "type": 0,
+      "value": "Kód másolva"
+    }
+  ],
+  "web.auth.appCode.copyCode": [
+    {
+      "type": 0,
+      "value": "Kód másolása"
+    }
+  ],
+  "web.auth.appCode.copyFailed": [
+    {
+      "type": 0,
+      "value": "Nem sikerült másolni a kódot. Jelölje ki, és másolja ki kézzel."
+    }
+  ],
+  "web.auth.appCode.expired": [
+    {
+      "type": 0,
+      "value": "Ez a kód lejárt."
+    }
+  ],
+  "web.auth.appCode.failed": [
+    {
+      "type": 0,
+      "value": "A Silo nem tudott kódot létrehozni. Próbálja újra."
+    }
+  ],
+  "web.auth.appCode.instructions": [
+    {
+      "type": 0,
+      "value": "Nyomja meg a Silo megnyitása gombot, hogy ezen az eszközön a Silo alkalmazásban folytassa. Ha az alkalmazás nincs telepítve, telepítse, térjen vissza erre a lapra, és nyomja meg újra a Silo megnyitása gombot."
+    }
+  ],
+  "web.auth.appCode.noScanCode": [
+    {
+      "type": 0,
+      "value": "A szerver címe túl hosszú egy beolvasható kódhoz. Írja be a szervercímet és a kódot a Silo alkalmazásba, vagy másolja ki a kódot, és illessze be oda."
+    }
+  ],
+  "web.auth.appCode.open": [
+    {
+      "type": 0,
+      "value": "Silo megnyitása"
+    }
+  ],
+  "web.auth.appCode.renew": [
+    {
+      "type": 0,
+      "value": "Új kód kérése"
+    }
+  ],
+  "web.auth.appCode.scanCodeLabel": [
+    {
+      "type": 0,
+      "value": "Beolvasható kód a Silo alkalmazáshoz"
+    }
+  ],
+  "web.auth.appCode.scanCodeUnavailable": [
+    {
+      "type": 0,
+      "value": "Ehhez a szerverhez nem jeleníthető meg beolvasható kód. Írja be a szervercímet és a kódot a Silo alkalmazásba, vagy másolja ki a kódot, és illessze be oda."
+    }
+  ],
+  "web.auth.appCode.scanHint": [
+    {
+      "type": 0,
+      "value": "Olvassa be ezt a Silo alkalmazás kódolvasójával, vagy írja be, illetve másolja ki az alábbi szervercímet és kódot."
+    }
+  ],
+  "web.auth.appCode.serverAddress": [
+    {
+      "type": 0,
+      "value": "Szervercím"
+    }
+  ],
+  "web.auth.appCode.singleUse": [
+    {
+      "type": 0,
+      "value": "Ez a kód egyszer használható, és néhány perc múlva lejár."
+    }
+  ],
+  "web.auth.appCode.title": [
+    {
+      "type": 0,
+      "value": "Silo megnyitása"
+    }
+  ],
+  "web.auth.appCode.typeInstructions": [
+    {
+      "type": 0,
+      "value": "A telefonján vagy táblagépén lévő Silo alkalmazásban adja hozzá ezt a szervert a címe alapján, és a fiók létrehozásához írja be ezt a kódot. Bárki, akinél a kód van, csatlakozhat Ön helyett, ezért ne ossza meg."
+    }
+  ],
+  "web.auth.appCode.typeTitle": [
+    {
+      "type": 0,
+      "value": "Csatlakozás ezzel a kóddal"
+    }
+  ],
+  "web.auth.appCode.webLink": [
+    {
+      "type": 0,
+      "value": "Megnyitás inkább a siloserver.org linkkel"
+    }
+  ],
   "web.auth.card.rememberedIt": [
     {
       "type": 0,
@@ -93197,10 +94844,50 @@
       ]
     }
   ],
+  "web.auth.invite.appAccountEmail": [
+    {
+      "type": 0,
+      "value": "A fiók ezt a címet fogja használni: "
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.auth.invite.appContinue": [
+    {
+      "type": 0,
+      "value": "Folytatás"
+    }
+  ],
+  "web.auth.invite.appEmailHint": [
+    {
+      "type": 0,
+      "value": "E-mail-cím megadása esetén ez a szerver bejelentkezési linket küldhet Önnek, ha elveszíti az eszközeit."
+    }
+  ],
   "web.auth.invite.appMissing": [
     {
       "type": 0,
       "value": "Nem történik semmi? Az alkalmazás nincs telepítve – egyszerűen folytassa lent."
+    }
+  ],
+  "web.auth.invite.appProviderOnly": [
+    {
+      "type": 0,
+      "value": "A(z) "
+    },
+    {
+      "type": 1,
+      "value": "server"
+    },
+    {
+      "type": 0,
+      "value": " szerver a bejelentkezési szolgáltatóján keresztül adja hozzá a felhasználókat. Jelentkezzen be vele ezen az oldalon, majd nyissa meg a Silót a fiókbeállításaiból."
     }
   ],
   "web.auth.invite.created": [
@@ -93229,6 +94916,18 @@
       "value": "Adja meg az e-mail-címét, és válasszon jelszót. Az e-mail-címével fog bejelentkezni."
     }
   ],
+  "web.auth.invite.descriptionWithApp": [
+    {
+      "type": 0,
+      "value": "Csatlakozzon a telefonján vagy táblagépén lévő Silo alkalmazással, vagy válasszon jelszót a bejelentkezéshez."
+    }
+  ],
+  "web.auth.invite.emailOptional": [
+    {
+      "type": 0,
+      "value": "E-mail (nem kötelező)"
+    }
+  ],
   "web.auth.invite.emailPlaceholder": [
     {
       "type": 0,
@@ -93249,6 +94948,18 @@
     {
       "type": 1,
       "value": "inviter"
+    }
+  ],
+  "web.auth.invite.joinWithApp": [
+    {
+      "type": 0,
+      "value": "Csatlakozás a Silo alkalmazással"
+    }
+  ],
+  "web.auth.invite.joinWithAppInstead": [
+    {
+      "type": 0,
+      "value": "Csatlakozás inkább a Silo alkalmazással"
     }
   ],
   "web.auth.invite.loadFailed": [
@@ -93353,6 +95064,30 @@
     {
       "type": 0,
       "value": "A meghívó nem érhető el"
+    }
+  ],
+  "web.auth.invite.usePassword": [
+    {
+      "type": 0,
+      "value": "Inkább jelszó használata"
+    }
+  ],
+  "web.auth.invite.usernameIsAddress": [
+    {
+      "type": 0,
+      "value": "A @ karaktert tartalmazó felhasználónévnek meg kell egyeznie az alább megadott e-mail-címmel."
+    }
+  ],
+  "web.auth.invite.usernameRequired": [
+    {
+      "type": 0,
+      "value": "Válasszon felhasználónevet."
+    }
+  ],
+  "web.auth.invite.usernameTaken": [
+    {
+      "type": 0,
+      "value": "Ez a felhasználónév már foglalt. Válasszon másikat."
     }
   ],
   "web.auth.languagePicker.label": [
@@ -94309,6 +96044,126 @@
     {
       "type": 0,
       "value": "Bejelentkezés"
+    }
+  ],
+  "web.auth.signInLink.backToCode": [
+    {
+      "type": 0,
+      "value": "Vissza a kódhoz"
+    }
+  ],
+  "web.auth.signInLink.codeExpired": [
+    {
+      "type": 0,
+      "value": "Új kódhoz kérjen új linket a szerver egyik rendszergazdájától."
+    }
+  ],
+  "web.auth.signInLink.documentTitle": [
+    {
+      "type": 0,
+      "value": "Bejelentkezési link"
+    }
+  ],
+  "web.auth.signInLink.failed": [
+    {
+      "type": 0,
+      "value": "A Silo nem tudta megnyitni ezt a linket. Próbálja újra."
+    }
+  ],
+  "web.auth.signInLink.installFirst": [
+    {
+      "type": 0,
+      "value": "A link egyszer használható, a kód pedig néhány percig érvényes. Először telepítse a Silo alkalmazást a telefonjára vagy táblagépére, majd nyomja meg a Folytatás gombot."
+    }
+  ],
+  "web.auth.signInLink.intro": [
+    {
+      "type": 0,
+      "value": "Egy rendszergazda azért küldte Önnek ezt a linket, hogy újra bejelentkezhessen. Folytassa, hogy kódot kapjon a Silo alkalmazáshoz, vagy hogy jelszót válasszon."
+    }
+  ],
+  "web.auth.signInLink.keepOpen": [
+    {
+      "type": 0,
+      "value": "Tartsa nyitva ezt az oldalt, amíg végez. A link felhasználódott, így újratöltéskor vagy az oldal elhagyásakor elvész minden, amit a link biztosított."
+    }
+  ],
+  "web.auth.signInLink.leaveAction": [
+    {
+      "type": 0,
+      "value": "Távozás"
+    }
+  ],
+  "web.auth.signInLink.leaveDescription": [
+    {
+      "type": 0,
+      "value": "A link felhasználódott. Ha elhagyja az oldalt, a Silo alkalmazáshoz kapott kód és a jelszó beállításának lehetősége elvész, és új linkre lesz szüksége."
+    }
+  ],
+  "web.auth.signInLink.leaveTitle": [
+    {
+      "type": 0,
+      "value": "Elhagyja ezt az oldalt?"
+    }
+  ],
+  "web.auth.signInLink.noCodeAdministrator": [
+    {
+      "type": 0,
+      "value": "Ez egy rendszergazdai fiók, ezért ez a link csak jelszót állít be. Állítson be egyet, jelentkezzen be a szerver webhelyén, majd ott nyissa meg a Silo alkalmazást a fiókbeállításaiból."
+    }
+  ],
+  "web.auth.signInLink.noCodeAppKeysOff": [
+    {
+      "type": 0,
+      "value": "A Silo alkalmazás jelenleg nem tud bejelentkezni ezen a szerveren, ezért ez a link csak jelszót állít be."
+    }
+  ],
+  "web.auth.signInLink.passwordDescription": [
+    {
+      "type": 0,
+      "value": "A mentés ezt a fiókot minden eszközön kijelentkezteti. A Silo alkalmazással bejelentkezett eszközök maguktól újra bejelentkeznek."
+    }
+  ],
+  "web.auth.signInLink.passwordSet": [
+    {
+      "type": 0,
+      "value": "A jelszó mentve. Jelentkezzen be vele."
+    }
+  ],
+  "web.auth.signInLink.passwordSetLostDevices": [
+    {
+      "type": 0,
+      "value": "Az elveszett, Silo alkalmazást használó eszközök addig be tudnak jelentkezni, amíg el nem távolítja őket. Bejelentkezés után távolítsa el őket a fiókbeállításokban az eszközei közül."
+    }
+  ],
+  "web.auth.signInLink.passwordTitle": [
+    {
+      "type": 0,
+      "value": "Válasszon jelszót"
+    }
+  ],
+  "web.auth.signInLink.providerRequired": [
+    {
+      "type": 0,
+      "value": "Ez a szerver a bejelentkezési szolgáltatóján keresztül jelentkezteti be a felhasználókat, ezért ez a link nem működik. Jelentkezzen be inkább a szolgáltatóval."
+    }
+  ],
+  "web.auth.signInLink.setPasswordInstead": [
+    {
+      "type": 0,
+      "value": "Inkább jelszó beállítása"
+    }
+  ],
+  "web.auth.signInLink.title": [
+    {
+      "type": 0,
+      "value": "Jusson vissza a fiókjába"
+    }
+  ],
+  "web.auth.signInLink.unavailable": [
+    {
+      "type": 0,
+      "value": "Ezt a linket már felhasználták, egy újabb váltotta fel, vagy lejárt. Kérjen újat a szerver egyik rendszergazdájától."
     }
   ],
   "web.auth.signup.closed": [
@@ -133326,7 +135181,7 @@
   "web.settings.account.password.signOutOthersDescription": [
     {
       "type": 0,
-      "value": "A többi böngészőben és alkalmazásban újra be kell jelentkezni az új jelszóval. Ez a böngésző bejelentkezve marad, és az API-kulcsok továbbra is működnek."
+      "value": "A többi böngésző és alkalmazás ki lesz jelentkeztetve. Ez a böngésző bejelentkezve marad, és az API-kulcsok továbbra is működnek."
     }
   ],
   "web.settings.account.password.title": [
@@ -134191,6 +136046,500 @@
     {
       "type": 0,
       "value": "A kulcs használata"
+    }
+  ],
+  "web.settings.appKeys.actionFailed": [
+    {
+      "type": 0,
+      "value": "Nem sikerült végrehajtani a módosítást. Próbálja újra."
+    }
+  ],
+  "web.settings.appKeys.approveMainOnly": [
+    {
+      "type": 0,
+      "value": "Eszközt csak a háztartás fő profilja hagyhat jóvá. A jóváhagyáshoz váltson arra a profilra."
+    }
+  ],
+  "web.settings.appKeys.approved": [
+    {
+      "type": 0,
+      "value": "Jóváhagyva: "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.confirm.approve": [
+    {
+      "type": 0,
+      "value": "Eszköz jóváhagyása"
+    }
+  ],
+  "web.settings.appKeys.confirm.approveDescription": [
+    {
+      "type": 0,
+      "value": "A(z) "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " eszköz a Silo alkalmazással bejelentkezhet a fiókjába, amíg el nem távolítja. Csak akkor hagyja jóvá, ha az imént állította be."
+    }
+  ],
+  "web.settings.appKeys.confirm.approveTitle": [
+    {
+      "type": 0,
+      "value": "Jóváhagyja a(z) "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " eszközt?"
+    }
+  ],
+  "web.settings.appKeys.confirm.deny": [
+    {
+      "type": 0,
+      "value": "Eszköz elutasítása"
+    }
+  ],
+  "web.settings.appKeys.confirm.denyDescription": [
+    {
+      "type": 0,
+      "value": "A(z) "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " eszköz nem tud majd bejelentkezni a fiókjába. Ha az Öné volt, adja hozzá újra a Silo alkalmazásban."
+    }
+  ],
+  "web.settings.appKeys.confirm.denyTitle": [
+    {
+      "type": 0,
+      "value": "Elutasítja a(z) "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " eszközt?"
+    }
+  ],
+  "web.settings.appKeys.confirm.remove": [
+    {
+      "type": 0,
+      "value": "Eszköz eltávolítása"
+    }
+  ],
+  "web.settings.appKeys.confirm.removeDescription": [
+    {
+      "type": 0,
+      "value": "A(z) "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " eszköz eltávolítása azonnal kijelentkezteti az eszközt, és letiltja a kulcsát: azzal többé nem tud bejelentkezni. Ha újra használni szeretné, adja hozzá újra a Silo alkalmazásban."
+    }
+  ],
+  "web.settings.appKeys.confirm.removeTitle": [
+    {
+      "type": 0,
+      "value": "Eltávolítja a(z) "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " eszközt?"
+    }
+  ],
+  "web.settings.appKeys.confirm.withdraw": [
+    {
+      "type": 0,
+      "value": "Jóváhagyás visszavonása"
+    }
+  ],
+  "web.settings.appKeys.confirm.withdrawDescription": [
+    {
+      "type": 0,
+      "value": "A(z) "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " eszköz nem tud majd ezzel a jóváhagyással bejelentkezni a fiókjába."
+    }
+  ],
+  "web.settings.appKeys.confirm.withdrawTitle": [
+    {
+      "type": 0,
+      "value": "Visszavonja a(z) "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " eszköz jóváhagyását?"
+    }
+  ],
+  "web.settings.appKeys.confirm.working": [
+    {
+      "type": 0,
+      "value": "Mentés…"
+    }
+  ],
+  "web.settings.appKeys.denied": [
+    {
+      "type": 0,
+      "value": "Elutasítva: "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.description": [
+    {
+      "type": 0,
+      "value": "Eszközök és alkalmazások, amelyek jelszó nélkül, a Silo alkalmazással bejelentkeznek a fiókjába."
+    }
+  ],
+  "web.settings.appKeys.devices.title": [
+    {
+      "type": 0,
+      "value": "Eszközök"
+    }
+  ],
+  "web.settings.appKeys.empty": [
+    {
+      "type": 0,
+      "value": "Egyetlen eszköz sem használja a Silo alkalmazást a fiókjában."
+    }
+  ],
+  "web.settings.appKeys.footnote": [
+    {
+      "type": 0,
+      "value": "Egy eszköz eltávolítása kijelentkezteti az eszközt, és a kulcsa többé nem működik. Egy munkamenet kijelentkeztetése nem távolítja el az eszközt: a kulcsával újra bejelentkezik."
+    }
+  ],
+  "web.settings.appKeys.loadFailed": [
+    {
+      "type": 0,
+      "value": "Nem sikerült betölteni az eszközöket."
+    }
+  ],
+  "web.settings.appKeys.loading": [
+    {
+      "type": 0,
+      "value": "Eszközök betöltése…"
+    }
+  ],
+  "web.settings.appKeys.off": [
+    {
+      "type": 0,
+      "value": "A Silo alkalmazással történő bejelentkezés ki van kapcsolva ezen a szerveren, ezért ezek az eszközök nem tudnak bejelentkezni, és a várakozó eszközök nem hagyhatók jóvá. Ettől még eltávolíthatja őket."
+    }
+  ],
+  "web.settings.appKeys.personKey.description": [
+    {
+      "type": 0,
+      "value": "A Silo alkalmazás ezzel a kulccsal adja hozzá az új eszközeit. Beállítva: "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.settings.appKeys.personKey.none": [
+    {
+      "type": 0,
+      "value": "Nincs fiókkulcs. A Silo alkalmazás akkor állít be egyet, amikor legközelebb bejelentkezve hozzáad egy eszközt."
+    }
+  ],
+  "web.settings.appKeys.personKey.title": [
+    {
+      "type": 0,
+      "value": "Fiókkulcs"
+    }
+  ],
+  "web.settings.appKeys.pinDescription": [
+    {
+      "type": 0,
+      "value": "Az eszköz jóváhagyásához adja meg a fő profil PIN-kódját."
+    }
+  ],
+  "web.settings.appKeys.preapprovals.description": [
+    {
+      "type": 0,
+      "value": "Bejelentkezések, amelyeket egy még nem csatlakozott eszközhöz hagyott jóvá."
+    }
+  ],
+  "web.settings.appKeys.preapprovals.loadFailed": [
+    {
+      "type": 0,
+      "value": "Nem sikerült betölteni az előre jóváhagyott bejelentkezéseket."
+    }
+  ],
+  "web.settings.appKeys.preapprovals.title": [
+    {
+      "type": 0,
+      "value": "Előre jóváhagyva"
+    }
+  ],
+  "web.settings.appKeys.refreshLabel": [
+    {
+      "type": 0,
+      "value": "Silo alkalmazást használó eszközök frissítése"
+    }
+  ],
+  "web.settings.appKeys.removed": [
+    {
+      "type": 0,
+      "value": "Eltávolítva: "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.row.allowedBy": [
+    {
+      "type": 0,
+      "value": "Engedélyezte: "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "web.settings.appKeys.row.approve": [
+    {
+      "type": 0,
+      "value": "Jóváhagyás"
+    }
+  ],
+  "web.settings.appKeys.row.approveLabel": [
+    {
+      "type": 0,
+      "value": "Jóváhagyás: "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.row.deny": [
+    {
+      "type": 0,
+      "value": "Elutasítás"
+    }
+  ],
+  "web.settings.appKeys.row.denyLabel": [
+    {
+      "type": 0,
+      "value": "Elutasítás: "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.row.enrolledFrom": [
+    {
+      "type": 0,
+      "value": "Innen: "
+    },
+    {
+      "type": 1,
+      "value": "address"
+    }
+  ],
+  "web.settings.appKeys.row.identityGone": [
+    {
+      "type": 0,
+      "value": "Nem tud bejelentkezni: a bejelentkezési szolgáltatónál lévő fiókja már nincs társítva"
+    }
+  ],
+  "web.settings.appKeys.row.kindApp": [
+    {
+      "type": 0,
+      "value": "Más alkalmazás"
+    }
+  ],
+  "web.settings.appKeys.row.kindDevice": [
+    {
+      "type": 0,
+      "value": "Silo alkalmazás"
+    }
+  ],
+  "web.settings.appKeys.row.lastUsed": [
+    {
+      "type": 0,
+      "value": "Utolsó bejelentkezés: "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.settings.appKeys.row.notUsed": [
+    {
+      "type": 0,
+      "value": "Még nem jelentkezett be a kulcsával"
+    }
+  ],
+  "web.settings.appKeys.row.preapproval": [
+    {
+      "type": 0,
+      "value": "Előre jóváhagyva · lejár: "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.settings.appKeys.row.provider": [
+    {
+      "type": 0,
+      "value": "Ellenőrizve a bejelentkezési szolgáltatóval"
+    }
+  ],
+  "web.settings.appKeys.row.remove": [
+    {
+      "type": 0,
+      "value": "Eltávolítás"
+    }
+  ],
+  "web.settings.appKeys.row.removeLabel": [
+    {
+      "type": 0,
+      "value": "Eltávolítás: "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.row.viaAppCode": [
+    {
+      "type": 0,
+      "value": "Hozzáadva a szerver weboldaláról kapott egyszeri kóddal"
+    }
+  ],
+  "web.settings.appKeys.row.viaPersonKey": [
+    {
+      "type": 0,
+      "value": "Egy másik eszközön futó Silo alkalmazás adta hozzá"
+    }
+  ],
+  "web.settings.appKeys.row.viaSession": [
+    {
+      "type": 0,
+      "value": "Bejelentkezett állapotban hozzáadva"
+    }
+  ],
+  "web.settings.appKeys.row.waitingUntil": [
+    {
+      "type": 0,
+      "value": "Jóváhagyásra vár eddig: "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.settings.appKeys.row.withdraw": [
+    {
+      "type": 0,
+      "value": "Visszavonás"
+    }
+  ],
+  "web.settings.appKeys.row.withdrawLabel": [
+    {
+      "type": 0,
+      "value": "Jóváhagyás visszavonása: "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.signsBackIn": [
+    {
+      "type": 0,
+      "value": "A Silo alkalmazással bejelentkezett eszközök maguktól újra bejelentkeznek. Ennek megállításához "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "távolítsa el az eszközt"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.settings.appKeys.title": [
+    {
+      "type": 0,
+      "value": "Silo alkalmazást használó eszközök"
+    }
+  ],
+  "web.settings.appKeys.unavailable": [
+    {
+      "type": 0,
+      "value": "A Silo alkalmazással történő bejelentkezés nem érhető el ezen a szerveren, ezért ezek az eszközök nem tudnak bejelentkezni. Ettől még eltávolíthatja őket."
+    }
+  ],
+  "web.settings.appKeys.waiting.description": [
+    {
+      "type": 0,
+      "value": "Egy új eszköz azt kérte, hogy a Silo alkalmazással bejelentkezhessen a fiókjába. Csak akkor hagyja jóvá, ha az imént állította be."
+    }
+  ],
+  "web.settings.appKeys.waiting.title": [
+    {
+      "type": 0,
+      "value": "Az Ön jóváhagyására vár"
+    }
+  ],
+  "web.settings.appKeys.withdrawn": [
+    {
+      "type": 0,
+      "value": "Jóváhagyás visszavonva"
     }
   ],
   "web.settings.cardOverlay.adjust": [
@@ -139197,6 +141546,54 @@
       "value": "Nincs internetkapcsolat, ezért nem sikerült menteni ezt a módosítást"
     }
   ],
+  "web.settings.openInSilo.action": [
+    {
+      "type": 0,
+      "value": "Kód kérése a Silo alkalmazáshoz"
+    }
+  ],
+  "web.settings.openInSilo.codeInstructions": [
+    {
+      "type": 0,
+      "value": "A telefonján vagy táblagépén futó Silo alkalmazásban adja hozzá ezt a szervert a címe alapján, és írja be ezt a kódot. A kóddal bárki bejelentkezhet ebbe a fiókba, ezért ne ossza meg senkivel."
+    }
+  ],
+  "web.settings.openInSilo.codeTitle": [
+    {
+      "type": 0,
+      "value": "Kód a Silo alkalmazáshoz"
+    }
+  ],
+  "web.settings.openInSilo.description": [
+    {
+      "type": 0,
+      "value": "A telefonján vagy táblagépén futó Silo alkalmazás bejelentkeztetése ebbe a fiókba, jelszó nélkül."
+    }
+  ],
+  "web.settings.openInSilo.loadFailed": [
+    {
+      "type": 0,
+      "value": "Nem sikerült ellenőrizni, hogy ez a böngésző kérhet-e kódot a Silo alkalmazáshoz."
+    }
+  ],
+  "web.settings.openInSilo.mainProfileOnly": [
+    {
+      "type": 0,
+      "value": "Kódot a Silo alkalmazáshoz csak a háztartás fő profilja kérhet. Váltson arra a profilra, és próbálja újra."
+    }
+  ],
+  "web.settings.openInSilo.pinDescription": [
+    {
+      "type": 0,
+      "value": "A Silo alkalmazáshoz tartozó kód kéréséhez adja meg a fő profil PIN-kódját."
+    }
+  ],
+  "web.settings.openInSilo.title": [
+    {
+      "type": 0,
+      "value": "Silo alkalmazás"
+    }
+  ],
   "web.settings.overlays.accent.amber": [
     {
       "type": 0,
@@ -142137,6 +144534,12 @@
       "value": "Bejelentkezve"
     }
   ],
+  "web.settings.sessions.row.signsBackIn": [
+    {
+      "type": 0,
+      "value": "Ez az eszköz magától újra bejelentkezik"
+    }
+  ],
   "web.settings.sessions.row.summary": [
     {
       "type": 8,
@@ -142219,6 +144622,24 @@
     {
       "type": 0,
       "value": "Beállítások"
+    }
+  ],
+  "web.settings.signInAgain.action": [
+    {
+      "type": 0,
+      "value": "Újbóli bejelentkezés"
+    }
+  ],
+  "web.settings.signInAgain.manageDevices": [
+    {
+      "type": 0,
+      "value": "Az eszközei kezeléséhez jelentkezzen be újra"
+    }
+  ],
+  "web.settings.signInAgain.useApp": [
+    {
+      "type": 0,
+      "value": "Az eszközeit a Silo alkalmazásban kezelheti."
     }
   ],
   "web.settings.signedInSessions.loadFailed": [

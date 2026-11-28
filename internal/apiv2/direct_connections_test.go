@@ -8,6 +8,7 @@ import (
 	"net/netip"
 	"testing"
 
+	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/directconn"
 )
 
@@ -146,5 +147,26 @@ func TestAdminDirectConnectionPeerNames(t *testing.T) {
 	want := [][2]string{{"alice", "Apple TV"}, {"alice", "Living Room"}, {"alice", "Apple TV"}}
 	if len(names) != len(want) || names[0] != want[0] || names[1] != want[1] || names[2] != want[2] {
 		t.Fatalf("peer names = %v, want %v", names, want)
+	}
+}
+
+func TestAdminDirectConnectionPeerAccountNameWithoutInventory(t *testing.T) {
+	deps := pilotDeps(nil, nil)
+	deps.DirectConnections = fakeDirectConnections{}
+	deps.AdminAccountDevices = &fakeAdminAccountDevices{rows: []handlers.AdminUserDeviceView{}}
+	deps.AdminAccounts = fixtureAdminAccounts()
+	rec := do(t, newTestHandler(t, deps), http.MethodGet, Prefix+"/admin/direct-connections/peers", "", actingRequestAdmin)
+	if rec.Code != http.StatusOK {
+		t.Fatal(rec.Code, rec.Body.String())
+	}
+	var got DirectConnectionPeerCollection
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Items) != 1 {
+		t.Fatalf("peers = %d, want one", len(got.Items))
+	}
+	if got.Items[0].Username != "sample" {
+		t.Fatalf("peer username = %q, want sample without device inventory", got.Items[0].Username)
 	}
 }

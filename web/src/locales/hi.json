@@ -215,6 +215,12 @@
       "value": "यह पहले से ही इस खाते से लिंक है।"
     }
   ],
+  "error.app_code_invalid": [
+    {
+      "type": 0,
+      "value": "यह कोड अज्ञात है, पहले इस्तेमाल हो चुका है या इसकी समय-सीमा खत्म हो गई है। सर्वर के पेज से नया कोड लें।"
+    }
+  ],
   "error.authentication_required": [
     {
       "type": 0,
@@ -333,6 +339,12 @@
     {
       "type": 0,
       "value": "इस वैल्यू का टाइप गलत है।"
+    }
+  ],
+  "error.field.key_enrolled": [
+    {
+      "type": 0,
+      "value": "यह कुंजी इस सर्वर पर पहले से इस्तेमाल में है।"
     }
   ],
   "error.field.malformed_form": [
@@ -2541,6 +2553,30 @@
     {
       "type": 0,
       "value": "ऑटो"
+    }
+  ],
+  "settingsManifest.playback.connection_path.description": [
+    {
+      "type": 0,
+      "value": "“सिर्फ़ डायरेक्ट” चुनने पर भी, लोकल नेटवर्क कनेक्शन उपलब्ध होने पर उसी का इस्तेमाल किया जाता है।"
+    }
+  ],
+  "settingsManifest.playback.connection_path.label": [
+    {
+      "type": 0,
+      "value": "कनेक्शन पाथ"
+    }
+  ],
+  "settingsManifest.playback.connection_path.option.automatic": [
+    {
+      "type": 0,
+      "value": "अपने-आप"
+    }
+  ],
+  "settingsManifest.playback.connection_path.option.direct_only": [
+    {
+      "type": 0,
+      "value": "सिर्फ़ डायरेक्ट"
     }
   ],
   "settingsManifest.playback.intro_skip_mode.description": [
@@ -23577,6 +23613,87 @@
       }
     }
   ],
+  "web.admin.common.adminUserSignIn.unlinkConfirm.text": [
+    {
+      "type": 5,
+      "value": "last_way",
+      "options": {
+        "yes": {
+          "value": [
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " के लिए अब इस प्रोवाइडर खाते से साइन इन नहीं किया जा सकेगा। पासवर्ड सेट करने या फिर से कोई प्रोवाइडर कनेक्ट करने तक "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " के लिए साइन इन नहीं किया जा सकेगा।"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " के लिए अब इस प्रोवाइडर खाते से साइन इन नहीं किया जा सकेगा।"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 5,
+      "value": "keys",
+      "options": {
+        "yes": {
+          "value": [
+            {
+              "type": 0,
+              "value": " इस प्रोवाइडर खाते से जुड़ी "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " की Silo ऐप कुंजियाँ हटा दी जाएँगी, और उन डिवाइसों से साइन आउट कर दिया जाएगा।"
+            }
+          ]
+        },
+        "unknown": {
+          "value": [
+            {
+              "type": 0,
+              "value": " इस प्रोवाइडर खाते से जुड़ी "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " की कोई भी Silo ऐप कुंजियाँ हों, तो उन्हें हटा दिया जाएगा, और उन डिवाइसों से साइन आउट कर दिया जाएगा।"
+            }
+          ]
+        },
+        "other": {
+          "value": []
+        }
+      }
+    }
+  ],
   "web.admin.common.adminUserSignIn.unlinkConfirm.title": [
     {
       "type": 1,
@@ -25839,6 +25956,18 @@
     {
       "type": 0,
       "value": "आगे-पीछे करते समय प्लेयर में दिखने वाले थंबनेल कॉन्फ़िगर किए गए पब्लिक एसेट स्टोरेज में बनाए जाते हैं। फ़ाइलें बैकग्राउंड में कम प्राथमिकता पर प्रोसेस की जाती हैं। इसे बंद करने पर लाइब्रेरी के प्रीव्यू मिट जाते हैं।"
+    }
+  ],
+  "web.admin.common.libraryEditor.advanced.trickplayGenerate": [
+    {
+      "type": 0,
+      "value": "FFmpeg से गायब प्रीव्यू बनाएँ"
+    }
+  ],
+  "web.admin.common.libraryEditor.advanced.trickplayGenerateDescription": [
+    {
+      "type": 0,
+      "value": "मीडिया फ़ाइलों के पास मौजूद .trickplay और .bif साइडकार पहले इस्तेमाल किए जाते हैं। सिर्फ़ साइडकार इंपोर्ट करने और FFmpeg से प्रीव्यू बनाना छोड़ने के लिए इसे बंद करें।"
     }
   ],
   "web.admin.common.libraryEditor.advanced.trickplayUnavailable": [
@@ -29839,6 +29968,40 @@
       "value": "एडमिन उपयोगकर्ता"
     }
   ],
+  "web.admin.common.trickplay.badge.awaitingSidecarCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " साइडकार के इंतज़ार में"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " साइडकार के इंतज़ार में"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.common.trickplay.badge.detail": [
     {
       "type": 0,
@@ -29969,6 +30132,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.common.trickplay.badge.sidecarsOnly": [
+    {
+      "type": 0,
+      "value": "सिर्फ़ साइडकार"
     }
   ],
   "web.admin.common.trickplay.badge.srDetail": [
@@ -30137,6 +30306,42 @@
     {
       "type": 0,
       "value": "नए प्रीव्यू तैयार होने तक प्लेयर मौजूदा प्रीव्यू ही इस्तेमाल करते हैं।"
+    }
+  ],
+  "web.admin.common.trickplay.sidecarStatus.awaiting_sidecar": [
+    {
+      "type": 0,
+      "value": "साइडकार का इंतज़ार"
+    }
+  ],
+  "web.admin.common.trickplay.sidecarStatus.sidecar_invalid": [
+    {
+      "type": 0,
+      "value": "अमान्य साइडकार"
+    }
+  ],
+  "web.admin.common.trickplay.sidecarStatus.sidecar_stale": [
+    {
+      "type": 0,
+      "value": "पुराना साइडकार"
+    }
+  ],
+  "web.admin.common.trickplay.source.generated": [
+    {
+      "type": 0,
+      "value": "जनरेट किया गया"
+    }
+  ],
+  "web.admin.common.trickplay.source.sidecar_bif": [
+    {
+      "type": 0,
+      "value": "साइडकार (.bif)"
+    }
+  ],
+  "web.admin.common.trickplay.source.sidecar_trickplay": [
+    {
+      "type": 0,
+      "value": "साइडकार (.trickplay)"
     }
   ],
   "web.admin.common.trickplay.state.off": [
@@ -31964,7 +32169,7 @@
     },
     {
       "type": 0,
-      "value": " के दूसरे डिवाइस साइन इन रहेंगे। क्लाइंट खाते के पासवर्ड से फिर से साइन इन कर सकता है।"
+      "value": " के दूसरे डिवाइस साइन इन रहेंगे। क्लाइंट फिर से साइन इन कर सकता है।"
     }
   ],
   "web.admin.dashboard.widgets.apiClients.confirmLabel": [
@@ -43570,6 +43775,12 @@
       "value": "प्रोफ़ाइल"
     }
   ],
+  "web.admin.history.column.progress": [
+    {
+      "type": 0,
+      "value": "प्रगति"
+    }
+  ],
   "web.admin.history.column.status": [
     {
       "type": 0,
@@ -43604,6 +43815,12 @@
     {
       "type": 0,
       "value": "सेशन लॉग"
+    }
+  ],
+  "web.admin.history.detail.backToPlay": [
+    {
+      "type": 0,
+      "value": "संयुक्त प्ले पर वापस जाएँ"
     }
   ],
   "web.admin.history.detail.column.delivered": [
@@ -43714,6 +43931,12 @@
       "value": "देखने का समय"
     }
   ],
+  "web.admin.history.detail.inspectSitting": [
+    {
+      "type": 0,
+      "value": "जाँचें"
+    }
+  ],
   "web.admin.history.detail.keyboardHint": [
     {
       "type": 0,
@@ -43798,6 +44021,12 @@
       "value": "डायरेक्ट प्ले क्यों नहीं हुआ"
     }
   ],
+  "web.admin.history.detail.section.sessions": [
+    {
+      "type": 0,
+      "value": "इस प्ले के सेशन"
+    }
+  ],
   "web.admin.history.detail.section.streams": [
     {
       "type": 0,
@@ -43808,6 +44037,94 @@
     {
       "type": 0,
       "value": "समय और देखने की प्रगति"
+    }
+  ],
+  "web.admin.history.detail.sessionsCapped": [
+    {
+      "type": 0,
+      "value": "इस प्ले के "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": " सेशन में से पहले "
+    },
+    {
+      "type": 1,
+      "value": "shown"
+    },
+    {
+      "type": 0,
+      "value": " दिखाए जा रहे हैं।"
+    }
+  ],
+  "web.admin.history.detail.sessionsNotice": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "इस प्ले में "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " सेशन है। नीचे दी गई स्ट्रीम, डिवाइस और रूट की जानकारी उसी सेशन की है।"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "यह प्ले "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " सेशन में फैला है। नीचे दी गई स्ट्रीम, डिवाइस और रूट की जानकारी इसके मुख्य सेशन की है; किसी सेशन की अलग से जाँच करने के लिए नीचे उसे चुनें।"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.ended": [
+    {
+      "type": 0,
+      "value": "खत्म हुआ"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.method": [
+    {
+      "type": 0,
+      "value": "तरीका"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.started": [
+    {
+      "type": 0,
+      "value": "शुरू हुआ"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.watched": [
+    {
+      "type": 0,
+      "value": "देखा गया"
     }
   ],
   "web.admin.history.detail.subtitlesBurnIn": [
@@ -44036,6 +44353,12 @@
       "value": "सभी नेटवर्क"
     }
   ],
+  "web.admin.history.filter.allMediaTypes": [
+    {
+      "type": 0,
+      "value": "सभी मीडिया"
+    }
+  ],
   "web.admin.history.filter.allMethods": [
     {
       "type": 0,
@@ -44072,6 +44395,24 @@
       "value": "पूरे हुए"
     }
   ],
+  "web.admin.history.filter.episodes": [
+    {
+      "type": 0,
+      "value": "एपिसोड"
+    }
+  ],
+  "web.admin.history.filter.hideShort": [
+    {
+      "type": 0,
+      "value": "<30 से॰ छिपाएँ"
+    }
+  ],
+  "web.admin.history.filter.hideShortTitle": [
+    {
+      "type": 0,
+      "value": "30 सेकंड से छोटे अधूरे सेशन छिपाएँ"
+    }
+  ],
   "web.admin.history.filter.locationLocal": [
     {
       "type": 0,
@@ -44082,6 +44423,12 @@
     {
       "type": 0,
       "value": "रिमोट"
+    }
+  ],
+  "web.admin.history.filter.movies": [
+    {
+      "type": 0,
+      "value": "फ़िल्में"
     }
   ],
   "web.admin.history.filter.partial": [
@@ -44270,6 +44617,12 @@
       "value": "हाल का प्लेबैक"
     }
   ],
+  "web.admin.history.row.burnInBadgeTitle": [
+    {
+      "type": 0,
+      "value": "वीडियो में बर्न-इन किए गए सबटाइटल"
+    }
+  ],
   "web.admin.history.row.completed": [
     {
       "type": 0,
@@ -44290,6 +44643,40 @@
     {
       "type": 0,
       "value": "अनुमानित (देखने का सटीक समय दर्ज होने से पहले रिकॉर्ड किया गया)"
+    }
+  ],
+  "web.admin.history.row.groupedSessionsTitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " सेशन से मिलाकर बना"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " सेशन से मिलाकर बना"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.history.row.meta": [
@@ -44322,6 +44709,12 @@
       "value": "अधूरा"
     }
   ],
+  "web.admin.history.row.progressLabel": [
+    {
+      "type": 0,
+      "value": "प्लेबैक की प्रगति"
+    }
+  ],
   "web.admin.history.row.started": [
     {
       "type": 0,
@@ -44332,16 +44725,92 @@
       "value": "time"
     }
   ],
+  "web.admin.history.stats.accountsCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " खाता"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " खाते"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.history.stats.completed": [
     {
       "type": 0,
       "value": "पूरे हुए"
     }
   ],
+  "web.admin.history.stats.completionBreakdown": [
+    {
+      "type": 1,
+      "value": "completed"
+    },
+    {
+      "type": 0,
+      "value": " पूरे हुए · "
+    },
+    {
+      "type": 1,
+      "value": "partial"
+    },
+    {
+      "type": 0,
+      "value": " अधूरे"
+    }
+  ],
   "web.admin.history.stats.partial": [
     {
       "type": 0,
       "value": "अधूरे"
+    }
+  ],
+  "web.admin.history.stats.totalPlays": [
+    {
+      "type": 0,
+      "value": "कुल प्ले"
+    }
+  ],
+  "web.admin.history.stats.totalSessions": [
+    {
+      "type": 0,
+      "value": "कुल सेशन"
+    }
+  ],
+  "web.admin.history.stats.uniqueProfiles": [
+    {
+      "type": 0,
+      "value": "अलग-अलग प्रोफ़ाइलें"
+    }
+  ],
+  "web.admin.history.stats.uniqueTitles": [
+    {
+      "type": 0,
+      "value": "अलग-अलग टाइटल"
     }
   ],
   "web.admin.history.stats.visibleRows": [
@@ -44360,6 +44829,24 @@
     {
       "type": 0,
       "value": "प्लेबैक इतिहास"
+    }
+  ],
+  "web.admin.history.view.label": [
+    {
+      "type": 0,
+      "value": "इतिहास का व्यू"
+    }
+  ],
+  "web.admin.history.view.plays": [
+    {
+      "type": 0,
+      "value": "प्ले"
+    }
+  ],
+  "web.admin.history.view.sessions": [
+    {
+      "type": 0,
+      "value": "सभी सेशन"
     }
   ],
   "web.admin.historyImport.conflict.message": [
@@ -86151,6 +86638,234 @@
       "value": " दिखाएँ"
     }
   ],
+  "web.admin.users.detail.appKeys.confirm.denyDescription": [
+    {
+      "type": 0,
+      "value": "डिवाइस "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " से "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " के खाते में साइन इन नहीं किया जा सकेगा। अगर यह "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " का डिवाइस था, तो इसे Silo ऐप में फिर से जोड़ा जा सकता है।"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKey": [
+    {
+      "type": 0,
+      "value": "कुंजी हटाएँ"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKeyDescription": [
+    {
+      "type": 0,
+      "value": "पहले से साइन इन डिवाइस उन्हें हटाए जाने तक काम करते रहेंगे। इस कुंजी से कोई नया डिवाइस नहीं जोड़ा जा सकेगा, और इसके ज़रिए जोड़े गए जो डिवाइस अभी इंतज़ार में हैं, उन्हें अस्वीकार कर दिया जाएगा। साइन इन रहते हुए अगली बार डिवाइस जोड़ने पर "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " का Silo ऐप नई कुंजी सेट अप करेगा।"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKeyTitle": [
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " की खाता कुंजी हटाएँ?"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.removeDescription": [
+    {
+      "type": 0,
+      "value": "डिवाइस "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " को हटाने पर उसे "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " के खाते से अभी साइन आउट कर दिया जाएगा और उसकी कुंजी बंद कर दी जाएगी: उस कुंजी से फिर साइन इन नहीं किया जा सकेगा। इसे फिर से इस्तेमाल करने के लिए, "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " को इसे Silo ऐप में फिर से जोड़ना होगा।"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.withdrawDescription": [
+    {
+      "type": 0,
+      "value": "डिवाइस "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " इस मंज़ूरी से "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " के खाते में साइन इन नहीं कर सकेगा।"
+    }
+  ],
+  "web.admin.users.detail.appKeys.description": [
+    {
+      "type": 0,
+      "value": "ऐसे डिवाइस और ऐप जो Silo ऐप के ज़रिए, बिना पासवर्ड के, "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " के खाते में साइन इन करते हैं।"
+    }
+  ],
+  "web.admin.users.detail.appKeys.empty": [
+    {
+      "type": 0,
+      "value": "इस खाते पर कोई भी डिवाइस Silo ऐप इस्तेमाल नहीं करता।"
+    }
+  ],
+  "web.admin.users.detail.appKeys.loadFailed": [
+    {
+      "type": 0,
+      "value": "डिवाइस लोड नहीं किए जा सके।"
+    }
+  ],
+  "web.admin.users.detail.appKeys.off": [
+    {
+      "type": 0,
+      "value": "इस सर्वर पर Silo ऐप से साइन इन बंद है, इसलिए ये डिवाइस साइन इन नहीं कर सकते। फिर भी इन्हें हटाया जा सकता है।"
+    }
+  ],
+  "web.admin.users.detail.appKeys.ownerOnly": [
+    {
+      "type": 0,
+      "value": "किसी दूसरे एडमिन या मालिक के डिवाइस सिर्फ़ सर्वर का मालिक बदल सकता है।"
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.description": [
+    {
+      "type": 0,
+      "value": "Silo ऐप इस कुंजी से "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " के नए डिवाइस जोड़ता है। "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": " को सेट अप की गई।"
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.none": [
+    {
+      "type": 0,
+      "value": "कोई खाता कुंजी नहीं है। साइन इन रहते हुए अगली बार डिवाइस जोड़ने पर "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " का Silo ऐप एक कुंजी सेट अप करेगा।"
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.remove": [
+    {
+      "type": 0,
+      "value": "खाता कुंजी हटाएँ"
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKeyRemoved": [
+    {
+      "type": 0,
+      "value": "खाता कुंजी हटाई गई"
+    }
+  ],
+  "web.admin.users.detail.appKeys.preapprovals.description": [
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " की ओर से ऐसे डिवाइस के लिए मंज़ूर किए गए साइन-इन, जो अभी तक कनेक्ट नहीं हुआ है।"
+    }
+  ],
+  "web.admin.users.detail.appKeys.waiting.description": [
+    {
+      "type": 0,
+      "value": "एडमिन खाते पर नया डिवाइस तब तक इंतज़ार करता है, जब तक "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " के साइन इन किए हुए किसी डिवाइस से उसे मंज़ूरी न दी जाए। इसे यहाँ अस्वीकार किया जा सकता है।"
+    }
+  ],
+  "web.admin.users.detail.appKeys.waiting.title": [
+    {
+      "type": 0,
+      "value": "मंज़ूरी का इंतज़ार"
+    }
+  ],
   "web.admin.users.detail.common.allProfiles": [
     {
       "type": 0,
@@ -89643,6 +90358,12 @@
       "value": "इस खाते में प्रोफ़ाइलों की सीमा पूरी हो गई है"
     }
   ],
+  "web.admin.users.detail.profiles.badge.changedHere": [
+    {
+      "type": 0,
+      "value": "यहाँ बदला गया"
+    }
+  ],
   "web.admin.users.detail.profiles.badge.kids": [
     {
       "type": 0,
@@ -89836,6 +90557,632 @@
     {
       "type": 0,
       "value": "PIN सेव करें"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowAgain": [
+    {
+      "type": 0,
+      "value": "फिर से अनुमति दें"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowAgainAria": [
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " को इस सर्वर पर वापस आने दें"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowDescription": [
+    {
+      "type": 0,
+      "value": "उनका ऐप अगली बार सिंक होने पर "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " को वापस जोड़ सकता है, इस सर्वर पर इसके इतिहास के बिना एक नई प्रोफ़ाइल के रूप में, अगर ऐप की प्रोफ़ाइलों में अब भी "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " शामिल हो और इस खाते में एक और प्रोफ़ाइल की जगह हो।"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowTitle": [
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " को फिर से अनुमति दें?"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.alreadyCleared": [
+    {
+      "type": 0,
+      "value": "यह बदलाव पहले ही साफ़ किया जा चुका है, या "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " ने इसे फिर से बदल दिया है। सूची अप-टू-डेट है।"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedBy": [
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": " को "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " ने बदला"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedSinceOpened": [
+    {
+      "type": 0,
+      "value": "खोलने के बाद यह बदलाव अपडेट हो गया, इसलिए कुछ भी साफ़ नहीं किया गया। सूची में इसे फिर से पढ़ें, फिर अब भी ज़रूरत हो तो इसे साफ़ करें।"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedWhileRunning": [
+    {
+      "type": 0,
+      "value": "इसके चलते समय प्रोफ़ाइलें बदल गईं, इसलिए कुछ भी नहीं बदला गया। सूची अप-टू-डेट है; अगर अब भी ज़रूरत हो, तो फिर से कोशिश करें।"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clear": [
+    {
+      "type": 0,
+      "value": "साफ़ करें"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearAndRemovePin": [
+    {
+      "type": 0,
+      "value": "साफ़ करें और PIN हटाएँ"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearAria": [
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " पर "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " में किया गया बदलाव साफ़ करें"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearFailed": [
+    {
+      "type": 0,
+      "value": "बदलाव साफ़ नहीं किया जा सका।"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearInherit": [
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " पर "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " की वैल्यू फिर से वही हो जाएगी जो "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " को अभी इनहेरिट होती है, जैसा उनका ऐप चाहता है। उनके ऐप से होने वाले बदलाव इस पर फिर से लागू होंगे।"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearLater": [
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " की वैल्यू तब तक जैसी है वैसी रहेगी, जब तक उनका ऐप इसे अगली बार नहीं भेजता। उसके बाद, उनके ऐप से होने वाले बदलाव इस पर फिर से लागू होंगे।"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearNow": [
+    {
+      "type": 0,
+      "value": "प्रोफ़ाइल "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " अभी उनके ऐप की वैल्यू पर वापस आ जाएगी, और उनके ऐप से होने वाले बदलाव इस पर फिर से लागू होंगे।"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearNowValue": [
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " पर "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " की वैल्यू अभी उनके ऐप की वैल्यू "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " पर वापस आ जाएगी। उनके ऐप से होने वाले बदलाव इस पर फिर से लागू होंगे।"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearPin": [
+    {
+      "type": 0,
+      "value": "प्रोफ़ाइल "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " पर आपका सेट किया गया PIN तब तक बना रहेगा, जब तक उनका ऐप अगली बार कोई PIN नहीं भेजता। उसके बाद, उनके ऐप से होने वाले बदलाव इस पर फिर से लागू होंगे।"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearPinRemoves": [
+    {
+      "type": 0,
+      "value": "उनका ऐप प्रोफ़ाइल "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " को बिना PIN के भेजता है, इसलिए साफ़ करने पर आपका सेट किया गया PIN अभी हटा दिया जाएगा। उसके बाद इस खाते का इस्तेमाल करने वाला कोई भी व्यक्ति "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " को बिना PIN के खोल सकेगा।"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearTitle": [
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " पर "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " में किया गया बदलाव साफ़ करें?"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.deletedAccount": [
+    {
+      "type": 0,
+      "value": "मिटाया गया खाता"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.description": [
+    {
+      "type": 0,
+      "value": "ये प्रोफ़ाइलें "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " के ऐप से आती हैं। यहाँ किया गया बदलाव साफ़ किए जाने तक इस सर्वर पर बना रहता है। यह कोई लॉक नहीं है: "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " भी यहाँ यही चीज़ बदल सकते हैं।"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismiss": [
+    {
+      "type": 0,
+      "value": "खारिज करें"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismissAria": [
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " पर "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " के बारे में नोट खारिज करें"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismissFailed": [
+    {
+      "type": 0,
+      "value": "नोट खारिज नहीं किया जा सका।"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.isChild": [
+    {
+      "type": 0,
+      "value": "बच्चों की प्रोफ़ाइल"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.maxAdvisoryAge": [
+    {
+      "type": 0,
+      "value": "आयु सीमा"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.maxContentRating": [
+    {
+      "type": 0,
+      "value": "कंटेंट रेटिंग की सीमा"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.name": [
+    {
+      "type": 0,
+      "value": "नाम"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.picture": [
+    {
+      "type": 0,
+      "value": "तस्वीर"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.pin": [
+    {
+      "type": 0,
+      "value": "PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.requests": [
+    {
+      "type": 0,
+      "value": "अनुरोध"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.requireAdvisoryAge": [
+    {
+      "type": 0,
+      "value": "आयु रेटिंग ज़रूरी"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.fieldValue": [
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.hidden": [
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": " को "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " ने इस सर्वर पर हटाया। अनुमति दिए जाने तक उनका ऐप इसे वापस नहीं जोड़ेगा।"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.loadFailed": [
+    {
+      "type": 0,
+      "value": "इस सर्वर पर किए गए बदलाव लोड नहीं किए जा सके।"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.nameTaken": [
+    {
+      "type": 0,
+      "value": "प्रोफ़ाइल "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " उनके ऐप के नाम "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " पर वापस नहीं जा सकती, क्योंकि यहाँ किसी दूसरी प्रोफ़ाइल का यही नाम है। पहले उस प्रोफ़ाइल का नाम बदलें, फिर इसे दोबारा साफ़ करें।"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeHiddenNextSync": [
+    {
+      "type": 0,
+      "value": "अगली बार "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " का ऐप सिंक होने पर प्रोफ़ाइल "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " वापस आ सकती है, अगर ऐप की प्रोफ़ाइलों में यह अब भी शामिल हो।"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeHiddenWoken": [
+    {
+      "type": 0,
+      "value": "अगली बार उनका ऐप सिंक होने पर प्रोफ़ाइल "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " वापस आ सकती है, अगर ऐप की प्रोफ़ाइलों में यह अब भी शामिल हो। "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " के फ़ोन से सिंक करने का अनुरोध किया गया है।"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeNextSync": [
+    {
+      "type": 0,
+      "value": "साफ़ किया गया। अगली बार सिंक होने पर यह "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " के ऐप तक पहुँचेगा।"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeWoken": [
+    {
+      "type": 0,
+      "value": "साफ़ किया गया। "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " के फ़ोन से सिंक करने का अनुरोध किया गया है।"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.removedBy": [
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": " को "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " ने हटाया"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.replacedOwner": [
+    {
+      "type": 0,
+      "value": "इसने आपकी सेट की गई वैल्यू की जगह ले ली।"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.setBy": [
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": " को "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " ने सेट किया"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.settled": [
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": " को "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " ने इसे बदल दिया; आपकी सेट की गई वैल्यू अब लागू नहीं होती।"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.title": [
+    {
+      "type": 0,
+      "value": "इस सर्वर पर बदला गया"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.inherited": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (इनहेरिटेड)"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.noPicture": [
+    {
+      "type": 0,
+      "value": "कोई तस्वीर नहीं"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.none": [
+    {
+      "type": 0,
+      "value": "कोई नहीं"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.off": [
+    {
+      "type": 0,
+      "value": "बंद"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.on": [
+    {
+      "type": 0,
+      "value": "चालू"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.picture": [
+    {
+      "type": 0,
+      "value": "कस्टम तस्वीर"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.pinNone": [
+    {
+      "type": 0,
+      "value": "कोई PIN नहीं"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.pinSet": [
+    {
+      "type": 0,
+      "value": "PIN सेट है"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.requestsAllowed": [
+    {
+      "type": 0,
+      "value": "अनुमति है"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.requestsBlocked": [
+    {
+      "type": 0,
+      "value": "ब्लॉक है"
     }
   ],
   "web.admin.users.detail.profiles.setPin": [
@@ -91079,6 +92426,144 @@
     {
       "type": 0,
       "value": "पासवर्ड सेट करें"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.action": [
+    {
+      "type": 0,
+      "value": "साइन-इन लिंक बनाएँ"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.actionHint": [
+    {
+      "type": 0,
+      "value": "सभी डिवाइस खो गए"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.description": [
+    {
+      "type": 0,
+      "value": "अगर "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " के सभी डिवाइस खो गए हों, तो उनके लिए एक बार इस्तेमाल होने वाला लिंक। यह एक ऐसा पेज खोलता है जो Silo ऐप के लिए कोड देता है, या पासवर्ड चुनने देता है। यह 24 घंटे तक काम करता है, और नया लिंक पिछले लिंक की जगह ले लेता है।"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailAction": [
+    {
+      "type": 0,
+      "value": "ईमेल करें"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHint": [
+    {
+      "type": 0,
+      "value": "लिंक बनाकर उसे कॉपी करें और खुद भेजें, या उसे "
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": " पर ईमेल करें।"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHintNoAddress": [
+    {
+      "type": 0,
+      "value": "लिंक बनाएँ, फिर उसे कॉपी करके खुद भेजें। इस खाते में भेजने के लिए कोई ईमेल पता नहीं है।"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHintNoMail": [
+    {
+      "type": 0,
+      "value": "लिंक बनाएँ, फिर उसे कॉपी करके खुद भेजें। इसे यहाँ से भेजने के लिए सेटिंग में ईमेल सेट अप करें।"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailSent": [
+    {
+      "type": 0,
+      "value": "लिंक "
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": " पर भेज दिया गया। इसकी समय-सीमा "
+    },
+    {
+      "type": 1,
+      "value": "expires"
+    },
+    {
+      "type": 0,
+      "value": " को खत्म होगी।"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailUnconfirmed": [
+    {
+      "type": 0,
+      "value": "मेल सर्वर ने डिलीवरी की पुष्टि नहीं की। नीचे दिया गया लिंक अब भी काम करता है: इसे कॉपी करें और किसी दूसरे तरीके से भेजें।"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.failed": [
+    {
+      "type": 0,
+      "value": "साइन-इन लिंक नहीं बनाया जा सका।"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.linkShare": [
+    {
+      "type": 0,
+      "value": "यह लिंक सिर्फ़ "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " को भेजें। जिसके पास भी यह लिंक हो, वह इसके इस्तेमाल होने तक या "
+    },
+    {
+      "type": 1,
+      "value": "expires"
+    },
+    {
+      "type": 0,
+      "value": " को इसकी समय-सीमा खत्म होने तक इस खाते में साइन इन कर सकता है।"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.providerRequired": [
+    {
+      "type": 0,
+      "value": "इस सर्वर पर लोकल पासवर्ड से साइन इन बंद है, इसलिए साइन-इन लिंक इसके साइन-इन प्रोवाइडर को बायपास कर देगा। "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " से कहें कि वे इस सर्वर की साइट पर प्रोवाइडर से साइन इन करें, फिर अपनी खाता सेटिंग में “Silo में खोलें” इस्तेमाल करें।"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.title": [
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " के लिए साइन-इन लिंक"
     }
   ],
   "web.audiobooks.chapter.fallbackTitle": [
@@ -92859,6 +94344,120 @@
       "value": "साइन-इन को मंज़ूरी दें"
     }
   ],
+  "web.auth.appCode.code": [
+    {
+      "type": 0,
+      "value": "कोड"
+    }
+  ],
+  "web.auth.appCode.codeCopied": [
+    {
+      "type": 0,
+      "value": "कोड कॉपी किया गया"
+    }
+  ],
+  "web.auth.appCode.copyCode": [
+    {
+      "type": 0,
+      "value": "कोड कॉपी करें"
+    }
+  ],
+  "web.auth.appCode.copyFailed": [
+    {
+      "type": 0,
+      "value": "कोड कॉपी नहीं किया जा सका। उसे चुनकर खुद कॉपी करें।"
+    }
+  ],
+  "web.auth.appCode.expired": [
+    {
+      "type": 0,
+      "value": "इस कोड की समय-सीमा खत्म हो गई है।"
+    }
+  ],
+  "web.auth.appCode.failed": [
+    {
+      "type": 0,
+      "value": "Silo कोड नहीं बना सका। फिर से कोशिश करें।"
+    }
+  ],
+  "web.auth.appCode.instructions": [
+    {
+      "type": 0,
+      "value": "इस डिवाइस पर Silo ऐप में जारी रखने के लिए “Silo खोलें” दबाएँ। अगर ऐप इंस्टॉल नहीं है, तो उसे इंस्टॉल करें, इस टैब पर वापस आएँ और फिर से “Silo खोलें” दबाएँ।"
+    }
+  ],
+  "web.auth.appCode.noScanCode": [
+    {
+      "type": 0,
+      "value": "इस सर्वर का पता स्कैन कोड के लिए बहुत लंबा है। Silo ऐप में सर्वर का पता और कोड टाइप करें, या कोड कॉपी करके वहाँ पेस्ट करें।"
+    }
+  ],
+  "web.auth.appCode.open": [
+    {
+      "type": 0,
+      "value": "Silo खोलें"
+    }
+  ],
+  "web.auth.appCode.renew": [
+    {
+      "type": 0,
+      "value": "नया कोड पाएँ"
+    }
+  ],
+  "web.auth.appCode.scanCodeLabel": [
+    {
+      "type": 0,
+      "value": "Silo ऐप के लिए स्कैन कोड"
+    }
+  ],
+  "web.auth.appCode.scanCodeUnavailable": [
+    {
+      "type": 0,
+      "value": "इस सर्वर के लिए स्कैन कोड नहीं दिखाया जा सकता। Silo ऐप में सर्वर का पता और कोड टाइप करें, या कोड कॉपी करके वहाँ पेस्ट करें।"
+    }
+  ],
+  "web.auth.appCode.scanHint": [
+    {
+      "type": 0,
+      "value": "इसे Silo ऐप के स्कैनर से स्कैन करें, या नीचे दिया गया सर्वर का पता और कोड टाइप या कॉपी करें।"
+    }
+  ],
+  "web.auth.appCode.serverAddress": [
+    {
+      "type": 0,
+      "value": "सर्वर का पता"
+    }
+  ],
+  "web.auth.appCode.singleUse": [
+    {
+      "type": 0,
+      "value": "यह कोड एक ही बार काम करता है और कुछ मिनट बाद इसकी समय-सीमा खत्म हो जाती है।"
+    }
+  ],
+  "web.auth.appCode.title": [
+    {
+      "type": 0,
+      "value": "Silo खोलें"
+    }
+  ],
+  "web.auth.appCode.typeInstructions": [
+    {
+      "type": 0,
+      "value": "अपने फ़ोन या टैबलेट पर Silo ऐप में इस सर्वर को उसके पते से जोड़ें और अपना खाता बनाने के लिए यह कोड टाइप करें। इस कोड से कोई भी आपकी जगह शामिल हो सकता है, इसलिए इसे किसी के साथ शेयर न करें।"
+    }
+  ],
+  "web.auth.appCode.typeTitle": [
+    {
+      "type": 0,
+      "value": "इस कोड से शामिल हों"
+    }
+  ],
+  "web.auth.appCode.webLink": [
+    {
+      "type": 0,
+      "value": "इसके बजाय siloserver.org लिंक से खोलें"
+    }
+  ],
   "web.auth.card.rememberedIt": [
     {
       "type": 0,
@@ -93061,10 +94660,50 @@
       ]
     }
   ],
+  "web.auth.invite.appAccountEmail": [
+    {
+      "type": 0,
+      "value": "आपका खाता "
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": " इस्तेमाल करेगा।"
+    }
+  ],
+  "web.auth.invite.appContinue": [
+    {
+      "type": 0,
+      "value": "जारी रखें"
+    }
+  ],
+  "web.auth.invite.appEmailHint": [
+    {
+      "type": 0,
+      "value": "ईमेल पता देने पर, अगर आपके डिवाइस खो जाएँ तो यह सर्वर आपको साइन-इन लिंक भेज सकता है।"
+    }
+  ],
   "web.auth.invite.appMissing": [
     {
       "type": 0,
       "value": "कुछ नहीं हो रहा? ऐप इंस्टॉल नहीं है — बस नीचे जारी रखें।"
+    }
+  ],
+  "web.auth.invite.appProviderOnly": [
+    {
+      "type": 0,
+      "value": "सर्वर "
+    },
+    {
+      "type": 1,
+      "value": "server"
+    },
+    {
+      "type": 0,
+      "value": " लोगों को अपने साइन-इन प्रोवाइडर के ज़रिए जोड़ता है। इस साइट पर उससे साइन इन करें, फिर अपनी खाता सेटिंग से Silo खोलें।"
     }
   ],
   "web.auth.invite.created": [
@@ -93093,6 +94732,18 @@
       "value": "अपना ईमेल पता डालें और पासवर्ड चुनें। आपको अपने ईमेल पते से साइन इन करना होगा।"
     }
   ],
+  "web.auth.invite.descriptionWithApp": [
+    {
+      "type": 0,
+      "value": "अपने फ़ोन या टैबलेट पर Silo ऐप से शामिल हों, या साइन इन करने के लिए पासवर्ड चुनें।"
+    }
+  ],
+  "web.auth.invite.emailOptional": [
+    {
+      "type": 0,
+      "value": "ईमेल (वैकल्पिक)"
+    }
+  ],
   "web.auth.invite.emailPlaceholder": [
     {
       "type": 0,
@@ -93113,6 +94764,18 @@
     {
       "type": 0,
       "value": " की ओर से आमंत्रण"
+    }
+  ],
+  "web.auth.invite.joinWithApp": [
+    {
+      "type": 0,
+      "value": "Silo ऐप से शामिल हों"
+    }
+  ],
+  "web.auth.invite.joinWithAppInstead": [
+    {
+      "type": 0,
+      "value": "इसके बजाय Silo ऐप से शामिल हों"
     }
   ],
   "web.auth.invite.loadFailed": [
@@ -93213,6 +94876,30 @@
     {
       "type": 0,
       "value": "आमंत्रण उपलब्ध नहीं है"
+    }
+  ],
+  "web.auth.invite.usePassword": [
+    {
+      "type": 0,
+      "value": "इसके बजाय पासवर्ड इस्तेमाल करें"
+    }
+  ],
+  "web.auth.invite.usernameIsAddress": [
+    {
+      "type": 0,
+      "value": "@ वाला उपयोगकर्ता नाम वही ईमेल पता होना चाहिए जो आप नीचे डालें।"
+    }
+  ],
+  "web.auth.invite.usernameRequired": [
+    {
+      "type": 0,
+      "value": "उपयोगकर्ता नाम चुनें।"
+    }
+  ],
+  "web.auth.invite.usernameTaken": [
+    {
+      "type": 0,
+      "value": "यह उपयोगकर्ता नाम पहले से इस्तेमाल में है। कोई दूसरा चुनें।"
     }
   ],
   "web.auth.languagePicker.label": [
@@ -94145,6 +95832,126 @@
     {
       "type": 0,
       "value": "साइन इन करें"
+    }
+  ],
+  "web.auth.signInLink.backToCode": [
+    {
+      "type": 0,
+      "value": "कोड पर वापस जाएँ"
+    }
+  ],
+  "web.auth.signInLink.codeExpired": [
+    {
+      "type": 0,
+      "value": "दूसरा कोड पाने के लिए इस सर्वर के किसी एडमिन से नया लिंक माँगें।"
+    }
+  ],
+  "web.auth.signInLink.documentTitle": [
+    {
+      "type": 0,
+      "value": "साइन-इन लिंक"
+    }
+  ],
+  "web.auth.signInLink.failed": [
+    {
+      "type": 0,
+      "value": "Silo यह लिंक नहीं खोल सका। फिर से कोशिश करें।"
+    }
+  ],
+  "web.auth.signInLink.installFirst": [
+    {
+      "type": 0,
+      "value": "लिंक एक ही बार काम करता है, और कोड कुछ मिनट तक चलता है। पहले अपने फ़ोन या टैबलेट पर Silo ऐप इंस्टॉल करें, फिर “जारी रखें” दबाएँ।"
+    }
+  ],
+  "web.auth.signInLink.intro": [
+    {
+      "type": 0,
+      "value": "एक एडमिन ने आपको यह लिंक भेजा है, ताकि आप फिर से साइन इन कर सकें। Silo ऐप के लिए कोड पाने या पासवर्ड चुनने के लिए जारी रखें।"
+    }
+  ],
+  "web.auth.signInLink.keepOpen": [
+    {
+      "type": 0,
+      "value": "काम पूरा होने तक यह पेज खुला रखें। लिंक इस्तेमाल हो चुका है, इसलिए पेज फिर से लोड करने या छोड़ने पर इससे मिली चीज़ें खो जाएँगी।"
+    }
+  ],
+  "web.auth.signInLink.leaveAction": [
+    {
+      "type": 0,
+      "value": "छोड़ें"
+    }
+  ],
+  "web.auth.signInLink.leaveDescription": [
+    {
+      "type": 0,
+      "value": "लिंक इस्तेमाल हो चुका है। पेज छोड़ने पर Silo ऐप का कोड और पासवर्ड सेट करने का मौका चला जाएगा, और आपको नए लिंक की ज़रूरत होगी।"
+    }
+  ],
+  "web.auth.signInLink.leaveTitle": [
+    {
+      "type": 0,
+      "value": "यह पेज छोड़ें?"
+    }
+  ],
+  "web.auth.signInLink.noCodeAdministrator": [
+    {
+      "type": 0,
+      "value": "यह एडमिन का खाता है, इसलिए यह लिंक सिर्फ़ पासवर्ड सेट करता है। पासवर्ड सेट करें, इस सर्वर की साइट पर साइन इन करें, फिर वहाँ अपनी खाता सेटिंग से Silo ऐप खोलें।"
+    }
+  ],
+  "web.auth.signInLink.noCodeAppKeysOff": [
+    {
+      "type": 0,
+      "value": "अभी इस सर्वर पर Silo ऐप से साइन इन नहीं किया जा सकता, इसलिए यह लिंक सिर्फ़ पासवर्ड सेट करता है।"
+    }
+  ],
+  "web.auth.signInLink.passwordDescription": [
+    {
+      "type": 0,
+      "value": "सेव करने पर यह खाता हर डिवाइस पर साइन आउट हो जाएगा। Silo ऐप से साइन इन किए गए डिवाइस अपने-आप फिर से साइन इन हो जाते हैं।"
+    }
+  ],
+  "web.auth.signInLink.passwordSet": [
+    {
+      "type": 0,
+      "value": "आपका पासवर्ड सेव हो गया है। इससे साइन इन करें।"
+    }
+  ],
+  "web.auth.signInLink.passwordSetLostDevices": [
+    {
+      "type": 0,
+      "value": "Silo ऐप इस्तेमाल करने वाले खोए हुए डिवाइस तब तक साइन इन कर सकते हैं, जब तक उन्हें हटाया नहीं जाता। साइन इन करने के बाद, उन्हें अपनी खाता सेटिंग में अपने डिवाइसों से हटाएँ।"
+    }
+  ],
+  "web.auth.signInLink.passwordTitle": [
+    {
+      "type": 0,
+      "value": "पासवर्ड चुनें"
+    }
+  ],
+  "web.auth.signInLink.providerRequired": [
+    {
+      "type": 0,
+      "value": "यह सर्वर लोगों को अपने साइन-इन प्रोवाइडर के ज़रिए साइन इन कराता है, इसलिए यह लिंक काम नहीं करता। इसके बजाय प्रोवाइडर से साइन इन करें।"
+    }
+  ],
+  "web.auth.signInLink.setPasswordInstead": [
+    {
+      "type": 0,
+      "value": "इसके बजाय पासवर्ड सेट करें"
+    }
+  ],
+  "web.auth.signInLink.title": [
+    {
+      "type": 0,
+      "value": "अपने खाते का ऐक्सेस वापस पाएँ"
+    }
+  ],
+  "web.auth.signInLink.unavailable": [
+    {
+      "type": 0,
+      "value": "यह लिंक पहले ही इस्तेमाल हो चुका है, इसकी जगह नया लिंक आ गया है, या इसकी समय-सीमा खत्म हो गई है। इस सर्वर के किसी एडमिन से नया लिंक माँगें।"
     }
   ],
   "web.auth.signup.closed": [
@@ -133028,7 +134835,7 @@
   "web.settings.account.password.signOutOthersDescription": [
     {
       "type": 0,
-      "value": "दूसरे ब्राउज़रों और ऐप्स में नए पासवर्ड से फिर से साइन इन करना होगा। यह ब्राउज़र साइन इन रहेगा और API कुंजियाँ काम करती रहेंगी।"
+      "value": "दूसरे ब्राउज़र और ऐप साइन आउट हो जाते हैं। यह ब्राउज़र साइन इन रहेगा और API कुंजियाँ काम करती रहेंगी।"
     }
   ],
   "web.settings.account.password.title": [
@@ -133869,6 +135676,496 @@
     {
       "type": 0,
       "value": "इस कुंजी का इस्तेमाल कैसे करें"
+    }
+  ],
+  "web.settings.appKeys.actionFailed": [
+    {
+      "type": 0,
+      "value": "यह बदलाव नहीं किया जा सका। फिर से कोशिश करें।"
+    }
+  ],
+  "web.settings.appKeys.approveMainOnly": [
+    {
+      "type": 0,
+      "value": "सिर्फ़ घर की मुख्य प्रोफ़ाइल ही किसी डिवाइस को मंज़ूरी दे सकती है। मंज़ूरी देने के लिए उस पर स्विच करें।"
+    }
+  ],
+  "web.settings.appKeys.approved": [
+    {
+      "type": 0,
+      "value": "डिवाइस "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " को मंज़ूरी दी गई"
+    }
+  ],
+  "web.settings.appKeys.confirm.approve": [
+    {
+      "type": 0,
+      "value": "डिवाइस को मंज़ूरी दें"
+    }
+  ],
+  "web.settings.appKeys.confirm.approveDescription": [
+    {
+      "type": 0,
+      "value": "डिवाइस "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " Silo ऐप से आपके खाते में तब तक साइन इन कर सकेगा, जब तक आप उसे हटा न दें। इसे मंज़ूरी सिर्फ़ तभी दें, जब आपने इसे अभी-अभी सेट अप किया हो।"
+    }
+  ],
+  "web.settings.appKeys.confirm.approveTitle": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " को मंज़ूरी दें?"
+    }
+  ],
+  "web.settings.appKeys.confirm.deny": [
+    {
+      "type": 0,
+      "value": "डिवाइस को अस्वीकार करें"
+    }
+  ],
+  "web.settings.appKeys.confirm.denyDescription": [
+    {
+      "type": 0,
+      "value": "डिवाइस "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " आपके खाते में साइन इन नहीं कर सकेगा। अगर यह आपका डिवाइस था, तो इसे Silo ऐप में फिर से जोड़ें।"
+    }
+  ],
+  "web.settings.appKeys.confirm.denyTitle": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " को अस्वीकार करें?"
+    }
+  ],
+  "web.settings.appKeys.confirm.remove": [
+    {
+      "type": 0,
+      "value": "डिवाइस हटाएँ"
+    }
+  ],
+  "web.settings.appKeys.confirm.removeDescription": [
+    {
+      "type": 0,
+      "value": "डिवाइस "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " को हटाने पर वह अभी साइन आउट हो जाएगा और उसकी कुंजी काम करना बंद कर देगी: वह उससे फिर से साइन इन नहीं कर सकेगा। इसे फिर से इस्तेमाल करने के लिए, Silo ऐप में इसे फिर से जोड़ें।"
+    }
+  ],
+  "web.settings.appKeys.confirm.removeTitle": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " को हटाएँ?"
+    }
+  ],
+  "web.settings.appKeys.confirm.withdraw": [
+    {
+      "type": 0,
+      "value": "मंज़ूरी वापस लें"
+    }
+  ],
+  "web.settings.appKeys.confirm.withdrawDescription": [
+    {
+      "type": 0,
+      "value": "डिवाइस "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " इस मंज़ूरी से आपके खाते में साइन इन नहीं कर सकेगा।"
+    }
+  ],
+  "web.settings.appKeys.confirm.withdrawTitle": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " की मंज़ूरी वापस लें?"
+    }
+  ],
+  "web.settings.appKeys.confirm.working": [
+    {
+      "type": 0,
+      "value": "सेव हो रहा है…"
+    }
+  ],
+  "web.settings.appKeys.denied": [
+    {
+      "type": 0,
+      "value": "डिवाइस "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " को अस्वीकार किया गया"
+    }
+  ],
+  "web.settings.appKeys.description": [
+    {
+      "type": 0,
+      "value": "वे डिवाइस और ऐप, जो बिना पासवर्ड के Silo ऐप से आपके खाते में साइन इन करते हैं।"
+    }
+  ],
+  "web.settings.appKeys.devices.title": [
+    {
+      "type": 0,
+      "value": "डिवाइस"
+    }
+  ],
+  "web.settings.appKeys.empty": [
+    {
+      "type": 0,
+      "value": "आपके खाते में कोई भी डिवाइस Silo ऐप का इस्तेमाल नहीं करता।"
+    }
+  ],
+  "web.settings.appKeys.footnote": [
+    {
+      "type": 0,
+      "value": "किसी डिवाइस को हटाने पर वह साइन आउट हो जाता है और उसकी कुंजी काम करना बंद कर देती है। किसी सेशन से साइन आउट करने पर डिवाइस नहीं हटता: वह अपनी कुंजी से फिर से साइन इन कर लेता है।"
+    }
+  ],
+  "web.settings.appKeys.loadFailed": [
+    {
+      "type": 0,
+      "value": "आपके डिवाइस लोड नहीं किए जा सके।"
+    }
+  ],
+  "web.settings.appKeys.loading": [
+    {
+      "type": 0,
+      "value": "डिवाइस लोड हो रहे हैं…"
+    }
+  ],
+  "web.settings.appKeys.off": [
+    {
+      "type": 0,
+      "value": "इस सर्वर पर Silo ऐप से साइन इन बंद है, इसलिए ये डिवाइस साइन इन नहीं कर सकते और इंतज़ार कर रहे डिवाइसों को मंज़ूरी नहीं दी जा सकती। फिर भी इन्हें हटाया जा सकता है।"
+    }
+  ],
+  "web.settings.appKeys.personKey.description": [
+    {
+      "type": 0,
+      "value": "आपका Silo ऐप आपके नए डिवाइस जोड़ने के लिए इस कुंजी का इस्तेमाल करता है। सेट अप करने का समय: "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "।"
+    }
+  ],
+  "web.settings.appKeys.personKey.none": [
+    {
+      "type": 0,
+      "value": "कोई खाता कुंजी नहीं है। अगली बार साइन इन रहते हुए कोई डिवाइस जोड़ने पर आपका Silo ऐप एक कुंजी सेट अप कर देगा।"
+    }
+  ],
+  "web.settings.appKeys.personKey.title": [
+    {
+      "type": 0,
+      "value": "खाता कुंजी"
+    }
+  ],
+  "web.settings.appKeys.pinDescription": [
+    {
+      "type": 0,
+      "value": "इस डिवाइस को मंज़ूरी देने के लिए मुख्य प्रोफ़ाइल का PIN डालें।"
+    }
+  ],
+  "web.settings.appKeys.preapprovals.description": [
+    {
+      "type": 0,
+      "value": "वे साइन इन, जिन्हें आपने ऐसे डिवाइस के लिए मंज़ूरी दी है जो अभी तक कनेक्ट नहीं हुआ है।"
+    }
+  ],
+  "web.settings.appKeys.preapprovals.loadFailed": [
+    {
+      "type": 0,
+      "value": "पहले से मंज़ूर किए गए साइन इन लोड नहीं किए जा सके।"
+    }
+  ],
+  "web.settings.appKeys.preapprovals.title": [
+    {
+      "type": 0,
+      "value": "पहले से मंज़ूर"
+    }
+  ],
+  "web.settings.appKeys.refreshLabel": [
+    {
+      "type": 0,
+      "value": "Silo ऐप के डिवाइस रीफ़्रेश करें"
+    }
+  ],
+  "web.settings.appKeys.removed": [
+    {
+      "type": 0,
+      "value": "डिवाइस "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " हटा दिया गया"
+    }
+  ],
+  "web.settings.appKeys.row.allowedBy": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " ने अनुमति दी"
+    }
+  ],
+  "web.settings.appKeys.row.approve": [
+    {
+      "type": 0,
+      "value": "मंज़ूरी दें"
+    }
+  ],
+  "web.settings.appKeys.row.approveLabel": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " को मंज़ूरी दें"
+    }
+  ],
+  "web.settings.appKeys.row.deny": [
+    {
+      "type": 0,
+      "value": "अस्वीकार करें"
+    }
+  ],
+  "web.settings.appKeys.row.denyLabel": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " को अस्वीकार करें"
+    }
+  ],
+  "web.settings.appKeys.row.enrolledFrom": [
+    {
+      "type": 1,
+      "value": "address"
+    },
+    {
+      "type": 0,
+      "value": " से"
+    }
+  ],
+  "web.settings.appKeys.row.identityGone": [
+    {
+      "type": 0,
+      "value": "साइन इन नहीं हो सकता: इसके साइन इन प्रोवाइडर का खाता अब लिंक नहीं है"
+    }
+  ],
+  "web.settings.appKeys.row.kindApp": [
+    {
+      "type": 0,
+      "value": "दूसरा ऐप"
+    }
+  ],
+  "web.settings.appKeys.row.kindDevice": [
+    {
+      "type": 0,
+      "value": "Silo ऐप"
+    }
+  ],
+  "web.settings.appKeys.row.lastUsed": [
+    {
+      "type": 0,
+      "value": "आखिरी साइन इन: "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.settings.appKeys.row.notUsed": [
+    {
+      "type": 0,
+      "value": "अपनी कुंजी से अभी तक साइन इन नहीं हुआ"
+    }
+  ],
+  "web.settings.appKeys.row.preapproval": [
+    {
+      "type": 0,
+      "value": "पहले से मंज़ूर · खत्म होने का समय: "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.settings.appKeys.row.provider": [
+    {
+      "type": 0,
+      "value": "साइन इन प्रोवाइडर से जाँचा गया"
+    }
+  ],
+  "web.settings.appKeys.row.remove": [
+    {
+      "type": 0,
+      "value": "हटाएँ"
+    }
+  ],
+  "web.settings.appKeys.row.removeLabel": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " को हटाएँ"
+    }
+  ],
+  "web.settings.appKeys.row.viaAppCode": [
+    {
+      "type": 0,
+      "value": "सर्वर के वेब पेज से मिले एक बार इस्तेमाल होने वाले कोड से जोड़ा गया"
+    }
+  ],
+  "web.settings.appKeys.row.viaPersonKey": [
+    {
+      "type": 0,
+      "value": "दूसरे डिवाइस पर Silo ऐप ने जोड़ा"
+    }
+  ],
+  "web.settings.appKeys.row.viaSession": [
+    {
+      "type": 0,
+      "value": "साइन इन रहते हुए जोड़ा गया"
+    }
+  ],
+  "web.settings.appKeys.row.waitingUntil": [
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": " तक मंज़ूरी का इंतज़ार"
+    }
+  ],
+  "web.settings.appKeys.row.withdraw": [
+    {
+      "type": 0,
+      "value": "वापस लें"
+    }
+  ],
+  "web.settings.appKeys.row.withdrawLabel": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " की मंज़ूरी वापस लें"
+    }
+  ],
+  "web.settings.appKeys.signsBackIn": [
+    {
+      "type": 0,
+      "value": "Silo ऐप से साइन इन किए गए डिवाइस अपने-आप फिर से साइन इन हो जाते हैं। ऐसा रोकने के लिए "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "डिवाइस हटाएँ"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "।"
+    }
+  ],
+  "web.settings.appKeys.title": [
+    {
+      "type": 0,
+      "value": "Silo ऐप के डिवाइस"
+    }
+  ],
+  "web.settings.appKeys.unavailable": [
+    {
+      "type": 0,
+      "value": "इस सर्वर पर Silo ऐप से साइन इन उपलब्ध नहीं है, इसलिए ये डिवाइस साइन इन नहीं कर सकते। फिर भी इन्हें हटाया जा सकता है।"
+    }
+  ],
+  "web.settings.appKeys.waiting.description": [
+    {
+      "type": 0,
+      "value": "किसी नए डिवाइस ने Silo ऐप से आपके खाते में साइन इन करने का अनुरोध किया है। इसे मंज़ूरी सिर्फ़ तभी दें, जब आपने इसे अभी-अभी सेट अप किया हो।"
+    }
+  ],
+  "web.settings.appKeys.waiting.title": [
+    {
+      "type": 0,
+      "value": "आपकी मंज़ूरी का इंतज़ार"
+    }
+  ],
+  "web.settings.appKeys.withdrawn": [
+    {
+      "type": 0,
+      "value": "मंज़ूरी वापस ली गई"
     }
   ],
   "web.settings.cardOverlay.adjust": [
@@ -138871,6 +141168,54 @@
       "value": "आप ऑफ़लाइन हैं, इसलिए यह बदलाव सेव नहीं हुआ"
     }
   ],
+  "web.settings.openInSilo.action": [
+    {
+      "type": 0,
+      "value": "Silo ऐप के लिए कोड पाएँ"
+    }
+  ],
+  "web.settings.openInSilo.codeInstructions": [
+    {
+      "type": 0,
+      "value": "अपने फ़ोन या टैबलेट के Silo ऐप में, इस सर्वर को उसके पते से जोड़ें और यह कोड डालें। जिसके पास भी यह कोड होगा, वह इस खाते में साइन इन कर सकता है, इसलिए इसे किसी से शेयर न करें।"
+    }
+  ],
+  "web.settings.openInSilo.codeTitle": [
+    {
+      "type": 0,
+      "value": "Silo ऐप के लिए कोड"
+    }
+  ],
+  "web.settings.openInSilo.description": [
+    {
+      "type": 0,
+      "value": "अपने फ़ोन या टैबलेट के Silo ऐप में, बिना पासवर्ड के, इस खाते से साइन इन करें।"
+    }
+  ],
+  "web.settings.openInSilo.loadFailed": [
+    {
+      "type": 0,
+      "value": "यह जाँचा नहीं जा सका कि यह ब्राउज़र Silo ऐप के लिए कोड पा सकता है या नहीं।"
+    }
+  ],
+  "web.settings.openInSilo.mainProfileOnly": [
+    {
+      "type": 0,
+      "value": "सिर्फ़ घर की मुख्य प्रोफ़ाइल ही Silo ऐप के लिए कोड पा सकती है। उस पर स्विच करें और फिर से कोशिश करें।"
+    }
+  ],
+  "web.settings.openInSilo.pinDescription": [
+    {
+      "type": 0,
+      "value": "Silo ऐप के लिए कोड पाने के लिए मुख्य प्रोफ़ाइल का PIN डालें।"
+    }
+  ],
+  "web.settings.openInSilo.title": [
+    {
+      "type": 0,
+      "value": "Silo ऐप"
+    }
+  ],
   "web.settings.overlays.accent.amber": [
     {
       "type": 0,
@@ -141775,6 +144120,12 @@
       "value": "साइन इन का समय"
     }
   ],
+  "web.settings.sessions.row.signsBackIn": [
+    {
+      "type": 0,
+      "value": "यह डिवाइस अपने-आप फिर से साइन इन हो जाता है"
+    }
+  ],
   "web.settings.sessions.row.summary": [
     {
       "type": 8,
@@ -141857,6 +144208,24 @@
     {
       "type": 0,
       "value": "सेटिंग"
+    }
+  ],
+  "web.settings.signInAgain.action": [
+    {
+      "type": 0,
+      "value": "फिर से साइन इन करें"
+    }
+  ],
+  "web.settings.signInAgain.manageDevices": [
+    {
+      "type": 0,
+      "value": "अपने डिवाइस मैनेज करने के लिए फिर से साइन इन करें"
+    }
+  ],
+  "web.settings.signInAgain.useApp": [
+    {
+      "type": 0,
+      "value": "अपने डिवाइस Silo ऐप में मैनेज करें।"
     }
   ],
   "web.settings.signedInSessions.loadFailed": [

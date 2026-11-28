@@ -502,7 +502,11 @@ func playbackProblem(err error) *Problem {
 	if !ok {
 		return NewProblem(TypeDependencyUnavailable, "Playback is temporarily unavailable.")
 	}
-	return NewProblem(playbackProblemType(operation.Status, operation.Code), operation.Message)
+	problem := NewProblem(playbackProblemType(operation.Status, operation.Code), operation.Message)
+	if operation.RetryAfter > 0 {
+		problem = problem.WithRetryAfter(operation.RetryAfter)
+	}
+	return problem
 }
 func playbackProblemType(status int, code string) ProblemType {
 	if status == http.StatusBadRequest || status == http.StatusUpgradeRequired {

@@ -510,6 +510,9 @@ func (s *Service) startEngine(values settings) error {
 	}
 	l.peersMu.Lock()
 	if coord != nil {
+		// The records and confirmations of an earlier engine describe its paths,
+		// not this one's: a device is ready again when this engine confirms it.
+		paths.reset()
 		// The cache may have changed since the last notification was handled.
 		entries := coord.directory.Devices()
 		paths.setDevices(entries)
@@ -678,6 +681,9 @@ func (s *Service) syncConfirmations(ctx context.Context, c *Coordination, fence 
 		if err == nil {
 			next[confirmation.Peer] = confirmation
 			paths.setConfirmed(confirmation.Peer, true)
+			// Observe the path now, so a peer's Since is when its path became
+			// direct and not when something first read it.
+			s.devicePath(confirmation.Peer)
 			s.storeResult(ctx, "confirmation", nil)
 		} else if !errors.Is(err, server.ErrNotFound) {
 			// The store may still hold the previous confirmation. Keeping it in next

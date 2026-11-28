@@ -211970,6 +211970,15 @@
               ],
               "type": "string"
             }
+          },
+          {
+            "description": "The client's stable device identifier. A device the server holds a direct enrollment for names itself here so the probe is measured, and receipted, on the path its media takes. Optional.",
+            "in": "header",
+            "name": "X-Silo-Device-Id",
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
           }
         ],
         "responses": {

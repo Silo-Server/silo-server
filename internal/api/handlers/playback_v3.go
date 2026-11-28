@@ -28,6 +28,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/directconn"
 	"github.com/Silo-Server/silo-server/internal/keptsub"
 	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -403,6 +404,40 @@ type transportErrorV3 struct {
 	// routePreparation marks a failure to prepare the selected route's
 	// transport, as opposed to a refusal of the whole playback.
 	routePreparation bool
+	// dependencyUnavailable marks a failure whose cause is a dependency that
+	// is temporarily down. A start answers it with a 503 and no stored decision.
+	dependencyUnavailable bool
+	// routeRefusal marks the refusal of a route decision that selected nothing
+	// (routeRefusalV3), as opposed to a failure to prepare a route it selected.
+	routeRefusal bool
+}
+
+// routeRefusalV3 is the failure of a route decision that selected nothing. A
+// device whose direct state could not be read counts as direct_only, so when
+// that leaves the request no legal route, the state store's failure is the
+// cause, not the operator's policy or the proxy pool: a temporary dependency
+// failure.
+func routeRefusalV3(ctx context.Context, outcome noderouting.Outcome) *transportErrorV3 {
+	if d := directRequestFromContext(ctx); d != nil && d.unreadable && outcome == noderouting.OutcomePolicyUnsatisfied {
+		return &transportErrorV3{
+			reason: codeInternalError, message: "The device's connection state is temporarily unavailable.",
+			retryable: true, dependencyUnavailable: true, routeRefusal: true,
+		}
+	}
+	return &transportErrorV3{
+		reason: string(outcome), message: "No playback route satisfies the configured policy and current node availability.",
+		retryable: outcome == noderouting.OutcomeCapacityUnavailable, routeRefusal: true,
+	}
+}
+
+// dependencyUnavailableErrorV3 is the 503 a playback request answers when the
+// state it needs is temporarily unreadable. No decision is stored for it, so the
+// same request runs again once the dependency answers, and Retry-After tells
+// the client when to ask.
+func dependencyUnavailableErrorV3(message string) *PlaybackOperationError {
+	err := playbackOperationError(http.StatusServiceUnavailable, "dependency_unavailable", message)
+	err.RetryAfter = directconn.RetryAfterSeconds
+	return err
 }
 
 func subtitleArtifactErrorV3(message string, cause error) *transportErrorV3 {
@@ -1042,7 +1077,7 @@ func (h *PlaybackHandler) progressiveRemuxPlanningRegistryWithInputsV3(
 ) *playback.TransformationRegistryV3 {
 	local = local.OnlyAdvertised(progressiveRemuxTransformationsV3(local.Advertised()))
 	localAllowed, proxyExecutionAllowed, transcodeExecutionAllowed := progressiveRemuxExecutorAvailabilityV3(
-		h.playbackRoutingPolicyForContextV3(ctx), proxyAllowed,
+		ctx, h.playbackRoutingPolicyForContextV3(ctx), proxyAllowed,
 	)
 	var merged []playback.TransformationV3
 	if proxyExecutionAllowed {
@@ -1093,8 +1128,8 @@ func progressiveRemuxTransformationsV3(transformations []playback.Transformation
 	return result
 }
 
-func progressiveRemuxExecutorAvailabilityV3(policy config.PlaybackRoutingPolicy, proxyAllowed bool) (bool, bool, bool) {
-	routes, err := noderouting.Candidates(noderouting.Request{
+func progressiveRemuxExecutorAvailabilityV3(ctx context.Context, policy config.PlaybackRoutingPolicy, proxyAllowed bool) (bool, bool, bool) {
+	routes, err := routeCandidatesV3(ctx, noderouting.Request{
 		Workload: noderouting.WorkloadRemux, Delivery: noderouting.DeliveryProgressiveRemux,
 		Policy: policy, ProxyAllowed: proxyAllowed,
 	})
@@ -1123,7 +1158,7 @@ func (h *PlaybackHandler) hlsPlanningRegistryWithInputsForClientV3(
 ) *playback.TransformationRegistryV3 {
 	local := h.localHLSExecutionRegistryWithInputsV3(ctx, settings, inventory)
 	routingPolicy := h.playbackRoutingPolicyForContextV3(ctx)
-	localAllowed, workerAllowed := hlsRouteExecutorAvailabilityForClientV3(workload, routingPolicy, proxyAllowed)
+	localAllowed, workerAllowed := hlsRouteExecutorAvailabilityForClientV3(ctx, workload, routingPolicy, proxyAllowed)
 	if !workerAllowed {
 		if !localAllowed {
 			return local.OnlyAdvertised(nil)
@@ -1155,27 +1190,28 @@ func (h *PlaybackHandler) hlsPlanningRegistryWithInputsForClientV3(
 }
 
 func (h *PlaybackHandler) localHLSToneMapCapabilitiesForTransportV3(ctx context.Context) (bool, tonemap.Capabilities, error) {
-	if !localHLSVideoRouteAllowedV3(h.playbackRoutingPolicyForContextV3(ctx)) {
+	if !localHLSVideoRouteAllowedV3(ctx, h.playbackRoutingPolicyForContextV3(ctx)) {
 		return false, nil, nil
 	}
 	capabilities, err := h.localToneMapCapabilitiesForTransportV3(ctx)
 	return true, capabilities, err
 }
 
-func localHLSVideoRouteAllowedV3(policy config.PlaybackRoutingPolicy) bool {
-	return localHLSRouteAllowedV3(noderouting.WorkloadVideoTranscode, policy)
+func localHLSVideoRouteAllowedV3(ctx context.Context, policy config.PlaybackRoutingPolicy) bool {
+	return localHLSRouteAllowedV3(ctx, noderouting.WorkloadVideoTranscode, policy)
 }
 
-func localHLSRouteAllowedV3(workload noderouting.Workload, policy config.PlaybackRoutingPolicy) bool {
-	localAllowed, _ := hlsRouteExecutorAvailabilityV3(workload, policy)
+func localHLSRouteAllowedV3(ctx context.Context, workload noderouting.Workload, policy config.PlaybackRoutingPolicy) bool {
+	localAllowed, _ := hlsRouteExecutorAvailabilityV3(ctx, workload, policy)
 	return localAllowed
 }
 
-func hlsRouteExecutorAvailabilityV3(workload noderouting.Workload, policy config.PlaybackRoutingPolicy) (bool, bool) {
-	return hlsRouteExecutorAvailabilityForClientV3(workload, policy, true)
+func hlsRouteExecutorAvailabilityV3(ctx context.Context, workload noderouting.Workload, policy config.PlaybackRoutingPolicy) (bool, bool) {
+	return hlsRouteExecutorAvailabilityForClientV3(ctx, workload, policy, true)
 }
 
 func hlsRouteExecutorAvailabilityForClientV3(
+	ctx context.Context,
 	workload noderouting.Workload,
 	policy config.PlaybackRoutingPolicy,
 	proxyAllowed bool,
@@ -1189,7 +1225,7 @@ func hlsRouteExecutorAvailabilityForClientV3(
 	default:
 		return false, false
 	}
-	routes, err := noderouting.Candidates(noderouting.Request{
+	routes, err := routeCandidatesV3(ctx, noderouting.Request{
 		Workload: workload, Delivery: delivery, Policy: policy, ProxyAllowed: proxyAllowed,
 	})
 	if err != nil {
@@ -1209,7 +1245,7 @@ func (h *PlaybackHandler) hlsToneMapCapabilityInventoryForClientV3(
 ) (hlsToneMapCapabilityInventoryV3, error) {
 	routingPolicy := h.playbackRoutingPolicyForContextV3(ctx)
 	localAllowed, workerAllowed := hlsRouteExecutorAvailabilityForClientV3(
-		noderouting.WorkloadVideoTranscode, routingPolicy, proxyAllowed,
+		ctx, noderouting.WorkloadVideoTranscode, routingPolicy, proxyAllowed,
 	)
 	fetchCtx, cancel := context.WithTimeout(ctx, h.toneMapPlanningTimeoutV3(localAllowed))
 	defer cancel()
@@ -1339,7 +1375,7 @@ func (h *PlaybackHandler) hlsSubtitleRenditionExecutableV3(ctx context.Context, 
 		features = append(features, playback.TransportFeatureHLSOnDemandSubtitleRenditionsV1)
 	}
 	localAllowed, workerAllowed := hlsRouteExecutorAvailabilityForClientV3(
-		workload, h.playbackRoutingPolicyForContextV3(ctx), proxyAllowed,
+		ctx, workload, h.playbackRoutingPolicyForContextV3(ctx), proxyAllowed,
 	)
 	if localAllowed {
 		return true
@@ -1371,7 +1407,7 @@ func hasAllStringsV3(have, want []string) bool {
 // filter node selection applies to the plan (transcodeEligibilityV3).
 func (h *PlaybackHandler) subtitleRenditionRoutableV3(ctx context.Context, result playback.PlannerResultV3, proxyAllowed bool) bool {
 	localAllowed, workerAllowed := hlsRouteExecutorAvailabilityForClientV3(
-		routingWorkloadV3(result), h.playbackRoutingPolicyForContextV3(ctx), proxyAllowed,
+		ctx, routingWorkloadV3(result), h.playbackRoutingPolicyForContextV3(ctx), proxyAllowed,
 	)
 	if localAllowed {
 		return true
@@ -1713,7 +1749,7 @@ func (h *PlaybackHandler) resolveHLSRouteWithPolicyV3(
 	// rather than at the URL builder keeps the resolver's fallbacks (API
 	// egress, API relay to the transcode node) in charge of what happens next.
 	proxyEligible := excludeUnreachableRouteNodesV3(ctx, nodepool.MediaReachableVia(netaccess.PathFromContext(ctx), directMediaFromContext(ctx), nil))
-	decision, err := noderouting.Resolve(noderouting.AdaptSessionPlanner(h.NodePlanner), noderouting.ResolveRequest{
+	decision, err := resolveRouteV3(ctx, noderouting.AdaptSessionPlanner(h.NodePlanner), noderouting.ResolveRequest{
 		Request: noderouting.Request{
 			Workload: workload, Delivery: delivery, Policy: policy, ProxyAllowed: proxyAllowed,
 		},
@@ -1934,7 +1970,7 @@ func (h *PlaybackHandler) planStartPassV3(r *http.Request, keys keyPassV3, req p
 	// goes with the limit; the connection's reading then stands in for it.
 	pass.unlimitedReq, pass.unlimitedFile, pass.unlimitedAudioIndex = withoutObservedEstimateV3(req), effectiveFile, audioIndex
 	record := keys.record
-	learnedLimit, limitErr := h.applyLearnedLimit(r, &req, keys.writes, keys.read, record, nil)
+	learnedLimit, limitErr := h.applyLearnedLimit(r, &req, keys.writes, keys.read, record, nil, keys.clearAlso)
 	if limitErr != nil {
 		pass.storeErr = true
 		return pass
@@ -2136,6 +2172,19 @@ func (h *PlaybackHandler) planWithoutLowerVersionV3(ctx context.Context, input p
 	return &alternateCandidateV3{file: input.EffectiveFile, request: input.Request, audioIndex: input.AudioTrackIndex, result: result, toneMapErr: toneMapErr}
 }
 
+// startPlaybackWithRetryV3 runs one start. When the commit of the pinned plan
+// finds the proxy gone (see planUnderKeysV3), it runs the start once more under
+// no connection key.
+func (h *PlaybackHandler) startPlaybackWithRetryV3(r *http.Request, body []byte) (playback.DecisionResponseV3, error) {
+	ctx, retry := withKeyRetryV3(r.Context())
+	response, err := h.startPlaybackApplicationV3(r.WithContext(ctx), body)
+	if !errors.Is(err, errPinnedRouteLostV3) {
+		return response, err
+	}
+	retry.unkeyed = true
+	return h.startPlaybackApplicationV3(r.WithContext(ctx), body)
+}
+
 func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byte) (playback.DecisionResponseV3, error) {
 	r = r.WithContext(withPlaybackRoutingPolicySnapshotV3(r.Context(), h.playbackRoutingPolicyV3()))
 	timings := newPlaybackStartTimingsV3()
@@ -2195,13 +2244,16 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 	r = r.WithContext(withServerBitrateCapV3(r.Context(), requestBitrateCapV3(r.Context())))
 	// The device's direct state is read here, once, before any route is
 	// resolved: planning and route selection only read fields of it.
-	r = r.WithContext(h.withDirectRequestV3(r.Context(), userID, req.MediaTransport, true))
+	r = r.WithContext(h.withDirectRequestV3(r.Context(), userID, req.MediaTransport))
 	requestedFile, err := h.loadAuthorizedFile(r, req.FileID)
 	if err != nil {
 		return playback.DecisionResponseV3{}, playbackFileOperationError(err)
 	}
 	requestedFile = h.ensurePlaybackProbe(r.Context(), requestedFile)
 	timings.mark("file_load_probe")
+	if refusal := h.noLegalRouteV3(r.Context()); refusal != nil {
+		return h.refuseStartV3(r.Context(), userID, profileID, req, requestDigests, requestedFile.ID, requestedFile.ID, refusal)
+	}
 	audioIndex, audioDegraded, err := resolveV3AudioIndex(requestedFile, req.AudioTrackID, req.AudioTrackIndex)
 	if err != nil {
 		return playback.DecisionResponseV3{}, playbackOperationError(http.StatusBadRequest, "bad_request", err.Error())
@@ -2364,6 +2416,9 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 	}
 	timings.mark("session_transport_commit")
 	if statusErr != nil {
+		if keyRetryFromContext(r.Context()).lost(statusErr) {
+			return playback.DecisionResponseV3{}, errPinnedRouteLostV3
+		}
 		if statusErr.reason == "playback_attempt_reused" {
 			return playback.DecisionResponseV3{}, playbackOperationError(http.StatusConflict, "playback_attempt_reused", statusErr.message)
 		}
@@ -2386,11 +2441,7 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 		default:
 			slog.InfoContext(r.Context(), "protocol v3 planned playback failed", failureAttrs...)
 		}
-		persistedResponse, persistErr := h.startFailureDecisionV3(r.Context(), userID, profileID, req, requestDigests, requestedFile.ID, effectiveFile.ID, statusErr)
-		if persistErr != nil {
-			return playback.DecisionResponseV3{}, playbackPersistenceOperationError(persistErr)
-		}
-		return persistedResponse, nil
+		return h.refuseStartV3(r.Context(), userID, profileID, req, requestDigests, requestedFile.ID, effectiveFile.ID, statusErr)
 	}
 	timings.mark("response_ready")
 	return response, nil
@@ -2896,10 +2947,7 @@ func (h *PlaybackHandler) prepareTransportWithPolicyAndExclusionsV3(
 			if lastErr != nil {
 				return preparedTransportV3{}, lastErr
 			}
-			retryable := decision.Outcome == noderouting.OutcomeCapacityUnavailable
-			return preparedTransportV3{}, &transportErrorV3{
-				reason: string(decision.Outcome), message: "No playback route satisfies the configured policy and current node availability.", retryable: retryable,
-			}
+			return preparedTransportV3{}, routeRefusalV3(r.Context(), decision.Outcome)
 		}
 
 		if decision.Shape.Execution == noderouting.ExecutionAPI {
@@ -3707,7 +3755,7 @@ func (h *PlaybackHandler) resolveIdentityRouteV3(r *http.Request, sessionID stri
 	// reports capacity unavailable under a proxy_only policy.
 	accessPath := netaccess.PathFromContext(r.Context())
 	direct := directMediaFromContext(r.Context())
-	decision, err := noderouting.Resolve(noderouting.AdaptSessionPlanner(h.NodePlanner), noderouting.ResolveRequest{
+	decision, err := resolveRouteV3(r.Context(), noderouting.AdaptSessionPlanner(h.NodePlanner), noderouting.ResolveRequest{
 		Request: noderouting.Request{
 			Workload: workload, Delivery: delivery,
 			Policy: policy, ProxyAllowed: proxyAllowed,
@@ -3724,8 +3772,7 @@ func (h *PlaybackHandler) resolveIdentityRouteV3(r *http.Request, sessionID stri
 		return noderouting.Decision{}, &transportErrorV3{reason: string(noderouting.OutcomePolicyUnsatisfied), message: "The playback routing policy is invalid.", retryable: false, cause: err}
 	}
 	if !decision.Selected() {
-		retryable := decision.Outcome == noderouting.OutcomeCapacityUnavailable
-		return noderouting.Decision{}, &transportErrorV3{reason: string(decision.Outcome), message: "No playback route satisfies the configured policy and current node availability.", retryable: retryable}
+		return noderouting.Decision{}, routeRefusalV3(r.Context(), decision.Outcome)
 	}
 	return decision, nil
 }
@@ -3909,7 +3956,7 @@ func (h *PlaybackHandler) progressiveRemuxRouteAvailableV3(ctx context.Context, 
 	if enumerator, ok := h.NodePlanner.(proxyNodeEnumeratorV3); ok {
 		reachableProxy = len(withoutUnreachableRouteNodesV3(ctx, enumerator.ProxyNodeURLs())) > 0
 	}
-	compiled, err := noderouting.Candidates(noderouting.Request{
+	compiled, err := routeCandidatesV3(ctx, noderouting.Request{
 		Workload: noderouting.WorkloadRemux, Delivery: noderouting.DeliveryProgressiveRemux,
 		Policy: h.playbackRoutingPolicyForContextV3(ctx), ProxyAllowed: proxyAllowed,
 	})
@@ -5499,10 +5546,15 @@ func (h *PlaybackHandler) replanPlaybackApplicationV3(r *http.Request, sessionID
 	if record.CurrentPlanID != req.FailedPlanID {
 		return playback.DecisionResponseV3{}, playbackOperationError(http.StatusConflict, "stale_playback_plan", "The failed plan is no longer current")
 	}
-	response, updated, transport, replanErr := h.executeReplanV3(r, record, req)
+	response, updated, transport, replanErr := h.executeReplanWithRetryV3(r, record, req)
 	if replanErr != nil {
 		if transport != nil {
 			transport.rollback()
+		}
+		if replanErr.dependencyUnavailable {
+			// A dependency that is down decides no replan: nothing is stored, the
+			// lease is released, and the same request runs again once it answers.
+			return playback.DecisionResponseV3{}, dependencyUnavailableErrorV3(replanErr.message)
 		}
 		response := playback.NewTerminalResponseV3(replanErr.reason, replanErr.message, replanErr.retryable)
 		encoded, _ := json.Marshal(response)
@@ -5874,6 +5926,19 @@ func appendReplanDegradationWarningsV3(plan *playback.PlanV3, audioDegraded, sub
 	}
 }
 
+// executeReplanWithRetryV3 prepares an atomic replacement for a failed playback
+// route. When the commit of the pinned plan finds the proxy gone (see
+// planUnderKeysV3), it plans the replacement once more under no connection key.
+func (h *PlaybackHandler) executeReplanWithRetryV3(r *http.Request, record *playback.AttemptRecordV3, req playback.ReplanRequestV3) (playback.DecisionResponseV3, playback.AttemptRecordV3, *preparedTransportV3, *transportErrorV3) {
+	ctx, retry := withKeyRetryV3(r.Context())
+	response, updated, transport, replanErr := h.executeReplanV3(r.WithContext(ctx), record, req)
+	if !retry.lost(replanErr) {
+		return response, updated, transport, replanErr
+	}
+	retry.unkeyed = true
+	return h.executeReplanV3(r.WithContext(ctx), record, req)
+}
+
 // executeReplanV3 prepares an atomic replacement for a failed playback route.
 func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.AttemptRecordV3, req playback.ReplanRequestV3) (playback.DecisionResponseV3, playback.AttemptRecordV3, *preparedTransportV3, *transportErrorV3) {
 	r = r.WithContext(withPlaybackRoutingPolicySnapshotV3(r.Context(), h.playbackRoutingPolicyV3()))
@@ -5913,9 +5978,19 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 	}
 	seekReanchor := operation == playback.ReplanOperationSeekReanchorV3
 	// The device's direct state is read here, once, before any route is
-	// resolved. A seek reanchor keeps its route and the session's attribution,
-	// so it reads nothing.
-	r = r.WithContext(h.withDirectRequestV3(r.Context(), record.UserID, req.MediaTransport, !seekReanchor))
+	// resolved, on a seek reanchor as on every other replan.
+	r = r.WithContext(h.withDirectRequestV3(r.Context(), record.UserID, req.MediaTransport))
+	if seekReanchor && record.CurrentPlan.MediaTransport == playback.MediaTransportDirectV3 {
+		// A seek replays the stream the session already plays, and a session on
+		// the direct path is attributed to the API host's connection: the seek
+		// is planned without proxy shapes, so it stays on the API host when a
+		// legal API route exists and ends in the usual final refusal when none
+		// does. A regular session seeks as it always did.
+		r = r.WithContext(withoutProxyV3(r.Context()))
+	}
+	if refusal := h.noLegalRouteV3(r.Context()); refusal != nil {
+		return playback.DecisionResponseV3{}, *record, nil, refusal
+	}
 	seekFailureRecovery := operation == playback.ReplanOperationSeekFailureRecoveryV3
 	seekScopedRecovery := seekReanchor || seekFailureRecovery
 	// A seek reanchor must keep its route; every other replan first finds out
@@ -6175,7 +6250,10 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 	// A recovery whose node stopped answering failed on the node, not on its
 	// recipe: keep the failed plan eligible so the replacement can run the same
 	// recipe on another node instead of stepping down or running out of plans.
-	nodeRecovery := !userIntentOperation && len(unreachableNodes) > 0
+	// So does a replan that leaves the direct path for the regular one: the
+	// path failed, not the recipe (docs/direct-connections-api.md, client rule 9).
+	leavesDirectPath := record.CurrentPlan.MediaTransport == playback.MediaTransportDirectV3 && req.MediaTransport != playback.MediaTransportDirectV3
+	nodeRecovery := !userIntentOperation && (len(unreachableNodes) > 0 || leavesDirectPath)
 	currentKey := playback.PlanAttemptKeyV3(record.CurrentPlan, record.NormalizedRequest.ClientPlaybackContext.Output.OutputContextID, req.LocalMutations)
 	attemptedKeys := []string(nil)
 	if !intentChange && !seekReanchor && !userIntentOperation {
@@ -6246,7 +6324,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		pass.unlimitedStart, pass.unlimitedFile, pass.unlimitedAudioIndex = withoutObservedEstimateV3(pass.start), pass.file, pass.audioIndex
 		if !seekReanchor {
 			var limitErr error
-			pass.learnedLimit, limitErr = h.applyLearnedLimit(r, &pass.start, keys.writes && !seekScopedRecovery, keys.read, keys.record, outputBound)
+			pass.learnedLimit, limitErr = h.applyLearnedLimit(r, &pass.start, keys.writes && !seekScopedRecovery, keys.read, keys.record, outputBound, keys.clearAlso)
 			if limitErr != nil {
 				pass.err = &transportErrorV3{reason: "internal_error", message: "Connection observations are temporarily unavailable.", retryable: true, cause: limitErr}
 				return pass
@@ -6305,6 +6383,15 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		}
 		return pass
 	}
+	if proxyOriginRecovery {
+		// The retry is served by the API origin, so every pass plans for that
+		// host and reads its connection key, not the refusing proxy's.
+		policy := h.playbackRoutingPolicyForContextV3(r.Context())
+		policy.DirectPlayEgress = config.PlaybackEgressAPIOnly
+		policy.RemuxEgress = config.PlaybackEgressAPIOnly
+		policy.VideoTranscodeEgress = config.PlaybackEgressAPIOnly
+		r = r.WithContext(withPlaybackRoutingPolicySnapshotV3(r.Context(), policy))
+	}
 	var pass replanKeyPassV3
 	if seekReanchor {
 		// A seek reanchor keeps its route and reads no connection.
@@ -6321,6 +6408,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		return playback.DecisionResponseV3{}, *record, nil, pass.err
 	}
 	start, effectiveFile, result := pass.start, pass.file, pass.result
+	audioIndex = pass.audioIndex
 	audioDegraded, subtitleDegraded, subtitleNotShown = pass.audioDegraded, pass.subtitleDegraded, pass.subtitleNotShown
 	plannerSettings, learnedLimit, planning := pass.planning.settings, pass.learnedLimit, pass.planning
 	unlimitedStart, unlimitedFile, unlimitedAudioIndex := pass.unlimitedStart, pass.unlimitedFile, pass.unlimitedAudioIndex
@@ -6395,14 +6483,6 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		}
 		return fallback, ok
 	}
-	transportRequest := r
-	if proxyOriginRecovery {
-		policy := h.playbackRoutingPolicyForContextV3(r.Context())
-		policy.DirectPlayEgress = config.PlaybackEgressAPIOnly
-		policy.RemuxEgress = config.PlaybackEgressAPIOnly
-		policy.VideoTranscodeEgress = config.PlaybackEgressAPIOnly
-		transportRequest = r.WithContext(withPlaybackRoutingPolicySnapshotV3(r.Context(), policy))
-	}
 	var artifactRecipe playback.ExecutableRecipeV3
 	var transport preparedTransportV3
 	var transportReused bool
@@ -6457,7 +6537,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 			proxyAllowed := mode.proxyEgress || (!mode.headerAuth && h.JWTSecret != "")
 			policy := h.playbackRoutingPolicyForContextV3(r.Context())
 			if reusedRecipe, ok := sidecarOnlyHLSReplanV3(record, result.Plan, artifactRecipe, req.ClientPlaybackContext.Output.OutputContextID); ok &&
-				reusedHLSRouteAllowedV3(session, result, policy, proxyAllowed) {
+				reusedHLSRouteAllowedV3(r.Context(), session, result, policy, proxyAllowed) {
 				artifactRecipe = reusedRecipe
 				result.ToneMapMode = reusedRecipe.ToneMapMode
 				transportReused = true
@@ -6467,7 +6547,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 			transport = h.reuseActiveHLSTransportV3(r.Context(), session, record, result.Plan, result.AdaptationReasons, mode)
 		} else {
 			var transportErr *transportErrorV3
-			transport, transportErr = h.prepareTransportV3(transportRequest, session, effectiveFile, result, mode)
+			transport, transportErr = h.prepareTransportV3(r, session, effectiveFile, result, mode)
 			if fallback, ok := surroundFallback(routePreparationErrorV3(transportErr)); ok {
 				result = fallback
 				continue
@@ -7055,12 +7135,12 @@ func reusedHLSTransportV3(session *playback.Session, streamURL string) preparedT
 // snapshot for this replan. Soft preferences do not interrupt healthy bytes,
 // but a hard execution/egress boundary or client-incompatible proxy route must
 // force normal replacement preparation.
-func reusedHLSRouteAllowedV3(session *playback.Session, result playback.PlannerResultV3, policy config.PlaybackRoutingPolicy, proxyAllowed bool) bool {
+func reusedHLSRouteAllowedV3(ctx context.Context, session *playback.Session, result playback.PlannerResultV3, policy config.PlaybackRoutingPolicy, proxyAllowed bool) bool {
 	workload, delivery, ok := routingClassV3(result)
 	if !ok || session == nil {
 		return false
 	}
-	compiled, err := noderouting.Candidates(noderouting.Request{
+	compiled, err := routeCandidatesV3(ctx, noderouting.Request{
 		Workload: workload, Delivery: delivery, Policy: policy, ProxyAllowed: proxyAllowed,
 	})
 	if err != nil {
@@ -7849,6 +7929,20 @@ func (h *PlaybackHandler) persistTerminalStartDecisionV3(ctx context.Context, us
 func (h *PlaybackHandler) startFailureDecisionV3(ctx context.Context, userID int, profileID string, req playback.StartRequestV3, requestDigests playbackStartRequestDigestsV3, requestedFileID, effectiveFileID int, failure *transportErrorV3) (playback.DecisionResponseV3, error) {
 	response := playback.NewTerminalResponseV3(failure.reason, failure.message, failure.retryable)
 	return h.persistTerminalStartDecisionV3(ctx, userID, profileID, req, requestDigests, requestedFileID, effectiveFileID, response)
+}
+
+// refuseStartV3 answers a start that failed: the 503 for a failure whose cause
+// is a dependency that is temporarily down, with no decision stored, or else the
+// stored terminal decision.
+func (h *PlaybackHandler) refuseStartV3(ctx context.Context, userID int, profileID string, req playback.StartRequestV3, requestDigests playbackStartRequestDigestsV3, requestedFileID, effectiveFileID int, failure *transportErrorV3) (playback.DecisionResponseV3, error) {
+	if failure.dependencyUnavailable {
+		return playback.DecisionResponseV3{}, dependencyUnavailableErrorV3(failure.message)
+	}
+	response, err := h.startFailureDecisionV3(ctx, userID, profileID, req, requestDigests, requestedFileID, effectiveFileID, failure)
+	if err != nil {
+		return playback.DecisionResponseV3{}, playbackPersistenceOperationError(err)
+	}
+	return response, nil
 }
 
 func decisionResponseFromAttemptV3(record *playback.AttemptRecordV3) playback.DecisionResponseV3 {

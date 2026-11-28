@@ -83,6 +83,20 @@ func (h *PlaybackHandler) applyConnectionReading(r *http.Request, req *playback.
 	return nil
 }
 
+// clearKeysV3 is the connections a clear removes the limit of: record first,
+// then each clearAlso key, each once. A key that is empty or repeats an earlier
+// one is skipped, so a regular start whose two host classes share one key
+// clears it once.
+func clearKeysV3(record string, clearAlso ...string) []string {
+	var keys []string
+	for _, key := range append([]string{record}, clearAlso...) {
+		if key != "" && !slices.Contains(keys, key) {
+			keys = append(keys, key)
+		}
+	}
+	return keys
+}
+
 // applyLearnedLimit plans Auto under the device's learned limit and returns the
 // limit when it replaced the request's estimate. clientSent says whether req is
 // the request the client just sent; only then are its clear and its
@@ -96,9 +110,10 @@ func (h *PlaybackHandler) applyConnectionReading(r *http.Request, req *playback.
 //
 // key is the connection the limit is read under. record is the connection a
 // clear or an observed rebuffer is written under: the connection of the plan
-// that was buffering, which a replan takes from its session. An empty key or
-// record applies or writes nothing.
-func (h *PlaybackHandler) applyLearnedLimit(r *http.Request, req *playback.StartRequestV3, clientSent bool, key, record string, outputBound func() bool) (*playback.BandwidthLimitV3, error) {
+// that was buffering, which a replan takes from its session. A clear also
+// removes the limit of clearAlso, the connection the plan may be served over
+// instead. An empty key or record applies or writes nothing.
+func (h *PlaybackHandler) applyLearnedLimit(r *http.Request, req *playback.StartRequestV3, clientSent bool, key, record string, outputBound func() bool, clearAlso ...string) (*playback.BandwidthLimitV3, error) {
 	if !playback.HasFeatureV3(req.ClientFeatures, playback.FeatureBufferingQualityV1) {
 		return nil, nil
 	}
@@ -114,7 +129,12 @@ func (h *PlaybackHandler) applyLearnedLimit(r *http.Request, req *playback.Start
 		if !clientSent {
 			return nil, nil
 		}
-		return nil, h.Connections.Clear(r.Context(), user, device, record)
+		for _, cleared := range clearKeysV3(record, clearAlso...) {
+			if err := h.Connections.Clear(r.Context(), user, device, cleared); err != nil {
+				return nil, err
+			}
+		}
+		return nil, nil
 	}
 	if req.LearnedLimit == playback.LearnedLimitIgnoreV3 {
 		return nil, nil

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import type { ReactNode } from "react";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { DirectConnectionsHostStatus } from "@/hooks/queries/admin/directConnections";
@@ -19,6 +19,9 @@ const state = vi.hoisted(() => ({
   persistedEnabled: "true",
   dirtyCount: 0,
   dirtyKeys: [] as string[],
+  loaded: true,
+  loadError: false,
+  retryLoad: vi.fn(),
 }));
 
 vi.mock("@/hooks/useSettingsForm", () => ({
@@ -32,6 +35,10 @@ vi.mock("@/hooks/useSettingsForm", () => ({
     save: vi.fn(),
     discard: vi.fn(),
     isSaving: false,
+    loaded: state.loaded,
+    isPending: !state.loaded && !state.loadError,
+    loadError: state.loadError,
+    retryLoad: state.retryLoad,
     envVar: () => undefined,
   }),
 }));
@@ -98,6 +105,9 @@ afterEach(() => {
   state.persistedEnabled = "true";
   state.dirtyCount = 0;
   state.dirtyKeys = [];
+  state.loaded = true;
+  state.loadError = false;
+  state.retryLoad.mockClear();
 });
 
 describe("host tuning values", () => {
@@ -362,5 +372,34 @@ describe("section visibility", () => {
 
     expect(screen.getByText("Port mapping")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Discard" })).toBeInTheDocument();
+  });
+});
+
+describe("settings that have not loaded", () => {
+  it("keeps the toggle off-limits until the settings arrive", () => {
+    state.persistedEnabled = "false";
+    state.loaded = false;
+    show({});
+
+    expect(screen.getByRole("switch")).toBeDisabled();
+  });
+
+  it("keeps the toggle off-limits after a failed load and offers a retry", () => {
+    state.persistedEnabled = "false";
+    state.loaded = false;
+    state.loadError = true;
+    show({});
+
+    expect(screen.getByRole("switch")).toBeDisabled();
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    fireEvent.click(within(screen.getByRole("alert")).getByRole("button"));
+    expect(state.retryLoad).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets an administrator edit the toggle once the settings have loaded", () => {
+    state.persistedEnabled = "false";
+    show({});
+
+    expect(screen.getByRole("switch")).toBeEnabled();
   });
 });

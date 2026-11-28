@@ -527,7 +527,7 @@ function ConnectedDevices() {
         </p>
       ) : !peers.data?.items.length ? (
         <p className="text-muted-foreground text-sm">
-          {t("web.admin.settings.network.direct.connected.empty")}
+          {t("web.admin.settings.network.direct.connected.emptyOnThisServer")}
         </p>
       ) : (
         <Table>
@@ -589,13 +589,22 @@ export function DirectConnectionsSection() {
         })}
         dirty={form.dirtyCount > 0}
       >
+        {form.loadError && !form.loaded ? (
+          <div role="alert" className="flex items-center justify-between gap-3 text-sm">
+            <p>{t("web.admin.settings.network.direct.loadError")}</p>
+            <Button variant="outline" size="sm" onClick={() => void form.retryLoad()}>
+              {t("common.retry")}
+            </Button>
+          </div>
+        ) : null}
+        {/* Until the settings load the toggle shows no saved value, so it cannot be edited. */}
         <SettingField
           label={t("web.admin.settings.network.direct.enable")}
           type="toggle"
           value={form.getValue(ENABLED)}
           onChange={(value) => form.setValue(ENABLED, value)}
           dirty={form.isDirty(ENABLED)}
-          disabled={form.isSaving}
+          disabled={form.isSaving || !form.loaded}
         />
         {enabled ? <Diagnostics /> : null}
         {enabled ? <ConnectedDevices /> : null}
