@@ -78,22 +78,18 @@ func TestUpdateProfileValidation(t *testing.T) {
 		// An id no library carries would hit the store's foreign key (a 500
 		// on Postgres) or persist dangling where no key is enforced.
 		{`{"allowed_library_ids":["1","9"]}`, "body.allowed_library_ids", codeInvalid},
-		// Only null clears the PIN: "" must never reach the store as the
-		// clearing sentinel, and bcrypt refuses more than 72 bytes.
-		{`{"pin":""}`, locationPIN, codeOutOfRange},
-		{`{"pin":"` + strings.Repeat("7", 73) + `"}`, locationPIN, codeOutOfRange},
-		{`{"pin":"` + strings.Repeat("é", 37) + `"}`, locationPIN, codeOutOfRange}, // 37 runes, 74 bytes
 	} {
 		p := requireProblem(t, do(t, h, http.MethodPatch, "/api/v2/profiles/p-owner", tc.body, auth), TypeValidationFailed)
 		if len(p.Errors) != 1 || p.Errors[0].Location != tc.location || p.Errors[0].Code != tc.code {
 			t.Errorf("%s: errors = %+v", tc.body, p.Errors)
 		}
 	}
-	long := requireProblem(t, do(t, h, http.MethodPatch, "/api/v2/profiles/p-owner", `{"pin":"`+strings.Repeat("é", 37)+`"}`, auth), TypeValidationFailed)
-	if len(long.Errors) != 1 || long.Errors[0].Detail != "PIN must be at most 72 bytes" {
-		t.Errorf("long pin detail: errors = %+v", long.Errors)
+	// Only null clears the PIN: "" must never reach the store as the
+	// clearing sentinel.
+	empty := requireProblem(t, do(t, h, http.MethodPatch, "/api/v2/profiles/p-owner", `{"pin":""}`, auth), TypeValidationFailed)
+	if len(empty.Errors) == 0 || empty.Errors[0].Location != locationPIN {
+		t.Errorf("empty pin: errors = %+v", empty.Errors)
 	}
-	// A 72-byte PIN is the longest bcrypt accepts and reaches the store intact.
 	profiles := &fakeProfiles{view: fixtureProfileView()}
 	h = newTestHandler(t, pilotDeps(nil, profiles))
 	// Values the clients send today (web onboarding, Android, Apple) reach
@@ -102,9 +98,6 @@ func TestUpdateProfileValidation(t *testing.T) {
 		t.Errorf("client vocabulary: %d %s", rec.Code, rec.Body.String())
 	} else if req := profiles.last.Request; req.QualityPreference == nil || *req.QualityPreference != "1080p" || req.SubtitleMode == nil || *req.SubtitleMode != "forced_only" {
 		t.Errorf("client vocabulary: request = %+v", req)
-	}
-	if rec := do(t, h, http.MethodPatch, "/api/v2/profiles/p-owner", `{"pin":"`+strings.Repeat("7", 72)+`"}`, auth); rec.Code != 200 || profiles.last.Request.PIN == nil || len(*profiles.last.Request.PIN) != 72 {
-		t.Errorf("72-byte pin: %d %s", rec.Code, rec.Body.String())
 	}
 	dup := requireProblem(t, do(t, h, http.MethodPatch, "/api/v2/profiles/p-owner", `{"allowed_library_ids":["2","3","2"]}`, auth), TypeValidationFailed)
 	if len(dup.Errors) != 1 || dup.Errors[0].Detail != "duplicate library identifier" {
@@ -487,5 +480,61 @@ func TestProfileRequestsAllowed(t *testing.T) {
 	rec = do(t, h, http.MethodPost, "/api/v2/profiles", `{"name":"Kid","requests_allowed":false}`, with(auth, "X-Profile-Id", "p-owner"))
 	if rec.Code != 201 || !profiles.lastCreate.Request.RequestsBlocked {
 		t.Fatalf("create with requests_allowed false: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// Every first-party client sets and enters exactly four digits (#5353), so
+// creating or changing a PIN takes nothing else, on the household's routes
+// and the admin's. Checking a PIN still takes the older 1 to 72 byte range,
+// so a profile that already has a longer PIN can be unlocked and changed.
+func TestProfilePINIsFourDigits(t *testing.T) {
+	profiles := &fakeProfiles{view: fixtureProfileView()}
+	deps := pilotDeps(nil, profiles)
+	deps.AdminAccounts = fixtureAdminAccounts()
+	h := newTestHandler(t, deps)
+	auth := bearer(memberToken)
+	writes := []struct{ name, method, path string }{
+		{"create", http.MethodPost, "/api/v2/profiles"},
+		{"update", http.MethodPatch, "/api/v2/profiles/p-owner"},
+		{"admin create", http.MethodPost, adminProfilesBase},
+		{"admin update", http.MethodPatch, adminProfilesBase + "/p-owner"},
+	}
+	reject := func(w struct{ name, method, path string }, as map[string]string, pin string) {
+		t.Helper()
+		*profiles = fakeProfiles{view: fixtureProfileView()}
+		p := requireProblem(t, do(t, h, w.method, w.path, `{"name":"Kid","pin":"`+pin+`"}`, as), TypeValidationFailed)
+		if len(p.Errors) == 0 {
+			t.Errorf("%s %q: no field errors", w.name, pin)
+		}
+		for _, e := range p.Errors {
+			if e.Location != locationPIN {
+				t.Errorf("%s %q: error at %s, want %s", w.name, pin, e.Location, locationPIN)
+			}
+		}
+		if profiles.lastCreate != nil || profiles.last != nil {
+			t.Errorf("%s %q reached the store", w.name, pin)
+		}
+	}
+	// Too short, too long, and not digits, on one route; the others share
+	// its body types, so one wrong PIN each checks their wiring.
+	for _, pin := range []string{"123", "12345", "abcd"} {
+		reject(writes[0], auth, pin)
+	}
+	for _, w := range writes {
+		as := auth
+		if strings.HasPrefix(w.path, adminProfilesBase) {
+			as = actingRequestAdmin
+		}
+		reject(w, as, "123456")
+		*profiles = fakeProfiles{view: fixtureProfileView()}
+		rec := do(t, h, w.method, w.path, `{"name":"Kid","pin":"0427"}`, as)
+		if rec.Code != http.StatusOK && rec.Code != http.StatusCreated {
+			t.Errorf("%s four digits: %d %s", w.name, rec.Code, rec.Body.String())
+		}
+	}
+
+	*profiles = fakeProfiles{view: fixtureProfileView()}
+	if rec := do(t, h, http.MethodPost, "/api/v2/profiles/p-owner/verify-pin", `{"pin":"123456"}`, auth); rec.Code != 200 || profiles.lastVerify == nil || profiles.lastVerify.PIN != "123456" {
+		t.Errorf("verify an older six-character PIN: %d %s", rec.Code, rec.Body.String())
 	}
 }

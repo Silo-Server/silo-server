@@ -52054,12 +52054,13 @@
             "type": "string"
           },
           "pin": {
-            "description": "PIN, 1 to 72 bytes",
+            "description": "PIN, exactly four digits",
             "examples": [
               "1234"
             ],
-            "maxLength": 72,
-            "minLength": 1,
+            "maxLength": 4,
+            "minLength": 4,
+            "pattern": "^[0-9]{4}$",
             "type": "string"
           },
           "preferred_metadata_language": {
@@ -52270,7 +52271,7 @@
         "additionalProperties": false,
         "properties": {
           "pin": {
-            "description": "The PIN to check",
+            "description": "The PIN to check. New PINs are four digits; a longer PIN set before that rule is still checked",
             "examples": [
               "1234"
             ],
@@ -52668,12 +52669,13 @@
             "type": "string"
           },
           "pin": {
-            "description": "New PIN, 1 to 72 bytes; null removes the PIN. An empty string is rejected, not a clear",
+            "description": "New PIN, exactly four digits; null removes the PIN. An empty string is rejected, not a clear",
             "examples": [
               "1234"
             ],
-            "maxLength": 72,
-            "minLength": 1,
+            "maxLength": 4,
+            "minLength": 4,
+            "pattern": "^[0-9]{4}$",
             "type": [
               "string",
               "null"

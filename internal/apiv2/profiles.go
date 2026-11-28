@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strconv"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -59,7 +60,7 @@ type Profile struct {
 type ProfileUpdate struct {
 	Name                       *string       `json:"name,omitempty" nullable:"false" minLength:"1" maxLength:"64" doc:"Display name; leading and trailing spaces are trimmed" example:"Alice"`
 	Avatar                     Patch[string] `json:"avatar,omitzero" doc:"Preset avatar reference; null removes the avatar" example:"preset:fox"`
-	PIN                        Patch[string] `json:"pin,omitzero" minLength:"1" maxLength:"72" doc:"New PIN, 1 to 72 bytes; null removes the PIN. An empty string is rejected, not a clear" example:"1234"`
+	PIN                        Patch[string] `json:"pin,omitzero" minLength:"4" maxLength:"4" pattern:"^[0-9]{4}$" doc:"New PIN, exactly four digits; null removes the PIN. An empty string is rejected, not a clear" example:"1234"`
 	IsChild                    *bool         `json:"is_child,omitempty" nullable:"false" example:"false"`
 	MaxContentRating           Patch[string] `json:"max_content_rating,omitzero" doc:"Content-rating ceiling; null removes it" example:"PG-13"`
 	MaxAdvisoryAge             Patch[int]    `json:"max_advisory_age,omitzero" minimum:"1" maximum:"21" doc:"Advisory-age limit: titles whose advisory age (for example Common Sense Media's 13+) is above it are hidden from the profile. Titles with no advisory age are limited by max_content_rating alone unless require_advisory_age is set; null removes it" example:"12"`
@@ -158,7 +159,7 @@ type ProfileCollectionOutput struct {
 type ProfileCreate struct {
 	Name                       string  `json:"name" minLength:"1" maxLength:"64" doc:"Display name; leading and trailing spaces are trimmed" example:"Alice"`
 	Avatar                     *string `json:"avatar,omitempty" nullable:"false" doc:"Preset avatar reference" example:"preset:fox"`
-	PIN                        *string `json:"pin,omitempty" nullable:"false" minLength:"1" maxLength:"72" doc:"PIN, 1 to 72 bytes" example:"1234"`
+	PIN                        *string `json:"pin,omitempty" nullable:"false" minLength:"4" maxLength:"4" pattern:"^[0-9]{4}$" doc:"PIN, exactly four digits" example:"1234"`
 	IsChild                    *bool   `json:"is_child,omitempty" nullable:"false" example:"false"`
 	MaxContentRating           *string `json:"max_content_rating,omitempty" nullable:"false" doc:"Content-rating ceiling" example:"PG-13"`
 	MaxAdvisoryAge             *int    `json:"max_advisory_age,omitempty" nullable:"false" minimum:"1" maximum:"21" doc:"Advisory-age limit: titles whose advisory age (for example Common Sense Media's 13+) is above it are hidden from the profile. Titles with no advisory age are limited by max_content_rating alone unless require_advisory_age is set" example:"12"`
@@ -527,7 +528,7 @@ func idOfIntPtr(v *int) *ID {
 
 // ProfilePINCheck is the verifyProfilePIN body.
 type ProfilePINCheck struct {
-	PIN string `json:"pin" minLength:"1" maxLength:"72" doc:"The PIN to check" example:"1234"`
+	PIN string `json:"pin" minLength:"1" maxLength:"72" doc:"The PIN to check. New PINs are four digits; a longer PIN set before that rule is still checked" example:"1234"`
 }
 
 // ProfilePINCheckInput is the verifyProfilePIN request.
@@ -905,31 +906,29 @@ func profileProblem(err error) *Problem {
 	return serviceProblem(err)
 }
 
-// maxPINBytes is bcrypt's input limit; a longer PIN fails to hash.
+// maxPINBytes is bcrypt's input limit; a longer PIN fails to hash. It bounds
+// the PIN a check accepts, which still admits PINs set before new ones had to
+// be four digits.
 const (
 	maxPINBytes      = 72
 	detailPINTooLong = "PIN must be at most 72 bytes"
 )
 
-// validatePIN rejects a present, non-null PIN that would otherwise be lowered
-// to the "" clearing sentinel (only null clears) or overflow bcrypt. The
-// schema's minLength/maxLength count runes, so the byte bound is enforced
-// here.
+// newPINPattern is the form a new PIN takes: four ASCII digits, the PIN every
+// first-party client sets and enters. The pin members of ProfileCreate and
+// ProfileUpdate carry the same pattern, which answers first; verifyProfilePIN
+// does not apply it, so a longer PIN set before the rule still unlocks.
+var newPINPattern = regexp.MustCompile(`^[0-9]{4}$`)
+
+// validatePIN is the backstop behind the schema's pattern: a present, non-null
+// PIN that is not four digits never reaches the store, and "" is never lowered
+// to the clearing sentinel (only null clears).
 func validatePIN(p Patch[string]) *Problem {
-	if !p.Present || p.Null {
-		return nil
-	}
-	var detail string
-	switch {
-	case p.Value == "":
-		detail = "PIN must not be empty"
-	case len(p.Value) > maxPINBytes:
-		detail = detailPINTooLong
-	default:
+	if !p.Present || p.Null || newPINPattern.MatchString(p.Value) {
 		return nil
 	}
 	return NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
-		WithErrors(ProblemError{Location: locationPIN, Code: codeOutOfRange, Detail: detail})
+		WithErrors(ProblemError{Location: locationPIN, Code: codeOutOfRange, Detail: "PIN must be exactly four digits"})
 }
 
 // toRequest lowers the presence-aware body onto the v1 request, where "" is

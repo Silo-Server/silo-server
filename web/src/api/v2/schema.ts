@@ -35149,7 +35149,7 @@ export interface components {
        */
       name: string;
       /**
-       * @description PIN, 1 to 72 bytes
+       * @description PIN, exactly four digits
        * @example 1234
        */
       pin?: string;
@@ -35252,7 +35252,7 @@ export interface components {
     };
     ProfilePINCheck: {
       /**
-       * @description The PIN to check
+       * @description The PIN to check. New PINs are four digits; a longer PIN set before that rule is still checked
        * @example 1234
        */
       pin: string;
@@ -35450,7 +35450,7 @@ export interface components {
        */
       name?: string;
       /**
-       * @description New PIN, 1 to 72 bytes; null removes the PIN. An empty string is rejected, not a clear
+       * @description New PIN, exactly four digits; null removes the PIN. An empty string is rejected, not a clear
        * @example 1234
        */
       pin?: string | null;

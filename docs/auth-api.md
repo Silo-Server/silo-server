@@ -686,12 +686,14 @@ lists the routes one session called in up to the last 24 hours. Both are admin-o
 
 Profile creation stores a requested PIN hash in the same
 transaction as the profile and its preferences. The first committed profile
-state already requires PIN proof. Creation rejects PINs longer than 72 bytes
-before writing anything (422 `validation_failed`).
+state already requires PIN proof. A new PIN, on creation or update, must be
+exactly four digits, the form every first-party client sets and enters; anything
+else is refused before writing anything (422 `validation_failed` at `body.pin`).
 Omitting the PIN still creates an unlocked profile.
 
 `POST /api/v2/profiles/{id}/verify-pin` (`verifyProfilePIN`) checks a household
-profile's PIN. A match
+profile's PIN. It accepts 1 to 72 bytes, so a longer PIN stored before the
+four-digit rule still unlocks its profile and can then be changed. A match
 issues the `X-Profile-Token` that unlocks the profile for the caller's login session; a
 wrong PIN answers 200 with `valid: false`.
 
