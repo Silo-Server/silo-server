@@ -37,6 +37,12 @@ describe("formatTime", () => {
     expect(formatTime(HALF_PAST_ONE_PM)).toMatch(/^1:30\spm$/);
   });
 
+  it("counts a one-digit hour written in digits outside the BMP as one digit", () => {
+    // Mathematical bold digits take two UTF-16 units each; the locale writes "𝟏:𝟑𝟎 ص".
+    setAppLocale({ ...ENGLISH_APP_LOCALE, formatLocale: "ar-u-nu-mathbold" });
+    expect(formatTime(new Date(2026, 0, 1, 1, 30))).toBe("\u{1D7CF}:\u{1D7D1}\u{1D7CE} \u0635");
+  });
+
   it("leaves an explicit hour option to the caller", () => {
     setAppLocale({ ...ENGLISH_APP_LOCALE, formatLocale: "en-GB" });
     expect(formatTime(HALF_PAST_MIDNIGHT, { hour: "numeric" })).toBe("0:30");

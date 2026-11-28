@@ -221,7 +221,8 @@ function localePadsHour(locale: string | undefined): boolean {
     const hour = new Intl.DateTimeFormat(locale, { timeStyle: "short" })
       .formatToParts(new Date(2000, 0, 1, 1, 30))
       .find((part) => part.type === "hour")?.value;
-    pads = hour?.length === 2;
+    // Count code points: digits outside the BMP (e.g. "-u-nu-mathbold") are two UTF-16 units.
+    pads = hour !== undefined && [...hour].length === 2;
     localePadsHourCache.set(key, pads);
   }
   return pads;
