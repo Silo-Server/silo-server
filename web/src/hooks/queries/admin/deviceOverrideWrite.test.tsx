@@ -28,6 +28,18 @@ const row = (fontSize: string, revision: number, updated_at: string) => ({
   updated_at,
 });
 const valuesPage = (items: unknown[]) => json({ revision: 1, page: { has_more: false }, items });
+const deleted = () => new Response(null, { status: 204 });
+// The server's answer to a delete with nothing stored at that scope.
+const alreadyGone = () =>
+  new Response(
+    JSON.stringify({
+      type: "https://siloserver.org/docs/api/v2/problems/not_found",
+      title: "Not found",
+      status: 404,
+      detail: "No value is set at this scope",
+    }),
+    { status: 404, headers: { "Content-Type": "application/problem+json" } },
+  );
 
 beforeEach(() => {
   setAccessToken("test-admin");
@@ -99,7 +111,9 @@ it.each([
 
 // A reopened editor reads its row and override flag from the same list, so a
 // reset must take the row out as soon as the delete settles; otherwise the
-// editor offers the deleted values again until a refetch answers.
+// editor offers the deleted values again until a refetch answers. A reset the
+// server answers with 404 (another admin or tab reset it first) ends the same
+// way instead of failing on every retry.
 it.each([
   [
     "one override",
@@ -113,6 +127,21 @@ it.each([
           key: "playback.subtitle_appearance",
         });
     },
+    deleted,
+  ],
+  [
+    "one override another tab already reset",
+    () => {
+      const reset = useDeleteAdminUserDeviceSetting();
+      return () =>
+        reset.mutateAsync({
+          userId: 1,
+          profileId: "profile-a",
+          deviceId: "device-a",
+          key: "playback.subtitle_appearance",
+        });
+    },
+    alreadyGone,
   ],
   [
     "every override for the profile",
@@ -126,6 +155,7 @@ it.each([
           keys: ["playback.subtitle_appearance"],
         });
     },
+    deleted,
   ],
   [
     "a removal on the user's Preferences tab",
@@ -138,8 +168,9 @@ it.each([
           identity: { scope: "profile_device", profileId: "profile-a", deviceId: "device-a" },
         });
     },
+    deleted,
   ],
-])("drops a reset device override from the user's stored values (%s)", async (_case, useReset) => {
+])("drops a reset device override from the stored values (%s)", async (_case, useReset, reply) => {
   const otherDevice = { ...row("large", 1, "2026-11-21T00:00:00Z"), device_id: "device-b" };
   let gets = 0;
   vi.stubGlobal(
@@ -147,7 +178,7 @@ it.each([
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input instanceof Request ? input.url : input);
       const method = init?.method ?? (input instanceof Request ? input.method : "GET");
-      if (method === "DELETE") return new Response(null, { status: 204 });
+      if (method === "DELETE") return reply();
       if (url.includes("/settings/values")) {
         gets += 1;
         // The refetch after the reset never answers.
@@ -282,59 +313,5 @@ it("drops the mirrored intro skip row a reset clears with it", async () => {
     expect(result.current.stored.data).toMatchObject([
       { key: "playback.auto_skip_intro", device_id: "device-b" },
     ]),
-  );
-});
-
-// Another admin or tab may have reset the override already. The server answers
-// that delete with 404, which is the state the reset asked for, so the row
-// leaves the list and the reset succeeds instead of failing on every retry.
-it("treats a reset of an override that is already gone as done", async () => {
-  const otherDevice = { ...row("large", 1, "2026-11-21T00:00:00Z"), device_id: "device-b" };
-  let gets = 0;
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input instanceof Request ? input.url : input);
-      const method = init?.method ?? (input instanceof Request ? input.method : "GET");
-      if (method === "DELETE") {
-        return new Response(
-          JSON.stringify({
-            type: "https://siloserver.org/docs/api/v2/problems/not_found",
-            title: "Not found",
-            status: 404,
-            detail: "No value is set at this scope",
-          }),
-          { status: 404, headers: { "Content-Type": "application/problem+json" } },
-        );
-      }
-      if (url.includes("/settings/values")) {
-        gets += 1;
-        return gets === 1
-          ? valuesPage([row("medium", 2, "2026-11-23T00:00:00Z"), otherDevice])
-          : new Promise<Response>(() => undefined);
-      }
-      return json({ items: [], page: { has_more: false } });
-    }),
-  );
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const wrapper = ({ children }: { children: ReactNode }) =>
-    createElement(QueryClientProvider, { client }, children);
-  const { result } = renderHook(
-    () => ({ stored: useAdminUserSettings(1), reset: useDeleteAdminUserDeviceSetting() }),
-    { wrapper },
-  );
-  await waitFor(() => expect(result.current.stored.data).toHaveLength(2));
-
-  await act(() =>
-    result.current.reset.mutateAsync({
-      userId: 1,
-      profileId: "profile-a",
-      deviceId: "device-a",
-      key: "playback.subtitle_appearance",
-    }),
-  );
-
-  await waitFor(() =>
-    expect(result.current.stored.data).toMatchObject([{ device_id: "device-b" }]),
   );
 });
