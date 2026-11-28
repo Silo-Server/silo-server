@@ -45,6 +45,10 @@ func (s *mixedBrowseMovies) BrowseItems(_ context.Context, _ *Session, params ur
 	if params.Get("include_total") == "true" {
 		total = len(all)
 	}
+	// Limit=0 counts without rows, as the catalog's BrowseCount does.
+	if params.Get("count_only") == "true" {
+		return &upstreamBrowseResponse{Items: []upstreamListItem{}, Total: len(all)}, nil
+	}
 	return &upstreamBrowseResponse{Items: page, Total: total, HasMore: offset+len(page) < len(all)}, nil
 }
 
@@ -255,6 +259,8 @@ func TestIdsNamingCollectionAndEpisodesIncludeEpisodes(t *testing.T) {
 		{"IncludeItemTypes=Episode", []string{"collection-1", "ep-1", "movie-1"}, []string{"ep-1"}},
 		{"Filters=IsFavorite", []string{"collection-1", "ep-1", "ep-2", "movie-1", "movie-2"}, []string{"ep-1", "movie-1"}},
 		{"IncludeItemTypes=BoxSet,Episode&StartIndex=1&Limit=1", []string{"ep-1", "collection-1", "ep-2"}, []string{"ep-2"}},
+		// Limit=0 counts every named match, the movie included, and lists none.
+		{"IncludeItemTypes=BoxSet,Episode,Movie&Limit=0", []string{"collection-1", "ep-1", "movie-1"}, nil},
 	} {
 		t.Run(tc.params+"/Ids="+strings.Join(tc.ids, ","), func(t *testing.T) {
 			movies := &mixedBrowseMovies{}
@@ -288,7 +294,7 @@ func TestIdsNamingCollectionAndEpisodesIncludeEpisodes(t *testing.T) {
 				gotIDs = append(gotIDs, id)
 			}
 			wantTotal := len(tc.wantIDs)
-			if strings.Contains(tc.params, "StartIndex=1") {
+			if strings.Contains(tc.params, "StartIndex=1") || strings.Contains(tc.params, "Limit=0") {
 				wantTotal = 3
 			}
 			if !slices.Equal(gotIDs, tc.wantIDs) || result.TotalRecordCount != wantTotal {

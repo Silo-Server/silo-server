@@ -3403,6 +3403,11 @@ func (h *ItemsHandler) handleSpecificItems(w http.ResponseWriter, r *http.Reques
 	if query.limitDefaulted {
 		query.limit = len(items)
 	}
+	// Limit=0 asks only for TotalRecordCount; slicePage reads a zero limit as
+	// no limit.
+	if query.countOnly {
+		items = items[:0]
+	}
 	items = slicePage(items, query.startIndex, query.limit)
 	h.applyListFileFields(r.Context(), session, items, query)
 	applyItemsResponseOptions(items, query)
@@ -4670,36 +4675,29 @@ func (h *ItemsHandler) filteredSpecificMediaIDs(ctx context.Context, session *Se
 	query.limit = min(len(selected), 1000)
 	query.startIndex = 0
 	query.enableTotalRecordCount = false
+	// Membership needs the matching rows even when the response only counts
+	// them (Limit=0).
+	query.countOnly = false
 	// This query determines membership. Stable catalog ordering prevents repeat
 	// or omitted IDs across pages even when the response asks for random order.
 	query.sort, query.order = catalog.BrowseSortTitle, "asc"
 	allowed := make(map[string]bool, len(selected))
-	episodeRepo, episodeOnly := h.episodeOnlyBrowser(query)
-	if !episodeOnly {
-		browseQuery := query
-		var mixed bool
-		if episodeRepo, mixed = h.mixedEpisodeBrowser(query); mixed {
-			browseQuery = withoutEpisodeType(query)
-		}
+	// Episodes alone take only the episode browse; Episode beside other types
+	// takes both halves; anything else only the media_items browse.
+	browseQuery, episodeRepo, browseOthers := query, episodeBrowser(nil), true
+	if repo, ok := h.episodeOnlyBrowser(query); ok {
+		episodeRepo, browseOthers = repo, false
+	} else if repo, ok := h.mixedEpisodeBrowser(query); ok {
+		browseQuery, episodeRepo = withoutEpisodeType(query), repo
+	}
+	if browseOthers {
 		if err := h.addBrowsedIDs(ctx, session, browseQuery, len(selected), allowed); err != nil {
 			return nil, err
 		}
 	}
 	if episodeRepo != nil {
-		// The Ids allowlist bounds the matches, so this ends once the browse
-		// runs out of them.
-		for offset := 0; offset < len(selected); {
-			episodes, _, ok, err := h.matchingEpisodes(ctx, session, query, episodeRepo, offset, len(selected)-offset)
-			if err != nil {
-				return nil, err
-			}
-			if !ok || len(episodes) == 0 {
-				break
-			}
-			for _, ep := range episodes {
-				allowed[ep.ContentID] = true
-			}
-			offset += len(episodes)
+		if err := h.addMatchedEpisodeIDs(ctx, session, query, episodeRepo, len(selected), allowed); err != nil {
+			return nil, err
 		}
 	}
 	result := make([]string, 0, len(allowed))
@@ -4729,6 +4727,27 @@ func (h *ItemsHandler) addBrowsedIDs(ctx context.Context, session *Session, quer
 			return nil
 		}
 		query.startIndex += len(result.Items)
+	}
+	return nil
+}
+
+// addMatchedEpisodeIDs marks in allowed every episode the episode browse for
+// query matches, paging through up to selected rows. The Ids allowlist bounds
+// the matches, so a short page is the last one.
+func (h *ItemsHandler) addMatchedEpisodeIDs(ctx context.Context, session *Session, query itemsQuery, repo episodeBrowser, selected int, allowed map[string]bool) error {
+	for offset := 0; offset < selected; {
+		limit := min(selected-offset, catalog.MaxEpisodePageSize)
+		episodes, _, ok, err := h.matchingEpisodes(ctx, session, query, repo, offset, limit)
+		if err != nil || !ok {
+			return err
+		}
+		for _, ep := range episodes {
+			allowed[ep.ContentID] = true
+		}
+		if len(episodes) < limit {
+			return nil
+		}
+		offset += len(episodes)
 	}
 	return nil
 }
