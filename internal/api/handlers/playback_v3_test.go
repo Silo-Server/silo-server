@@ -5385,32 +5385,43 @@ func TestTranscodeTimelineStartsATailResumeAtTheLastVideoSegment(t *testing.T) {
 		wantStart float64
 		wantSeek  float64
 		wantSeg   int
+		requested float64
+		duration  float64
+		noProbe   bool
 	}{
 		{name: "inside the tail", resolved: 18, wantStart: 18, wantSeek: 18, wantSeg: 9},
 		{name: "probe failed", resolved: 0, probeErr: errors.New("ffmpeg failed"), wantStart: 24, wantSeek: 24, wantSeg: 12},
+		{name: "mid-file start is not probed", requested: 10, duration: 120, wantStart: 10, wantSeek: 10, wantSeg: 5, noProbe: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0))
+			requested, stored := 24.0, 30.0
+			if tc.requested > 0 {
+				requested, stored = tc.requested, tc.duration
+			}
 			var probed []float64
 			handler.transcodeStart = func(_ context.Context, _ string, _ string, requested, duration float64, _ int) (float64, error) {
-				if duration != 30 {
-					t.Errorf("probe duration = %v, want the stored 30", duration)
+				if duration != stored {
+					t.Errorf("probe duration = %v, want the stored %v", duration, stored)
 				}
 				probed = append(probed, requested)
 				return tc.resolved, tc.probeErr
 			}
-			plan := &playback.PlanV3{Delivery: playback.DeliveryTranscodeHLSV3, Timeline: playback.TimelineV3{SourceStartSeconds: 24}}
+			plan := &playback.PlanV3{Delivery: playback.DeliveryTranscodeHLSV3, Timeline: playback.TimelineV3{SourceStartSeconds: requested}}
 			result := playback.PlannerResultV3{
 				Plan:                 plan,
 				TargetVideoCodec:     "h264",
-				FrozenSourceMetadata: &playback.SourceExecutionMetadataV3{DurationSeconds: 30},
+				FrozenSourceMetadata: &playback.SourceExecutionMetadataV3{DurationSeconds: stored},
 			}
-			file := &models.MediaFile{ID: 1, FilePath: "/media/tail.mkv", Duration: 30}
+			file := &models.MediaFile{ID: 1, FilePath: "/media/tail.mkv", Duration: int(stored)}
 			timeline, timelineErr := handler.prepareTransportTimelineV3(context.Background(), &playback.Session{ID: "tail-resume"}, file, result)
 			if timelineErr != nil {
 				t.Fatalf("prepare timeline: %v", timelineErr)
 			}
-			if len(probed) != 1 || probed[0] != 24 {
+			switch {
+			case tc.noProbe && len(probed) != 0:
+				t.Fatalf("probed starts = %v, want no probe", probed)
+			case !tc.noProbe && (len(probed) != 1 || probed[0] != 24):
 				t.Fatalf("probed starts = %v, want [24]", probed)
 			}
 			if timeline.seekSeconds != tc.wantSeek || timeline.startSegmentNumber != tc.wantSeg {

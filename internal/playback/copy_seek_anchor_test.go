@@ -254,7 +254,8 @@ func TestResolveTranscodeStartMovesATailStartToTheLastVideoSegment(t *testing.T)
 	}{
 		{name: "mkv inside the tail", path: mkvPath, requested: 24, duration: 30, want: 18},
 		{name: "mkv inside the last video segment", path: mkvPath, requested: 19, duration: 30, want: 19},
-		{name: "mkv mid-file", path: mkvPath, requested: 10, duration: 30, want: 10},
+		// Outside the window the file is not read: the path does not exist.
+		{name: "start before the probe window", path: filepath.Join(dir, "missing.mkv"), requested: 10, duration: 120, want: 10},
 		{name: "mpegts inside the tail", path: tsPath, requested: 22, duration: 25, want: 16},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

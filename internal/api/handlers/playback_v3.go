@@ -3064,12 +3064,15 @@ func (h *PlaybackHandler) prepareTransportTimelineV3(ctx context.Context, sessio
 
 // moveTailStartToLastVideoSegmentV3 moves an encoded transcode's start that
 // lies past the end of the file's video (its stored duration runs longer) to
-// the last segment that holds video; see playback.ResolveTranscodeStart. A
+// the last segment that holds video; see playback.ResolveTranscodeStart. Only
+// a start near the stored duration's end is probed, so other starts read
+// nothing (playback.TranscodeStartNearStoredEnd). A
 // probe that fails leaves the start as requested: it is how every start
 // behaved before, and playback past the end still ends the stream.
 func (h *PlaybackHandler) moveTailStartToLastVideoSegmentV3(ctx context.Context, session *playback.Session, file *models.MediaFile, plan *playback.PlanV3, durationSeconds float64) {
 	requested := plan.Timeline.SourceStartSeconds
-	if requested <= 0 || file == nil || strings.TrimSpace(file.FilePath) == "" || file.IsAudioOnly() {
+	if !playback.TranscodeStartNearStoredEnd(requested, durationSeconds) ||
+		file == nil || strings.TrimSpace(file.FilePath) == "" || file.IsAudioOnly() {
 		return
 	}
 	resolver := h.transcodeStart

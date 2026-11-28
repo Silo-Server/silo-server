@@ -1152,15 +1152,18 @@ writes nothing, and the request answers the same segment.
 
 A native encoded transcode that starts or reanchors in the tail would give the
 player only such segments, and a player whose first segment holds no media
-cannot prepare. So before the plan is returned, a start past zero probes the
-file's last video keyframe (`playback.ResolveTranscodeStart`): ffprobe lists
-the video packets from a seek to the later of the stored duration and the
-requested start, and when those hold no keyframe, from 10, 60 and then 300 s
-before that point, since MPEG-TS seeks forward. When the start's segment
+cannot prepare. So before the plan is returned, a start within 60 s of the
+stored duration's end probes the file's last video keyframe
+(`playback.ResolveTranscodeStart`); every earlier start reads nothing, since
+the stored metadata keeps no per-stream video length and media often lives on
+network storage. ffprobe lists the video packets from a seek to the later of
+the stored duration and the requested start, and when those hold no keyframe,
+from 10 and then 60 s before that point, since MPEG-TS seeks forward. When the start's segment
 begins after that keyframe, the plan starts at the segment that holds it (an
 MPEG-TS transcode started after the last keyframe writes no video), and
 playback ends at the end of the video as above. A probe that fails, finds no
-video, or has no stored duration to seek to keeps the requested start. The
+video, or has no stored duration keeps the requested start, and so does a
+start more than 60 s before the stored end of a file whose tail is longer. The
 Jellyfin-compatible start path does not probe. A crash, a kill, a
 non-zero exit, or an exit after a demux error has not reached the end, so a
 request past its output restarts it as before. A keyframe-planned copy remux

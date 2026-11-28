@@ -17,13 +17,33 @@ import (
 // hold up a copy remux's seek.
 var transcodeStartProbeSlots = make(chan struct{}, maxConcurrentCopySeekProbes)
 
+// TranscodeTailProbeWindowSeconds is how close to the stored duration's end
+// a start must lie for ResolveTranscodeStart to probe the file. The stored
+// metadata keeps no per-stream video duration, so this window is what keeps
+// every other start free of I/O: most resumes land well before the end, and
+// media is often read from network storage. The tails seen in practice are
+// seconds long (a subtitle cue or a duration tag a few seconds past the
+// video, #4639 and #5127), and the scanner already stores the video's length
+// when a subtitle track explains the longer container, so a minute covers
+// the stretches that reach playback. A start earlier than that keeps its
+// position, as before.
+const TranscodeTailProbeWindowSeconds = 60
+
+// TranscodeStartNearStoredEnd reports whether an encoded transcode start at
+// requestedSeconds is close enough to the stored duration's end to be
+// probed (see TranscodeTailProbeWindowSeconds).
+func TranscodeStartNearStoredEnd(requestedSeconds, durationSeconds float64) bool {
+	return requestedSeconds > 0 && durationSeconds > 0 &&
+		requestedSeconds >= durationSeconds-TranscodeTailProbeWindowSeconds
+}
+
 // transcodeStartProbeBacksteps are how far before the end of the file the
 // probe looks again when the packets after its first seek hold no video
 // keyframe. MPEG-TS seeks forward, to the first packet at or after the
 // target, so a seek to the end lands past the last keyframe; and a tail
-// longer than a step leaves that step past the video too. Each step bounds
-// how much of the file a probe reads.
-var transcodeStartProbeBacksteps = []float64{10, 60, 300}
+// longer than a step leaves that step past the video too. The last step
+// matches the probe window, so a probe reads at most that much of the file.
+var transcodeStartProbeBacksteps = []float64{10, TranscodeTailProbeWindowSeconds}
 
 // ResolveTranscodeStart returns where an encoded transcode asked to start at
 // requestedSeconds should start. That is requestedSeconds itself, unless its
@@ -44,9 +64,9 @@ var transcodeStartProbeBacksteps = []float64{10, 60, 300}
 // position when it is later) and lists the video packets from there, so it
 // reads only the end of the file wherever playback starts. When those hold no
 // keyframe it looks again from transcodeStartProbeBacksteps before that
-// position. A probe that finds none returns requestedSeconds, and so does a
-// file with no known duration, whose probe would read from the requested
-// position to the end.
+// position. A probe that finds none returns requestedSeconds. A start that is
+// not TranscodeStartNearStoredEnd, including any start of a file with no
+// known duration, returns requestedSeconds without reading the file.
 func ResolveTranscodeStart(
 	ctx context.Context,
 	ffmpegPath string,
@@ -55,7 +75,7 @@ func ResolveTranscodeStart(
 	durationSeconds float64,
 	segmentDuration int,
 ) (float64, error) {
-	if requestedSeconds <= 0 || durationSeconds <= 0 {
+	if !TranscodeStartNearStoredEnd(requestedSeconds, durationSeconds) {
 		return requestedSeconds, nil
 	}
 	if strings.TrimSpace(inputPath) == "" {
