@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -123,6 +123,7 @@ export function TriggerFormRow({ trigger, onChange, onRemove }: TriggerFormRowPr
   };
   // The Max runtime box shows what was typed, so "1.23456" isn't rewritten to
   // the minutes its rounded millisecond count works out to.
+  const maxRuntimeId = useId();
   const [maxRuntimeDraft, setMaxRuntimeDraft] = useState(() =>
     maxRuntimeToDraft(trigger.max_runtime_ms),
   );
@@ -229,11 +230,15 @@ export function TriggerFormRow({ trigger, onChange, onRemove }: TriggerFormRowPr
         {/* At large text sizes the label wraps above the box instead of widening the
             row past its panel; the box and its unit stay together. */}
         <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
-          <label className="text-muted-foreground text-xs text-balance break-words">
+          <label
+            htmlFor={maxRuntimeId}
+            className="text-muted-foreground text-xs text-balance break-words"
+          >
             {t("web.admin.tasks.detail.maxRuntimeLabel")}
           </label>
           <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
             <Input
+              id={maxRuntimeId}
               type="number"
               min={0}
               step="any"
