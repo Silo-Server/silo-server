@@ -2169,6 +2169,18 @@ type episodeBrowser interface {
 
 var errConfiguredUserStoreUnavailable = errors.New("configured user store unavailable")
 
+// episodeSort returns the catalog sort an episode list applies for an explicit
+// SortBy. An episode's Jellyfin SortName is built from its season and episode
+// numbers, so SortName keeps the season and episode order, which is the
+// browse's own (#5193). Name still sorts by episode title, as Jellyfin's
+// NameComparer does.
+func (q itemsQuery) episodeSort() string {
+	if q.sort == catalog.BrowseSortTitle && q.sortByKey == sortKeySortName {
+		return ""
+	}
+	return q.sort
+}
+
 // episodeBrowseFilters builds the access filter and catalog filters an episode
 // browse applies for query.
 func (h *ItemsHandler) episodeBrowseFilters(ctx context.Context, session *Session, query itemsQuery) (catalog.AccessFilter, catalog.BrowseFilters) {
@@ -2176,7 +2188,7 @@ func (h *ItemsHandler) episodeBrowseFilters(ctx context.Context, session *Sessio
 	access.MaturityLimits = clampMaturityLimits(access.MaturityLimits, query.maxOfficialRating)
 	sortKey, order := "", ""
 	if query.sortExplicit {
-		sortKey = query.sort
+		sortKey = query.episodeSort()
 		order = query.order
 	}
 	return access, catalog.BrowseFilters{UserID: session.StreamAppUserID, MaturityLimits: access.MaturityLimits, ProfileID: session.ProfileID, IsFavorite: query.isFavorite, IsPlayed: query.isPlayed, IsResumable: query.isResumable, Genres: query.genres, Genre: query.genreName, Years: query.years, SearchTerm: query.searchTerm, NamePrefix: query.namePrefix, PersonID: query.personID, RequireBackdrop: query.requireBackdrop, AudioLanguages: query.audioLanguages, SubtitleLanguages: query.subtitleLanguages, ExcludeContentIDs: query.excludeIDs, Studios: query.studios, OfficialRatings: query.officialRatings, MinCommunityRating: query.minCommunityRating, MinCriticRating: query.minCriticRating, MinPremiereDate: query.minPremiereDate, MaxPremiereDate: query.maxPremiereDate, NameLessThan: query.nameLessThan, NameStartsWithOrGreater: query.nameStartsWithOrGreater, Limit: query.limit, Offset: query.startIndex, Sort: sortKey, Order: order}
@@ -2293,10 +2305,6 @@ func (h *ItemsHandler) browseEpisodeItems(ctx context.Context, session *Session,
 	// /Shows/{id}/Episodes shares episodeBrowseFilters but has no Ids filter in
 	// Jellyfin, so only this browse applies them.
 	filters.ContentIDs = query.specificIDs
-	// Name still sorts by episode title, as Jellyfin's NameComparer does.
-	if filters.Sort == catalog.BrowseSortTitle && query.sortByKey == sortKeySortName {
-		filters.Sort = ""
-	}
 	filters.Offset = offset
 	filters.Limit = limit
 	// Only an Ids lookup reaches here with a series or season ParentId, whose
@@ -2375,7 +2383,7 @@ func (h *ItemsHandler) writeEpisodeModelsPage(w http.ResponseWriter, r *http.Req
 	}
 	if query.sortExplicit && query.totalOverride == nil {
 		slices.SortStableFunc(episodeModels, func(a, b *models.Episode) int {
-			switch query.sort {
+			switch query.episodeSort() {
 			case catalog.BrowseSortTitle:
 				return strings.Compare(strings.ToLower(a.Title), strings.ToLower(b.Title))
 			case catalog.BrowseSortCreatedAt:

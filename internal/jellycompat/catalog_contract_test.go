@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"testing"
 	"time"
 
@@ -194,6 +195,78 @@ func TestParentEpisodesComposeFiltersBeforePage(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// An episode's Jellyfin SortName is built from its season and episode
+// numbers, so a SortName sort of a series' episodes keeps season and episode
+// order, while Name sorts by episode title. Jellyfin Android TV's "Play all"
+// asks /Shows/{id}/Episodes for sortBy=SortName (#5193).
+func TestParentEpisodesSortNameKeepsEpisodeOrder(t *testing.T) {
+	for _, tc := range []struct {
+		name, params, wantSort, wantOrder string
+	}{
+		{name: "sort name", params: "&SortBy=SortName", wantSort: "", wantOrder: "asc"},
+		{name: "sort name descending", params: "&SortBy=SortName&SortOrder=Descending", wantSort: "", wantOrder: catalog.BrowseOrderDescending},
+		{name: "name", params: "&SortBy=Name", wantSort: catalog.BrowseSortTitle, wantOrder: "asc"},
+	} {
+		for _, route := range []string{"items", "shows"} {
+			t.Run(route+"/"+tc.name, func(t *testing.T) {
+				codec := NewResourceIDCodec()
+				repo := &boundedEpisodeContractRepo{}
+				svc := &countingContentService{seasons: []upstreamSeason{{ContentID: "season2", SeasonNumber: 2, EpisodeCount: 20}}}
+				h := &ItemsHandler{catalogUserState: true, content: svc, episodeRepo: repo, codec: codec, mapper: newMapper(codec, &config.Config{}), userData: &mockUserDataService{}, images: NewImageCache(time.Hour, time.Now)}
+				seriesID := codec.EncodeStringID(EncodedIDItem, "series")
+				if route == "shows" {
+					performEpisodesRequest(t, h, "/Shows/"+seriesID+"/Episodes?isMissing=false"+tc.params, seriesID)
+				} else {
+					performItemsRequest(t, h, "/Items?ParentId="+seriesID+"&IncludeItemTypes=Episode&Recursive=true"+tc.params)
+				}
+				if repo.filters.Sort != tc.wantSort || repo.filters.Order != tc.wantOrder {
+					t.Fatalf("episode browse sort = %q %q, want %q %q", repo.filters.Sort, repo.filters.Order, tc.wantSort, tc.wantOrder)
+				}
+			})
+		}
+	}
+}
+
+// Without the catalog episode browse, a series' episodes are sorted in
+// memory, where SortName keeps season and episode order too (#5193).
+func TestHandleEpisodesSortNameKeepsEpisodeOrderInMemory(t *testing.T) {
+	for _, tc := range []struct {
+		name, params string
+		want         []string
+	}{
+		{name: "sort name", params: "?SortBy=SortName", want: []string{"Pilot", "Cat's in the Bag", "Alibi"}},
+		{name: "sort name descending", params: "?SortBy=SortName&SortOrder=Descending", want: []string{"Alibi", "Cat's in the Bag", "Pilot"}},
+		{name: "name", params: "?SortBy=Name", want: []string{"Alibi", "Cat's in the Bag", "Pilot"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			codec := NewResourceIDCodec()
+			svc := &countingContentService{seasons: []upstreamSeason{
+				{ContentID: "season-1", SeasonNumber: 1, Title: "Season 1", EpisodeCount: 2},
+				{ContentID: "season-2", SeasonNumber: 2, Title: "Season 2", EpisodeCount: 1},
+			}}
+			repo := &fakeSeasonEpisodeRepo{bySeason: map[string][]*models.Episode{
+				episodeBySeasonKey("series", 1): {
+					{ContentID: "ep-1", SeriesID: "series", SeasonID: "season-1", SeasonNumber: 1, EpisodeNumber: 1, Title: "Pilot"},
+					{ContentID: "ep-2", SeriesID: "series", SeasonID: "season-1", SeasonNumber: 1, EpisodeNumber: 2, Title: "Cat's in the Bag"},
+				},
+				episodeBySeasonKey("series", 2): {
+					{ContentID: "ep-3", SeriesID: "series", SeasonID: "season-2", SeasonNumber: 2, EpisodeNumber: 3, Title: "Alibi"},
+				},
+			}}
+			h := &ItemsHandler{content: svc, episodeRepo: repo, codec: codec, mapper: newMapper(codec, &config.Config{}), userData: &mockUserDataService{}, images: NewImageCache(time.Hour, time.Now)}
+			seriesID := codec.EncodeStringID(EncodedIDItem, "series")
+			result := performEpisodesRequest(t, h, "/Shows/"+seriesID+"/Episodes"+tc.params, seriesID)
+			got := make([]string, 0, len(result.Items))
+			for _, item := range result.Items {
+				got = append(got, item.Name)
+			}
+			if !slices.Equal(got, tc.want) {
+				t.Fatalf("episodes = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 

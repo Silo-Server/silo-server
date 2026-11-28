@@ -267,6 +267,9 @@ browse without a type filter, favorites or `Ids` still lists no episodes.
 `/Shows/{id}/Episodes` accepts numeric `Season`, `SeasonId`, `StartItemId`,
 `StartIndex`, and `Limit`. As in Jellyfin 12.1, an explicit `SeasonId` selects
 its owning series and takes precedence over the path series and numeric season.
+`SortBy=SortName` keeps season and episode order on this route and on series
+and season `/Items?ParentId=` episode listings, as on the flat episode browse
+above, and `SortBy=Name` sorts by episode title.
 When `Limit` is omitted, episode listings on this route and series/season
 `/Items?ParentId=` requests use a 1,000-row page. Explicit limits retain their
 requested page size, subject to the 1,000-row cap; `Limit=0` requests only the
