@@ -1282,13 +1282,6 @@ func (r *Repository) deleteIntegration(ctx context.Context, tx pgx.Tx, id string
 	`, id).Scan(&liveRequests); err != nil {
 		return fmt.Errorf("check integration targets: %w", err)
 	}
-	if liveRequests > 0 && enabled {
-		inProgress := "1 request is still in progress"
-		if liveRequests > 1 {
-			inProgress = strconv.Itoa(liveRequests) + " requests are still in progress"
-		}
-		return &InvalidStateError{Detail: inProgress + " on this server. Let them finish, or disable the server first: deleting a disabled server marks them failed so they can be retried."}
-	}
 
 	// The last server of its kind can go with the Everything else that
 	// only it served (made for it when it was added), as long as no rule
@@ -1363,6 +1356,16 @@ func (r *Repository) deleteIntegration(ctx context.Context, tx pgx.Tx, id string
 		return &ValidationError{FormError: "Routing still sends requests to this server (" + strings.Join(routes, ", ") + "); send them elsewhere first."}
 	}
 
+	// Checked after the routes: disabling a server a route still sends to
+	// would not let its delete through, so it is not the advice to give.
+	if liveRequests > 0 && enabled {
+		inProgress := "1 request is still in progress"
+		if liveRequests > 1 {
+			inProgress = strconv.Itoa(liveRequests) + " requests are still in progress"
+		}
+		return &InvalidStateError{Detail: inProgress + " on this server. Let them finish, or disable the server first: deleting a disabled server marks them failed so they can be retried."}
+	}
+
 	if liveRequests > 0 {
 		if err := r.failServerTargets(ctx, tx, id); err != nil {
 			return err
@@ -1379,7 +1382,11 @@ func (r *Repository) deleteIntegration(ctx context.Context, tx pgx.Tx, id string
 // server that is being deleted, and settles each of their requests from its
 // targets, so a request left with nothing in flight shows as failed and can be
 // retried. The requests are locked first, in id order, as DeleteTarget and an
-// account delete's cascade lock a request before its targets.
+// account delete's cascade lock a request before its targets. UpdateTargetStatus
+// takes a target before its request, so a status write to one of these targets
+// at the same moment (a poll that began before the server was disabled, or the
+// stalled-target backstop) can deadlock with this delete; Postgres aborts one
+// of the two, and either can be retried.
 func (r *Repository) failServerTargets(ctx context.Context, tx pgx.Tx, id string) error {
 	rows, err := tx.Query(ctx, `
 		SELECT id FROM media_requests

@@ -787,9 +787,23 @@ func TestDeleteServerWithLiveTargetsDatabase(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// While a route still sends to the enabled server, the route is what the
+	// admin must change: disabling the server would not let the delete through.
+	if _, err := pool.Exec(ctx, `INSERT INTO request_routes (id, media_type, position, name, hd_integration_id)
+		VALUES ('to-on', 'movie', 1, 'Movies', 'on')`); err != nil {
+		t.Fatal(err)
+	}
+	err := repo.DeleteIntegrationConditional(ctx, "on", -1)
+	if refused, ok := errors.AsType[*ValidationError](err); !ok || !strings.Contains(refused.FormError, "Routing still sends") {
+		t.Fatalf("delete routed enabled server: err = %v, want the routing refusal", err)
+	}
+	if _, err := pool.Exec(ctx, `DELETE FROM request_routes`); err != nil {
+		t.Fatal(err)
+	}
+
 	// The enabled server can still finish its download, so it is kept, with
 	// a reason the admin can act on.
-	err := repo.DeleteIntegrationConditional(ctx, "on", -1)
+	err = repo.DeleteIntegrationConditional(ctx, "on", -1)
 	blocked, ok := errors.AsType[*InvalidStateError](err)
 	if !ok || !errors.Is(err, ErrInvalidState) || !strings.Contains(blocked.Detail, "1 request is still in progress") {
 		t.Fatalf("delete enabled server: err = %v, want an invalid state naming 1 request in progress", err)
