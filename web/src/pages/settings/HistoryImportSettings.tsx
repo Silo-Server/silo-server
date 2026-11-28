@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { PageHeader } from "@/components/page/PageHeader";
 import { useEventChannel } from "@/components/realtimeEventsContext";
@@ -14,7 +14,7 @@ import {
   useHistoryImportSources,
   useLoginEmbyConnect,
 } from "@/hooks/queries/history-import";
-import type { EmbyConnectLoginResponse } from "@/api/types";
+import type { CreateHistoryImportRunRequest, EmbyConnectLoginResponse } from "@/api/types";
 import { SettingsGroup } from "@/components/settings/SettingsGroup";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -41,10 +41,12 @@ import {
 import {
   canStartEmbyImport,
   canStartJellyfinImport,
+  isValidHttpServerURL,
   type EmbyMode,
   type PlexMode,
   type SourceType,
 } from "./HistoryImportSettings.utils";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { isActingAdmin } from "@/lib/permissions";
 import { AlertTriangle, CheckCircle2, CircleSlash2, Clock, Loader2, XCircle } from "lucide-react";
@@ -110,6 +112,7 @@ const SOURCE_NAMES: Record<SourceType, string> = {
   plex: "Plex",
 };
 const SOURCE_LETTERS: Record<SourceType, string> = { emby: "E", jellyfin: "J", plex: "P" };
+const EMBY_URL_EXAMPLE = "https://emby.example.com";
 const JELLYFIN_URL_EXAMPLE = "https://jellyfin.example.com";
 
 export default function HistoryImportSettings() {
@@ -130,18 +133,27 @@ export default function HistoryImportSettings() {
   );
   const { data: sources = [], isLoading: sourcesLoading } = useHistoryImportSources();
   const { data: recentRuns = [] } = useHistoryImportRuns();
+  const { data: importCapability } = useHistoryImportCapability();
 
   const [sourceType, setSourceType] = useState<SourceType>("emby");
   const [embyMode, setEmbyMode] = useState<EmbyMode>("connect");
   const [plexMode, setPlexMode] = useState<PlexMode>("oauth");
   const [profileId, setProfileId] = useState(profile?.id ?? "");
   const [activeRunId, setActiveRunId] = useState<string>();
+  const [startErrorScope, setStartErrorScope] = useState<string | null>(null);
+
+  const embyDirectUrlId = useId();
+  const embyDirectUsernameId = useId();
+  const embyDirectPasswordId = useId();
 
   // Emby state
   const [connectUsername, setConnectUsername] = useState("");
   const [connectPassword, setConnectPassword] = useState("");
   const [connectSession, setConnectSession] = useState<EmbyConnectLoginResponse | null>(null);
   const [connectServerId, setConnectServerId] = useState("");
+  const [embyServerURL, setEmbyServerURL] = useState("");
+  const [embyDirectUsername, setEmbyDirectUsername] = useState("");
+  const [embyDirectPassword, setEmbyDirectPassword] = useState("");
   const [savedSourceId, setSavedSourceId] = useState("");
   const [savedUsername, setSavedUsername] = useState("");
   const [savedPassword, setSavedPassword] = useState("");
@@ -182,7 +194,27 @@ export default function HistoryImportSettings() {
   const effectiveProfileId = canImportForOthers
     ? profileId || profile?.id || ""
     : (profile?.id ?? "");
-  const startError = createRunMutation.error;
+  const supportsEmbyDirect =
+    importCapability?.state === "available" && importCapability?.emby_custom_server === true;
+  const effectiveEmbyMode: EmbyMode =
+    embyMode === "direct" && !supportsEmbyDirect ? "connect" : embyMode;
+  const currentFormScope = formScope(sourceType, effectiveEmbyMode, plexMode);
+  const currentFormScopeRef = useRef(currentFormScope);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    currentFormScopeRef.current = currentFormScope;
+  }, [currentFormScope]);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+  const startError = startErrorScope === currentFormScope ? createRunMutation.error : null;
+  const embyURLInvalid =
+    sourceType === "emby" &&
+    effectiveEmbyMode === "direct" &&
+    Boolean(startError && !isValidHttpServerURL(embyServerURL));
   const returnedPlexAuth = searchParams.get("plex_auth");
   const returnedPlexPinId = searchParams.get("plex_pin_id");
   const returnedPlexPinCode = searchParams.get("plex_pin_code");
@@ -212,7 +244,31 @@ export default function HistoryImportSettings() {
   const selectedPlexOAuthServerURL = selectedPlexOAuthServer
     ? getPreferredPlexServerURL(selectedPlexOAuthServer)
     : "";
-  const { data: importCapability } = useHistoryImportCapability();
+
+  function clearSettledStartError(nextScope: string) {
+    if (
+      !createRunMutation.isPending &&
+      startErrorScope === currentFormScope &&
+      nextScope !== currentFormScope
+    ) {
+      setStartErrorScope(null);
+    }
+  }
+
+  function selectSourceType(next: SourceType) {
+    clearSettledStartError(formScope(next, effectiveEmbyMode, plexMode));
+    setSourceType(next);
+  }
+
+  function selectEmbyMode(next: EmbyMode) {
+    clearSettledStartError(formScope(sourceType, next, plexMode));
+    setEmbyMode(next);
+  }
+
+  function selectPlexMode(next: PlexMode) {
+    clearSettledStartError(formScope(sourceType, effectiveEmbyMode, next));
+    setPlexMode(next);
+  }
 
   useEffect(() => {
     if (returnedPlexAuth !== "1") {
@@ -328,30 +384,53 @@ export default function HistoryImportSettings() {
 
   async function handleStartImport() {
     if (!effectiveProfileId) return;
+    const submitScope = currentFormScope;
+    async function submitRun(body: CreateHistoryImportRunRequest) {
+      setStartErrorScope(submitScope);
+      try {
+        const run = await createRunMutation.mutateAsync(body);
+        setActiveRunId(run.id);
+      } catch (err) {
+        if (!mountedRef.current || currentFormScopeRef.current !== submitScope) {
+          toast.error(
+            err instanceof Error ? err.message : t("web.common.toast.historyImport.startFailed"),
+          );
+        }
+        throw err;
+      }
+    }
 
     if (sourceType === "emby") {
-      if (embyMode === "connect") {
-        const run = await createRunMutation.mutateAsync({
+      if (effectiveEmbyMode === "connect") {
+        await submitRun({
           profile_id: effectiveProfileId,
           source: "emby",
           connect_session_id: connectSession?.connect_session_id,
           server_id: connectServerId,
         });
-        setActiveRunId(run.id);
         // Starting a run consumes the Connect session; another import needs a
         // fresh sign-in.
         setConnectSession(null);
         setConnectServerId("");
         setConnectPassword("");
-      } else if (embyMode === "saved" && selectedSavedSource) {
-        const run = await createRunMutation.mutateAsync({
+      } else if (effectiveEmbyMode === "direct") {
+        await submitRun({
+          profile_id: effectiveProfileId,
+          source: "emby",
+          emby_base_url: embyServerURL.trim(),
+          username: embyDirectUsername.trim(),
+          password: embyDirectPassword,
+        });
+        setEmbyDirectPassword("");
+      } else if (effectiveEmbyMode === "saved" && selectedSavedSource) {
+        await submitRun({
           profile_id: effectiveProfileId,
           source: "emby",
           source_id: selectedSavedSource.id,
           username: savedUsername.trim(),
           password: savedPassword,
         });
-        setActiveRunId(run.id);
+        setSavedPassword("");
       }
       return;
     }
@@ -363,6 +442,7 @@ export default function HistoryImportSettings() {
         if (selectedPlexHomeUser) {
           // Import as the Home member: their own server token and plex.tv
           // token, so the run reads their watch state and watchlist.
+          setStartErrorScope(null);
           setPlexSwitchError(null);
           setPlexSwitchPending(true);
           try {
@@ -390,7 +470,7 @@ export default function HistoryImportSettings() {
         const fallbackURLs = importCapability?.plex_connection_fallback
           ? getPlexFallbackURLs(server)
           : [];
-        const run = await createRunMutation.mutateAsync({
+        await submitRun({
           profile_id: effectiveProfileId,
           source: "plex",
           plex_base_url: getPreferredPlexServerURL(server),
@@ -398,29 +478,28 @@ export default function HistoryImportSettings() {
           plex_token: server.accessToken,
           plex_account_token: accountToken || undefined,
         });
-        setActiveRunId(run.id);
         setPlexHomeUserPin("");
       } else if (plexMode === "saved" && selectedPlexSavedSource) {
-        const run = await createRunMutation.mutateAsync({
+        await submitRun({
           profile_id: effectiveProfileId,
           source: "plex",
           source_id: selectedPlexSavedSource.id,
           plex_token: plexToken,
         });
-        setActiveRunId(run.id);
+        setPlexToken("");
       }
       return;
     }
 
     if (sourceType === "jellyfin") {
-      const run = await createRunMutation.mutateAsync({
+      await submitRun({
         profile_id: effectiveProfileId,
         source: "jellyfin",
         jellyfin_base_url: jellyfinServerURL.trim(),
         jellyfin_username: jellyfinUsername,
         jellyfin_password: jellyfinPassword,
       });
-      setActiveRunId(run.id);
+      setJellyfinPassword("");
       return;
     }
   }
@@ -428,12 +507,14 @@ export default function HistoryImportSettings() {
   const canStart =
     sourceType === "emby"
       ? canStartEmbyImport(
-          embyMode,
+          effectiveEmbyMode,
           effectiveProfileId,
           connectSession,
           connectServerId,
           selectedSavedSource,
           savedUsername,
+          embyServerURL,
+          embyDirectUsername,
         )
       : sourceType === "plex"
         ? plexMode === "oauth"
@@ -448,6 +529,14 @@ export default function HistoryImportSettings() {
             jellyfinUsername,
             jellyfinPassword,
           );
+
+  const embyModeOptions = [
+    { value: "connect", label: t("web.settings.historyImport.mode.embyConnect") },
+    ...(supportsEmbyDirect
+      ? [{ value: "direct", label: t("web.settings.historyImport.mode.serverUrl") }]
+      : []),
+    { value: "saved", label: t("web.settings.historyImport.savedServer") },
+  ];
 
   return (
     <div className="space-y-6">
@@ -466,17 +555,17 @@ export default function HistoryImportSettings() {
           <SourceCard
             type="emby"
             selected={sourceType === "emby"}
-            onClick={() => setSourceType("emby")}
+            onClick={() => selectSourceType("emby")}
           />
           <SourceCard
             type="plex"
             selected={sourceType === "plex"}
-            onClick={() => setSourceType("plex")}
+            onClick={() => selectSourceType("plex")}
           />
           <SourceCard
             type="jellyfin"
             selected={sourceType === "jellyfin"}
-            onClick={() => setSourceType("jellyfin")}
+            onClick={() => selectSourceType("jellyfin")}
           />
         </div>
 
@@ -484,15 +573,12 @@ export default function HistoryImportSettings() {
         {sourceType === "emby" && (
           <div className="space-y-4">
             <SegmentedControl
-              value={embyMode}
-              onChange={(v) => setEmbyMode(v as EmbyMode)}
-              options={[
-                { value: "connect", label: t("web.settings.historyImport.mode.embyConnect") },
-                { value: "saved", label: t("web.settings.historyImport.savedServer") },
-              ]}
+              value={effectiveEmbyMode}
+              onChange={(v) => selectEmbyMode(v as EmbyMode)}
+              options={embyModeOptions}
             />
 
-            {embyMode === "connect" ? (
+            {effectiveEmbyMode === "connect" ? (
               <div className="space-y-4">
                 <div className="grid gap-4 md:grid-cols-2">
                   <div className="space-y-2">
@@ -511,7 +597,10 @@ export default function HistoryImportSettings() {
                     />
                   </div>
                 </div>
-                <Button onClick={handleConnectLogin} disabled={loginMutation.isPending}>
+                <Button
+                  onClick={() => void handleConnectLogin().catch(() => undefined)}
+                  disabled={loginMutation.isPending || !connectUsername.trim() || !connectPassword}
+                >
                   {loginMutation.isPending
                     ? t("web.settings.historyImport.connecting")
                     : t("web.settings.historyImport.findServers")}
@@ -542,6 +631,49 @@ export default function HistoryImportSettings() {
                     </div>
                   </div>
                 )}
+              </div>
+            ) : effectiveEmbyMode === "direct" ? (
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor={embyDirectUrlId}>
+                    {t("web.settings.historyImport.embyServerUrl")}
+                  </Label>
+                  <Input
+                    id={embyDirectUrlId}
+                    dir="ltr"
+                    aria-invalid={embyURLInvalid || undefined}
+                    value={embyServerURL}
+                    onChange={(e) => setEmbyServerURL(e.target.value)}
+                    placeholder={EMBY_URL_EXAMPLE}
+                  />
+                </div>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor={embyDirectUsernameId}>
+                      {t("web.settings.historyImport.embyUsername")}
+                    </Label>
+                    <Input
+                      id={embyDirectUsernameId}
+                      value={embyDirectUsername}
+                      onChange={(e) => setEmbyDirectUsername(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor={embyDirectPasswordId}>
+                      {t("web.settings.historyImport.embyPassword")}
+                    </Label>
+                    <Input
+                      id={embyDirectPasswordId}
+                      type="password"
+                      placeholder={t("web.settings.historyImport.embyPasswordPlaceholder")}
+                      value={embyDirectPassword}
+                      onChange={(e) => setEmbyDirectPassword(e.target.value)}
+                    />
+                  </div>
+                </div>
+                <p className="text-muted-foreground text-xs leading-relaxed">
+                  {t("web.settings.historyImport.embyDirectHelp")}
+                </p>
               </div>
             ) : (
               <div className="space-y-4">
@@ -598,7 +730,7 @@ export default function HistoryImportSettings() {
           <div className="space-y-4">
             <SegmentedControl
               value={plexMode}
-              onChange={(v) => setPlexMode(v as PlexMode)}
+              onChange={(v) => selectPlexMode(v as PlexMode)}
               options={[
                 { value: "oauth", label: t("web.settings.historyImport.mode.plexAccount") },
                 { value: "saved", label: t("web.settings.historyImport.savedServer") },
@@ -843,12 +975,16 @@ export default function HistoryImportSettings() {
           </Button>
         </div>
         {startError && (
-          <p role="alert" className="text-destructive text-sm">
+          <div
+            role="alert"
+            className="flex items-start gap-2.5 rounded-[1rem] border border-red-500/30 bg-red-500/[0.06] px-3.5 py-3 text-sm"
+          >
+            <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-400" />
             {/* The server's reason is shown as is: a profile that can't import for
                 others only ever targets itself, so its 403 is some other refusal
                 (demo mode, say), and the cross-profile refusal already explains itself. */}
-            {startError.message}
-          </p>
+            <span className="text-red-100/90">{startError.message}</span>
+          </div>
         )}
         {plexSwitchError && sourceType === "plex" && (
           <p role="alert" className="text-destructive text-sm">
@@ -944,7 +1080,7 @@ function SourceCard({
       <div className="flex items-center gap-3">
         <div
           className={cn(
-            "flex h-10 w-10 items-center justify-center rounded-lg text-sm font-bold tracking-tight transition-colors",
+            "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-sm font-bold tracking-tight transition-colors",
             selected
               ? isEmby
                 ? "bg-emerald-500/15 text-emerald-400"
@@ -992,7 +1128,7 @@ function SegmentedControl({
           type="button"
           onClick={() => onChange(option.value)}
           className={cn(
-            "flex-1 rounded-[0.85rem] px-3 py-1.5 text-sm font-medium transition-all duration-200",
+            "flex flex-1 items-center justify-center rounded-[0.85rem] px-2 py-1.5 text-center text-xs leading-tight font-medium transition-all duration-200 sm:px-3 sm:text-sm",
             value === option.value
               ? "bg-background text-foreground shadow-sm"
               : "text-muted-foreground hover:text-foreground",
@@ -1090,7 +1226,7 @@ function RunSummary({ run }: { run: PersonalImportRun | null }) {
       )}
 
       {/* Metrics */}
-      <div className="grid grid-cols-3 gap-2 sm:grid-cols-7">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         <MetricCard label={t("web.settings.historyImport.metric.fetched")} value={run.fetched} />
         <MetricCard
           label={t("web.settings.historyImport.metric.matched")}
@@ -1283,6 +1419,12 @@ function HistoryRunCard({
 /** A run's source as a card type; anything unexpected shows as Plex, as before. */
 function sourceKind(source: string): SourceType {
   return source === "emby" || source === "jellyfin" ? source : "plex";
+}
+
+function formScope(source: SourceType, embyMode: EmbyMode, plexMode: PlexMode): string {
+  if (source === "emby") return `emby:${embyMode}`;
+  if (source === "plex") return `plex:${plexMode}`;
+  return "jellyfin";
 }
 
 function formatRelativeTime(t: Translate, dateStr: string): string {

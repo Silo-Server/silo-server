@@ -282,7 +282,7 @@ func (r *AccountResolver) resolve(ctx context.Context, tx pgx.Tx, in ResolveInpu
 		autoMatch = autoMatch && out.demo.knownOff()
 		if autoMatch {
 			user, err := scanUser(tx.QueryRow(ctx, `SELECT `+allColumns+` FROM users
-				WHERE email = $1 AND role = 'user' AND NOT is_owner AND NOT break_glass FOR UPDATE`, NormalizeEmail(identity.Email)))
+				WHERE email = $1 AND `+emailMatchCandidateSQL("users")+` FOR UPDATE`, NormalizeEmail(identity.Email)))
 			if err != nil && !IsNotFound(err) {
 				return err
 			}
@@ -364,6 +364,13 @@ func (r *AccountResolver) finish(ctx context.Context, tx pgx.Tx, in ResolveInput
 	}
 	out.user = user
 	return nil
+}
+
+// emailMatchCandidateSQL is the SQL test that the users row named by alias
+// is an account email auto-match may link: an ordinary account, never the
+// Owner, an admin or a break-glass account.
+func emailMatchCandidateSQL(alias string) string {
+	return alias + `.role = 'user' AND NOT ` + alias + `.is_owner AND NOT ` + alias + `.break_glass`
 }
 
 func lockUser(ctx context.Context, tx rowQuerier, id int) (*models.User, error) {
@@ -621,7 +628,7 @@ const adminRoleLock = "silo:auth:admin-role"
 
 // syncManagedRole applies the provider's managed role to user in tx. It
 // returns the updated account when the role changed (its login sessions are
-// revoked in tx, as an administrator role change does) and the audit event
+// revoked in tx, as an administrator's promotion does) and the audit event
 // for any change or skipped demotion. ADMIN promotes, USER demotes, anything
 // else leaves the role alone. The Owner, break-glass accounts and the last
 // enabled admin are never demoted.
@@ -667,7 +674,7 @@ func demotionBlocked(ctx context.Context, tx pgx.Tx, user *models.User) (string,
 	switch {
 	case user.IsOwner:
 		return demotionReasonOwner, nil
-	case user.BreakGlass && user.LocalPasswordLoginEnabled:
+	case user.BreakGlass && user.HasLocalPassword():
 		// Break-glass exists for local recovery; an account that cannot use
 		// its password gets no immunity from it.
 		return demotionReasonBreakGlass, nil

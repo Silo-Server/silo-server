@@ -16,6 +16,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/quic-go/quic-go"
 )
 
 type deadlineBlockingResponseWriter struct {
@@ -314,6 +316,30 @@ func TestCompletedFullResponse(t *testing.T) {
 			if got := sw.CompletedFullResponse(int64(len(body))); got != tt.want {
 				t.Fatalf("CompletedFullResponse = %v, want %v (status=%d range=%q bytes=%d)",
 					got, tt.want, sw.StatusCode(), rr.Header().Get("Content-Range"), sw.BytesWritten())
+			}
+		})
+	}
+}
+
+func TestClassifyOutcomeSeparatesPeerTimeoutFromStall(t *testing.T) {
+	deadline := fmt.Errorf("write: %w", os.ErrDeadlineExceeded)
+	tests := []struct {
+		name     string
+		writeErr error
+		ctxErr   error
+		want     StreamOutcome
+	}{
+		{name: "write deadline", writeErr: deadline, want: OutcomeStalledReap},
+		{name: "quic idle timeout", writeErr: &quic.IdleTimeoutError{}, want: OutcomePeerTimeout},
+		{name: "wrapped quic idle timeout", writeErr: fmt.Errorf("write: %w", &quic.IdleTimeoutError{}), want: OutcomePeerTimeout},
+		{name: "closed pipe", writeErr: io.ErrClosedPipe, want: OutcomeClientGone},
+		{name: "canceled", ctxErr: context.Canceled, want: OutcomeClientGone},
+		{name: "none", want: OutcomeCompleted},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := ClassifyOutcome(test.writeErr, test.ctxErr); got != test.want {
+				t.Fatalf("ClassifyOutcome(%v, %v) = %q, want %q", test.writeErr, test.ctxErr, got, test.want)
 			}
 		})
 	}

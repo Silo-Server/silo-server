@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/darthShadow/shunpike/coordination/protocol"
+	"github.com/darthShadow/shunpike/coordination/server"
 
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
@@ -54,7 +55,7 @@ func TestDirectWrapper(t *testing.T) {
 				if path.Direct == nil {
 					t.Error("Path.Direct is nil")
 				} else {
-					want := netaccess.DirectPath{HostID: "api-test", PeerKey: key.String(), Class: "direct"}
+					want := netaccess.DirectPath{HostID: "api-test", PeerKey: key.String(), DeviceID: "tv", UserID: 7, Class: "direct", Policy: "direct_only", LocalPort: 8094, PathGeneration: 42}
 					if *path.Direct != want {
 						t.Errorf("Path.Direct = %+v, want %+v", *path.Direct, want)
 					}
@@ -67,8 +68,13 @@ func TestDirectWrapper(t *testing.T) {
 				}
 				w.WriteHeader(http.StatusNoContent)
 			}))
-			source := func(context.Context) (protocol.NodeKey, netip.AddrPort) { return test.peer, endpoint }
-			h := wrapDirect("api-test", source, next)
+			source := func(context.Context) observedPeer {
+				return observedPeer{Key: test.peer, Endpoint: endpoint, LocalPort: 8094, Generation: 42}
+			}
+			lookup := func(context.Context, protocol.NodeKey) (server.PeerEntry, bool) {
+				return server.PeerEntry{NodeKey: test.peer, Ref: deviceRef(7, "tv"), Policy: []byte(`{"connection_path":"direct_only"}`)}, true
+			}
+			h := wrapDirect("api-test", source, lookup, next)
 			req := httptest.NewRequest(http.MethodGet, "https://peer.invalid/probe", nil)
 			req.RemoteAddr = "127.0.0.1:1"
 			req.Header.Set("Forwarded", "for=203.0.113.9")

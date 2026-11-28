@@ -105,11 +105,11 @@ describe("SubtitlesStep", () => {
 
     // A reload that fails keeps the row locked and leaves the way to try again.
     const reload = screen.getByRole("button", {
-      name: "Reload saved configuration (discard draft)",
+      name: "Reload saved settings (discard changes)",
     });
     editorMock.mockRejectedValueOnce(new Error("load failed"));
     await user.click(reload);
-    await screen.findByText("Unable to load saved configuration. Reload before editing.");
+    await screen.findByText("Couldn’t load saved settings. Reload before editing.");
     expect(reload).toBeEnabled();
     expect(continueButton).toBeDisabled();
     expect(screen.getByLabelText("API key")).toHaveValue("typed-key");

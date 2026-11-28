@@ -7,8 +7,10 @@ import (
 	"strconv"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/clientip"
+	"github.com/Silo-Server/silo-server/internal/demomode"
 )
 
 // The auth domain: opening and closing login sessions. The token pair a
@@ -37,6 +39,14 @@ type LoginOutput struct {
 type NetworkSignInInput struct {
 	SignInDeviceHeaders
 	ID      ID `path:"id" pattern:"^[1-9][0-9]*$" doc:"The network provider's plugin installation, as listAuthProviders shows it" example:"5"`
+	RawBody []byte
+	Body    struct{}
+}
+
+// DemoLoginInput opens a public demo session. The body is an empty JSON object
+// so cross-site form posts fail the media-type check.
+type DemoLoginInput struct {
+	SignInDeviceHeaders
 	RawBody []byte
 	Body    struct{}
 }
@@ -77,6 +87,28 @@ type CompleteOAuthLoginOutput struct {
 // limit bucket of the login operation.
 const loginDomain = "login"
 
+// demoLoginBucket is the per-address rate-limit bucket of demo sign-in, kept
+// apart from the login bucket so demo visitors do not spend password
+// sign-in attempts.
+const demoLoginBucket = "demo_login"
+
+// demoLoginDomain names demo sign-in in its capability problems.
+const demoLoginDomain = "demo sign-in"
+
+// DemoLoginCapability is the demo sign-in capability: available only on a
+// public demo, a server with demo mode on and a demo account named.
+type DemoLoginCapability struct {
+	Capability
+}
+
+// DemoLoginCapabilityOutput answers getDemoLoginCapability.
+type DemoLoginCapabilityOutput struct {
+	Status       int
+	ETag         string `header:"ETag"`
+	CacheControl string `header:"Cache-Control"`
+	Body         DemoLoginCapability
+}
+
 func registerAuth(reg *Registry) {
 	end := humaOp(http.MethodPost, Prefix+"/auth/impersonation/end", "endImpersonation", "auth",
 		"Return an impersonating session to the administrator who started it.")
@@ -101,6 +133,20 @@ func registerAuth(reg *Registry) {
 		RetrySafety: RetrySafetyNonRetryable,
 		Class:       ClassPublic, ServiceBacked: true, RateLimitBucket: loginDomain,
 	}, reg.login)
+	demo := humaOp(http.MethodPost, Prefix+"/auth/demo", "demoLogin", "auth",
+		"Sign in to the public demo account of a server run as a public demo.")
+	demo.Description = "Only a server whose operator runs it as a public demo offers this: demo mode (the demo.enabled setting) is on and the demo.username setting names an account that is not an administrator. Every other server answers 409 capability_disabled, or capability_not_configured on a demo server with no usable demo account; getDemoLoginCapability tells a client which before it offers the action. The session opened is the one a visitor gets by typing the demo account's password, restricted by demo mode in the same way. Send an empty JSON object as the body."
+	demo.Errors = []int{http.StatusConflict, http.StatusTooManyRequests}
+	Register(reg, Operation{
+		Operation:   demo,
+		RetrySafety: RetrySafetyNonRetryable,
+		Class:       ClassPublic, ServiceBacked: true, RateLimitBucket: demoLoginBucket,
+	}, reg.demoLogin)
+	Register(reg, Operation{
+		Operation: humaOp(http.MethodGet, Prefix+"/auth/demo/capability", "getDemoLoginCapability", "auth",
+			"Describe whether this server offers demo sign-in: available only on a public demo, disabled when demo mode is off, not_configured when no demo account is named."),
+		Class: ClassPublic,
+	}, reg.getDemoLoginCapability)
 	complete := humaOp(http.MethodPost, Prefix+"/auth/oauth/complete", "completeOAuthLogin", "auth",
 		"Redeem the one-time code an OAuth callback issued for the token pair.")
 	complete.Description = "A code is valid for 60 seconds and redeems once. The login session opens at redemption, so a code that is never redeemed leaves no session. Redeeming a used code again revokes the session its redemption opened. A native code needs the code_verifier of its S256 challenge. A web code takes none and redeems only in the browser the callback answered, which holds the silo_oauth_complete cookie, so a code passed to another browser cannot sign that browser in."
@@ -147,6 +193,50 @@ func (reg *Registry) login(ctx context.Context, in *LoginInput) (*LoginOutput, e
 		return nil, loginProblem(err)
 	}
 	return &LoginOutput{Body: tokenPairFromView(view)}, nil
+}
+
+func (reg *Registry) demoLogin(ctx context.Context, in *DemoLoginInput) (*LoginOutput, error) {
+	if p := rejectNonNullableNulls(in.RawBody, nil); p != nil {
+		return nil, p
+	}
+	if reg.deps.Sessions == nil {
+		return nil, unavailable(loginDomain)
+	}
+	input := handlers.DemoLoginInput{IP: clientip.FromContext(ctx)}
+	if r := requestFrom(ctx); r != nil {
+		input.DeviceName = r.UserAgent()
+	}
+	view, err := reg.deps.Sessions.DemoLogin(withClientDevice(ctx), input)
+	switch {
+	case errors.Is(err, auth.ErrDemoLoginDisabled):
+		return nil, CapabilityProblem(StateDisabled, demoLoginDomain)
+	case errors.Is(err, auth.ErrDemoLoginNotConfigured):
+		return nil, CapabilityProblem(StateNotConfigured, demoLoginDomain)
+	case err != nil:
+		return nil, serviceProblem(err)
+	}
+	return &LoginOutput{Body: tokenPairFromView(view)}, nil
+}
+
+func (reg *Registry) getDemoLoginCapability(ctx context.Context, _ *CapabilityInput) (*DemoLoginCapabilityOutput, error) {
+	return &DemoLoginCapabilityOutput{
+		CacheControl: cachePrivateNoCache,
+		Body:         DemoLoginCapability{Capability: Capability{State: demoLoginState(ctx, reg.deps.DemoSettings)}},
+	}, nil
+}
+
+// demoLoginState reads the demo settings through the shared demo mode reader.
+// A setting it can't read answers disabled, so a client does not offer a
+// sign-in the server may refuse.
+func demoLoginState(ctx context.Context, settings apimw.DemoSettingsReader) string {
+	username, on, err := demomode.DemoAccount(ctx, settings)
+	if err != nil || !on {
+		return StateDisabled
+	}
+	if username == "" {
+		return StateNotConfigured
+	}
+	return StateAvailable
 }
 
 func (reg *Registry) signInWithNetworkIdentity(ctx context.Context, in *NetworkSignInInput) (*LoginOutput, error) {

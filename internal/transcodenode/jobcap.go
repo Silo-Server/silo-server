@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -59,28 +60,61 @@ func (s *Server) SetArtifactBudget(bytes int64) {
 // two starts arriving together at the cap less one cannot both pass.
 type jobSlot struct {
 	s    *Server
+	kind nodepool.JobKind
 	done bool
 }
 
-// admitJob admits new work under the job cap: work that is not a session,
-// remux or preparation the node already holds. It reports false at the cap.
+// admitJob admits new work of kind under the job cap: work that is not a
+// session, remux or preparation the node already holds. It reports false at
+// the cap. The health report counts the slot from here, so the core sees the
+// job while it gets ready (a RequireReady start waiting on its first segment).
 // The caller counts the slot with countJob once the job runs, and releases
 // it on every other return (release after count does nothing).
-func (s *Server) admitJob() (*jobSlot, bool) {
+func (s *Server) admitJob(kind nodepool.JobKind) (*jobSlot, bool) {
 	s.admission.Lock()
 	defer s.admission.Unlock()
 	if s.fullLocked() {
 		return nil, false
 	}
 	s.admitted++
-	return &jobSlot{s: s}, true
+	if s.admittedKinds == nil {
+		s.admittedKinds = make(map[nodepool.JobKind]int, len(nodepool.JobKinds))
+	}
+	s.admittedKinds[kind]++
+	return &jobSlot{s: s, kind: kind}, true
 }
 
-// countJob counts a job in activeJobs: its admitted slot when it was new
-// work, or none for work the node already held, which the cap never refuses.
-func (s *Server) countJob(slot *jobSlot) {
+// unadmitLocked takes an uncounted slot out of the admitted counts. The caller
+// holds s.admission.
+func (s *Server) unadmitLocked(slot *jobSlot) {
+	slot.done = true
+	s.admitted--
+	s.admittedKinds[slot.kind]--
+}
+
+// reportedJobs is what the health report counts: the jobs activeJobs counts
+// plus the slots admitted and not yet counted, by kind as well. It reads under
+// s.admission, which countJob holds while it moves a slot from admitted to
+// counted, so a job is in exactly one of the two. A drained node reports only
+// the jobs it counts: what it admits from then on is a start it is about to
+// refuse.
+func (s *Server) reportedJobs(drained bool) (int32, map[nodepool.JobKind]int) {
+	if drained {
+		return s.activeJobs.Load(), s.jobKinds.snapshot(nil)
+	}
+	s.admission.Lock()
+	defer s.admission.Unlock()
+	jobs := int32(min(int(s.activeJobs.Load())+s.admitted, math.MaxInt32)) //nolint:gosec // min clamps it to int32
+	return jobs, s.jobKinds.snapshot(s.admittedKinds)
+}
+
+// countJob counts a job of kind in activeJobs: its admitted slot when it was
+// new work, or none for work the node already held, which the cap never
+// refuses. The job ends with endJob of the same kind.
+func (s *Server) countJob(slot *jobSlot, kind nodepool.JobKind) {
 	if slot == nil {
 		s.activeJobs.Add(1)
+		s.jobKinds.add(kind, 1)
 		return
 	}
 	s.admission.Lock()
@@ -88,9 +122,53 @@ func (s *Server) countJob(slot *jobSlot) {
 	if slot.done {
 		return
 	}
-	slot.done = true
-	s.admitted--
+	s.unadmitLocked(slot)
 	s.activeJobs.Add(1)
+	s.jobKinds.add(kind, 1)
+}
+
+// endJob uncounts a job countJob counted.
+func (s *Server) endJob(kind nodepool.JobKind) {
+	s.activeJobs.Add(-1)
+	s.jobKinds.add(kind, -1)
+}
+
+// jobKindCounts breaks activeJobs down by nodepool.JobKind for the health
+// report, which the core's planner balances each kind on. It moves with
+// activeJobs in countJob and endJob. The zero value is ready to use.
+type jobKindCounts struct {
+	mu   sync.Mutex
+	jobs map[nodepool.JobKind]int
+}
+
+func (c *jobKindCounts) add(kind nodepool.JobKind, delta int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.jobs == nil {
+		c.jobs = make(map[nodepool.JobKind]int, len(nodepool.JobKinds))
+	}
+	c.jobs[kind] += delta
+}
+
+// snapshot names every kind, idle ones as zero, so the core can tell a node
+// with no jobs of a kind from a node that cannot say. extra adds jobs not
+// counted here, such as admitted slots.
+func (c *jobKindCounts) snapshot(extra map[nodepool.JobKind]int) map[nodepool.JobKind]int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make(map[nodepool.JobKind]int, len(nodepool.JobKinds))
+	for _, kind := range nodepool.JobKinds {
+		out[kind] = max(c.jobs[kind]+extra[kind], 0)
+	}
+	return out
+}
+
+// sessionJobKind classifies an HLS transcode session from what its recipe
+// re-encodes. A session's target codecs never change after it starts, so its
+// start and its retirement name the same kind.
+func sessionJobKind(session *playback.TranscodeSession) nodepool.JobKind {
+	opts := session.Opts()
+	return nodepool.CodecJobKind(opts.TargetCodecVideo, opts.TargetCodecAudio)
 }
 
 // release gives back a slot that was never counted.
@@ -101,8 +179,7 @@ func (slot *jobSlot) release() {
 	slot.s.admission.Lock()
 	defer slot.s.admission.Unlock()
 	if !slot.done {
-		slot.done = true
-		slot.s.admitted--
+		slot.s.unadmitLocked(slot)
 	}
 }
 
@@ -139,18 +216,18 @@ func (s *Server) admitPreparation(w http.ResponseWriter, req downloadprepare.Req
 	if _, prepared := existingDownloadPrepareResult(filepath.Join(s.artifactRoot, req.ArtifactID+".mp4"), req); prepared {
 		return nil, false
 	}
-	return s.admitNewPreparation(w)
+	return s.admitNewPreparation(w, req.JobKind())
 }
 
 // admitNewPreparation admits a preparation the node has to encode, under the
 // declared budget and the job cap, and writes the refusal when it is refused.
-func (s *Server) admitNewPreparation(w http.ResponseWriter) (slot *jobSlot, refused bool) {
+func (s *Server) admitNewPreparation(w http.ResponseWriter, kind nodepool.JobKind) (slot *jobSlot, refused bool) {
 	if s.artifactBudgetReached() {
 		setRefusal(w, nodepool.RefusalStorageFull)
 		http.Error(w, errNodeStorageFull, http.StatusServiceUnavailable)
 		return nil, true
 	}
-	slot, ok := s.admitJob()
+	slot, ok := s.admitJob(kind)
 	if !ok {
 		writeAtCapacity(w)
 		return nil, true
@@ -271,7 +348,7 @@ func (s *Server) admitStart(req TranscodeStartRequest, now time.Time) (slot *job
 	if overlap, continues := s.claimContinuation(req.PlaybackSessionID, now); continues {
 		return nil, overlap.release, true
 	}
-	slot, ok = s.admitJob()
+	slot, ok = s.admitJob(nodepool.CodecJobKind(req.TargetCodecVideo, req.TargetCodecAudio))
 	if !ok {
 		return nil, nil, false
 	}

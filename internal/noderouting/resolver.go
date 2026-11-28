@@ -122,6 +122,22 @@ type ResolveRequest struct {
 	// UnreachableNodes are node URLs the caller found not answering; see
 	// nodepool.RouteRequest.Unreachable.
 	UnreachableNodes map[string]struct{}
+	// TranscodesAudio says the stream re-encodes its audio. With Workload it
+	// names the transcode node's job kind (see jobKind), which the planner
+	// balances across nodes kind by kind.
+	TranscodesAudio bool
+}
+
+// jobKind is the kind of job a transcode node runs for this request: a video
+// transcode, a remux that converts audio, or a remux that copies every stream.
+// A workload that never runs on a transcode node has none.
+func (r ResolveRequest) jobKind() nodepool.JobKind {
+	switch r.Workload {
+	case WorkloadVideoTranscode, WorkloadRemux:
+		return nodepool.StreamJobKind(r.Workload == WorkloadVideoTranscode, r.TranscodesAudio)
+	default:
+		return ""
+	}
 }
 
 type Outcome string
@@ -185,6 +201,7 @@ func Resolve(planner nodepool.RoutePlanner, request ResolveRequest) (Decision, e
 			NeedsProxy:           shape.NeedsProxyNode(),
 			TranscodeEligible:    request.TranscodeEligible,
 			ProxyEligible:        proxyEligible,
+			JobKind:              request.jobKind(),
 			Unreachable:          request.UnreachableNodes,
 		})
 		if shape.NeedsTranscodeNode() != (plan.TranscodeNode != nil) ||

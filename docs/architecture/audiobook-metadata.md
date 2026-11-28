@@ -30,7 +30,8 @@ Admin field locks win over both writers.
 | Title, original title, series | tags | tags (the enricher never writes them) |
 | Year, genres, studios | tags; year follows the tag even when the tag is empty, genres and studios merge | provider; tags fill only an empty field |
 | Authors, narrators | every tagged author and narrator (multi-value tags are split) replaces the stored credits when they differ | provider; tagged credits are added only for a kind (author or narrator) the book has no credit for |
-| Overview, release date, language | tags fill an empty field | provider; tags fill an empty field |
+| Release date | tags; a date tag that reads as a date or year replaces the stored date, and a missing or unreadable tag keeps it | provider; tags fill only an empty field |
+| Overview, language | tags fill an empty field | provider; tags fill an empty field |
 | Cover | the folder image or embedded art | unchanged; a provider poster fills only a missing cover |
 | Runtime | the active files | the active files |
 

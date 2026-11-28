@@ -111,7 +111,7 @@ func (s *Server) handleTrickplayExtract(w http.ResponseWriter, r *http.Request) 
 	defer s.trickplay.done()
 	// A run is a job, so the node's own job cap refuses it as busy, which a
 	// core of any version tries elsewhere or later.
-	slot, admitted := s.admitJob()
+	slot, admitted := s.admitJob(nodepool.JobKindTrickplay)
 	if !admitted {
 		setRefusal(w, nodepool.RefusalAtCapacity)
 		writeTrickplayError(w, http.StatusServiceUnavailable, trickplay.ExtractError{Reason: trickplay.NodeBusyReason, Message: errNodeAtCapacity})
@@ -136,8 +136,8 @@ func (s *Server) handleTrickplayExtract(w http.ResponseWriter, r *http.Request) 
 	ctx, cancel := sourceContext(r.Context(), source)
 	defer cancel()
 	req.Input = source.Input()
-	s.countJob(slot)
-	defer s.activeJobs.Add(-1)
+	s.countJob(slot, nodepool.JobKindTrickplay)
+	defer s.endJob(nodepool.JobKindTrickplay)
 	// Backend resolution can smoke-encode after the shared probe cache is
 	// invalidated. Reserve admission before it starts and keep it through
 	// extraction, including a fallback to software.

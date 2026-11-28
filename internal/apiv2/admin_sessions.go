@@ -8,12 +8,27 @@ import (
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/streamlocation"
+	"github.com/Silo-Server/silo-server/internal/streamtelemetry"
 )
 
 type AdminPlaybackSessionService interface {
 	AdminPlaybackSessionsAvailable() bool
 	ReadAdminPlaybackSessions(context.Context, handlers.PlaybackSessionsQuery, string, int) ([]handlers.AdminPlaybackSessionView, error)
 	ReadAdminPlaybackSummary(context.Context, handlers.PlaybackSessionsQuery, int) ([]handlers.AdminPlaybackSessionView, int, error)
+}
+
+// AdminSessionEgressService is the merged stream-telemetry view's per-session
+// egress projection (*streamtelemetry.ViewCache), wired only while stream
+// telemetry is enabled.
+type AdminSessionEgressService interface {
+	SessionEgress(context.Context) (streamtelemetry.EgressView, streamtelemetry.ViewCacheStatus)
+}
+
+// AdminPlaybackSessionEgress is a playback session's cumulative viewer egress.
+type AdminPlaybackSessionEgress struct {
+	Bytes      int64   `json:"bytes" minimum:"0" doc:"Bytes Silo has sent to the viewer for this playback session so far, summed across every API server and proxy node; hops between Silo's own nodes are not counted"`
+	MeasuredAt Instant `json:"measured_at" doc:"When the newest of the counting servers took its count, on that server's clock; the same on every API server for the same reports. Servers report about once a second and their clocks can differ slightly, so rates over short intervals jitter. Divide a change in bytes by the change in this, not by the time between polls"`
+	Series     string  `json:"series" doc:"Opaque token naming the set of servers that make up bytes. Ignore an observation whose measured_at is not newer than the baseline's, whatever its series. Otherwise start a new baseline when series differs from the baseline's or bytes fell, and compare bytes only within one series"`
 }
 
 // AdminPlaybackSession is an observation, not a sequenced control receipt.
@@ -91,6 +106,7 @@ type AdminPlaybackSession struct {
 	RoutingEgressNodeName    string                                  `json:"routing_egress_node_name,omitempty"`
 	Subtitle                 NullableObject[PlaybackSessionSubtitle] `json:"subtitle" doc:"The subtitle the session's current plan delivers, following each replan (a subtitle switch the client reports, a recovery); null when it shows none, for a session planned before the server recorded it, and for Jellyfin-protocol and Audiobookshelf sessions. A client that turns an already delivered sidecar on or off without a replan is not seen."`
 	LifecycleSeq             *int64                                  `json:"lifecycle_seq,omitempty" doc:"Sequence number of the session's last lifecycle transition (start, pause, resume) on the sessions channel. A row and a session.* event with the same number carry the same is_paused; the higher number is the newer. Absent for a session that started before the server recorded lifecycle transitions."`
+	Egress                   *AdminPlaybackSessionEgress             `json:"egress,omitempty" doc:"Viewer egress of the session, only when the list was read with include_egress=true. Absent when it is unknown: stream telemetry is off, its merged view is not built, its last refresh failed, the session's routes exceeded the telemetry route cap, a counting server's clock runs ahead of this server's beyond the telemetry tolerance, telemetry has no record of the session, or a proxy node served the session while telemetry is not shared between servers. Never present in session.* events."`
 }
 
 // directStreamPlayMethod is the native bucket for copied video with converted
@@ -198,8 +214,9 @@ func adminPlaybackSessionOf(v handlers.AdminPlaybackSessionView) AdminPlaybackSe
 
 type AdminPlaybackSessionsInput struct {
 	LimitParam
-	Cursor string `query:"cursor" maxLength:"8192"`
-	UserID ID     `query:"user_id" doc:"Only live observations belonging to this login account"`
+	Cursor        string `query:"cursor" maxLength:"8192"`
+	UserID        ID     `query:"user_id" doc:"Only live observations belonging to this login account"`
+	IncludeEgress bool   `query:"include_egress" doc:"Add egress to the rows. Send it only when the capabilities report egress true."`
 }
 type AdminPlaybackSessionsOutput struct {
 	Body Collection[AdminPlaybackSession]
@@ -235,6 +252,7 @@ type AdminPlaybackSessionCapabilitiesOutputBody struct {
 	LifecycleEvents           bool     `json:"lifecycle_events" doc:"The admin sessions channel carries session.started, session.paused, session.resumed and session.stopped, and rows may carry lifecycle_seq"`
 	AdaptationReasons         bool     `json:"adaptation_reasons" doc:"Rows may carry adaptation_reasons"`
 	Subtitle                  bool     `json:"subtitle" doc:"Rows and admin playback history entries carry subtitle"`
+	Egress                    bool     `json:"egress" doc:"Stream telemetry is enabled: the list accepts include_egress and rows may then carry egress"`
 	AdaptationReasonValues    []string `json:"adaptation_reason_values" doc:"Every adaptation_reasons value this server emits, in the order it reports them. A later server may add values."`
 }
 
@@ -242,10 +260,10 @@ const opListAdminPlaybackSessions = "listAdminPlaybackSessions"
 
 func registerAdminPlaybackSessions(reg *Registry) {
 	cursors := NewCursors(reg.deps.CursorSecret)
-	op := func(path, id string) Operation {
-		return Operation{Operation: humaOp("GET", Prefix+"/admin/sessions"+path, id, "admin", "Read live playback observations; these do not confer control authority. Pagination bounds the SQL source and response using session identity."), Class: ClassActingAdmin, ServiceBacked: true}
+	op := func(path, id, summary string) Operation {
+		return Operation{Operation: humaOp("GET", Prefix+"/admin/sessions"+path, id, "admin", summary), Class: ClassActingAdmin, ServiceBacked: true}
 	}
-	Register(reg, op("/capabilities", "getAdminPlaybackSessionCapabilities"), func(_ context.Context, _ *CapabilityInput) (*AdminPlaybackSessionCapabilitiesOutput, error) {
+	Register(reg, op("/capabilities", "getAdminPlaybackSessionCapabilities", "Discover live playback observation features and supported row fields on this server."), func(_ context.Context, _ *CapabilityInput) (*AdminPlaybackSessionCapabilitiesOutput, error) {
 		out := new(AdminPlaybackSessionCapabilitiesOutput)
 		out.Body.Available = reg.deps.AdminPlaybackSessions != nil && reg.deps.AdminPlaybackSessions.AdminPlaybackSessionsAvailable()
 		out.Body.UserFilter = out.Body.Available
@@ -274,9 +292,10 @@ func registerAdminPlaybackSessions(reg *Registry) {
 		out.Body.Subtitle = true
 		out.Body.AdaptationReasonValues = slices.Clone(playback.AdaptationReasons)
 		out.Body.LifecycleEvents = out.Body.Available && reg.deps.PlaybackLifecycleEvents
+		out.Body.Egress = out.Body.Available && reg.deps.AdminSessionEgress != nil
 		return out, nil
 	})
-	Register(reg, op("", opListAdminPlaybackSessions), func(ctx context.Context, in *AdminPlaybackSessionsInput) (*AdminPlaybackSessionsOutput, error) {
+	Register(reg, op("", opListAdminPlaybackSessions, "Read live playback observations; these do not confer control authority. Pagination bounds the SQL source and response using session identity."), func(ctx context.Context, in *AdminPlaybackSessionsInput) (*AdminPlaybackSessionsOutput, error) {
 		if reg.deps.AdminPlaybackSessions == nil || !reg.deps.AdminPlaybackSessions.AdminPlaybackSessionsAvailable() {
 			return nil, unavailable("administrator playback sessions")
 		}
@@ -313,9 +332,12 @@ func registerAdminPlaybackSessions(reg *Registry) {
 			}
 			items = append(items, adminPlaybackSessionOf(row))
 		}
+		if in.IncludeEgress && len(items) > 0 && reg.deps.AdminSessionEgress != nil {
+			addAdminSessionEgress(ctx, reg.deps.AdminSessionEgress, items)
+		}
 		return &AdminPlaybackSessionsOutput{Body: Paginated(items, next)}, nil
 	})
-	summary := op("/summary", "getAdminPlaybackSummary")
+	summary := op("/summary", "getAdminPlaybackSummary", "Read a bounded sample and total count of live playback observations without session identifiers or diagnostic metadata.")
 	summary.Description = "Read a bounded sample and total count of live playback observations, optionally filtered by account, without session identifiers or diagnostic metadata."
 	Register(reg, summary, func(ctx context.Context, in *AdminPlaybackSummaryInput) (*AdminPlaybackSummaryOutput, error) {
 		if reg.deps.AdminPlaybackSessions == nil || !reg.deps.AdminPlaybackSessions.AdminPlaybackSessionsAvailable() {
@@ -341,6 +363,32 @@ func registerAdminPlaybackSessions(reg *Registry) {
 		}
 		return out, nil
 	})
+}
+
+// addAdminSessionEgress fills egress on the rows the merged telemetry view can
+// vouch for. Egress is omitted, never zero, when the count is unknown: no view
+// yet, a failed refresh (the cache serves the last good view, whose counters a
+// client would diff against newer ones), a session whose routes were capped or
+// whose counting server's clock runs ahead, a session telemetry has no record
+// of, or, when telemetry is local to this process, a session a proxy node
+// served, whose bytes the view cannot see.
+//
+// A stale or missing publisher does not blank the list: it drops out of each
+// session it served, which changes that session's series. A view served stale
+// only because a rebuild is in flight still counts: each row's measured_at
+// comes from the publishers, so a client diffs it correctly.
+func addAdminSessionEgress(ctx context.Context, source AdminSessionEgressService, items []AdminPlaybackSession) {
+	view, status := source.SessionEgress(ctx)
+	if !status.Available || status.LastError != "" {
+		return
+	}
+	for i := range items {
+		egress, ok := view.Sessions[items[i].SessionID]
+		if !ok || egress.Degraded || (!view.Distributed && items[i].RoutingEgressNodeID != nil) {
+			continue
+		}
+		items[i].Egress = &AdminPlaybackSessionEgress{Bytes: egress.Bytes, MeasuredAt: NewInstant(egress.MeasuredAt), Series: egress.Series}
+	}
 }
 
 // A fixed projection keeps diagnostic identifiers and network details out of summary credentials.

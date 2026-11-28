@@ -18,6 +18,7 @@ import { usePageActivity } from "@/hooks/usePageActivity";
 
 export type DirectConnectionsHostStatus = components["schemas"]["DirectConnectionsHostStatus"];
 type DirectConnectionsStatus = components["schemas"]["DirectConnectionsStatus"];
+export type DirectConnectionPeer = components["schemas"]["DirectConnectionPeer"];
 
 const STATUS_POLL_INTERVAL = 15_000;
 
@@ -53,6 +54,41 @@ function recordPublication(client: QueryClient, queryKey: readonly unknown[]) {
   const counts = refreshPublications.get(client) ?? new Map<string, number>();
   counts.set(JSON.stringify(queryKey), publicationCount(client, queryKey) + 1);
   refreshPublications.set(client, counts);
+}
+
+function peersKey(context: ProfileRequestContextSnapshot | null) {
+  return [
+    "admin",
+    "directConnections",
+    "peers",
+    context?.serverOrigin,
+    context?.authContextVersion,
+    context?.profileId,
+    context?.profileTokenGeneration,
+  ] as const;
+}
+
+/** Lists the devices with a direct path to the API host now, while the page is visible. */
+export function useAdminDirectConnectionPeers() {
+  const pageActivity = usePageActivity();
+  const profileContext = captureProfileRequestContext();
+  return useQuery({
+    queryKey: peersKey(profileContext),
+    enabled: profileContext !== null,
+    queryFn: async ({ signal }) => {
+      if (!profileContext || !isCapturedProfileAuthorityActive(profileContext))
+        throw new StaleApiRequestContextError();
+      const result = await v2("GET /api/v2/admin/direct-connections/peers", {
+        profileContext,
+        signal,
+      });
+      if (!isCapturedProfileAuthorityActive(profileContext))
+        throw new StaleApiRequestContextError();
+      return result;
+    },
+    staleTime: STATUS_POLL_INTERVAL,
+    refetchInterval: pageActivity.canApplyRealtimeUpdates ? STATUS_POLL_INTERVAL : false,
+  });
 }
 
 /** Reads the last completed check while visible; polling starts no new probes. */

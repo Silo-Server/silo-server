@@ -623,11 +623,12 @@ func updateCurrentRole(ctx context.Context, db interface {
 }
 
 // endImpersonationsInvolving ends the impersonation sessions account id
-// started and those viewing the server as it. A role change keeps the
+// started and those viewing the server as it. A demotion keeps the
 // account's own sessions (their access tokens must be refreshed to carry the
-// new role), but a demoted admin may no longer view as anyone, and a promoted
-// account may only be viewed as by the Owner. Refreshing an impersonation
-// session would otherwise carry it across the change.
+// new role; a promotion's callers sign the account out), but a demoted admin
+// may no longer view as anyone, and a promoted account may only be viewed as
+// by the Owner. Refreshing an impersonation session would otherwise carry it
+// across the change.
 func endImpersonationsInvolving(ctx context.Context, db interface {
 	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
 }, id int) error {

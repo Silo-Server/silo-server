@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import type { ReactNode } from "react";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { DirectConnectionsHostStatus } from "@/hooks/queries/admin/directConnections";
@@ -18,6 +18,10 @@ const state = vi.hoisted(() => ({
   host: undefined as unknown,
   persistedEnabled: "true",
   dirtyCount: 0,
+  dirtyKeys: [] as string[],
+  loaded: true,
+  loadError: false,
+  retryLoad: vi.fn(),
 }));
 
 vi.mock("@/hooks/useSettingsForm", () => ({
@@ -26,11 +30,15 @@ vi.mock("@/hooks/useSettingsForm", () => ({
     getPersistedValue: (key: string) =>
       key === "direct_connections.enabled" ? state.persistedEnabled : "",
     setValue: vi.fn(),
-    isDirty: () => false,
+    isDirty: (key: string) => state.dirtyKeys.includes(key),
     dirtyCount: state.dirtyCount,
     save: vi.fn(),
     discard: vi.fn(),
     isSaving: false,
+    loaded: state.loaded,
+    isPending: !state.loaded && !state.loadError,
+    loadError: state.loadError,
+    retryLoad: state.retryLoad,
     envVar: () => undefined,
   }),
 }));
@@ -41,6 +49,7 @@ vi.mock("@/hooks/queries/admin/directConnections", () => ({
     data: { enabled: true, hosts: [state.host] },
   }),
   useRefreshDirectConnections: () => ({ isPending: false, isError: false, mutate: vi.fn() }),
+  useAdminDirectConnectionPeers: () => ({ isLoading: false, isError: false, data: { items: [] } }),
 }));
 
 function show(
@@ -95,6 +104,10 @@ afterEach(() => {
   cleanup();
   state.persistedEnabled = "true";
   state.dirtyCount = 0;
+  state.dirtyKeys = [];
+  state.loaded = true;
+  state.loadError = false;
+  state.retryLoad.mockClear();
 });
 
 describe("host tuning values", () => {
@@ -102,12 +115,12 @@ describe("host tuning values", () => {
     show({ knobs: [congestion, sendBuffer] });
 
     const algorithm = row("TCP congestion control");
-    expect(algorithm.getByText("Effective: BBR")).toBeInTheDocument();
+    expect(algorithm.getByText("Active: BBR")).toBeInTheDocument();
     expect(algorithm.getByText("Default: BBR")).toBeInTheDocument();
     expect(algorithm.getByText("Allowed: BBR, Off")).toBeInTheDocument();
 
     const buffer = row("TCP send buffer");
-    expect(buffer.getByText("Effective: 32.0 MB")).toBeInTheDocument();
+    expect(buffer.getByText("Active: 32.0 MB")).toBeInTheDocument();
     expect(buffer.getByText("Default: 32.0 MB")).toBeInTheDocument();
     expect(screen.queryByText(/33554432/)).not.toBeInTheDocument();
   });
@@ -121,10 +134,10 @@ describe("host tuning values", () => {
     });
 
     const algorithm = row("TCP congestion control");
-    expect(algorithm.getByText("Effective: Off")).toBeInTheDocument();
+    expect(algorithm.getByText("Active: Off")).toBeInTheDocument();
     expect(algorithm.getByText("Requested: bbrr")).toBeInTheDocument();
     const buffer = row("TCP send buffer");
-    expect(buffer.getByText("Effective: Off")).toBeInTheDocument();
+    expect(buffer.getByText("Active: Off")).toBeInTheDocument();
     expect(buffer.getByText("Requested: lots")).toBeInTheDocument();
   });
 });
@@ -246,16 +259,16 @@ describe("direct connection tuning rows", () => {
   it("names each direct variable and shows on and off as states", () => {
     show({ knobs: [udpPort, gso, bbrLoss, receiveWindow, ackDecimation] });
 
-    expect(row("Direct connection UDP port").getByText("Effective: 8094")).toBeInTheDocument();
+    expect(row("Direct connection UDP port").getByText("Active: 8094")).toBeInTheDocument();
     const offload = row("UDP segmentation offload");
-    expect(offload.getByText("Effective: On")).toBeInTheDocument();
+    expect(offload.getByText("Active: On")).toBeInTheDocument();
     expect(offload.getByText("Default: On")).toBeInTheDocument();
     expect(offload.getByText("Allowed: On, Off")).toBeInTheDocument();
     const decimation = row("ACK decimation");
-    expect(decimation.getByText("Effective: Off")).toBeInTheDocument();
+    expect(decimation.getByText("Active: Off")).toBeInTheDocument();
     expect(decimation.getByText("Default: On")).toBeInTheDocument();
     const loss = row("BBR loss policy");
-    expect(loss.getByText("Effective: Off")).toBeInTheDocument();
+    expect(loss.getByText("Active: Off")).toBeInTheDocument();
     expect(loss.getByText("Requested: none")).toBeInTheDocument();
   });
 
@@ -263,9 +276,9 @@ describe("direct connection tuning rows", () => {
     show({ knobs: [receiveWindow] });
 
     const window = row("Client receive window");
-    expect(window.getByText("Effective: 64.0 MB")).toBeInTheDocument();
+    expect(window.getByText("Active: 64.0 MB")).toBeInTheDocument();
     expect(window.getByText("Default: 128.0 MB")).toBeInTheDocument();
-    expect(screen.queryByText(/Effective: 64$/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Active: 64$/)).not.toBeInTheDocument();
   });
 
   it("shows the allowed range under each numeric row, formatted like its value", () => {
@@ -293,7 +306,7 @@ describe("direct connection tuning rows", () => {
     show({});
 
     expect(
-      screen.getByText(/^Turning this on starts the direct connection engine\./),
+      screen.getByText(/^Turning this on opens a UDP port for direct connections/),
     ).toBeInTheDocument();
     expect(screen.queryByText(/do not start direct playback/)).not.toBeInTheDocument();
   });
@@ -309,9 +322,9 @@ describe("direct connection tuning rows", () => {
 
     expect(screen.getByText(/^⟦Ŕåñĝé: /)).toBeInTheDocument();
     expect(screen.getByText(/^⟦Îñṽåļîđ ṽåļûé; ûšîñĝ ţĥé đéƒåûļţ/)).toBeInTheDocument();
-    expect(screen.getByText(/^⟦Ţûŕñîñĝ ţĥîš öñ šţåŕţš/)).toBeInTheDocument();
+    expect(screen.getByText(/^⟦Ţûŕñîñĝ ţĥîš öñ öþéñš/)).toBeInTheDocument();
     expect(
-      screen.queryByText(/Range:|Invalid value|Turning this on starts/),
+      screen.queryByText(/Range:|Invalid value|Turning this on opens/),
     ).not.toBeInTheDocument();
   });
 });
@@ -326,7 +339,7 @@ describe("host tuning field names", () => {
 });
 
 describe("section visibility", () => {
-  it("hides the section once enablement is off and nothing is staged", () => {
+  it("hides readiness once enablement is off and nothing is staged", () => {
     state.persistedEnabled = "false";
     show({});
 
@@ -338,7 +351,55 @@ describe("section visibility", () => {
     state.dirtyCount = 1;
     show({});
 
-    expect(screen.getByRole("heading", { name: "API server" })).toBeInTheDocument();
+    expect(screen.getByText("Enable direct connections")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Discard" })).toBeInTheDocument();
+  });
+
+  it("shows the toggle without readiness or connected devices while enablement is off", () => {
+    state.persistedEnabled = "false";
+    show({});
+
+    expect(screen.getByText("Enable direct connections")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "API server" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Connected devices")).not.toBeInTheDocument();
+  });
+
+  it("keeps Advanced and the save bar while an Advanced key is staged after enablement turns off", () => {
+    state.persistedEnabled = "false";
+    state.dirtyCount = 1;
+    state.dirtyKeys = ["direct_connections.port_mapping"];
+    show({});
+
+    expect(screen.getByText("Port mapping")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Discard" })).toBeInTheDocument();
+  });
+});
+
+describe("settings that have not loaded", () => {
+  it("keeps the toggle off-limits until the settings arrive", () => {
+    state.persistedEnabled = "false";
+    state.loaded = false;
+    show({});
+
+    expect(screen.getByRole("switch")).toBeDisabled();
+  });
+
+  it("keeps the toggle off-limits after a failed load and offers a retry", () => {
+    state.persistedEnabled = "false";
+    state.loaded = false;
+    state.loadError = true;
+    show({});
+
+    expect(screen.getByRole("switch")).toBeDisabled();
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    fireEvent.click(within(screen.getByRole("alert")).getByRole("button"));
+    expect(state.retryLoad).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets an administrator edit the toggle once the settings have loaded", () => {
+    state.persistedEnabled = "false";
+    show({});
+
+    expect(screen.getByRole("switch")).toBeEnabled();
   });
 });

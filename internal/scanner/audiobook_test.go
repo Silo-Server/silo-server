@@ -338,8 +338,9 @@ func TestApplyBookToMediaItemSortTitleFollowsTitle(t *testing.T) {
 	}
 }
 
-// An admin's locked fields survive a changed-book rescan: tags only fill what
-// the editor has not pinned. The item's overview starts empty, as after an
+// An admin's locked fields survive a changed-book rescan, and the fields left
+// unlocked follow the new tags: a retagged date moves the year and the release
+// date together. The item's overview starts empty, as after an
 // admin clears a bad tag description.
 func TestApplyBookToMediaItemKeepsLockedFields(t *testing.T) {
 	book := &parsedAudiobook{
@@ -351,6 +352,7 @@ func TestApplyBookToMediaItemKeepsLockedFields(t *testing.T) {
 		Overview:    "Tagged overview",
 	}
 	edited := "2020-05-06"
+	tagged := "2001-02-03"
 	newItem := func(locked ...int) *models.MediaItem {
 		return &models.MediaItem{
 			Title:        "Admin Title",
@@ -368,18 +370,19 @@ func TestApplyBookToMediaItemKeepsLockedFields(t *testing.T) {
 		matched      bool
 		wantTitle    string
 		wantYear     int
+		wantRelease  string
 		wantGenres   []string
 		wantStudios  []string
 		wantOverview string
 	}{
-		{"nothing locked", nil, false, "Tagged Title", 2001, []string{"Admin Genre", "Tagged Genre"}, []string{"Admin Studio", "Tagged Press"}, "Tagged overview"},
-		{"title locked", []int{lockedFieldName}, false, "Admin Title", 2001, []string{"Admin Genre", "Tagged Genre"}, []string{"Admin Studio", "Tagged Press"}, "Tagged overview"},
-		{"release dates locked", []int{lockedFieldReleaseDates}, false, "Tagged Title", 2020, []string{"Admin Genre", "Tagged Genre"}, []string{"Admin Studio", "Tagged Press"}, "Tagged overview"},
-		{"genres and studios locked", []int{lockedFieldGenres, lockedFieldStudios}, false, "Tagged Title", 2001, []string{"Admin Genre"}, []string{"Admin Studio"}, "Tagged overview"},
-		{"overview locked", []int{lockedFieldOverview}, false, "Tagged Title", 2001, []string{"Admin Genre", "Tagged Genre"}, []string{"Admin Studio", "Tagged Press"}, ""},
-		// A provider match owns year, genres and studios; tags keep the title
-		// and only fill what is empty.
-		{"provider matched", nil, true, "Tagged Title", 2020, []string{"Admin Genre"}, []string{"Admin Studio"}, "Tagged overview"},
+		{"nothing locked", nil, false, "Tagged Title", 2001, tagged, []string{"Admin Genre", "Tagged Genre"}, []string{"Admin Studio", "Tagged Press"}, "Tagged overview"},
+		{"title locked", []int{lockedFieldName}, false, "Admin Title", 2001, tagged, []string{"Admin Genre", "Tagged Genre"}, []string{"Admin Studio", "Tagged Press"}, "Tagged overview"},
+		{"release dates locked", []int{lockedFieldReleaseDates}, false, "Tagged Title", 2020, edited, []string{"Admin Genre", "Tagged Genre"}, []string{"Admin Studio", "Tagged Press"}, "Tagged overview"},
+		{"genres and studios locked", []int{lockedFieldGenres, lockedFieldStudios}, false, "Tagged Title", 2001, tagged, []string{"Admin Genre"}, []string{"Admin Studio"}, "Tagged overview"},
+		{"overview locked", []int{lockedFieldOverview}, false, "Tagged Title", 2001, tagged, []string{"Admin Genre", "Tagged Genre"}, []string{"Admin Studio", "Tagged Press"}, ""},
+		// A provider match owns the year, release date, genres and studios;
+		// tags keep the title and only fill what is empty.
+		{"provider matched", nil, true, "Tagged Title", 2020, edited, []string{"Admin Genre"}, []string{"Admin Studio"}, "Tagged overview"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			item := newItem(tc.locked...)
@@ -390,8 +393,8 @@ func TestApplyBookToMediaItemKeepsLockedFields(t *testing.T) {
 			if item.Year != tc.wantYear {
 				t.Errorf("Year = %d, want %d", item.Year, tc.wantYear)
 			}
-			if item.ReleaseDate == nil || *item.ReleaseDate != edited {
-				t.Errorf("ReleaseDate = %v, want %q kept", item.ReleaseDate, edited)
+			if item.ReleaseDate == nil || *item.ReleaseDate != tc.wantRelease {
+				t.Errorf("ReleaseDate = %v, want %q", item.ReleaseDate, tc.wantRelease)
 			}
 			if !slices.Equal(item.Genres, tc.wantGenres) {
 				t.Errorf("Genres = %v, want %v", item.Genres, tc.wantGenres)

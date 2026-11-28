@@ -155,8 +155,21 @@ func NewOAuthHandler(d OAuthHandlerDeps) *OAuthHandler {
 // SetHostBaseURL updates the externally reachable origin used for future
 // OAuth redirects.
 func (h *OAuthHandler) SetHostBaseURL(url string) {
-	normalized := strings.TrimRight(strings.TrimSpace(url), "/")
+	normalized := normalizeHostBaseURL(url)
 	h.hostBaseURL.Store(&normalized)
+}
+
+func normalizeHostBaseURL(url string) string {
+	return strings.TrimRight(strings.TrimSpace(url), "/")
+}
+
+// OAuthSignInServed reports whether OAuth sign-in can be served with
+// publicURL (server.public_url) as the public URL: every flow start needs
+// one to resume on and to name the callback the provider knows. Without it
+// an OAuth provider signs nobody in, while a credentials (directory)
+// provider still does.
+func OAuthSignInServed(publicURL string) bool {
+	return normalizeHostBaseURL(publicURL) != ""
 }
 
 func (h *OAuthHandler) currentHostBaseURL() string {
@@ -257,7 +270,7 @@ func NativeStartPath(prefix string, installID int) string {
 // public URL is configured, so the flow has an origin to resume on and a
 // callback the provider knows.
 func (h *OAuthHandler) NativeSignInAvailable() bool {
-	return h.currentHostBaseURL() != ""
+	return OAuthSignInServed(h.currentHostBaseURL())
 }
 
 // OnPublicOrigin reports whether r arrived on the configured public origin.
@@ -502,7 +515,7 @@ func (h *OAuthHandler) consumeLinkTicket(ctx context.Context, value string, inst
 // checkStart refuses a start that cannot succeed before anything is
 // written or the browser is bounced.
 func (h *OAuthHandler) checkStart(ctx context.Context, req OAuthStartRequest) error {
-	if h.currentHostBaseURL() == "" {
+	if !OAuthSignInServed(h.currentHostBaseURL()) {
 		return &OAuthHandshakeError{Status: http.StatusConflict, Message: "Silo public URL is not configured"}
 	}
 	if req.LinkTicket != "" && !req.Native {
@@ -1141,7 +1154,7 @@ func (h *OAuthHandler) StartLink(ctx context.Context, userID int, prefix, ticket
 	if !h.LinkingAvailable() {
 		return OAuthStartResult{}, ErrLinkTicketUnavailable
 	}
-	if h.currentHostBaseURL() == "" {
+	if !OAuthSignInServed(h.currentHostBaseURL()) {
 		return OAuthStartResult{}, ErrOAuthPublicOriginRequired
 	}
 	ticket, err := h.consumeLinkTicket(ctx, ticketValue, 0)

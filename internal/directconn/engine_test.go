@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/netip"
 	"reflect"
 	"slices"
 	"strings"
@@ -21,6 +22,7 @@ import (
 	"time"
 
 	"github.com/darthShadow/shunpike/coordination/protocol"
+	"github.com/darthShadow/shunpike/coordination/server"
 	"github.com/darthShadow/shunpike/engine"
 	"github.com/darthShadow/shunpike/engine/n4"
 	"github.com/redis/go-redis/v9"
@@ -39,12 +41,62 @@ type lifecycleEngine struct {
 	id           int
 	closeStarted chan struct{}
 	closeRelease <-chan struct{}
+	// stateMu guards reg, paths and peersErr, which tests change while the
+	// engine runs.
+	stateMu  sync.Mutex
+	reg      protocol.Registration
+	paths    map[protocol.NodeKey]engine.PathStatus
+	peersErr error
+}
+
+func (e *lifecycleEngine) IsPeer(k protocol.NodeKey) bool {
+	e.eventsMu.Lock()
+	defer e.eventsMu.Unlock()
+	return slices.ContainsFunc(e.peers, func(p engine.Peer) bool { return p.NodeKey == k })
+}
+
+func (e *lifecycleEngine) Registration() (protocol.Registration, error) {
+	e.stateMu.Lock()
+	defer e.stateMu.Unlock()
+	reg := e.reg
+	reg.Endpoints = slices.Clone(reg.Endpoints)
+	reg.Confirmations = slices.Clone(reg.Confirmations)
+	return reg, nil
+}
+
+func (e *lifecycleEngine) Path(k protocol.NodeKey) engine.PathStatus {
+	e.stateMu.Lock()
+	defer e.stateMu.Unlock()
+	if status, ok := e.paths[k]; ok {
+		return status
+	}
+	return engine.PathStatus{Class: "none"}
+}
+
+// setRegistration replaces what the engine reports and fires Changed, as the
+// real engine does when its endpoints or confirmations change.
+func (e *lifecycleEngine) setRegistration(reg protocol.Registration, fire bool) {
+	e.stateMu.Lock()
+	e.reg = reg
+	e.stateMu.Unlock()
+	if fire {
+		select {
+		case e.changed <- struct{}{}:
+		default:
+		}
+	}
 }
 
 func (e *lifecycleEngine) LocalPort() uint16          { return e.port }
 func (e *lifecycleEngine) Changed() <-chan struct{}   { return e.changed }
 func (e *lifecycleEngine) PacketConn() net.PacketConn { return nil }
 func (e *lifecycleEngine) SetPeers(peers []engine.Peer) error {
+	e.stateMu.Lock()
+	err := e.peersErr
+	e.stateMu.Unlock()
+	if err != nil {
+		return err
+	}
 	e.eventsMu.Lock()
 	defer e.eventsMu.Unlock()
 	e.peers = append([]engine.Peer(nil), peers...)
@@ -113,6 +165,8 @@ type lifecycleFixture struct {
 	leased    bool
 	failFrom  time.Duration
 	leaseLost atomic.Bool
+	// onNew, when set, sees the config of each engine the service builds.
+	onNew func(engine.Config)
 }
 
 type lifecycleLogWriter struct {
@@ -165,16 +219,26 @@ func newLifecycleFixture(t *testing.T, name string) *lifecycleFixture {
 
 func (f *lifecycleFixture) newEngine(_ context.Context, c engine.Config) (engineHandle, error) {
 	f.calls++
+	if f.onNew != nil {
+		f.onNew(c)
+	}
 	f.eventsMu.Lock()
 	f.events = append(f.events, fmt.Sprintf("new %d", f.calls))
 	f.eventsMu.Unlock()
 	if int(c.Port) != f.cfg.Tuning.DirectUDPPort {
 		f.t.Errorf("requested port = %d, want %d", c.Port, f.cfg.Tuning.DirectUDPPort)
 	}
+	if f.name == "start failure" {
+		return nil, errors.New("start refused")
+	}
 	if f.name == "bind failure" || (f.name == "drift failure" && f.calls == 2) {
 		return nil, fmt.Errorf("bind: %w", engine.ErrPortUnavailable)
 	}
-	e := &lifecycleEngine{port: c.Port, changed: make(chan struct{}, 1), events: &f.events, eventsMu: &f.eventsMu, id: f.calls}
+	e := &lifecycleEngine{port: c.Port, changed: make(chan struct{}, 1), events: &f.events, eventsMu: &f.eventsMu, id: f.calls,
+		reg: protocol.Registration{NodeKey: protocol.NodeKey{0xA1}, DiscoKey: protocol.DiscoKey{0xA2}, Endpoints: []netip.AddrPort{netip.MustParseAddrPort("198.51.100.1:8094")}}}
+	if f.name == "peers failure" {
+		e.peersErr = errors.New("peer set refused")
+	}
 	f.engines = append(f.engines, e)
 	return e, nil
 }
@@ -675,6 +739,8 @@ type serveExitFixture struct {
 	servers   []*exitServer
 	renewFail atomic.Bool
 	leased    bool
+	// coordStore is the coordination store when the coordination option is set.
+	coordStore CoordinationStore
 }
 
 type serveExitOptions struct {
@@ -686,6 +752,8 @@ type serveExitOptions struct {
 	capabilities chan struct{}
 	// logs, when set, receives the service log instead of the fixture's buffer.
 	logs io.Writer
+	// coordination attaches a coordination service over a memory store.
+	coordination bool
 }
 
 func newServeExitFixture(t *testing.T, opts serveExitOptions) *serveExitFixture {
@@ -714,7 +782,8 @@ func newServeExitFixture(t *testing.T, opts serveExitOptions) *serveExitFixture 
 	cfg.newEngine = func(_ context.Context, c engine.Config) (engineHandle, error) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
-		return &lifecycleEngine{port: c.Port, changed: make(chan struct{}, 1), events: &events, eventsMu: &eventsMu, id: len(f.servers) + 1}, nil
+		return &lifecycleEngine{port: c.Port, changed: make(chan struct{}, 1), events: &events, eventsMu: &eventsMu, id: len(f.servers) + 1,
+			reg: protocol.Registration{NodeKey: protocol.NodeKey{0xA1}, DiscoKey: protocol.DiscoKey{0xA2}, Endpoints: []netip.AddrPort{netip.MustParseAddrPort("198.51.100.1:8094")}}}, nil
 	}
 	cfg.newServer = func(engineHandle, n4.Policy) engineServer {
 		f.mu.Lock()
@@ -732,6 +801,15 @@ func newServeExitFixture(t *testing.T, opts serveExitOptions) *serveExitFixture 
 		cfg.ReplicaPresence = cache.NewAPIReplicaPresence(client, "api")
 	}
 	f.svc = New(context.Background(), cfg)
+	if opts.coordination {
+		store := newMemoryStore()
+		coord, err := NewCoordination(CoordinationConfig{Store: store, AuthSecret: testAuthSecret, Clock: time.Now})
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.coordStore = store
+		f.svc.SetCoordination(coord)
+	}
 	return f
 }
 
@@ -1208,5 +1286,178 @@ func TestShutdownClosesEngineBeforeReleasingLease(t *testing.T) {
 		if closed < 0 || released < 0 || closed > released {
 			t.Fatalf("shutdown events %v: want close 1 before release", f.events)
 		}
+	})
+}
+
+// predecessorHostKey is the node key of the API host entry a previous lease
+// holder left in the store.
+var predecessorHostKey = protocol.NodeKey{0xB1}
+
+// seedPredecessor writes what a previous lease holder leaves behind: its API
+// host entry and its confirmation of d, enrolled on account 7 as "tv".
+func seedPredecessor(t *testing.T, store CoordinationStore, d regionDevice) {
+	t.Helper()
+	now := time.Now()
+	host := server.HostEntry{Label: coordinationHostLabel, NodeKey: predecessorHostKey, DiscoKey: protocol.DiscoKey{0xB2},
+		Endpoints: []netip.AddrPort{netip.MustParseAddrPort("198.51.100.2:8094")}, PresenceExpires: now.Add(confirmationLifetime)}
+	if err := store.PutHost(t.Context(), host, now); err != nil {
+		t.Fatal(err)
+	}
+	confirmation := protocol.Confirmation{Peer: d.nodeKey, DiscoKey: protocol.DiscoKey{0xD1}, Endpoint: netip.MustParseAddrPort("203.0.113.9:4000")}
+	if err := store.PutConfirmation(t.Context(), coordinationHostLabel, deviceRef(7, "tv"), &confirmation, now.Add(confirmationLifetime), now); err != nil {
+		t.Fatal(err)
+	}
+	if got := confirmationsOf(t, store); len(got) != 1 {
+		t.Fatalf("seeded confirmations = %v, want the predecessor's", got)
+	}
+}
+
+// confirmationsOf returns the live confirmations of the device seedPredecessor
+// names.
+func confirmationsOf(t *testing.T, store CoordinationStore) map[string]protocol.Confirmation {
+	t.Helper()
+	got, err := store.Confirmations(t.Context(), deviceRef(7, "tv"), time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return got
+}
+
+// hostKeys returns the node keys of the live host entries.
+func hostKeys(t *testing.T, store CoordinationStore) []protocol.NodeKey {
+	t.Helper()
+	hosts, err := store.Hosts(t.Context(), time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys := make([]protocol.NodeKey, 0, len(hosts))
+	for _, h := range hosts {
+		keys = append(keys, h.NodeKey)
+	}
+	return keys
+}
+
+// hostCleanupStore fails the first failDeletes DeleteHost calls with a store
+// outage and counts every call.
+type hostCleanupStore struct {
+	CoordinationStore
+	failDeletes atomic.Int32
+	deletes     atomic.Int32
+}
+
+func (s *hostCleanupStore) DeleteHost(ctx context.Context, label string) error {
+	s.deletes.Add(1)
+	if s.failDeletes.Add(-1) >= 0 {
+		return fmt.Errorf("delete host: %w", server.ErrUnavailable)
+	}
+	return s.CoordinationStore.DeleteHost(ctx, label) //nolint:wrapcheck // A test double passes the store's result through.
+}
+
+// TestSuccessorClearsStaleConfirmations: a new engine removes the confirmations
+// a previous lease holder left before it publishes its own host entry, so no
+// device reads them beside the new host.
+func TestSuccessorClearsStaleConfirmations(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		store := newMemoryStore()
+		f, coord := startReplica(t, store, nil)
+		defer f.cleanup()
+		defer func() { _ = coord.Close() }()
+		seedPredecessor(t, store, newRegionDevice(t, coord, "tv"))
+		f.apply()
+		f.initial()
+		// No engine event and no refresh tick has run yet.
+		if got := confirmationsOf(t, store); len(got) != 0 {
+			t.Fatalf("confirmations after the start = %v, want none: the predecessor's stays until its 90 s lifetime", got)
+		}
+		if got, want := hostKeys(t, store), []protocol.NodeKey{f.engines[0].reg.NodeKey}; !slices.Equal(got, want) {
+			t.Fatalf("host entries after the start = %v, want the new engine's %v", got, want)
+		}
+	})
+}
+
+// TestStartCleanupFailsKeepsHostUnpublished: while the cleanup of the previous
+// holder's entries fails, the new engine publishes no host entry and its region
+// dial stays shut; the refresh tick retries the cleanup and then publishes.
+func TestStartCleanupFailsKeepsHostUnpublished(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		store := &hostCleanupStore{CoordinationStore: newMemoryStore()}
+		store.failDeletes.Store(1)
+		f, coord := startReplica(t, store, nil)
+		defer f.cleanup()
+		defer func() { _ = coord.Close() }()
+		seedPredecessor(t, store, newRegionDevice(t, coord, "tv"))
+		dialed := make(chan dialResult, 1)
+		f.onNew = func(c engine.Config) {
+			go func() {
+				conn, err := c.Signaling.Dial(t.Context(), "")
+				dialed <- dialResult{conn, err, nil}
+			}()
+		}
+		f.apply()
+		f.initial()
+		if got, want := hostKeys(t, store), []protocol.NodeKey{predecessorHostKey}; !slices.Equal(got, want) {
+			t.Fatalf("host entries after a failed cleanup = %v, want only the predecessor's %v", got, want)
+		}
+		if got := confirmationsOf(t, store); len(got) != 1 {
+			t.Fatalf("confirmations after a failed cleanup = %v, want the predecessor's, untouched", got)
+		}
+		select {
+		case got := <-dialed:
+			t.Fatalf("the region dial returned (%v) before the cleanup succeeded", got.err)
+		default:
+		}
+		time.Sleep(hostRefreshInterval + time.Second) //nolint:forbidigo // Runs in a synctest bubble: fake time moves the refresh tick.
+		synctest.Wait()
+		if got := confirmationsOf(t, store); len(got) != 0 {
+			t.Fatalf("confirmations after the retried cleanup = %v, want none", got)
+		}
+		if got, want := hostKeys(t, store), []protocol.NodeKey{f.engines[0].reg.NodeKey}; !slices.Equal(got, want) {
+			t.Fatalf("host entries after the retried cleanup = %v, want the new engine's %v", got, want)
+		}
+		select {
+		case got := <-dialed:
+			if got.err != nil {
+				t.Fatalf("dial: %v", got.err)
+			}
+			_ = got.conn.Close()
+		default:
+			t.Fatal("the region dial is still shut after the host entry was published")
+		}
+		if n := store.deletes.Load(); n != 2 {
+			t.Fatalf("DeleteHost calls = %d, want 2: the failed cleanup and its retry", n)
+		}
+	})
+}
+
+// wantHost checks the store's API host entry and the capability's availability
+// at one step of a serve-exit case.
+func (f *serveExitFixture) wantHost(step string, published bool) {
+	f.t.Helper()
+	hosts := hostKeys(f.t, f.coordStore)
+	host, err := f.svc.CapabilityHost(f.t.Context())
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	if (len(hosts) == 1) != published || host.Available != published {
+		f.t.Fatalf("%s: host entries=%v available=%t, want published and available %t", step, hosts, host.Available, published)
+	}
+}
+
+// TestServeExitWithdrawsHost: an unexpected Serve exit removes the API host entry
+// before the restart, so no device is offered a host that no longer serves; the
+// restart publishes it again.
+func TestServeExitWithdrawsHost(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		f := newServeExitFixture(t, serveExitOptions{lease: true, coordination: true})
+		defer f.shutdown()
+		f.begin()
+		f.want("started", 1, stateOn, "")
+		f.wantHost("started", true)
+		f.exitServe(1)
+		f.wantWithdrawn("after the exit and its read", 1)
+		f.wantHost("after the exit, before the restart", false)
+		f.sleep(censusInterval)
+		f.want("after the renewal", 2, stateOn, "")
+		f.wantHost("after the restart", true)
 	})
 }

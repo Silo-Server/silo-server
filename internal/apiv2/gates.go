@@ -506,6 +506,10 @@ func mediaTypeGuard(ctx huma.Context, next func(huma.Context)) {
 		next(ctx)
 		return
 	}
+	if lacks, _ := op.Metadata[metaBodyNoMediaType].(bool); lacks && ct == "" {
+		next(ctx)
+		return
+	}
 	if blankOK, _ := op.Metadata[metaBlankBodyAbsent].(bool); blankOK && !op.RequestBody.Required {
 		blank, problem := readBlankBody(ctx, r, op)
 		if problem != nil {

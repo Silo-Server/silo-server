@@ -25,6 +25,22 @@ type AuthHandler struct {
 	oauthRoutesAvailable bool
 	accessGroups         access.GroupPolicyProvider
 	checkPrimaryProfile  apimw.PrimaryProfileChecker
+	directRevoker        DirectRevoker
+}
+
+// DirectRevoker withdraws the direct-connection enrollments that a sign-out, a
+// device removal or a profile delete ends. It reports no error: a store failure is its own to log,
+// and the enrollment then lapses at its lease end.
+type DirectRevoker interface {
+	// RevokeSession withdraws every entry of the account that the login session
+	// last enrolled or renewed, whatever device ID the entry names.
+	RevokeSession(ctx context.Context, userID int, sessionID string)
+	// RevokeProfileDevice withdraws the account's entry for one device ID when
+	// it belongs to the profile.
+	RevokeProfileDevice(ctx context.Context, userID int, deviceID, profileID string)
+	// RevokeProfile withdraws every entry of the account that records the
+	// profile, whichever device holds it.
+	RevokeProfile(ctx context.Context, userID int, profileID string)
 }
 
 type accountPasswordService interface {
@@ -157,6 +173,33 @@ type NetworkSignInInput struct {
 	IP             string
 }
 
+// DemoLoginInput is a public demo sign-in as the transport received it.
+type DemoLoginInput struct {
+	DeviceName string
+	IP         string
+}
+
+// DemoLogin signs a visitor in to the public demo account
+// (auth.Service.DemoLogin). v2 demoLogin calls it. auth.ErrDemoLoginDisabled
+// and auth.ErrDemoLoginNotConfigured are returned as they are, for the caller
+// to answer with the capability state; any other failure is an *APIError.
+func (h *AuthHandler) DemoLogin(ctx context.Context, in DemoLoginInput) (TokenPairView, error) {
+	pair, user, err := h.service.DemoLogin(ctx, in.DeviceName, in.IP)
+	if errors.Is(err, auth.ErrDemoLoginDisabled) || errors.Is(err, auth.ErrDemoLoginNotConfigured) {
+		return TokenPairView{}, err
+	}
+	if err != nil {
+		slog.ErrorContext(ctx, "demo sign-in failed", "component", "auth", "error", err)
+		return TokenPairView{}, apiError(http.StatusInternalServerError, "internal_error", "An unexpected error occurred")
+	}
+	return TokenPairView{
+		AccessToken:  pair.AccessToken,
+		RefreshToken: pair.RefreshToken,
+		ExpiresIn:    pair.ExpiresIn,
+		User:         buildUserResponse(user, effectiveAccountPolicy(ctx, user, h.accessGroups), nil, nil),
+	}, nil
+}
+
 // NetworkSignIn signs in the overlay peer of the request through a network
 // identity provider (auth.Service.NetworkSignIn) and opens a login session.
 // v2 signInWithNetworkIdentity calls it; a failure is an *APIError.
@@ -231,7 +274,19 @@ func (h *AuthHandler) Logout(ctx context.Context, claims *auth.Claims) error {
 	if err := h.service.Logout(ctx, claims.SessionID); err != nil {
 		return apiError(http.StatusInternalServerError, "internal_error", "An unexpected error occurred")
 	}
+	h.revokeDirect(ctx, claims.UserID, claims.SessionID)
 	return nil
+}
+
+// SetDirectRevoker wires the direct-connection enrollments that sign-out ends.
+func (h *AuthHandler) SetDirectRevoker(r DirectRevoker) { h.directRevoker = r }
+
+// revokeDirect runs after the session change has committed. It withdraws the
+// entries the ended session issued, and no others.
+func (h *AuthHandler) revokeDirect(ctx context.Context, userID int, sessionID string) {
+	if h.directRevoker != nil {
+		h.directRevoker.RevokeSession(ctx, userID, sessionID)
+	}
 }
 
 // EndImpersonation returns an impersonating session to the administrator.
@@ -249,6 +304,8 @@ func (h *AuthHandler) EndImpersonation(ctx context.Context, claims *auth.Claims)
 		}
 		return apiError(http.StatusInternalServerError, "internal_error", "An unexpected error occurred")
 	}
+	// Guard for entries enrolled before enrollment refused a View as user; they name the viewed account, claims.UserID.
+	h.revokeDirect(ctx, claims.UserID, claims.SessionID)
 	return nil
 }
 

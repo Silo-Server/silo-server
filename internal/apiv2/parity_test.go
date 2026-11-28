@@ -182,6 +182,9 @@ func fakeAuth(users map[int]*models.User) *apimw.AuthMiddleware {
 		demotedToken:           {UserID: 1, Role: "admin", SessionID: "s1", TokenType: auth.TokenTypeAccess},
 		householdToken:         {UserID: householdUserID, Role: "user", SessionID: "s5", TokenType: auth.TokenTypeAccess},
 		storeDownToken:         {UserID: 1, Role: "user", SessionID: storeDownSession, TokenType: auth.TokenTypeAccess},
+		directLoginToken:       {UserID: 1, Role: "user", SessionID: "s1", TokenType: auth.TokenTypeAccess, RegisteredClaims: jwt.RegisteredClaims{ExpiresAt: jwt.NewNumericDate(time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC))}},
+		directLoginOtherToken:  {UserID: 3, Role: "admin", SessionID: "s3", TokenType: auth.TokenTypeAccess, RegisteredClaims: jwt.RegisteredClaims{ExpiresAt: jwt.NewNumericDate(time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC))}},
+		directViewAsToken:      {UserID: 1, Role: "user", SessionID: "s4", TokenType: auth.TokenTypeAccess, ImpersonatorUserID: ptr(3), RegisteredClaims: jwt.RegisteredClaims{ExpiresAt: jwt.NewNumericDate(time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC))}},
 	}
 	keys := fakeAPIKeys{map[string]*models.APIKey{apiKeyToken: {ID: 7, UserID: 1}, householdAPIKeyToken: {ID: 11, UserID: householdUserID}}}
 	return apimw.NewAuthMiddleware(fakeTokens{claims}, fakeSessions{map[string]string{"s1": "user", "s2": "admin", "s3": "admin", "s4": "user", "s5": "user"}}, keys, fakeUsers{users})

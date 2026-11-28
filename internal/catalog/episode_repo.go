@@ -43,7 +43,7 @@ const episodeColumns = `content_id, series_id, season_id, season_number, episode
 	sort_title, original_title, tagline`
 
 // refreshSeriesAirDatesSQL maintains the denormalized media_items columns
-// last_air_date_at (newest episode aired on or before today) and
+// last_air_date_at (newest regular episode aired on or before today) and
 // next_air_date_at (earliest episode airing after today) for the series IDs
 // in $1. Audit 2026-05-01 §2.1 hot path #1: the last-air-date sort reads a
 // column instead of a per-row correlated subquery.
@@ -53,7 +53,12 @@ const episodeColumns = `content_id, series_id, season_id, season_number, episode
 // Air Date" sort and rule read it, so a series ranks by the newest episode a
 // viewer can play, not by one the provider lists but no library has
 // (issue #2741). last_air_date_at keeps naming the show's newest aired
-// episode for the series' last_air_date field. Because the available value
+// regular episode for the series' last_air_date field. Specials (season 0) do not
+// count toward last_air_date_at: a special that aired after the finale does
+// not extend the series' run, matching the provider's last_air_date that the
+// item endpoint returns (issue #5393). A series with no aired regular
+// episode falls back to its newest aired special. Specials still count toward
+// next_air_date_at and the available date. Because the available value
 // depends on files, membership changes recompute it through
 // RecomputeSeriesEpisodeMembershipDenorms.
 //
@@ -83,7 +88,12 @@ const refreshSeriesAirDatesSQL = `
 		next_air_date_at = sub.next_airing
 	FROM (
 		SELECT s.series_id,
-			MAX(e.air_date) FILTER (WHERE e.air_date <= CURRENT_DATE) AS last_aired,
+			COALESCE(
+				MAX(e.air_date) FILTER (
+					WHERE e.air_date <= CURRENT_DATE AND e.season_number <> 0
+				),
+				MAX(e.air_date) FILTER (WHERE e.air_date <= CURRENT_DATE)
+			) AS last_aired,
 			MAX(e.air_date) FILTER (
 				WHERE e.air_date <= CURRENT_DATE
 				  AND EXISTS (SELECT 1 FROM episode_libraries el WHERE el.episode_id = e.content_id)

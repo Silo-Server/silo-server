@@ -36,7 +36,7 @@ type AdminNode struct {
 	Capabilities                     json.RawMessage `json:"capabilities,omitempty" doc:"Last stored worker capability document, preserving its owning protocol schema."`
 	CapabilitiesHash                 *string         `json:"capabilities_hash,omitempty"`
 	CapabilitiesRefreshedAt          *Instant        `json:"capabilities_refreshed_at,omitempty"`
-	LastStats                        json.RawMessage `json:"last_stats,omitempty" doc:"Worker resource sample stored at the last health check."`
+	LastStats                        json.RawMessage `json:"last_stats,omitempty" doc:"Raw JSON worker health snapshot stored at the last health check; may contain optional system, gpu, attribution, sampled_at, build, and artifacts members. Read GET /api/v2/admin/nodes/summary resources for the typed, path-free form."`
 	HWAccelOverride                  *string         `json:"hw_accel_override,omitempty"`
 	HWDeviceOverride                 *string         `json:"hw_device_override,omitempty"`
 	DownloadArtifactDirOverride      *string         `json:"download_artifact_dir_override,omitempty" doc:"This node's own prepared-download directory; absent when inherited."`
@@ -123,7 +123,7 @@ type AdminNodeSummary struct {
 	Group            *string             `json:"group"`
 	MaxJobs          *int                `json:"max_jobs"`
 	MaxBandwidthKbps *int                `json:"max_bandwidth_kbps"`
-	EgressKbps       int                 `json:"egress_kbps"`
+	EgressKbps       int                 `json:"egress_kbps" doc:"Node-reported viewer egress rate at the last health check in kbps (30-second rolling average)."`
 	LastHealthCheck  NullableInstant     `json:"last_health_check"`
 	CreatedAt        Instant             `json:"created_at"`
 	DrainRequested   bool                `json:"drain_requested" doc:"An administrator asked this transcode node to drain."`
@@ -134,10 +134,10 @@ type AdminNodeSummary struct {
 // AdminNodeResources is a node's resource sample in the same shape as the API
 // host's own (/admin/system/resources), with mount paths removed.
 type AdminNodeResources struct {
-	SampledAt   *Instant                  `json:"sampled_at,omitempty"`
-	System      *AdminSystemStats         `json:"system,omitempty"`
-	GPU         []AdminGPUStats           `json:"gpu"`
-	Attribution *AdminResourceAttribution `json:"attribution,omitempty"`
+	SampledAt   *Instant                  `json:"sampled_at,omitempty" doc:"When the node took this sample; omitted when not reported."`
+	System      *AdminSystemStats         `json:"system,omitempty" doc:"Node host or cgroup CPU, memory, load, disk (without mount paths), and network sample; omitted when unavailable."`
+	GPU         []AdminGPUStats           `json:"gpu" doc:"Node GPU measurements, always an array."`
+	Attribution *AdminResourceAttribution `json:"attribution,omitempty" doc:"Node metric scopes, process, cgroup, and owned FFmpeg child detail; omitted when unavailable."`
 }
 type AdminNodeSummariesOutput struct{ Body Collection[AdminNodeSummary] }
 

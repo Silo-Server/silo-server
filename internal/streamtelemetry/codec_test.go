@@ -20,6 +20,7 @@ func populatedSessionView() SessionView {
 		Routes: []RouteActivityView{{Method: "GET", Pattern: "/媒体/{id}", Role: RoleViewerEgress, Class: ClassPlayback, CapRelevant: true, Open: 1, Requests: 2, BytesAccepted: 90, LastByteAccepted: t2}}, RoutesOverflowed: true,
 		ViewerIPs: []string{"192.0.2.1"}, ViewerIPsOverflowed: true, DeviceIDs: []string{"device"}, DeviceIDsOverflowed: true,
 		ClientVariants: []ClientVariant{{Name: "客户端", Version: "1", Build: "2", Channel: "beta"}}, ClientVariantsOverflowed: true,
+		Transports: []Transport{{PathKind: PathKindDirect, Class: "direct", HostID: "api", AddressFamily: "ipv6", LocalPort: 8094, PeerPort: 41641, PathGeneration: 1<<63 + 5}}, TransportsOverflowed: true,
 		UserAgents: []string{"播放器/日本語 🚀"}, UserAgentsOverflowed: true, TokenIssuedAts: []time.Time{t1, {}}, TokenIssuedAtsOverflowed: true,
 		TokenIssuedAtSources: map[TokenIssuedAtSource]int64{TokenIssuedAtSourceVerified: 2, TokenIssuedAtSource("future"): 1},
 		Outcomes:             map[httpstream.StreamOutcome]int64{httpstream.OutcomeCompleted: 1, httpstream.StreamOutcome("future_outcome"): 2},

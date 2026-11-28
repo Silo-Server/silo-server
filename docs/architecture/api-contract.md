@@ -523,6 +523,13 @@ client upgrade required, and internal error. Domain-specific types are added onl
 needs distinct corrective behavior. `token_refresh_required` (401) is one: the login
 session is valid but the access token predates a change to the account's role, so the client
 refreshes and retries instead of signing out.
+`direct_device_limit` and `direct_node_key_conflict` (both 409) are two more, on direct
+connection enrollment: the first tells the client to show the account's device limit, the second to
+make a new node key and enroll again. The validation code `missing` is the code of
+`body.connection_receipt` on `reportPlaybackBandwidthProbe` when a device that holds a direct
+connection enrollment sends no receipt; it differs from `required` because account state, not the
+schema, makes the field mandatory. `invalid` at the same location means the receipt is not the
+probe host's for that account and device.
 
 The foundation adapter replaces Huma's default problem output where necessary: every response has
 a Silo type and instance; validation details add stable codes and omit Huma's rejected `value`;
@@ -1229,6 +1236,13 @@ contract is:
   with `status` `draining`, then `drained` once it has no work left; the values are additive to
   the frozen shape, and the status code does not change, so probes keep passing while the node
   finishes its sessions. See [node-drain.md](node-drain.md).
+  Revision (2026-11-26, with job kind balancing): a transcode node adds `active_jobs_by_kind`, an
+  object naming every job kind with its count, which the API server stores in the node's
+  `last_stats` and balances placements on; additive to the frozen shape. See
+  [admin-api.md](../admin-api.md#job-kind-balancing).
+  Revision (2026-11-26, with process CPU percent): the optional `attribution` object, the same
+  type `GET /api/v2/admin/system/resources` returns, gains `process.cpu_pct` and
+  `children.cpu_pct`; both are additive and omitted when not measured.
 
 Probe traffic is excluded from request and activity logging. Consumers stay where they are:
 container `HEALTHCHECK`s (`Dockerfile`, `Dockerfile.dev`, `dev/compose.yml`), orchestrator

@@ -197,7 +197,7 @@ describe("PluginConfigForm secrets", () => {
     );
 
     await userEvent.click(screen.getByRole("button", { name: "Clear saved secret" }));
-    await userEvent.click(screen.getByRole("button", { name: "Check Connection" }));
+    await userEvent.click(screen.getByRole("button", { name: "Check connection" }));
 
     expect(onTest).toHaveBeenCalledWith("account", expect.objectContaining({ region: "us-east" }), [
       "api_key",

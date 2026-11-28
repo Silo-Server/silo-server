@@ -70,7 +70,7 @@ func TestJobCapAdmissionIsRaceFree(t *testing.T) {
 	)
 	for range 64 {
 		wg.Go(func() {
-			if slot, ok := s.admitJob(); ok {
+			if slot, ok := s.admitJob(nodepool.JobKindVideoTranscode); ok {
 				mu.Lock()
 				admitted = append(admitted, slot)
 				mu.Unlock()
@@ -81,12 +81,12 @@ func TestJobCapAdmissionIsRaceFree(t *testing.T) {
 	if len(admitted) != 1 {
 		t.Fatalf("%d starts admitted at the cap less one, want 1", len(admitted))
 	}
-	s.countJob(admitted[0])
+	s.countJob(admitted[0], nodepool.JobKindRemux)
 	admitted[0].release()
 	if s.activeJobs.Load() != 3 || s.admitted != 0 {
 		t.Fatalf("after counting the slot: active %d, admitted %d", s.activeJobs.Load(), s.admitted)
 	}
-	if _, ok := s.admitJob(); ok {
+	if _, ok := s.admitJob(nodepool.JobKindVideoTranscode); ok {
 		t.Fatal("a job was admitted at the cap")
 	}
 }
@@ -181,5 +181,87 @@ func TestDeclaredHWAccelHoldsAgainstTheRequest(t *testing.T) {
 		if got := s.jobHWAccel(tc.requested, tc.toneMap); got != tc.want {
 			t.Errorf("declared %q, requested %q, tone map %v: %q, want %q", tc.declared, tc.requested, tc.toneMap, got, tc.want)
 		}
+	}
+}
+
+// A start the node has admitted but not yet counted, such as a RequireReady
+// start still waiting on FFmpeg's first segment, is in the health report's
+// job counts. The core stops counting its reservation once a health report is
+// newer than it, so a report that left the start out would show the node a job
+// lighter than it is, and a burst of starts could all pick it.
+func TestHealthCountsAnAdmittedStartBeforeItRuns(t *testing.T) {
+	s := newLoopingFFmpegServer(t)
+	t.Cleanup(func() { _ = s.Shutdown(context.Background()) })
+	admitted := func() int {
+		s.admission.Lock()
+		defer s.admission.Unlock()
+		return s.admitted
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	request := jsonRequest(t, "/transcode/start", TranscodeStartRequest{
+		SessionID: "waiting", PlaybackSessionID: "playback-1", InputPath: "/media/movie.mkv",
+		TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2, RequireReady: true,
+	}).WithContext(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		s.handleStart(httptest.NewRecorder(), request)
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for admitted() != 1 {
+		if time.Now().After(deadline) {
+			t.Fatal("the start was never admitted")
+		}
+		time.Sleep(5 * time.Millisecond) //nolint:forbidigo // polls the admission count, the observable state an admitted start changes
+	}
+
+	health := healthStatusOf(t, s)
+	if health.ActiveJobs != 1 || health.ActiveJobsByKind[nodepool.JobKindVideoTranscode] != 1 {
+		t.Fatalf("health while the start waits on FFmpeg: active_jobs %d, by kind %v; want 1 video transcode",
+			health.ActiveJobs, health.ActiveJobsByKind)
+	}
+
+	// An abandoned start leaves the report.
+	cancel()
+	<-done
+	health = healthStatusOf(t, s)
+	if health.ActiveJobs != 0 || health.ActiveJobsByKind[nodepool.JobKindVideoTranscode] != 0 {
+		t.Fatalf("health after the start was abandoned: active_jobs %d, by kind %v; want none",
+			health.ActiveJobs, health.ActiveJobsByKind)
+	}
+}
+
+// Once a start runs it moves from admitted to counted, and the health report
+// counts it once.
+func TestHealthCountsARunningStartOnce(t *testing.T) {
+	s := newLoopingFFmpegServer(t)
+	t.Cleanup(func() { _ = s.Shutdown(context.Background()) })
+	if rr := postStart(t, s, "running"); rr.Code != http.StatusAccepted {
+		t.Fatalf("start: %d %s", rr.Code, rr.Body.String())
+	}
+	health := healthStatusOf(t, s)
+	if health.ActiveJobs != 1 || health.ActiveJobsByKind[nodepool.JobKindVideoTranscode] != 1 {
+		t.Fatalf("health with one running start: active_jobs %d, by kind %v; want 1 video transcode",
+			health.ActiveJobs, health.ActiveJobsByKind)
+	}
+}
+
+// A drained node leaves admitted work out of its report. Work admitted after
+// the drain completes, such as a start a draining node is about to refuse,
+// would otherwise show a drained node with a job.
+func TestDrainedHealthReportsNoJobs(t *testing.T) {
+	s := newTestServer(t)
+	s.shutdownDrain.Store(true)
+	slot, ok := s.admitJob(nodepool.JobKindVideoTranscode)
+	if !ok {
+		t.Fatal("admission refused")
+	}
+	defer slot.release()
+	health := healthStatusOf(t, s)
+	if health.Status != HealthStatusDrained || health.ActiveJobs != 0 || health.ActiveJobsByKind[nodepool.JobKindVideoTranscode] != 0 {
+		t.Fatalf("health: status %q, active_jobs %d, by kind %v; want drained with no jobs",
+			health.Status, health.ActiveJobs, health.ActiveJobsByKind)
 	}
 }

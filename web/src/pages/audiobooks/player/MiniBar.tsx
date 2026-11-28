@@ -71,8 +71,14 @@ export function MiniBar({
         }}
       />
 
-      <div className="mt-1 grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 sm:gap-5">
-        <div className="flex min-w-0 items-center gap-3">
+      {/* The title and the tools grow equally around the transport, which
+          centres it. The tools never shrink below their content: when the row
+          can't hold them (a phone always, or a narrow bar beside the sidebar),
+          they wrap to a second row instead of drawing over the transport. A
+          container query would do this too, but container-type makes the bar
+          the containing block of the menus' fixed sheets before Safari 18.4. */}
+      <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 sm:gap-x-5">
+        <div className="flex min-w-16 flex-1 basis-0 items-center gap-3 sm:min-w-40">
           <CoverExpandTile
             contentId={contentId}
             posterUrl={posterUrl}
@@ -112,7 +118,7 @@ export function MiniBar({
         </div>
 
         {/* Transport and time read left to right in every language, like the timeline. */}
-        <div dir="ltr" className="flex items-center justify-center gap-2 sm:gap-3">
+        <div dir="ltr" className="flex flex-none items-center justify-center gap-2 sm:gap-3">
           {hasChapters && (
             <span className="hidden sm:contents">
               <CircleButton
@@ -191,7 +197,7 @@ export function MiniBar({
           )}
         </div>
 
-        <div className="flex items-center justify-end gap-2">
+        <div className="flex min-w-max flex-1 basis-0 items-center justify-end gap-2 max-sm:min-w-0 max-sm:basis-full max-sm:flex-wrap">
           <div className="hidden md:block">
             <VolumeControl
               tone="surface"

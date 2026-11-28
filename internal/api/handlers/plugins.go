@@ -35,6 +35,9 @@ type PluginHandler struct {
 	installations *plugins.InstallationStore
 	configs       *plugins.RuntimeConfigStore
 	service       *plugins.Service
+	// stopForTest replaces service.Stop in tests that must see whether a
+	// refused change stopped the plugin; nil in production.
+	stopForTest   func(installationID int) error
 	userConfig    *plugins.UserConfigStore
 	proxy         *plugins.HTTPProxy
 	chainRepo     *metadata.ChainRepository

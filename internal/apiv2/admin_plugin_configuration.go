@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/plugins"
 )
 
@@ -124,6 +125,10 @@ func adminPluginMutationProblem(err error) error {
 		return NewProblem(TypeConflict, "Built-in host providers cannot be modified.")
 	case errors.Is(err, plugins.ErrAuthBindingIneligible):
 		return NewProblem(TypeConflict, "An enabled sign-in binding is incompatible with this plugin release. Disable or update the binding before enabling the plugin or replacing the release.")
+	case errors.Is(err, plugins.ErrInstallationBusy):
+		return NewProblem(TypeDependencyUnavailable, "This plugin's sign-in accounts are being changed right now, so it was not uninstalled. Try again in a moment.").WithRetryAfter(1)
+	case errors.Is(err, auth.ErrSignInProviderRequired):
+		return NewProblem(TypeSignInProviderRequired, "Password sign-in is off, and this is the last sign-in provider people can use. Turn password sign-in back on first. Break-glass administrators can sign in with a password either way.")
 	case errors.Is(err, plugins.ErrAuthProviderAlreadyEnabled):
 		return NewProblem(TypeProviderAlreadyEnabled, "Another sign-in provider is already enabled. Turn it off first: a server has one external sign-in provider.")
 	case errors.As(err, &validation):
@@ -180,7 +185,7 @@ func registerAdminPluginConfiguration(reg *Registry) {
 		}
 		return &AdminPluginConnectionCheckOutput{Body: AdminPluginConnectionCheck{Success: result.Success, Message: result.Message}}, nil
 	})
-	auth := op("PUT", "auth-binding", "updateAdminPluginAuthBinding", "Replace the auth provider binding for one capability. Sign-in providers rebuild on every node without a restart. Enabling a binding while another one is enabled is 409 provider_already_enabled. The whole row is assigned, so repeating the request converges on one stored binding.", RetrySafetyNaturalIdempotent)
+	auth := op("PUT", "auth-binding", "updateAdminPluginAuthBinding", "Replace the auth provider binding for one capability. Sign-in providers rebuild on every node without a restart. Enabling a binding while another one is enabled is 409 provider_already_enabled. Turning off the last OIDC or LDAP binding people can sign in with while auth.local_password_login is off is 409 sign_in_provider_required. The whole row is assigned, so repeating the request converges on one stored binding.", RetrySafetyNaturalIdempotent)
 	auth.DefaultStatus = http.StatusNoContent
 	Register(reg, auth, func(ctx context.Context, in *AdminPluginAuthBindingInput) (*AdminPluginAuthBindingOutput, error) {
 		if reg.deps.AdminPluginConfiguration == nil {

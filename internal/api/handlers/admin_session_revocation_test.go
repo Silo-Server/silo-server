@@ -8,16 +8,18 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-func TestUpdateAdminAccountSignsOutOnlyForCredentialAndEnabledChanges(t *testing.T) {
+func TestUpdateAdminAccountSignsOutOnlyForCredentialEnabledAndPromotionChanges(t *testing.T) {
 	permissions := []string{"marker_edit"}
 	quality := "720p"
 	password := "a-new-long-password"
 	disabled := false
 	admin := models.RoleAdmin
+	user := models.RoleUser
 	tests := []struct {
-		name       string
-		input      models.UpdateUserInput
-		wantRevoke bool
+		name        string
+		currentRole string
+		input       models.UpdateUserInput
+		wantRevoke  bool
 	}{
 		// The v2 group move reads the group inside the account transaction, so
 		// that case is covered by TestUpdateRequiresSessionRevocation.
@@ -26,11 +28,19 @@ func TestUpdateAdminAccountSignsOutOnlyForCredentialAndEnabledChanges(t *testing
 		{name: "playback quality cleared", input: models.UpdateUserInput{MaxPlaybackQuality: models.ClearValue[string]()}},
 		{name: "password", input: models.UpdateUserInput{Password: &password}, wantRevoke: true},
 		{name: "disable", input: models.UpdateUserInput{Enabled: &disabled}, wantRevoke: true},
-		{name: "role", input: models.UpdateUserInput{Role: &admin}},
+		// Sessions opened for an ordinary account, such as every visitor's on
+		// a public demo, must not become administrator sessions.
+		{name: "promotion", currentRole: models.RoleUser, input: models.UpdateUserInput{Role: &admin}, wantRevoke: true},
+		{name: "role unchanged", currentRole: models.RoleAdmin, input: models.UpdateUserInput{Role: &admin}},
+		{name: "demotion", currentRole: models.RoleAdmin, input: models.UpdateUserInput{Role: &user}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h, repo := newScopedKeyAdminHandler(models.RoleUser)
+			role := tt.currentRole
+			if role == "" {
+				role = models.RoleUser
+			}
+			h, repo := newScopedKeyAdminHandler(role)
 			current := "1080p"
 			repo.user.MaxPlaybackQuality = &current
 			var notified []int
@@ -44,6 +54,34 @@ func TestUpdateAdminAccountSignsOutOnlyForCredentialAndEnabledChanges(t *testing
 			}
 			if got := len(notified) == 1 && notified[0] == repo.user.ID; got != tt.wantRevoke {
 				t.Fatalf("compatibility sessions dropped for %v, want revocation %v", notified, tt.wantRevoke)
+			}
+		})
+	}
+}
+
+// Deleting an account ends its sessions the way a disable does, so the hook
+// that withdraws its direct-connection entries runs for it too, and not for a
+// delete the owner rules refuse.
+func TestDeleteAdminAccountNotifiesSessionRevocation(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		current models.User
+		wantErr bool
+	}{
+		{name: "deleted", current: userAccount()},
+		{name: "refused", current: adminAccount(), wantErr: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var notified []int
+			h := &AdminHandler{userRepo: &mutatingUserRepo{current: tt.current}}
+			h.OnUserSessionsRevoked = func(_ context.Context, userID int) { notified = append(notified, userID) }
+
+			err := h.DeleteAdminAccount(claimsCtx(7), testAdminID, -1, 0)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("DeleteAdminAccount() error = %v, want error %v", err, tt.wantErr)
+			}
+			if got := len(notified) == 1 && notified[0] == testAdminID; got == tt.wantErr {
+				t.Fatalf("notified = %v with error %v, want notice only for a delete", notified, err)
 			}
 		})
 	}

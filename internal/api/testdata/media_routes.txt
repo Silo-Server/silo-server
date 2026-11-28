@@ -209,6 +209,7 @@ DELETE /api/v2/admin/diagnostics/reports/{id}	non-media
 GET /api/v2/admin/diagnostics/reports/{id}	non-media
 GET /api/v2/admin/diagnostics/reports/{id}/download	non-media
 GET /api/v2/admin/direct-connections/capabilities	non-media
+GET /api/v2/admin/direct-connections/peers	non-media
 GET /api/v2/admin/direct-connections/status	non-media
 GET /api/v2/admin/downloads/devices	non-media
 GET /api/v2/admin/downloads/entries	non-media
@@ -476,6 +477,7 @@ GET /api/v2/admin/settings/restart-keys	non-media
 GET /api/v2/admin/settings/sensitive-status	non-media
 GET /api/v2/admin/settings/{key}	non-media
 PUT /api/v2/admin/settings/{key}	non-media
+GET /api/v2/admin/sign-in/local-password-off/accounts	non-media
 GET /api/v2/admin/stats	non-media
 GET /api/v2/admin/stats/api-clients	non-media
 GET /api/v2/admin/stats/api-clients/{session_id}/endpoints	non-media
@@ -554,6 +556,8 @@ HEAD /api/v2/artwork/*	non-media
 DELETE /api/v2/audio-prefs/{series_id}	non-media
 GET /api/v2/audio-prefs/{series_id}	non-media
 PUT /api/v2/audio-prefs/{series_id}	non-media
+POST /api/v2/auth/demo	non-media
+GET /api/v2/auth/demo/capability	non-media
 GET /api/v2/auth/device	non-media
 POST /api/v2/auth/device/approve	non-media
 POST /api/v2/auth/device/approve-handoff	non-media
@@ -590,6 +594,7 @@ POST /api/v2/autoscan/webhooks/{token}	non-media
 GET /api/v2/branding/assets/{kind}	non-media
 HEAD /api/v2/branding/assets/{kind}	non-media
 GET /api/v2/calendar	non-media
+GET /api/v2/capabilities/direct-connections	non-media
 GET /api/v2/capabilities/downloads	non-media
 GET /api/v2/capabilities/ebooks	non-media
 GET /api/v2/capabilities/metadata-ai	non-media
@@ -676,6 +681,11 @@ POST /api/v2/diagnostics/reports/uploads	non-media
 DELETE /api/v2/diagnostics/reports/uploads/{upload_id}	non-media
 PUT /api/v2/diagnostics/reports/uploads/{upload_id}/chunks/{chunk_index}	non-media
 POST /api/v2/diagnostics/reports/uploads/{upload_id}/complete	non-media
+DELETE /api/v2/direct-connections/enrollment	non-media
+POST /api/v2/direct-connections/enrollment	non-media
+GET /api/v2/direct-connections/netmap	non-media
+POST /api/v2/direct-connections/registration	non-media
+GET /api/v2/direct-connections/signal	non-media
 GET /api/v2/direct-download	media	transfer	viewer_egress	false	true
 HEAD /api/v2/direct-download	media	transfer	viewer_egress	false	true
 GET /api/v2/direct-download-proxy	media	transfer	viewer_egress	false	true
@@ -1296,6 +1306,7 @@ DELETE /api/v2/admin/diagnostics/reports/{id}	non-media
 GET /api/v2/admin/diagnostics/reports/{id}	non-media
 GET /api/v2/admin/diagnostics/reports/{id}/download	non-media
 GET /api/v2/admin/direct-connections/capabilities	non-media
+GET /api/v2/admin/direct-connections/peers	non-media
 GET /api/v2/admin/direct-connections/status	non-media
 GET /api/v2/admin/downloads/devices	non-media
 GET /api/v2/admin/downloads/entries	non-media
@@ -1563,6 +1574,7 @@ GET /api/v2/admin/settings/restart-keys	non-media
 GET /api/v2/admin/settings/sensitive-status	non-media
 GET /api/v2/admin/settings/{key}	non-media
 PUT /api/v2/admin/settings/{key}	non-media
+GET /api/v2/admin/sign-in/local-password-off/accounts	non-media
 GET /api/v2/admin/stats	non-media
 GET /api/v2/admin/stats/api-clients	non-media
 GET /api/v2/admin/stats/api-clients/{session_id}/endpoints	non-media
@@ -1641,6 +1653,8 @@ HEAD /api/v2/artwork/*	non-media
 DELETE /api/v2/audio-prefs/{series_id}	non-media
 GET /api/v2/audio-prefs/{series_id}	non-media
 PUT /api/v2/audio-prefs/{series_id}	non-media
+POST /api/v2/auth/demo	non-media
+GET /api/v2/auth/demo/capability	non-media
 GET /api/v2/auth/device	non-media
 POST /api/v2/auth/device/approve	non-media
 POST /api/v2/auth/device/approve-handoff	non-media
@@ -1677,6 +1691,7 @@ POST /api/v2/autoscan/webhooks/{token}	non-media
 GET /api/v2/branding/assets/{kind}	non-media
 HEAD /api/v2/branding/assets/{kind}	non-media
 GET /api/v2/calendar	non-media
+GET /api/v2/capabilities/direct-connections	non-media
 GET /api/v2/capabilities/downloads	non-media
 GET /api/v2/capabilities/ebooks	non-media
 GET /api/v2/capabilities/metadata-ai	non-media
@@ -1763,6 +1778,11 @@ POST /api/v2/diagnostics/reports/uploads	non-media
 DELETE /api/v2/diagnostics/reports/uploads/{upload_id}	non-media
 PUT /api/v2/diagnostics/reports/uploads/{upload_id}/chunks/{chunk_index}	non-media
 POST /api/v2/diagnostics/reports/uploads/{upload_id}/complete	non-media
+DELETE /api/v2/direct-connections/enrollment	non-media
+POST /api/v2/direct-connections/enrollment	non-media
+GET /api/v2/direct-connections/netmap	non-media
+POST /api/v2/direct-connections/registration	non-media
+GET /api/v2/direct-connections/signal	non-media
 GET /api/v2/direct-download	media	transfer	viewer_egress	false	true
 HEAD /api/v2/direct-download	media	transfer	viewer_egress	false	true
 GET /api/v2/direct-download-proxy	media	transfer	viewer_egress	false	true

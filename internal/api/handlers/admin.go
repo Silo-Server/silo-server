@@ -220,6 +220,9 @@ type AdminHandler struct {
 	// RecWorker is told when an account update changes its profiles' access
 	// scope, so their recommendations are rebuilt. Optional.
 	RecWorker AccountsScopeNotifier
+	// DirectRevoker, when set, withdraws the direct-connection entry of a login
+	// session that an administrator ends on its own.
+	DirectRevoker DirectRevoker
 	// ProfileAvatars resolves the avatar on admin profile listings the way
 	// the profile endpoints do. Nil leaves uploaded avatars without a URL.
 	ProfileAvatars interface {
@@ -351,7 +354,7 @@ func toAdminUserResponse(u *models.User, group *access.GroupPolicy) AdminUserVie
 		DownloadTranscodeAllowed:   clonePtr(u.DownloadTranscodeAllowed),
 		RequestsAllowed:            clonePtr(u.RequestsAllowed),
 		AccessGroupID:              clonePtr(u.AccessGroupID),
-		PasswordLogin:              u.LocalPasswordLoginEnabled && u.PasswordHash != "",
+		PasswordLogin:              u.HasLocalPassword(),
 		PasswordChangeRequired:     u.PasswordChangeRequired,
 		IsOwner:                    u.IsOwner,
 		BreakGlass:                 u.BreakGlass,
@@ -583,22 +586,31 @@ func (h *AdminHandler) sweepWatchlistTitles(ctx context.Context, userID int) {
 }
 
 // updateMayRequireSessionRevocation is updateRequiresSessionRevocation without
-// the current account to compare against: any credential or enabled change
-// might sign the user out.
+// the current account to compare against: any credential or enabled change,
+// or a role set to admin, might sign the user out.
 func updateMayRequireSessionRevocation(input models.UpdateUserInput) bool {
 	return input.Password != nil ||
-		input.Enabled != nil
+		input.Enabled != nil ||
+		(input.Role != nil && *input.Role == roleAdmin)
 }
 
 // updateRequiresSessionRevocation reports whether an account update signs the
-// user out everywhere: a new password or an enabled change.
+// user out everywhere: a new password, an enabled change, or a promotion to
+// admin.
+//
+// A promotion signs the account out because a session may have been opened by
+// someone the operator never meant to make an administrator: on a public demo,
+// every visitor holds a session on the shared account, and on any server a
+// session opened before the promotion was authorized for an ordinary account.
+// Every session starts again under the new role, as provider role mapping and
+// owner recovery already do.
 //
 // Policy changes (permissions, playback-quality override, access group) do
 // not; they bump access_policy_revision, every request resolves the current
-// policy, and connected realtime sockets tell their clients to refresh. A role
-// change does not either: RequireAuth refuses access tokens minted under the
-// old role with token_refresh_required, and a refresh issues the new role.
-// The impersonation sessions a demoted admin started end in the same
+// policy, and connected realtime sockets tell their clients to refresh.
+// A demotion does not either: RequireAuth refuses access tokens minted under
+// the old role with token_refresh_required, and a refresh issues the lower
+// role. The impersonation sessions a demoted admin started end in the same
 // transaction (auth.UserRepository.MutateAdminAccount).
 func updateRequiresSessionRevocation(current *models.User, input models.UpdateUserInput) bool {
 	if input.Password != nil {
@@ -608,6 +620,9 @@ func updateRequiresSessionRevocation(current *models.User, input models.UpdateUs
 		return updateMayRequireSessionRevocation(input)
 	}
 	if input.Enabled != nil && *input.Enabled != current.Enabled {
+		return true
+	}
+	if input.Role != nil && *input.Role == roleAdmin && current.Role != roleAdmin {
 		return true
 	}
 	return false
@@ -1526,22 +1541,39 @@ func shouldPersistAdminSetting(stored map[string]string, key, normalized string,
 	return normalized != "" && effectiveChanged
 }
 
-// checkLocalLoginSetting refuses turning local password sign-in off while no
-// break-glass admin could still sign in with a password. It runs inside the
-// settings mutation, which holds the settings lock that break-glass changes
-// also take.
+// checkLocalLoginSetting refuses a save that would leave local password
+// sign-in off with no break-glass admin or no sign-in provider people can
+// use (auth.CheckLocalLoginSettingChange). It runs inside the settings
+// mutation, which holds the settings lock that break-glass and sign-in
+// provider changes also take.
 func (h *AdminHandler) checkLocalLoginSetting(ctx context.Context, tx pgx.Tx, before, after map[string]string) error {
-	key := config.AuthLocalPasswordLoginSettingKey
-	if before[key] == after[key] {
+	local, url := config.AuthLocalPasswordLoginSettingKey, config.ServerPublicURLSettingKey
+	if before[local] == after[local] && before[url] == after[url] {
 		return nil
 	}
+	was := auth.LocalLoginSettings{LocalPasswordLogin: before[local], PublicURL: before[url]}
+	will := auth.LocalLoginSettings{LocalPasswordLogin: after[local], PublicURL: after[url]}
 	if tx != nil {
-		return breakGlassError(auth.CheckLocalLoginSettingChange(ctx, tx, before[key], after[key]))
+		return localLoginSettingError(auth.CheckLocalLoginSettingChange(ctx, tx, was, will), was)
 	}
 	if h.pool == nil {
 		return ErrAdminSettingsUnavailable
 	}
-	return breakGlassError(auth.CheckLocalLoginSettingChange(ctx, h.pool, before[key], after[key]))
+	return localLoginSettingError(auth.CheckLocalLoginSettingChange(ctx, h.pool, was, will), was)
+}
+
+// localLoginSettingError answers a refused change. was is what the save
+// changes from: a save turning password sign-in off is told to turn a
+// provider on, and one that would take the provider's public URL away while
+// passwords are already off is told to turn passwords back on first.
+func localLoginSettingError(err error, was auth.LocalLoginSettings) error {
+	if !errors.Is(err, auth.ErrSignInProviderRequired) {
+		return breakGlassError(err)
+	}
+	if on, parseErr := strconv.ParseBool(strings.TrimSpace(was.LocalPasswordLogin)); parseErr == nil && !on {
+		return apiError(http.StatusConflict, "sign_in_provider_required", "Password sign-in is off, and an OpenID Connect provider needs server.public_url to sign anyone in. Turn password sign-in back on first. Break-glass administrators can sign in with a password either way")
+	}
+	return apiError(http.StatusConflict, "sign_in_provider_required", "Turn on a sign-in provider that can sign people in before turning local password sign-in off; an OpenID Connect provider also needs server.public_url")
 }
 
 // errBackupKeyNotConfirmed refuses switching backups to S3 before the admin
