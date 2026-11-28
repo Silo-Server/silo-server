@@ -148,6 +148,7 @@ export const v2Operations = {
   "GET /api/v2/admin/collection-jobs/{job_id}": "getAdminCollectionJob",
   "GET /api/v2/admin/collections": "listAdminCollections",
   "GET /api/v2/admin/collections/capabilities": "getAdminCollectionCapabilities",
+  "GET /api/v2/admin/collections/mdblist/lists": "listAdminMDBListLists",
   "GET /api/v2/admin/collections/order": "getAdminCollectionOrder",
   "GET /api/v2/admin/collections/template-bundles": "listAdminCollectionTemplateBundles",
   "GET /api/v2/admin/collections/templates": "listAdminCollectionTemplates",

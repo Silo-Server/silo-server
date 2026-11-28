@@ -6593,7 +6593,7 @@
       "response_headers": {
         "Cache-Control": "private, no-cache",
         "Content-Type": "application/json",
-        "ETag": "\"f9bfba671c81dbcc510b4d4cc41d4c6feb58ad9165a71786799d47524f7d7217\""
+        "ETag": "\"1a53e61b4c2f6dac9f73962dd3d6a0cd1692be25ca0656446cbc0c6312cd6d0f\""
       },
       "response_media_type": "application/json",
       "schema": "#/components/schemas/AdminCollectionCapabilityOutputBody",

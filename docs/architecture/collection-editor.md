@@ -139,6 +139,11 @@ links, max titles and the schedule.
   pick filled; a field that still holds that value (or is blank) takes the next pick's value, and
   a field changed by hand stays and is named under Name ("Kept your name"). A search result brings
   only its own name and description, never a template's.
+- **Your MDBList lists.** When the scope reports `mdblist_account_lists`, the MDBList tab opens
+  on "Your lists": the lists of the account whose key the scope's syncs read with, private ones
+  tagged, which the search box filters by name even when MDBList search is off. "Browse MDBList"
+  switches to the popular picks and MDBList search; a pick made there reopens on it. A pick
+  brings only the list's name. The paste field says when a private list works.
 - **Only creatable templates show.** A template appears when its source is one of the scope's
   `import_sources` and it needs no profile; Discover and Franchise templates come only with Starter
   packs. Templates that ask for a link are left out, because the panel has its own link fields.

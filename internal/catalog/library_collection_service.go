@@ -14,6 +14,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/collage"
 	"github.com/Silo-Server/silo-server/internal/collectionutil"
 	"github.com/Silo-Server/silo-server/internal/logredact"
+	"github.com/Silo-Server/silo-server/internal/mdblist"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -75,6 +76,14 @@ type TMDBListFetcher interface {
 	GetList(ctx context.Context, id, limit int) ([]TMDBCollectionEntry, error)
 }
 
+// MDBListListReader reads an MDBList list through the MDBList API with the
+// server's key (internal/mdblist.Client). Refusals are
+// *collectionutil.MDBListReadError.
+type MDBListListReader interface {
+	Configured() bool
+	ListItems(ctx context.Context, ref collectionutil.MDBListRef, maxEntries int) ([]collectionutil.MDBListEntry, error)
+}
+
 // CollageGenerator composes and stores collection collages. Stored collages
 // are deleted through the artwork revision collector, never directly.
 type CollageGenerator interface {
@@ -115,6 +124,11 @@ type LibraryCollectionService struct {
 	// TMDBLists is nil when TMDB is not configured. It serves the `tmdb_list`
 	// source mode (public user-authored lists).
 	TMDBLists TMDBListFetcher
+
+	// MDBList reads a list the public MDBList feed refuses, such as a
+	// private one, through the MDBList API with the server's key. Nil
+	// leaves such lists failing with the feed's refusal.
+	MDBList MDBListListReader
 
 	// CollageGen is nil when S3/image processing is not configured.
 	CollageGen CollageGenerator
@@ -207,16 +221,6 @@ type libraryCollectionDiscoverConfig struct {
 	OriginalLanguage string   `json:"original_language,omitempty"`
 }
 
-type mdblistEntry struct {
-	ID          int    `json:"id"`
-	Rank        int    `json:"rank"`
-	TVDBID      *int   `json:"tvdbid"`
-	IMDbID      string `json:"imdb_id"`
-	MediaType   string `json:"mediatype"`
-	Title       string `json:"title"`
-	ReleaseYear int    `json:"release_year"`
-}
-
 func (s *LibraryCollectionService) SyncCollection(ctx context.Context, collectionID string) (*models.LibraryCollectionSyncRun, error) {
 	return s.SyncCollectionWithOptions(ctx, collectionID, SyncCollectionOptions{})
 }
@@ -283,8 +287,8 @@ func (s *LibraryCollectionService) syncMDBListCollection(ctx context.Context, co
 	// the two GetByExternalIDs IN arrays balloon to the full list size even
 	// when the user's limit is small.
 	fetchLimit := collectionutil.SourceFetchLimit(limit)
-	entries, err := collectionutil.FetchMDBListWithFallback(listURLs, func(listURL string) ([]mdblistEntry, error) {
-		return s.fetchMDBListEntries(ctx, listURL, fetchLimit)
+	entries, err := collectionutil.FetchMDBListEntries(ctx, s.httpClient, listURLs, fetchLimit, func(ref collectionutil.MDBListRef, feedErr *collectionutil.MDBListFeedError) ([]collectionutil.MDBListEntry, error) {
+		return s.readMDBListWithServerKey(ctx, ref, fetchLimit, feedErr)
 	})
 	if err != nil {
 		return nil, err
@@ -295,7 +299,7 @@ func (s *LibraryCollectionService) syncMDBListCollection(ctx context.Context, co
 	// (audit 2026-05-01 §3.7).
 	var movieBatch, seriesBatch ExternalIDBatch
 	for _, entry := range entries {
-		itemType := mdbListEntryItemType(entry)
+		itemType := entry.ItemType()
 		if entry.ID > 0 {
 			idStr := fmt.Sprintf("%d", entry.ID)
 			if itemType == "movie" {
@@ -342,7 +346,7 @@ func (s *LibraryCollectionService) syncMDBListCollection(ctx context.Context, co
 	warnings := make([]string, 0)
 
 	for index, entry := range entries {
-		itemType := mdbListEntryItemType(entry)
+		itemType := entry.ItemType()
 		var lookup *ExternalIDLookup
 		if itemType == "movie" {
 			lookup = movieLookup
@@ -831,18 +835,35 @@ func (s *LibraryCollectionService) matchTMDBEntriesInLibraries(ctx context.Conte
 	return contentIDs, nil
 }
 
-func (s *LibraryCollectionService) fetchMDBListEntries(ctx context.Context, listURL string, maxEntries int) ([]mdblistEntry, error) {
-	return collectionutil.FetchMDBListJSON[mdblistEntry](ctx, s.httpClient, listURL, maxEntries)
-}
-
-// mdbListEntryItemType normalizes an MDBList entry's media_type field to the
-// internal "movie"/"series" item type taxonomy.
-func mdbListEntryItemType(entry mdblistEntry) string {
-	switch strings.ToLower(entry.MediaType) {
-	case "show", "tv", "series":
-		return "series"
+// readMDBListWithServerKey reads a list the public feed refused through the
+// MDBList API with the server's key, so an admin's private list can sync.
+// Its errors are the messages the sync stores, which say what to change.
+func (s *LibraryCollectionService) readMDBListWithServerKey(ctx context.Context, ref collectionutil.MDBListRef, maxEntries int, feedErr *collectionutil.MDBListFeedError) ([]collectionutil.MDBListEntry, error) {
+	noKey := func() error {
+		return fmt.Errorf("%w. To sync a private list, add an MDBList API key from the account that owns it in Settings › Providers", feedErr)
+	}
+	if s.MDBList == nil || !s.MDBList.Configured() {
+		return nil, noKey()
+	}
+	entries, err := s.MDBList.ListItems(ctx, ref, maxEntries)
+	if err == nil {
+		return entries, nil
+	}
+	// The key can be cleared between the check above and the read.
+	if errors.Is(err, mdblist.ErrNotConfigured) {
+		return nil, noKey()
+	}
+	var readErr *collectionutil.MDBListReadError
+	if !errors.As(err, &readErr) {
+		return nil, err
+	}
+	switch readErr.Kind {
+	case collectionutil.MDBListKeyRejected:
+		return nil, errors.New("MDBList rejected the server's MDBList API key. Check it in Settings › Providers")
+	case collectionutil.MDBListRateLimited:
+		return nil, errors.New("the server's MDBList API key has used up its daily MDBList limit. The next sync tries again")
 	default:
-		return "movie"
+		return nil, fmt.Errorf("%w. The server's MDBList API key can't read this list; if it is private, use a key from the account that owns it in Settings › Providers", readErr)
 	}
 }
 
@@ -853,7 +874,7 @@ func mdbListEntryItemType(entry mdblistEntry) string {
 // which external ID resolved it.
 //
 // Priority order: for series TVDB > TMDB > IMDb, for movies TMDB > IMDb.
-func pickCandidatesByPriority(lookup *ExternalIDLookup, entry mdblistEntry, itemType string) []string {
+func pickCandidatesByPriority(lookup *ExternalIDLookup, entry collectionutil.MDBListEntry, itemType string) []string {
 	if lookup == nil {
 		return nil
 	}

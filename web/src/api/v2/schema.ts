@@ -1472,6 +1472,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/admin/collections/mdblist/lists": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List the lists of the MDBList account that owns the server's MDBList API key, private ones included, to sync as server collections. */
+    get: operations["listAdminMDBListLists"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/admin/collections/order": {
     parameters: {
       query?: never;
@@ -16871,6 +16888,11 @@ export interface components {
       imports: boolean;
       item_reorder: boolean;
       /**
+       * @description listAdminMDBListLists returns the lists of the account that owns the server's MDBList API key, and server collections sync that account's private lists; false when the server has no MDBList API key
+       * @example true
+       */
+      mdblist_account_lists: boolean;
+      /**
        * @description searchMDBListLists and listTopMDBListLists return lists; false when the server has no MDBList API key
        * @example true
        */
@@ -32018,6 +32040,54 @@ export interface components {
       title_language?: string;
       /** Format: int64 */
       year: number;
+    };
+    MDBListAccountList: {
+      /**
+       * @description MDBList updates the list from its filters
+       * @example false
+       */
+      dynamic: boolean;
+      /**
+       * Format: int64
+       * @example 42
+       */
+      items: number;
+      /**
+       * @description What the list holds; both for a list of movies and shows
+       * @example [
+       *       "movie"
+       *     ]
+       */
+      media_types: ("movie" | "show")[];
+      /** @example Weekend picks */
+      name: string;
+      /**
+       * @description false for a list the account liked
+       * @example true
+       */
+      owned: boolean;
+      /**
+       * @description Only the account can see the list; Silo reads it with the key
+       * @example true
+       */
+      private: boolean;
+      /**
+       * Format: uri
+       * @description The list page, which a synced collection stores
+       * @example https://mdblist.com/lists/example-user/weekend-picks
+       */
+      url: string;
+    };
+    MDBListAccountListCollection: {
+      /**
+       * @description false when there is no MDBList API key to read with; items is then empty and clients hide the choice
+       * @example true
+       */
+      configured: boolean;
+      /** @description The page's items; empty, never null */
+      items: components["schemas"]["MDBListAccountList"][];
+      /** @description Cursor state; absent for bounded unpaginated collections */
+      page?: components["schemas"]["PageInfo"];
     };
     MDBListCollectionImport: {
       /** @example  */
@@ -54408,6 +54478,112 @@ export interface operations {
       };
       /** @description Unsupported Media Type */
       415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  listAdminMDBListLists: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MDBListAccountListCollection"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
         headers: {
           [name: string]: unknown;
         };

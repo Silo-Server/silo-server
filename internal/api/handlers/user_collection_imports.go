@@ -349,6 +349,42 @@ func (h *UserCollectionImportHandler) TopMDBList(ctx context.Context) (MDBListDi
 	return MDBListDiscoveryView{Configured: true, Lists: lists}, nil
 }
 
+// MDBListAccountListsView is the lists of the MDBList account behind an API
+// key: its own, private ones included, and the ones it liked.
+type MDBListAccountListsView struct {
+	Configured bool
+	Lists      []mdblist.AccountList
+}
+
+// ServerMDBListAccountLists answers the lists of the account that owns the
+// server's MDBList API key, so an administrator can pick one of its private
+// lists for a server collection. It shows that account's private lists, so
+// only administrators may reach it: v2 listAdminMDBListLists calls it, and no
+// v1 route does. An unconfigured key answers configured=false and no lists,
+// as SearchMDBList does.
+func (h *UserCollectionImportHandler) ServerMDBListAccountLists(ctx context.Context) (MDBListAccountListsView, error) {
+	if !h.MDBListConfigured() {
+		return MDBListAccountListsView{Configured: false, Lists: []mdblist.AccountList{}}, nil
+	}
+	lists, err := h.mdblist.AccountLists(ctx)
+	if err != nil {
+		var readErr *collectionutil.MDBListReadError
+		if errors.As(err, &readErr) {
+			switch readErr.Kind {
+			case collectionutil.MDBListKeyRejected:
+				return MDBListAccountListsView{}, apiError(http.StatusBadGateway, "upstream_error", "MDBList rejected the server's MDBList API key")
+			case collectionutil.MDBListRateLimited:
+				return MDBListAccountListsView{}, apiError(http.StatusBadGateway, "upstream_error", "The server's MDBList API key has used up its daily MDBList limit")
+			}
+		}
+		return MDBListAccountListsView{}, apiError(http.StatusBadGateway, "upstream_error", fmt.Sprintf("Reading MDBList lists failed: %v", err))
+	}
+	if lists == nil {
+		lists = []mdblist.AccountList{}
+	}
+	return MDBListAccountListsView{Configured: true, Lists: lists}, nil
+}
+
 func validateOptionalLimit(limit *int) error {
 	if limit == nil {
 		return nil

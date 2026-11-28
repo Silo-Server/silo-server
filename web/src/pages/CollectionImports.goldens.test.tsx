@@ -10,6 +10,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Library } from "@/api/types";
 import {
+  adminCapabilities,
   adminCollection,
   adminCollectionList,
   adminSyncedCollection,
@@ -164,6 +165,32 @@ describe("admin Synced list step", () => {
     ]);
     expect(v2Recorder.writes()).toEqual(goldens.adminTemplateMDBListPick);
   });
+
+  it("creates from one of the server MDBList account's own lists, private ones included", async () => {
+    v2Recorder.answer("GET /api/v2/admin/collections/capabilities", {
+      ...adminCapabilities,
+      mdblist_account_lists: true,
+    });
+    v2Recorder.answer("GET /api/v2/admin/collections/mdblist/lists", {
+      configured: true,
+      items: [ownMDBList("Weekend Picks", "weekend-picks", true)],
+    });
+    showEditorPage("/admin/collections/new?type=synced&libraryId=1");
+    const pick = await screen.findByRole("radio", { name: "Weekend Picks" });
+    expect(pick).toHaveAccessibleDescription(/^Private/);
+    fireEvent.click(pick);
+    await createAndLeave();
+    expect(v2Recorder.writes()).toEqual([
+      expect.objectContaining({
+        operation: "POST /api/v2/admin/collections/import/mdblist",
+        body: expect.objectContaining({
+          title: "Weekend Picks",
+          url: "https://mdblist.com/lists/alice/weekend-picks/json",
+          library_ids: ["1"],
+        }),
+      }),
+    ]);
+  });
 });
 
 describe("personal Synced list step", () => {
@@ -310,3 +337,16 @@ describe("personal Synced list editor", () => {
     expect(v2Recorder.writes()).toEqual(goldens.personalSyncedClearLimit);
   });
 });
+
+/** One of the key account's own MDBList lists, as the account-list operations answer it. */
+function ownMDBList(name: string, slug: string, isPrivate: boolean) {
+  return {
+    name,
+    url: `https://mdblist.com/lists/alice/${slug}`,
+    media_types: ["movie"],
+    items: 3,
+    private: isPrivate,
+    dynamic: false,
+    owned: true,
+  };
+}

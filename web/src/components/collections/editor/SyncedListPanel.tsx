@@ -208,6 +208,7 @@ function NewListContents({
               scopeKind={scopeKind}
               picks={picks}
               searchEnabled={capabilities?.mdblist_search ?? false}
+              accountListsEnabled={capabilities?.mdblist_account_lists ?? false}
               selectedId={list?.pickId}
               onPick={(pick) => follow(pick, { mdblistLink: "", tmdbListLink: "" })}
               link={synced.mdblistLink}
@@ -698,6 +699,7 @@ interface PanelBase {
   capabilities?: {
     import_sources: readonly string[];
     mdblist_search: boolean;
+    mdblist_account_lists?: boolean;
     schedule_time_zone?: { utc_offset: string; name?: string };
     sync_schedule_editable?: boolean;
   };

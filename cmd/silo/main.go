@@ -3498,6 +3498,14 @@ func main() {
 		libraryItemRepo := catalog.NewLibraryItemRepository(deps.DB)
 		collectionService := catalog.NewLibraryCollectionService(collectionRepo, collItemRepo, libraryItemRepo, nil)
 		collectionService.TMDBCollections = api.NewTMDBCollectionFetcher(tmdbClient)
+		// One client holds the server's MDBList key for list search, the
+		// admin's own lists, and private lists the public feed refuses.
+		deps.MDBListClient = mdblist.NewClient(cfg.MDBListAPIKey, nil)
+		mdblistForReload := deps.MDBListClient
+		configWatcher.OnChange(func(_, updated *config.Config) {
+			mdblistForReload.SetAPIKey(updated.MDBListAPIKey)
+		})
+		collectionService.MDBList = deps.MDBListClient
 		deps.CollectionService = collectionService
 		collectionSyncScheduler = catalog.NewCollectionSyncScheduler(collectionRepo, collectionService, slog.Default())
 
@@ -3530,11 +3538,6 @@ func main() {
 			userCollectionScheduler = usercollections.NewScheduler(deps.DB, userSync, slog.Default())
 			deps.UserCollectionSync = userSync
 			deps.UserCollectionScheduler = userCollectionScheduler
-			deps.MDBListClient = mdblist.NewClient(cfg.MDBListAPIKey, nil)
-			mdblistForReload := deps.MDBListClient
-			configWatcher.OnChange(func(_, updated *config.Config) {
-				mdblistForReload.SetAPIKey(updated.MDBListAPIKey)
-			})
 		}
 	}
 

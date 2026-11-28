@@ -1,5 +1,5 @@
 import { useId, useMemo, useState } from "react";
-import { Info, Link2, Search } from "lucide-react";
+import { Info, Link2, Lock, Search } from "lucide-react";
 import { Link } from "react-router";
 import { RadioGroup as RadioGroupPrimitive } from "radix-ui";
 
@@ -7,7 +7,11 @@ import type { MDBListListSummary } from "@/api/types";
 import { LineName, MetaLine } from "@/components/MetaLine";
 import { Input } from "@/components/ui/input";
 import { useDebounce } from "@/hooks/useDebounce";
-import { useMDBListSearch } from "@/hooks/queries/userCollectionImports";
+import {
+  useMDBListAccountLists,
+  useMDBListSearch,
+  type MDBListAccountList,
+} from "@/hooks/queries/userCollectionImports";
 import type { CollectionTemplate, CollectionTemplateGroup } from "@/lib/collectionTemplates";
 import {
   fromMdblist,
@@ -17,10 +21,15 @@ import {
   pasteMdblistLink,
   popularPicks,
   popularPicksHelp,
+  yourMdblistLists,
+  yourMdblistListsServerHelp,
 } from "@/lib/collections/copy";
 import {
   cleanMDBListLink,
   isMDBListLink,
+  isMdblistAccountPickId,
+  mdblistAccountPick,
+  mdblistAccountPickId,
   mdblistPick,
   mdblistPickId,
   templatePick,
@@ -34,6 +43,9 @@ import { formatLocale } from "@/lib/appLocale";
 import { useT, type Translate } from "@/i18n";
 
 const ALL = "all";
+
+/** What the list box shows: the key account's own lists, or popular picks and MDBList search. */
+type View = "own" | "browse";
 
 /** A link, not text: the same in every language. */
 const MDBLIST_LINK_PLACEHOLDER = "https://mdblist.com/lists/…";
@@ -67,6 +79,24 @@ function listMeta(t: Translate, list: MDBListListSummary) {
   );
 }
 
+function accountListMeta(t: Translate, list: MDBListAccountList) {
+  const [only] = list.media_types;
+  return (
+    <MetaLine
+      parts={[
+        list.owned ? null : t("web.collections.templateGallery.listLiked"),
+        list.media_types.length === 1 && only
+          ? t("web.collections.templateGallery.listKind", { kind: only })
+          : null,
+        t("web.collections.metaLine.titleCount", {
+          count: list.items,
+          shown: list.items.toLocaleString(formatLocale()),
+        }),
+      ]}
+    />
+  );
+}
+
 function GroupHeading({ title, help }: { title: string; help: string }) {
   const t = useT();
   return (
@@ -82,16 +112,20 @@ function GroupHeading({ title, help }: { title: string; help: string }) {
 }
 
 /**
- * The MDBList tab of the Synced list step. One search box covers the popular
- * picks (filtered here) and MDBList's public lists (searched on the server),
- * theme chips narrow the picks, and any MDBList link can be pasted instead.
- * With MDBList search off, the box is disabled and says why; picks and links
- * still work. A failed search keeps the typed text and the last results.
+ * The MDBList tab of the Synced list step. When the scope's key can list its
+ * account's own lists, private ones included, a switch shows them first ("Your
+ * lists") and the search box filters them by name; "Browse MDBList" shows the
+ * popular picks (filtered here, narrowed by theme chips) and MDBList's public
+ * lists (searched on the server). Any MDBList link can be pasted instead, and
+ * the field says when a private one works. With MDBList search off, browsing
+ * disables the box and says why; picks and links still work. A failed search
+ * keeps the typed text and the last results.
  */
 export function MDBListBrowser({
   scopeKind,
   picks,
   searchEnabled,
+  accountListsEnabled = false,
   selectedId,
   onPick,
   link,
@@ -102,6 +136,8 @@ export function MDBListBrowser({
   picks: readonly CollectionTemplateGroup[];
   /** `mdblist_search` from the scope's capabilities. */
   searchEnabled: boolean;
+  /** `mdblist_account_lists` from the scope's capabilities. */
+  accountListsEnabled?: boolean;
   /** The pick the draft follows, if it came from this tab. */
   selectedId?: string;
   onPick: (pick: SyncedPick) => void;
@@ -113,16 +149,26 @@ export function MDBListBrowser({
   const id = useId();
   const [query, setQuery] = useState("");
   const [theme, setTheme] = useState(ALL);
+  // A pick made while browsing reopens there; anything else starts on the account's own lists.
+  const [view, setView] = useState<View>(() =>
+    selectedId && !isMdblistAccountPickId(selectedId) ? "browse" : "own",
+  );
+  const accountLists = useMDBListAccountLists(scopeKind, accountListsEnabled);
+  // An account with no lists has nothing to switch to.
+  const ownOffered =
+    accountListsEnabled && !(accountLists.isSuccess && accountLists.data.length === 0);
+  const showing: View = ownOffered ? view : "browse";
+  const browsing = showing === "browse";
   // 300ms keeps typing responsive while bounding hits against MDBList's daily quota.
   const settled = useDebounce(query.trim(), 300);
-  const search = useMDBListSearch(settled, searchEnabled);
+  const search = useMDBListSearch(settled, searchEnabled && browsing);
   const [lastFound, setLastFound] = useState<{ query: string; lists: MDBListListSummary[] }>();
   if (search.data && search.data.lists !== lastFound?.lists && settled) {
     setLastFound({ query: settled, lists: search.data.lists });
   }
   // A failed search keeps the last results; a new term shows "Searching…" until it answers.
   const fallback = search.isError ? lastFound?.lists : undefined;
-  const found = settled ? (search.data?.lists ?? fallback ?? []) : [];
+  const found = settled && browsing ? (search.data?.lists ?? fallback ?? []) : [];
 
   const term = query.trim().toLowerCase();
   const shown = useMemo(
@@ -134,19 +180,64 @@ export function MDBListBrowser({
     [picks, term, theme],
   );
   const templates = useMemo(() => picks.flatMap((group) => group.templates), [picks]);
+  const ownLists = useMemo(
+    () =>
+      (accountLists.data ?? []).filter((list) => !term || list.name.toLowerCase().includes(term)),
+    [accountLists.data, term],
+  );
 
   function choose(value: string) {
     const template = templates.find((entry) => entry.id === value);
     if (template) return onPick(templatePick(template, scopeKind));
+    const own = accountLists.data?.find((entry) => mdblistAccountPickId(entry) === value);
+    if (own) return onPick(mdblistAccountPick(own));
     const list = found.find((entry) => mdblistPickId(entry) === value);
     if (list) onPick(mdblistPick(list));
   }
 
   const cleaned = cleanMDBListLink(link);
   const linkInvalid = cleaned !== "" && !isMDBListLink(cleaned);
+  // A private list syncs through the server's key, which the account lists come from.
+  const privateHelp =
+    scopeKind === "server" ? t("web.collections.templateGallery.pasteLinkPrivateServer") : null;
+  const searchOn = searchEnabled || !browsing;
 
   return (
     <div className="grid gap-3">
+      {ownOffered ? (
+        <div
+          role="group"
+          aria-label={t("web.collections.templateGallery.listViews")}
+          className="bg-muted inline-flex w-fit gap-1 rounded-lg p-1"
+        >
+          {(["own", "browse"] as const).map((entry) => (
+            <button
+              key={entry}
+              type="button"
+              aria-pressed={showing === entry}
+              onClick={() => setView(entry)}
+              className={cn(
+                "text-muted-foreground hover:text-foreground inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-[0.8125rem] font-medium",
+                showing === entry && "bg-background text-foreground shadow-sm",
+              )}
+            >
+              {entry === "own" ? (
+                <>
+                  <Lock aria-hidden className="size-3.5" />
+                  {t("web.collections.templateGallery.viewOwnLists")}
+                  {accountLists.data ? (
+                    <span className="text-muted-foreground tabular-nums">
+                      {accountLists.data.length.toLocaleString(formatLocale())}
+                    </span>
+                  ) : null}
+                </>
+              ) : (
+                t("web.collections.templateGallery.viewBrowse")
+              )}
+            </button>
+          ))}
+        </div>
+      ) : null}
       <div className="relative">
         <Search
           aria-hidden
@@ -155,19 +246,21 @@ export function MDBListBrowser({
         <Input
           type="search"
           aria-label={t("web.collections.templateGallery.searchLists")}
-          aria-describedby={searchEnabled ? undefined : `${id}-off`}
+          aria-describedby={searchOn ? undefined : `${id}-off`}
           placeholder={
-            searchEnabled
-              ? t("web.collections.templateGallery.searchPlaceholder")
-              : t("web.collections.templateGallery.searchOff")
+            !browsing
+              ? t("web.collections.templateGallery.searchOwnLists")
+              : searchEnabled
+                ? t("web.collections.templateGallery.searchPlaceholder")
+                : t("web.collections.templateGallery.searchOff")
           }
-          disabled={!searchEnabled}
+          disabled={!searchOn}
           className="h-11 ps-9"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
         />
       </div>
-      {searchEnabled ? null : (
+      {searchOn ? null : (
         <p
           id={`${id}-off`}
           className="bg-muted/60 flex items-start gap-2.5 rounded-xl px-3 py-2.5 text-[0.8125rem]"
@@ -191,7 +284,7 @@ export function MDBListBrowser({
           )}
         </p>
       )}
-      {picks.length > 1 ? (
+      {browsing && picks.length > 1 ? (
         <div
           role="group"
           aria-label={t("web.collections.templateGallery.themes")}
@@ -222,7 +315,41 @@ export function MDBListBrowser({
         onValueChange={choose}
         className="border-border divide-border/60 grid max-h-[420px] overflow-y-auto rounded-xl border"
       >
-        {shown.length > 0 ? (
+        {!browsing ? (
+          <div>
+            <GroupHeading title={yourMdblistLists()} help={yourMdblistListsServerHelp()} />
+            {ownLists.map((list) => (
+              <PickRow
+                key={list.url}
+                value={mdblistAccountPickId(list)}
+                title={list.name}
+                tag={list.private ? t("web.collections.templateGallery.listPrivate") : undefined}
+                poster={
+                  list.private ? (
+                    <Lock aria-hidden className="text-muted-foreground size-3.5" />
+                  ) : undefined
+                }
+                meta={accountListMeta(t, list)}
+              />
+            ))}
+            {accountLists.isError ? (
+              <p role="alert" className="text-destructive px-3.5 py-2.5 text-[0.8125rem]">
+                {t("web.collections.templateGallery.accountListsFailed", {
+                  detail: accountLists.error instanceof Error ? accountLists.error.message : "",
+                }).trim()}
+              </p>
+            ) : accountLists.isPending ? (
+              <p className="text-muted-foreground px-3.5 py-2.5 text-[0.8125rem]">
+                {t("web.collections.templateGallery.loadingOwnLists")}
+              </p>
+            ) : term && ownLists.length === 0 ? (
+              <p className="text-muted-foreground px-3.5 py-2.5 text-[0.8125rem]">
+                {t("web.collections.templateGallery.noOwnMatches", { query: query.trim() })}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+        {browsing && shown.length > 0 ? (
           <div>
             <GroupHeading title={popularPicks()} help={popularPicksHelp()} />
             {shown.map((template) => (
@@ -230,7 +357,7 @@ export function MDBListBrowser({
             ))}
           </div>
         ) : null}
-        {settled ? (
+        {browsing && settled ? (
           <div>
             <GroupHeading title={fromMdblist()} help={fromMdblistHelp()} />
             {found.map((list) => (
@@ -258,7 +385,7 @@ export function MDBListBrowser({
             ) : null}
           </div>
         ) : null}
-        {shown.length === 0 && !settled ? (
+        {browsing && shown.length === 0 && !settled ? (
           <p className="text-muted-foreground px-3.5 py-3 text-[0.8125rem]">
             {t("web.collections.templateGallery.noPicks")}
           </p>
@@ -283,7 +410,9 @@ export function MDBListBrowser({
             placeholder={MDBLIST_LINK_PLACEHOLDER}
             className="h-11 ps-9"
             aria-invalid={linkInvalid || undefined}
-            aria-describedby={linkInvalid ? `${id}-link-error` : undefined}
+            aria-describedby={
+              linkInvalid ? `${id}-link-error` : privateHelp ? `${id}-link-help` : undefined
+            }
             value={link}
             onChange={(event) => onLinkChange(event.target.value)}
           />
@@ -291,6 +420,10 @@ export function MDBListBrowser({
         {linkInvalid ? (
           <p id={`${id}-link-error`} className="text-destructive text-[0.78125rem]">
             {mdblistLinkInvalid()}
+          </p>
+        ) : privateHelp ? (
+          <p id={`${id}-link-help`} className="text-muted-foreground text-[0.78125rem]">
+            {privateHelp}
           </p>
         ) : null}
       </div>

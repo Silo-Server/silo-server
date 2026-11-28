@@ -6918,6 +6918,13 @@
           "item_reorder": {
             "type": "boolean"
           },
+          "mdblist_account_lists": {
+            "description": "listAdminMDBListLists returns the lists of the account that owns the server's MDBList API key, and server collections sync that account's private lists; false when the server has no MDBList API key",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
           "mdblist_search": {
             "description": "searchMDBListLists and listTopMDBListLists return lists; false when the server has no MDBList API key",
             "examples": [
@@ -6965,6 +6972,7 @@
           "item_reorder",
           "template_summaries",
           "mdblist_search",
+          "mdblist_account_lists",
           "schedule_time_zone",
           "section_references",
           "revision",
@@ -44000,6 +44008,107 @@
         },
         "required": [
           "current_session",
+          "items"
+        ],
+        "type": "object"
+      },
+      "MDBListAccountList": {
+        "additionalProperties": false,
+        "properties": {
+          "dynamic": {
+            "description": "MDBList updates the list from its filters",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
+          "items": {
+            "examples": [
+              42
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "media_types": {
+            "description": "What the list holds; both for a list of movies and shows",
+            "examples": [
+              [
+                "movie"
+              ]
+            ],
+            "items": {
+              "enum": [
+                "movie",
+                "show"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "name": {
+            "examples": [
+              "Weekend picks"
+            ],
+            "type": "string"
+          },
+          "owned": {
+            "description": "false for a list the account liked",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "private": {
+            "description": "Only the account can see the list; Silo reads it with the key",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "url": {
+            "description": "The list page, which a synced collection stores",
+            "examples": [
+              "https://mdblist.com/lists/example-user/weekend-picks"
+            ],
+            "format": "uri",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "url",
+          "media_types",
+          "items",
+          "private",
+          "dynamic",
+          "owned"
+        ],
+        "type": "object"
+      },
+      "MDBListAccountListCollection": {
+        "additionalProperties": false,
+        "properties": {
+          "configured": {
+            "description": "false when there is no MDBList API key to read with; items is then empty and clients hide the choice",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "items": {
+            "description": "The page's items; empty, never null",
+            "items": {
+              "$ref": "#/components/schemas/MDBListAccountList"
+            },
+            "type": "array"
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageInfo",
+            "description": "Cursor state; absent for bounded unpaginated collections"
+          }
+        },
+        "required": [
+          "configured",
           "items"
         ],
         "type": "object"
@@ -81970,6 +82079,148 @@
         "x-silo-class": "acting_admin",
         "x-silo-demo-restricted": true,
         "x-silo-retry-safety": "non_retryable",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/collections/mdblist/lists": {
+      "get": {
+        "operationId": "listAdminMDBListLists",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MDBListAccountListCollection"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List the lists of the MDBList account that owns the server's MDBList API key, private ones included, to sync as server collections.",
+        "tags": [
+          "admin-collections"
+        ],
+        "x-silo-class": "acting_admin",
         "x-silo-service-backed": true
       }
     },

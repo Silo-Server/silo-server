@@ -22,9 +22,9 @@ func TestFetchMDBListEntriesDoesNotDialPrivateHosts(t *testing.T) {
 		}),
 	})
 
-	_, err := svc.fetchMDBListEntries(context.Background(), "http://127.0.0.1:8096/", 0)
+	_, err := collectionutil.FetchMDBListEntries(context.Background(), svc.httpClient, []string{"http://127.0.0.1:8096/"}, 0, nil)
 	if !errors.Is(err, collectionutil.ErrMDBListURL) {
-		t.Fatalf("fetchMDBListEntries(loopback) = %v, want ErrMDBListURL", err)
+		t.Fatalf("FetchMDBListEntries(loopback) = %v, want ErrMDBListURL", err)
 	}
 	if hits.Load() != 0 {
 		t.Fatalf("HTTP client was used %d times for a private URL", hits.Load())

@@ -572,6 +572,12 @@ export function fromMdblist() {
 export function fromMdblistHelp() {
   return t("web.collections.copy.fromMdblistHelp");
 }
+export function yourMdblistLists() {
+  return t("web.collections.copy.yourMdblistLists");
+}
+export function yourMdblistListsServerHelp() {
+  return t("web.collections.copy.yourMdblistListsServerHelp");
+}
 export function pasteMdblistLink() {
   return t("web.collections.copy.pasteMdblistLink");
 }
