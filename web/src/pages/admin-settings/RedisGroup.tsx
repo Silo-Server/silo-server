@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 
 import type { ConnectionCheckResponse } from "@/api/types";
 import { ConnectionCheckAction } from "@/components/admin/ConnectionCheckAction";
@@ -37,12 +37,18 @@ export function RedisGroup({
   restartKeys,
   secrets,
   savesAndDiscards,
+  stagedDb,
 }: {
   form: ReturnType<typeof useSettingsForm>;
   restartKeys: RestartKeyMatcher;
   secrets: RedisUrlEditors;
   /** Counts the page's completed saves and its discards. */
   savesAndDiscards: number;
+  /**
+   * The number a URL edit staged. The page owns it, like the draft, so it
+   * outlives this group being swapped out while credential status is down.
+   */
+  stagedDb: StagedRedisDb;
 }) {
   const t = useT();
   const checkConnection = useCheckAdminSettingsConnection();
@@ -51,7 +57,6 @@ export function RedisGroup({
   const urlEnv = form.envVar("redis.url");
   const configured = form.sensitiveConfigured.includes("redis.url");
   const [enabledOverride, setEnabledOverride] = useState<boolean | null>(null);
-  const stagedDb = useRef<StagedRedisDb["current"]>(null);
   // Saving or discarding clears the toggle override so it follows the stored
   // URL again. Running out of unsaved changes is not the same: erasing what
   // was typed into a field with nothing saved takes back its edit while the

@@ -10,7 +10,7 @@ import { SettingField } from "./SettingField";
 import { SaveBar } from "@/components/SaveBar";
 import { FieldGroup } from "./FieldGroup";
 import { RedisGroup, type RedisUrlEditors } from "./RedisGroup";
-import { REDIS_KEYS } from "./redisDraft";
+import { REDIS_KEYS, type StagedRedisDb } from "./redisDraft";
 
 // Identity (server name, login subtitle) used to live on the Branding tab; it is
 // a plain server-wide value an admin looks for under General, so it saves with
@@ -53,6 +53,7 @@ export default function GeneralSettings() {
   const anyDirty = (keys: string[]) => keys.some((key) => form.isDirty(key));
   const [saveInProgress, setSaveInProgress] = useState(false);
   const saveInProgressRef = useRef(false);
+  const stagedRedisDb = useRef<StagedRedisDb["current"]>(null);
   // Each save and discard ends the Use Redis switch's own choice.
   const [savesAndDiscards, setSavesAndDiscards] = useState(0);
 
@@ -239,6 +240,7 @@ export default function GeneralSettings() {
             restartKeys={restartKeys}
             secrets={redisUrlEditors}
             savesAndDiscards={savesAndDiscards}
+            stagedDb={stagedRedisDb}
           />
         )}
       </div>

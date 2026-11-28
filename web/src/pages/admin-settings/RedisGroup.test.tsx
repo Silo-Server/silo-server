@@ -1,11 +1,12 @@
 import { render, screen } from "@testing-library/react";
+import { useRef } from "react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useSettingsForm } from "@/hooks/useSettingsForm";
 
 import { RedisGroup } from "./RedisGroup";
-import { REDIS_KEYS } from "./redisDraft";
+import { REDIS_KEYS, type StagedRedisDb } from "./redisDraft";
 
 const { serverSettings, sensitiveStatus } = vi.hoisted(() => ({
   serverSettings: { current: {} as Record<string, string> },
@@ -31,6 +32,7 @@ const OTHER_KEY = "server.public_url";
 
 function Harness() {
   const form = useSettingsForm({ keys: [...REDIS_KEYS, OTHER_KEY] });
+  const stagedDb = useRef<StagedRedisDb["current"]>(null);
   return (
     <>
       <RedisGroup
@@ -38,6 +40,7 @@ function Harness() {
         restartKeys={{ has: () => false }}
         secrets={{ keepSaved: form.resetValue, setSecret: form.setValue, disabled: false }}
         savesAndDiscards={0}
+        stagedDb={stagedDb}
       />
       {/* Another setting on the same page, so an edit can stay staged. */}
       <input
@@ -174,5 +177,22 @@ describe("RedisGroup", () => {
     expect(screen.getByLabelText("Connection URL")).toBeInTheDocument();
     // The Redis drafts went with the takeover; the other edit stays.
     expect(screen.getByText("1 staged")).toBeInTheDocument();
+  });
+
+  // The settings refresh while a new URL is typed and report another number:
+  // erasing the URL takes back the number it staged too (#4834).
+  it("takes back the number a URL edit staged after the settings report another", async () => {
+    serverSettings.current = { "redis.db": "2" };
+    sensitiveStatus.current = { configured: ["redis.url"], managed_by_env: [] };
+    const { rerender } = render(<Harness />);
+    await userEvent.type(screen.getByLabelText("Connection URL"), "redis://other:6379");
+    expect(screen.getByText("2 staged")).toBeInTheDocument();
+
+    serverSettings.current = { "redis.db": "3" };
+    rerender(<Harness />);
+    await userEvent.clear(screen.getByLabelText("Connection URL"));
+
+    expect(screen.getByText("0 staged")).toBeInTheDocument();
+    expect(screen.getByLabelText("Database number")).toHaveValue(3);
   });
 });
