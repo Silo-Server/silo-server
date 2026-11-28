@@ -1154,6 +1154,8 @@
 ./internal/api/handlers TestIgnoredUnmatchedItemStaysIgnoredAcrossRescanDB
 ./internal/metadata TestProcessLeavesIgnoredItemUnmatchedDB
 ./internal/metadata TestMatchQueuesSkipIgnoredItemsDB
+./internal/metadata TestSeriesRootQueueWakeInScopeDB
+./internal/metadata TestSeriesRootQueueWakeInScopeRerunsALeasedRowDB
 ./internal/metadata TestRefreshLeavesIgnoredItemAloneDB
 ./internal/adminjob TestLibraryRefreshSkipsIgnoredItemsDB
 

@@ -797,6 +797,53 @@ func (r *SeriesRootMatchQueueRepository) WakeRoot(ctx context.Context, folderID 
 	return nil
 }
 
+// WakeInScope returns the parked or backed-off row of every series root in a
+// scope to pending, as WakeRoot does for one root: the roots at or under
+// scopePath, and those with a present file under it, as a season folder's
+// root. A complete item refresh calls it once it has cleared the scope's
+// content links, so its own scan matches a root that an earlier failure
+// backed off, such as a hand-matched folder no provider finds on its own
+// (#5337). Like WakeRoot it requests no rerun of a row that is not leased. A
+// leased row keeps its available_at and is asked to rerun instead, so the
+// worker holding it makes it due again when it finishes or fails, rather than
+// restoring a back-off.
+func (r *SeriesRootMatchQueueRepository) WakeInScope(ctx context.Context, folderID int, scopePath string) error {
+	if err := r.requireConfigured(); err != nil {
+		return err
+	}
+	if err := requirePositiveSeriesQueueID("folder id", folderID); err != nil {
+		return err
+	}
+	if strings.TrimSpace(scopePath) == "" {
+		return errors.New("scope path is required")
+	}
+	scopePath = filepath.Clean(scopePath)
+	if _, err := r.pool.Exec(ctx, `
+		UPDATE series_root_match_queue q
+		SET state = 'pending',
+			available_at = CASE WHEN q.lease_token = '' THEN NOW() ELSE q.available_at END,
+			deterministic_attempt_count = 0,
+			failure_kind = '', failure_detail = '{}'::jsonb, last_error = '', parked_at = NULL,
+			rerun_requested = q.rerun_requested OR q.lease_token <> '',
+			updated_at = NOW()
+		WHERE q.media_folder_id = $1
+		  AND (
+			q.observed_root_path = $2 OR q.observed_root_path LIKE $3 ESCAPE '\' OR
+			EXISTS (
+				SELECT 1
+				FROM media_files mf
+				WHERE mf.media_folder_id = q.media_folder_id
+				  AND mf.observed_root_path = q.observed_root_path
+				  AND mf.missing_since IS NULL AND mf.extra_id IS NULL
+				  AND (mf.file_path = $2 OR mf.file_path LIKE $3 ESCAPE '\')
+			)
+		  )
+	`, folderID, scopePath, pathPrefixLike(scopePath)); err != nil {
+		return fmt.Errorf("waking series root queue rows in scope: %w", err)
+	}
+	return nil
+}
+
 func (r *SeriesRootMatchQueueRepository) WakeForChangedInputs(ctx context.Context) (int, error) {
 	if err := r.requireConfigured(); err != nil {
 		return 0, err

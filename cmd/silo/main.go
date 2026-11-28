@@ -2757,6 +2757,9 @@ func main() {
 			if itemRepo != nil {
 				itemRefreshExecutor.SetItemStatusReader(itemRepo)
 			}
+			if seriesQueueRepo != nil {
+				itemRefreshExecutor.SetSeriesRootWaker(seriesQueueRepo)
+			}
 			if audiobookEnricher != nil {
 				itemRefreshExecutor.SetAudiobookEnricher(audiobookEnricher)
 			}

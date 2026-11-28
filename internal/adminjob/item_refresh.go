@@ -506,6 +506,8 @@ type ItemRefreshExecutor struct {
 	// itemStatuses lets a complete refresh wait out a series match that
 	// another worker is still running; see SetItemStatusReader.
 	itemStatuses itemRefreshItemStatusReader
+	// seriesRoots wakes a complete refresh's series roots; see wakeSeriesRoots.
+	seriesRoots itemRefreshSeriesRootWaker
 }
 
 // A complete refresh resolves the rebuilt item from the files its scope links
@@ -533,16 +535,6 @@ var errRebuiltItemMatching = errors.New("rebuilt series is still being matched")
 // itemRefreshItemStatusReader reads catalog item statuses.
 type itemRefreshItemStatusReader interface {
 	GetStatusByIDs(ctx context.Context, ids []string) (map[string]string, error)
-}
-
-// isSeriesTarget reports whether a refresh of requestedType rebuilds a series
-// root, which the TV match queue matches.
-func isSeriesTarget(requestedType string) bool {
-	switch requestedType {
-	case "series", "season", "episode":
-		return true
-	}
-	return false
 }
 
 func NewItemRefreshExecutor(
@@ -643,6 +635,7 @@ func (e *ItemRefreshExecutor) Execute(ctx context.Context, req ItemRefreshReques
 		if err := e.prepareCompleteRefresh(ctx, folder, req); err != nil {
 			return nil, fmt.Errorf("prepare complete refresh: %w", err)
 		}
+		e.wakeSeriesRoots(ctx, req)
 	}
 
 	if progress != nil {
