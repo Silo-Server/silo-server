@@ -85,6 +85,8 @@ func main() {
 	write(*out, "buffering-replan_request.json", goldenBufferingReplanRequest())
 	write(*out, "learned-limit-decision_response.json", goldenLearnedLimitDecisionResponse())
 	write(*out, "plan-summary-route_event.json", goldenPlanSummaryRouteEvent())
+	write(*out, "direct-start_request.json", goldenDirectStartRequest())
+	write(*out, "direct-decision_response.json", goldenDirectDecisionResponse())
 	write(*out, "subtitle_inventory.json", goldenSubtitleInventory())
 	write(*out, "attempt_keys.json", goldenAttemptKeys())
 	write(*out, "conformance_matrix.json", goldenConformanceMatrix())

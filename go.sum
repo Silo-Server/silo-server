@@ -158,12 +158,14 @@ github.com/danieljoos/wincred v1.2.2 h1:774zMFJrqaeYCK2W57BgAem/MLi6mtSE47MB6BOJ
 github.com/danieljoos/wincred v1.2.2/go.mod h1:w7w4Utbrz8lqeMbDAK0lkNJUv5sAOkFi7nd/ogr0Uh8=
 github.com/darthShadow/quic-go v0.64.1-shunpike.2 h1:7v0OFZ+w+mpdoS0uoW/VwTIcEZ593xdGK1jCyjclu10=
 github.com/darthShadow/quic-go v0.64.1-shunpike.2/go.mod h1:RAro2j2yN9a9EiPACLHT9IB2NXCvGQmmo/alT0yYI0w=
-github.com/darthShadow/shunpike v0.1.1 h1:ASTvIBodpFN8J4dK34EsNyDHzlKme+j0GMmstFnokEI=
-github.com/darthShadow/shunpike v0.1.1/go.mod h1:dnxsvd/OZh7kzBSbj0winitKxr7zh5RCO2QDgEcKjbc=
+github.com/darthShadow/shunpike v0.1.2 h1:B1KWiUHdaLmPRtVDZJbNac46lCrdjh4pssGqXP0pzb0=
+github.com/darthShadow/shunpike v0.1.2/go.mod h1:dnxsvd/OZh7kzBSbj0winitKxr7zh5RCO2QDgEcKjbc=
 github.com/darthShadow/tailscale v1.104.2-shunpike.2 h1:YGnyOHX2DdH70chiPGOmxIOhxqDfFGVPLVRT+djb4YM=
 github.com/darthShadow/tailscale v1.104.2-shunpike.2/go.mod h1:D+gqEyJjFnwIaojBLaKxUbOfEO3cRXOaFaOZ5BIvYqs=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
+github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc h1:U9qPSI2PIWSS1VwoXQT9A3Wy9MM3WgvqSxFWenqJduM=
+github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/dblohm7/wingoes v0.0.0-20260526185140-fb298caac7ca h1:h1Awca4lQOspNR/2eeo04Ricn5NixDX9mb17WSAgLhQ=
 github.com/dblohm7/wingoes v0.0.0-20260526185140-fb298caac7ca/go.mod h1:2TGl1jRJrRpbzykmg7asHm3h08TqutUgQqY5v9k/g3c=
 github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.1 h1:5RVFMOWjMyRy8cARdy79nAmgYw3hK/4HUq48LQ6Wwqo=

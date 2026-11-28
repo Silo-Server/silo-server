@@ -215,6 +215,12 @@
       "value": "すでにこのアカウントにリンクされています。"
     }
   ],
+  "error.app_code_invalid": [
+    {
+      "type": 0,
+      "value": "このコードは不明、使用済み、または有効期限切れです。サーバーのページで新しいコードを取得してください。"
+    }
+  ],
   "error.authentication_required": [
     {
       "type": 0,
@@ -333,6 +339,12 @@
     {
       "type": 0,
       "value": "この値の型が正しくありません。"
+    }
+  ],
+  "error.field.key_enrolled": [
+    {
+      "type": 0,
+      "value": "このキーはこのサーバーですでに使用されています。"
     }
   ],
   "error.field.malformed_form": [
@@ -2496,6 +2508,30 @@
     {
       "type": 0,
       "value": "自動"
+    }
+  ],
+  "settingsManifest.playback.connection_path.description": [
+    {
+      "type": 0,
+      "value": "「直接のみ」の場合でも、ローカルネットワーク接続が利用できるときはその接続を使います。"
+    }
+  ],
+  "settingsManifest.playback.connection_path.label": [
+    {
+      "type": 0,
+      "value": "接続経路"
+    }
+  ],
+  "settingsManifest.playback.connection_path.option.automatic": [
+    {
+      "type": 0,
+      "value": "自動"
+    }
+  ],
+  "settingsManifest.playback.connection_path.option.direct_only": [
+    {
+      "type": 0,
+      "value": "直接のみ"
     }
   ],
   "settingsManifest.playback.intro_skip_mode.description": [
@@ -21460,6 +21496,87 @@
       }
     }
   ],
+  "web.admin.common.adminUserSignIn.unlinkConfirm.text": [
+    {
+      "type": 5,
+      "value": "last_way",
+      "options": {
+        "yes": {
+          "value": [
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": "はこのプロバイダーのアカウントでサインインできなくなります。パスワードを設定するか、再度プロバイダーを連携するまで、"
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": "はサインインできません。"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": "はこのプロバイダーのアカウントでサインインできなくなります。"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 5,
+      "value": "keys",
+      "options": {
+        "yes": {
+          "value": [
+            {
+              "type": 0,
+              "value": "このプロバイダーのアカウントに関連付けられた"
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": "のSiloアプリのキーは削除され、それらのデバイスはサインアウトされます。"
+            }
+          ]
+        },
+        "unknown": {
+          "value": [
+            {
+              "type": 0,
+              "value": "このプロバイダーのアカウントに関連付けられた"
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": "のSiloアプリのキーがある場合は削除され、それらのデバイスはサインアウトされます。"
+            }
+          ]
+        },
+        "other": {
+          "value": []
+        }
+      }
+    }
+  ],
   "web.admin.common.adminUserSignIn.unlinkConfirm.title": [
     {
       "type": 1,
@@ -23548,6 +23665,18 @@
     {
       "type": 0,
       "value": "シーク中にプレーヤーに表示されるサムネイルを、設定済みの公開アセットストレージに作成します。ファイルはバックグラウンドで低い優先度で処理されます。オフにすると、このライブラリのプレビューは削除されます。"
+    }
+  ],
+  "web.admin.common.libraryEditor.advanced.trickplayGenerate": [
+    {
+      "type": 0,
+      "value": "不足しているプレビューをFFmpegで生成"
+    }
+  ],
+  "web.admin.common.libraryEditor.advanced.trickplayGenerateDescription": [
+    {
+      "type": 0,
+      "value": "メディアファイルの横にある既存の.trickplayと.bifのサイドカーファイルが優先して使用されます。オフにすると、サイドカーファイルの取り込みのみを行い、FFmpegでの生成はスキップします。"
     }
   ],
   "web.admin.common.libraryEditor.advanced.trickplayUnavailable": [
@@ -27146,6 +27275,32 @@
       "value": "管理：ユーザー"
     }
   ],
+  "web.admin.common.trickplay.badge.awaitingSidecarCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "サイドカー待ち"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "件"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.common.trickplay.badge.detail": [
     {
       "type": 0,
@@ -27252,6 +27407,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.common.trickplay.badge.sidecarsOnly": [
+    {
+      "type": 0,
+      "value": "サイドカーのみ"
     }
   ],
   "web.admin.common.trickplay.badge.srDetail": [
@@ -27400,6 +27561,42 @@
     {
       "type": 0,
       "value": "新しいプレビューの準備ができるまで、プレーヤーは現在のプレビューを使用します。"
+    }
+  ],
+  "web.admin.common.trickplay.sidecarStatus.awaiting_sidecar": [
+    {
+      "type": 0,
+      "value": "サイドカー待ち"
+    }
+  ],
+  "web.admin.common.trickplay.sidecarStatus.sidecar_invalid": [
+    {
+      "type": 0,
+      "value": "無効なサイドカー"
+    }
+  ],
+  "web.admin.common.trickplay.sidecarStatus.sidecar_stale": [
+    {
+      "type": 0,
+      "value": "古いサイドカー"
+    }
+  ],
+  "web.admin.common.trickplay.source.generated": [
+    {
+      "type": 0,
+      "value": "生成済み"
+    }
+  ],
+  "web.admin.common.trickplay.source.sidecar_bif": [
+    {
+      "type": 0,
+      "value": "サイドカー（.bif）"
+    }
+  ],
+  "web.admin.common.trickplay.source.sidecar_trickplay": [
+    {
+      "type": 0,
+      "value": "サイドカー（.trickplay）"
     }
   ],
   "web.admin.common.trickplay.state.off": [
@@ -29022,7 +29219,7 @@
     },
     {
       "type": 0,
-      "value": "のサインインセッションを1つ終了します。他のデバイスはサインインしたままです。クライアントはアカウントのパスワードで再度サインインできます。"
+      "value": "のサインインセッションを1つ終了します。他のデバイスはサインインしたままです。クライアントは再度サインインできます。"
     }
   ],
   "web.admin.dashboard.widgets.apiClients.confirmLabel": [
@@ -38867,6 +39064,12 @@
       "value": "プロフィール"
     }
   ],
+  "web.admin.history.column.progress": [
+    {
+      "type": 0,
+      "value": "進行状況"
+    }
+  ],
   "web.admin.history.column.status": [
     {
       "type": 0,
@@ -38901,6 +39104,12 @@
     {
       "type": 0,
       "value": "セッションログ"
+    }
+  ],
+  "web.admin.history.detail.backToPlay": [
+    {
+      "type": 0,
+      "value": "統合された再生に戻る"
     }
   ],
   "web.admin.history.detail.column.delivered": [
@@ -39011,6 +39220,12 @@
       "value": "視聴時間"
     }
   ],
+  "web.admin.history.detail.inspectSitting": [
+    {
+      "type": 0,
+      "value": "詳細"
+    }
+  ],
   "web.admin.history.detail.keyboardHint": [
     {
       "type": 0,
@@ -39095,6 +39310,12 @@
       "value": "ダイレクト再生されなかった理由"
     }
   ],
+  "web.admin.history.detail.section.sessions": [
+    {
+      "type": 0,
+      "value": "この再生のセッション"
+    }
+  ],
   "web.admin.history.detail.section.streams": [
     {
       "type": 0,
@@ -39105,6 +39326,78 @@
     {
       "type": 0,
       "value": "時間と視聴状況"
+    }
+  ],
+  "web.admin.history.detail.sessionsCapped": [
+    {
+      "type": 0,
+      "value": "この再生の"
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "件のセッションのうち、最初の"
+    },
+    {
+      "type": 1,
+      "value": "shown"
+    },
+    {
+      "type": 0,
+      "value": "件を表示しています。"
+    }
+  ],
+  "web.admin.history.detail.sessionsNotice": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "この再生には"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "件のセッションが含まれます。以下のストリーム、デバイス、経路の詳細はメインのセッションのものです。個別に確認するには、下のセッションを選択してください。"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.ended": [
+    {
+      "type": 0,
+      "value": "終了"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.method": [
+    {
+      "type": 0,
+      "value": "再生方法"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.started": [
+    {
+      "type": 0,
+      "value": "開始"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.watched": [
+    {
+      "type": 0,
+      "value": "視聴時間"
     }
   ],
   "web.admin.history.detail.subtitlesBurnIn": [
@@ -39333,6 +39626,12 @@
       "value": "すべてのネットワーク"
     }
   ],
+  "web.admin.history.filter.allMediaTypes": [
+    {
+      "type": 0,
+      "value": "すべてのメディア"
+    }
+  ],
   "web.admin.history.filter.allMethods": [
     {
       "type": 0,
@@ -39369,6 +39668,24 @@
       "value": "完了"
     }
   ],
+  "web.admin.history.filter.episodes": [
+    {
+      "type": 0,
+      "value": "エピソード"
+    }
+  ],
+  "web.admin.history.filter.hideShort": [
+    {
+      "type": 0,
+      "value": "30秒未満を非表示"
+    }
+  ],
+  "web.admin.history.filter.hideShortTitle": [
+    {
+      "type": 0,
+      "value": "30秒未満の未完了セッションを非表示"
+    }
+  ],
   "web.admin.history.filter.locationLocal": [
     {
       "type": 0,
@@ -39379,6 +39696,12 @@
     {
       "type": 0,
       "value": "リモート"
+    }
+  ],
+  "web.admin.history.filter.movies": [
+    {
+      "type": 0,
+      "value": "映画"
     }
   ],
   "web.admin.history.filter.partial": [
@@ -39544,6 +39867,12 @@
       "value": "最近の再生"
     }
   ],
+  "web.admin.history.row.burnInBadgeTitle": [
+    {
+      "type": 0,
+      "value": "字幕を映像に焼き込み"
+    }
+  ],
   "web.admin.history.row.completed": [
     {
       "type": 0,
@@ -39564,6 +39893,28 @@
     {
       "type": 0,
       "value": "推定値（正確な視聴時間の記録開始前に記録）"
+    }
+  ],
+  "web.admin.history.row.groupedSessionsTitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "件のセッションを統合"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.history.row.meta": [
@@ -39596,6 +39947,12 @@
       "value": "途中まで"
     }
   ],
+  "web.admin.history.row.progressLabel": [
+    {
+      "type": 0,
+      "value": "再生の進行状況"
+    }
+  ],
   "web.admin.history.row.started": [
     {
       "type": 1,
@@ -39606,16 +39963,84 @@
       "value": "に開始"
     }
   ],
+  "web.admin.history.stats.accountsCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "アカウント"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.history.stats.completed": [
     {
       "type": 0,
       "value": "完了"
     }
   ],
+  "web.admin.history.stats.completionBreakdown": [
+    {
+      "type": 0,
+      "value": "完了"
+    },
+    {
+      "type": 1,
+      "value": "completed"
+    },
+    {
+      "type": 0,
+      "value": "件 · 途中まで"
+    },
+    {
+      "type": 1,
+      "value": "partial"
+    },
+    {
+      "type": 0,
+      "value": "件"
+    }
+  ],
   "web.admin.history.stats.partial": [
     {
       "type": 0,
       "value": "途中まで"
+    }
+  ],
+  "web.admin.history.stats.totalPlays": [
+    {
+      "type": 0,
+      "value": "総再生数"
+    }
+  ],
+  "web.admin.history.stats.totalSessions": [
+    {
+      "type": 0,
+      "value": "総セッション数"
+    }
+  ],
+  "web.admin.history.stats.uniqueProfiles": [
+    {
+      "type": 0,
+      "value": "プロフィール数"
+    }
+  ],
+  "web.admin.history.stats.uniqueTitles": [
+    {
+      "type": 0,
+      "value": "タイトル数"
     }
   ],
   "web.admin.history.stats.visibleRows": [
@@ -39634,6 +40059,24 @@
     {
       "type": 0,
       "value": "再生履歴"
+    }
+  ],
+  "web.admin.history.view.label": [
+    {
+      "type": 0,
+      "value": "履歴の表示"
+    }
+  ],
+  "web.admin.history.view.plays": [
+    {
+      "type": 0,
+      "value": "再生"
+    }
+  ],
+  "web.admin.history.view.sessions": [
+    {
+      "type": 0,
+      "value": "すべてのセッション"
     }
   ],
   "web.admin.historyImport.conflict.message": [
@@ -78860,6 +79303,218 @@
       "value": "件をすべて表示"
     }
   ],
+  "web.admin.users.detail.appKeys.confirm.denyDescription": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "は"
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "のアカウントにサインインできなくなります。本人のデバイスだった場合は、Siloアプリで再度追加できます。"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKey": [
+    {
+      "type": 0,
+      "value": "キーを削除"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKeyDescription": [
+    {
+      "type": 0,
+      "value": "サインイン済みのデバイスは、削除するまで引き続き使用できます。このキーで新しいデバイスを追加することはできなくなり、このキーで追加されて承認待ちのデバイスは拒否されます。"
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "のSiloアプリは、次回サインイン中にデバイスを追加するときに新しいキーを設定します。"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKeyTitle": [
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "のアカウントキーを削除しますか？"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.removeDescription": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "を削除すると、"
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "のアカウントからすぐにサインアウトされ、そのキーは停止されます。このキーで再度サインインすることはできません。再び使用するには、"
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "がSiloアプリでもう一度追加する必要があります。"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.withdrawDescription": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "はこの承認を使用して"
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "のアカウントにサインインできなくなります。"
+    }
+  ],
+  "web.admin.users.detail.appKeys.description": [
+    {
+      "type": 0,
+      "value": "パスワードなしでSiloアプリを使用して"
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "のアカウントにサインインするデバイスとアプリです。"
+    }
+  ],
+  "web.admin.users.detail.appKeys.empty": [
+    {
+      "type": 0,
+      "value": "このアカウントでSiloアプリを使用しているデバイスはありません。"
+    }
+  ],
+  "web.admin.users.detail.appKeys.loadFailed": [
+    {
+      "type": 0,
+      "value": "デバイスを読み込めませんでした。"
+    }
+  ],
+  "web.admin.users.detail.appKeys.off": [
+    {
+      "type": 0,
+      "value": "このサーバーではSiloアプリによるサインインがオフのため、これらのデバイスはサインインできません。削除は引き続き可能です。"
+    }
+  ],
+  "web.admin.users.detail.appKeys.ownerOnly": [
+    {
+      "type": 0,
+      "value": "ほかの管理者やオーナーのデバイスを変更できるのはサーバーのオーナーのみです。"
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.description": [
+    {
+      "type": 0,
+      "value": "Siloアプリはこのキーを使用して"
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "の新しいデバイスを追加します。設定日時："
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "。"
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.none": [
+    {
+      "type": 0,
+      "value": "アカウントキーはありません。"
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "のSiloアプリは、次回サインイン中にデバイスを追加するときにキーを設定します。"
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.remove": [
+    {
+      "type": 0,
+      "value": "アカウントキーを削除"
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKeyRemoved": [
+    {
+      "type": 0,
+      "value": "アカウントキーを削除しました"
+    }
+  ],
+  "web.admin.users.detail.appKeys.preapprovals.description": [
+    {
+      "type": 0,
+      "value": "まだ接続していないデバイスに対して"
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "が承認したサインインです。"
+    }
+  ],
+  "web.admin.users.detail.appKeys.waiting.description": [
+    {
+      "type": 0,
+      "value": "管理者アカウントの新しいデバイスは、"
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "がサインイン済みのデバイスから承認するまで待機します。ここで拒否することもできます。"
+    }
+  ],
+  "web.admin.users.detail.appKeys.waiting.title": [
+    {
+      "type": 0,
+      "value": "承認待ち"
+    }
+  ],
   "web.admin.users.detail.common.allProfiles": [
     {
       "type": 0,
@@ -82068,6 +82723,12 @@
       "value": "このアカウントはプロフィールの上限に達しています"
     }
   ],
+  "web.admin.users.detail.profiles.badge.changedHere": [
+    {
+      "type": 0,
+      "value": "このサーバーで変更"
+    }
+  ],
   "web.admin.users.detail.profiles.badge.kids": [
     {
       "type": 0,
@@ -82257,6 +82918,628 @@
     {
       "type": 0,
       "value": "PINを保存"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowAgain": [
+    {
+      "type": 0,
+      "value": "再度許可"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowAgainAria": [
+    {
+      "type": 0,
+      "value": "このサーバーで"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "の復元を許可"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowDescription": [
+    {
+      "type": 0,
+      "value": "アプリのプロフィールにまだ"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "が含まれていて、このアカウントにプロフィールを追加する余裕がある場合、次回の同期時にアプリは"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "を、このサーバーでの履歴がない新しいプロフィールとして再追加できます。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowTitle": [
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "を再度許可しますか？"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.alreadyCleared": [
+    {
+      "type": 0,
+      "value": "この変更はすでにクリアされているか、"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "が再度変更しました。リストは最新の状態です。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedBy": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "が"
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "に変更"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedSinceOpened": [
+    {
+      "type": 0,
+      "value": "開いた後にこの変更が更新されたため、何もクリアされていません。リストでもう一度確認し、必要であればクリアしてください。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedWhileRunning": [
+    {
+      "type": 0,
+      "value": "実行中にプロフィールが変更されたため、何も変更されていません。リストは最新の状態です。必要であればもう一度お試しください。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clear": [
+    {
+      "type": 0,
+      "value": "クリア"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearAndRemovePin": [
+    {
+      "type": 0,
+      "value": "クリアしてPINを削除"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearAria": [
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "の"
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": "への変更をクリア"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearFailed": [
+    {
+      "type": 0,
+      "value": "変更をクリアできませんでした。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearInherit": [
+    {
+      "type": 0,
+      "value": "アプリの指示どおり、"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "の"
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": "は現在"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "が継承している値に戻ります。アプリからの変更が再び適用されます。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearLater": [
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": "は、次にアプリから送信されるまでそのままです。その後はアプリからの変更が再び適用されます。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearNow": [
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "はすぐにアプリの値に戻り、アプリからの変更が再び適用されます。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearNowValue": [
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "の"
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": "は、アプリの値である"
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": "にすぐに戻ります。アプリからの変更が再び適用されます。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearPin": [
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "は、次にアプリからPINが送信されるまで、設定したPINを維持します。その後はアプリからの変更が再び適用されます。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearPinRemoves": [
+    {
+      "type": 0,
+      "value": "アプリは"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "をPINなしで送信しているため、クリアすると設定したPINがすぐに削除されます。その後は、このアカウントを使用する誰もがPINなしで"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "を開けるようになります。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearTitle": [
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "の"
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": "への変更をクリアしますか？"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.deletedAccount": [
+    {
+      "type": 0,
+      "value": "削除されたアカウント"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.description": [
+    {
+      "type": 0,
+      "value": "これらのプロフィールは"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "のアプリから同期されています。ここで行った変更は、クリアするまでこのサーバーに残ります。ロックではないため、"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "もここで同じ項目を変更できます。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismiss": [
+    {
+      "type": 0,
+      "value": "閉じる"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismissAria": [
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "の"
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": "に関するメモを閉じる"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismissFailed": [
+    {
+      "type": 0,
+      "value": "メモを閉じられませんでした。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.isChild": [
+    {
+      "type": 0,
+      "value": "キッズプロフィール"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.maxAdvisoryAge": [
+    {
+      "type": 0,
+      "value": "年齢制限"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.maxContentRating": [
+    {
+      "type": 0,
+      "value": "コンテンツレーティングの上限"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.name": [
+    {
+      "type": 0,
+      "value": "名前"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.picture": [
+    {
+      "type": 0,
+      "value": "画像"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.pin": [
+    {
+      "type": 0,
+      "value": "PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.requests": [
+    {
+      "type": 0,
+      "value": "リクエスト"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.requireAdvisoryAge": [
+    {
+      "type": 0,
+      "value": "年齢制限の指定を必須にする"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.fieldValue": [
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": "："
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.hidden": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "が"
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "にこのサーバーで削除しました。許可するまで、アプリによって再追加されることはありません。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.loadFailed": [
+    {
+      "type": 0,
+      "value": "このサーバーで行われた変更を読み込めませんでした。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.nameTaken": [
+    {
+      "type": 0,
+      "value": "このサーバーの別のプロフィールが同じ名前を使用しているため、"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "をアプリの名前「"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "」に戻せません。先にそのプロフィールの名前を変更してから、もう一度クリアしてください。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeHiddenNextSync": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "のアプリが次回同期したときに、アプリのプロフィールにまだ含まれていれば、"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "が復元されます。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeHiddenWoken": [
+    {
+      "type": 0,
+      "value": "アプリが次回同期したときに、アプリのプロフィールにまだ含まれていれば、"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "が復元されます。"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "のスマートフォンに同期をリクエストしました。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeNextSync": [
+    {
+      "type": 0,
+      "value": "クリアしました。"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "のアプリが次回同期したときに反映されます。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeWoken": [
+    {
+      "type": 0,
+      "value": "クリアしました。"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "のスマートフォンに同期をリクエストしました。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.removedBy": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "が"
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "に削除"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.replacedOwner": [
+    {
+      "type": 0,
+      "value": "これにより、設定した値が置き換えられました。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.setBy": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "が"
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "に設定"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.settled": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "が"
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "に変更しました。設定した値は適用されなくなりました。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.title": [
+    {
+      "type": 0,
+      "value": "このサーバーで変更"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.inherited": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": "（継承）"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.noPicture": [
+    {
+      "type": 0,
+      "value": "画像なし"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.none": [
+    {
+      "type": 0,
+      "value": "なし"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.off": [
+    {
+      "type": 0,
+      "value": "オフ"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.on": [
+    {
+      "type": 0,
+      "value": "オン"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.picture": [
+    {
+      "type": 0,
+      "value": "カスタム画像"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.pinNone": [
+    {
+      "type": 0,
+      "value": "PINなし"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.pinSet": [
+    {
+      "type": 0,
+      "value": "PIN設定済み"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.requestsAllowed": [
+    {
+      "type": 0,
+      "value": "許可"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.requestsBlocked": [
+    {
+      "type": 0,
+      "value": "ブロック"
     }
   ],
   "web.admin.users.detail.profiles.setPin": [
@@ -83446,6 +84729,140 @@
     {
       "type": 0,
       "value": "パスワードを設定"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.action": [
+    {
+      "type": 0,
+      "value": "サインインリンクを作成"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.actionHint": [
+    {
+      "type": 0,
+      "value": "すべてのデバイスを紛失"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.description": [
+    {
+      "type": 0,
+      "value": "すべてのデバイスを紛失した"
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "のための1回限りのリンクです。開いたページで、Siloアプリ用のコードを取得するか、パスワードを設定できます。有効期間は24時間で、新しいリンクを作成すると以前のリンクは置き換えられます。"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailAction": [
+    {
+      "type": 0,
+      "value": "メールで送信"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHint": [
+    {
+      "type": 0,
+      "value": "リンクを作成してコピーし自分で送信するか、"
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": "にメールで送信してください。"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHintNoAddress": [
+    {
+      "type": 0,
+      "value": "リンクを作成してコピーし、自分で送信してください。このアカウントには送信先のメールアドレスがありません。"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHintNoMail": [
+    {
+      "type": 0,
+      "value": "リンクを作成してコピーし、自分で送信してください。ここから送信するには、設定でメールを設定してください。"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailSent": [
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": "にリンクを送信しました。有効期限："
+    },
+    {
+      "type": 1,
+      "value": "expires"
+    },
+    {
+      "type": 0,
+      "value": "。"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailUnconfirmed": [
+    {
+      "type": 0,
+      "value": "メールサーバーで配信を確認できませんでした。下のリンクは引き続き使用できます。コピーして別の方法で送信してください。"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.failed": [
+    {
+      "type": 0,
+      "value": "サインインリンクを作成できませんでした。"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.linkShare": [
+    {
+      "type": 0,
+      "value": "このリンクは"
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "にのみ送信してください。リンクを知っている人は誰でも、使用されるか有効期限（"
+    },
+    {
+      "type": 1,
+      "value": "expires"
+    },
+    {
+      "type": 0,
+      "value": "）が切れるまで、このアカウントにサインインできます。"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.providerRequired": [
+    {
+      "type": 0,
+      "value": "このサーバーではローカルのパスワードによるサインインがオフのため、サインインリンクを使うとサインインプロバイダーを経由しなくなります。"
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "に、このサーバーのサイトでプロバイダーを使ってサインインしてもらい、アカウント設定の「Siloで開く」を使用するよう依頼してください。"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.title": [
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "のサインインリンク"
     }
   ],
   "web.audiobooks.chapter.fallbackTitle": [
@@ -85051,6 +86468,120 @@
       "value": "サインインを承認"
     }
   ],
+  "web.auth.appCode.code": [
+    {
+      "type": 0,
+      "value": "コード"
+    }
+  ],
+  "web.auth.appCode.codeCopied": [
+    {
+      "type": 0,
+      "value": "コードをコピーしました"
+    }
+  ],
+  "web.auth.appCode.copyCode": [
+    {
+      "type": 0,
+      "value": "コードをコピー"
+    }
+  ],
+  "web.auth.appCode.copyFailed": [
+    {
+      "type": 0,
+      "value": "コードをコピーできませんでした。コードを選択して手動でコピーしてください。"
+    }
+  ],
+  "web.auth.appCode.expired": [
+    {
+      "type": 0,
+      "value": "このコードは期限切れです。"
+    }
+  ],
+  "web.auth.appCode.failed": [
+    {
+      "type": 0,
+      "value": "Siloはコードを作成できませんでした。もう一度お試しください。"
+    }
+  ],
+  "web.auth.appCode.instructions": [
+    {
+      "type": 0,
+      "value": "「Siloを開く」を押すと、このデバイスのSiloアプリで続行できます。アプリがインストールされていない場合は、インストールしてからこのタブに戻り、もう一度「Siloを開く」を押してください。"
+    }
+  ],
+  "web.auth.appCode.noScanCode": [
+    {
+      "type": 0,
+      "value": "このサーバーのアドレスは長すぎるため、スキャンコードにできません。Siloアプリでサーバーのアドレスとコードを入力するか、コードをコピーしてアプリに貼り付けてください。"
+    }
+  ],
+  "web.auth.appCode.open": [
+    {
+      "type": 0,
+      "value": "Siloを開く"
+    }
+  ],
+  "web.auth.appCode.renew": [
+    {
+      "type": 0,
+      "value": "新しいコードを取得"
+    }
+  ],
+  "web.auth.appCode.scanCodeLabel": [
+    {
+      "type": 0,
+      "value": "Siloアプリ用のスキャンコード"
+    }
+  ],
+  "web.auth.appCode.scanCodeUnavailable": [
+    {
+      "type": 0,
+      "value": "このサーバーではスキャンコードを表示できません。Siloアプリでサーバーのアドレスとコードを入力するか、コードをコピーしてアプリに貼り付けてください。"
+    }
+  ],
+  "web.auth.appCode.scanHint": [
+    {
+      "type": 0,
+      "value": "Siloアプリのスキャナーでスキャンするか、下のサーバーのアドレスとコードを入力またはコピーしてください。"
+    }
+  ],
+  "web.auth.appCode.serverAddress": [
+    {
+      "type": 0,
+      "value": "サーバーのアドレス"
+    }
+  ],
+  "web.auth.appCode.singleUse": [
+    {
+      "type": 0,
+      "value": "このコードは1回だけ使用でき、数分で期限切れになります。"
+    }
+  ],
+  "web.auth.appCode.title": [
+    {
+      "type": 0,
+      "value": "Siloを開く"
+    }
+  ],
+  "web.auth.appCode.typeInstructions": [
+    {
+      "type": 0,
+      "value": "スマートフォンまたはタブレットのSiloアプリで、このサーバーをアドレスで追加し、このコードを入力してアカウントを作成してください。コードを知っている人は誰でも代わりに参加できるため、共有しないでください。"
+    }
+  ],
+  "web.auth.appCode.typeTitle": [
+    {
+      "type": 0,
+      "value": "このコードで参加"
+    }
+  ],
+  "web.auth.appCode.webLink": [
+    {
+      "type": 0,
+      "value": "代わりにsiloserver.orgのリンクで開く"
+    }
+  ],
   "web.auth.card.rememberedIt": [
     {
       "type": 0,
@@ -85249,10 +86780,46 @@
       ]
     }
   ],
+  "web.auth.invite.appAccountEmail": [
+    {
+      "type": 0,
+      "value": "アカウントには"
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": "が使用されます。"
+    }
+  ],
+  "web.auth.invite.appContinue": [
+    {
+      "type": 0,
+      "value": "続行"
+    }
+  ],
+  "web.auth.invite.appEmailHint": [
+    {
+      "type": 0,
+      "value": "メールアドレスを登録すると、デバイスをなくした場合にこのサーバーからサインイン用のリンクを送信できます。"
+    }
+  ],
   "web.auth.invite.appMissing": [
     {
       "type": 0,
       "value": "何も起きませんか？アプリがインストールされていません。下に進んでください。"
+    }
+  ],
+  "web.auth.invite.appProviderOnly": [
+    {
+      "type": 1,
+      "value": "server"
+    },
+    {
+      "type": 0,
+      "value": "はサインインプロバイダーを通じてユーザーを追加します。このサイトでプロバイダーを使ってサインインし、アカウントの設定からSiloを開いてください。"
     }
   ],
   "web.auth.invite.created": [
@@ -85281,6 +86848,18 @@
       "value": "メールアドレスを入力し、パスワードを設定してください。サインインにはメールアドレスを使用します。"
     }
   ],
+  "web.auth.invite.descriptionWithApp": [
+    {
+      "type": 0,
+      "value": "スマートフォンまたはタブレットのSiloアプリで参加するか、パスワードを設定してサインインしてください。"
+    }
+  ],
+  "web.auth.invite.emailOptional": [
+    {
+      "type": 0,
+      "value": "メールアドレス（任意）"
+    }
+  ],
   "web.auth.invite.emailPlaceholder": [
     {
       "type": 0,
@@ -85301,6 +86880,18 @@
     {
       "type": 0,
       "value": "からの招待"
+    }
+  ],
+  "web.auth.invite.joinWithApp": [
+    {
+      "type": 0,
+      "value": "Siloアプリで参加"
+    }
+  ],
+  "web.auth.invite.joinWithAppInstead": [
+    {
+      "type": 0,
+      "value": "代わりにSiloアプリで参加"
     }
   ],
   "web.auth.invite.loadFailed": [
@@ -85401,6 +86992,30 @@
     {
       "type": 0,
       "value": "招待を利用できません"
+    }
+  ],
+  "web.auth.invite.usePassword": [
+    {
+      "type": 0,
+      "value": "代わりにパスワードを使用"
+    }
+  ],
+  "web.auth.invite.usernameIsAddress": [
+    {
+      "type": 0,
+      "value": "@を含むユーザー名は、下に入力するメールアドレスと同じにしてください。"
+    }
+  ],
+  "web.auth.invite.usernameRequired": [
+    {
+      "type": 0,
+      "value": "ユーザー名を入力してください。"
+    }
+  ],
+  "web.auth.invite.usernameTaken": [
+    {
+      "type": 0,
+      "value": "このユーザー名はすでに使用されています。別のユーザー名を入力してください。"
     }
   ],
   "web.auth.languagePicker.label": [
@@ -86259,6 +87874,126 @@
     {
       "type": 0,
       "value": "サインイン"
+    }
+  ],
+  "web.auth.signInLink.backToCode": [
+    {
+      "type": 0,
+      "value": "コードに戻る"
+    }
+  ],
+  "web.auth.signInLink.codeExpired": [
+    {
+      "type": 0,
+      "value": "別のコードを取得するには、このサーバーの管理者に新しいリンクを依頼してください。"
+    }
+  ],
+  "web.auth.signInLink.documentTitle": [
+    {
+      "type": 0,
+      "value": "サインイン用リンク"
+    }
+  ],
+  "web.auth.signInLink.failed": [
+    {
+      "type": 0,
+      "value": "Siloはこのリンクを開けませんでした。もう一度お試しください。"
+    }
+  ],
+  "web.auth.signInLink.installFirst": [
+    {
+      "type": 0,
+      "value": "リンクは1回だけ使用でき、コードの有効期間は数分です。先にスマートフォンまたはタブレットにSiloアプリをインストールしてから、「続行」を押してください。"
+    }
+  ],
+  "web.auth.signInLink.intro": [
+    {
+      "type": 0,
+      "value": "再度サインインできるよう、管理者がこのリンクを送信しました。続行してSiloアプリ用のコードを取得するか、パスワードを設定してください。"
+    }
+  ],
+  "web.auth.signInLink.keepOpen": [
+    {
+      "type": 0,
+      "value": "完了するまでこのページを開いたままにしてください。リンクは使用済みのため、再読み込みしたりページを離れたりすると、取得した内容は失われます。"
+    }
+  ],
+  "web.auth.signInLink.leaveAction": [
+    {
+      "type": 0,
+      "value": "移動"
+    }
+  ],
+  "web.auth.signInLink.leaveDescription": [
+    {
+      "type": 0,
+      "value": "リンクは使用済みです。ページを離れると、Siloアプリ用のコードとパスワードを設定する機会が失われ、新しいリンクが必要になります。"
+    }
+  ],
+  "web.auth.signInLink.leaveTitle": [
+    {
+      "type": 0,
+      "value": "このページを離れますか？"
+    }
+  ],
+  "web.auth.signInLink.noCodeAdministrator": [
+    {
+      "type": 0,
+      "value": "これは管理者のアカウントのため、このリンクではパスワードの設定のみ行えます。パスワードを設定してこのサーバーのサイトでサインインし、そこでアカウントの設定からSiloアプリを開いてください。"
+    }
+  ],
+  "web.auth.signInLink.noCodeAppKeysOff": [
+    {
+      "type": 0,
+      "value": "現在このサーバーではSiloアプリでサインインできないため、このリンクではパスワードの設定のみ行えます。"
+    }
+  ],
+  "web.auth.signInLink.passwordDescription": [
+    {
+      "type": 0,
+      "value": "保存すると、このアカウントはすべてのデバイスでサインアウトされます。Siloアプリでサインインしているデバイスは自動的に再度サインインします。"
+    }
+  ],
+  "web.auth.signInLink.passwordSet": [
+    {
+      "type": 0,
+      "value": "パスワードを保存しました。このパスワードでサインインしてください。"
+    }
+  ],
+  "web.auth.signInLink.passwordSetLostDevices": [
+    {
+      "type": 0,
+      "value": "Siloアプリを使用していた紛失したデバイスは、削除するまでサインインできます。サインイン後、アカウントの設定のデバイス一覧から削除してください。"
+    }
+  ],
+  "web.auth.signInLink.passwordTitle": [
+    {
+      "type": 0,
+      "value": "パスワードを設定"
+    }
+  ],
+  "web.auth.signInLink.providerRequired": [
+    {
+      "type": 0,
+      "value": "このサーバーはサインインプロバイダーを通じてサインインするため、このリンクは使用できません。代わりにプロバイダーでサインインしてください。"
+    }
+  ],
+  "web.auth.signInLink.setPasswordInstead": [
+    {
+      "type": 0,
+      "value": "代わりにパスワードを設定"
+    }
+  ],
+  "web.auth.signInLink.title": [
+    {
+      "type": 0,
+      "value": "アカウントに再度アクセス"
+    }
+  ],
+  "web.auth.signInLink.unavailable": [
+    {
+      "type": 0,
+      "value": "このリンクは使用済み、新しいリンクに置き換え済み、または期限切れです。このサーバーの管理者に新しいリンクを依頼してください。"
     }
   ],
   "web.auth.signup.closed": [
@@ -121724,7 +123459,7 @@
   "web.settings.account.password.signOutOthersDescription": [
     {
       "type": 0,
-      "value": "他のブラウザやアプリでは、新しいパスワードで再度サインインする必要があります。このブラウザはサインインしたままで、APIキーも引き続き使用できます。"
+      "value": "他のブラウザーやアプリはサインアウトされます。このブラウザーはサインインしたままで、APIキーも引き続き使用できます。"
     }
   ],
   "web.settings.account.password.title": [
@@ -122553,6 +124288,464 @@
     {
       "type": 0,
       "value": "このキーの使い方"
+    }
+  ],
+  "web.settings.appKeys.actionFailed": [
+    {
+      "type": 0,
+      "value": "変更できませんでした。もう一度お試しください。"
+    }
+  ],
+  "web.settings.appKeys.approveMainOnly": [
+    {
+      "type": 0,
+      "value": "デバイスを承認できるのは、世帯のメインプロフィールだけです。承認するには、メインプロフィールに切り替えてください。"
+    }
+  ],
+  "web.settings.appKeys.approved": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "を承認しました"
+    }
+  ],
+  "web.settings.appKeys.confirm.approve": [
+    {
+      "type": 0,
+      "value": "デバイスを承認"
+    }
+  ],
+  "web.settings.appKeys.confirm.approveDescription": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "は、削除するまでSiloアプリでアカウントにサインインできるようになります。設定したばかりのデバイスの場合のみ承認してください。"
+    }
+  ],
+  "web.settings.appKeys.confirm.approveTitle": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "を承認しますか？"
+    }
+  ],
+  "web.settings.appKeys.confirm.deny": [
+    {
+      "type": 0,
+      "value": "デバイスを拒否"
+    }
+  ],
+  "web.settings.appKeys.confirm.denyDescription": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "はアカウントにサインインできなくなります。ご自身のデバイスだった場合は、Siloアプリでもう一度追加してください。"
+    }
+  ],
+  "web.settings.appKeys.confirm.denyTitle": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "を拒否しますか？"
+    }
+  ],
+  "web.settings.appKeys.confirm.remove": [
+    {
+      "type": 0,
+      "value": "デバイスを削除"
+    }
+  ],
+  "web.settings.appKeys.confirm.removeDescription": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "を削除すると、すぐにサインアウトされ、キーが無効になります。このキーで再びサインインすることはできません。再び使用するには、Siloアプリでもう一度追加してください。"
+    }
+  ],
+  "web.settings.appKeys.confirm.removeTitle": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "を削除しますか？"
+    }
+  ],
+  "web.settings.appKeys.confirm.withdraw": [
+    {
+      "type": 0,
+      "value": "承認を取り消す"
+    }
+  ],
+  "web.settings.appKeys.confirm.withdrawDescription": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "は、この承認を使ってアカウントにサインインできなくなります。"
+    }
+  ],
+  "web.settings.appKeys.confirm.withdrawTitle": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "の承認を取り消しますか？"
+    }
+  ],
+  "web.settings.appKeys.confirm.working": [
+    {
+      "type": 0,
+      "value": "保存中…"
+    }
+  ],
+  "web.settings.appKeys.denied": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "を拒否しました"
+    }
+  ],
+  "web.settings.appKeys.description": [
+    {
+      "type": 0,
+      "value": "パスワードなしでSiloアプリからアカウントにサインインするデバイスとアプリです。"
+    }
+  ],
+  "web.settings.appKeys.devices.title": [
+    {
+      "type": 0,
+      "value": "デバイス"
+    }
+  ],
+  "web.settings.appKeys.empty": [
+    {
+      "type": 0,
+      "value": "アカウントでSiloアプリを使用しているデバイスはありません。"
+    }
+  ],
+  "web.settings.appKeys.footnote": [
+    {
+      "type": 0,
+      "value": "デバイスを削除すると、サインアウトされ、キーが使えなくなります。セッションをサインアウトしてもデバイスは削除されず、キーで再びサインインします。"
+    }
+  ],
+  "web.settings.appKeys.loadFailed": [
+    {
+      "type": 0,
+      "value": "デバイスを読み込めませんでした。"
+    }
+  ],
+  "web.settings.appKeys.loading": [
+    {
+      "type": 0,
+      "value": "デバイスを読み込み中…"
+    }
+  ],
+  "web.settings.appKeys.off": [
+    {
+      "type": 0,
+      "value": "このサーバーではSiloアプリでのサインインがオフになっているため、これらのデバイスはサインインできず、承認待ちのデバイスも承認できません。削除は引き続き可能です。"
+    }
+  ],
+  "web.settings.appKeys.personKey.description": [
+    {
+      "type": 0,
+      "value": "Siloアプリは、このキーを使って新しいデバイスを追加します。設定日時："
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.settings.appKeys.personKey.none": [
+    {
+      "type": 0,
+      "value": "アカウントキーがありません。次回サインイン中にデバイスを追加すると、Siloアプリが設定します。"
+    }
+  ],
+  "web.settings.appKeys.personKey.title": [
+    {
+      "type": 0,
+      "value": "アカウントキー"
+    }
+  ],
+  "web.settings.appKeys.pinDescription": [
+    {
+      "type": 0,
+      "value": "このデバイスを承認するには、メインプロフィールのPINを入力してください。"
+    }
+  ],
+  "web.settings.appKeys.preapprovals.description": [
+    {
+      "type": 0,
+      "value": "まだ接続していないデバイスに対して承認したサインインです。"
+    }
+  ],
+  "web.settings.appKeys.preapprovals.loadFailed": [
+    {
+      "type": 0,
+      "value": "事前に承認したサインインを読み込めませんでした。"
+    }
+  ],
+  "web.settings.appKeys.preapprovals.title": [
+    {
+      "type": 0,
+      "value": "事前承認済み"
+    }
+  ],
+  "web.settings.appKeys.refreshLabel": [
+    {
+      "type": 0,
+      "value": "Siloアプリのデバイスを更新"
+    }
+  ],
+  "web.settings.appKeys.removed": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "を削除しました"
+    }
+  ],
+  "web.settings.appKeys.row.allowedBy": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "が許可"
+    }
+  ],
+  "web.settings.appKeys.row.approve": [
+    {
+      "type": 0,
+      "value": "承認"
+    }
+  ],
+  "web.settings.appKeys.row.approveLabel": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "を承認"
+    }
+  ],
+  "web.settings.appKeys.row.deny": [
+    {
+      "type": 0,
+      "value": "拒否"
+    }
+  ],
+  "web.settings.appKeys.row.denyLabel": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "を拒否"
+    }
+  ],
+  "web.settings.appKeys.row.enrolledFrom": [
+    {
+      "type": 1,
+      "value": "address"
+    },
+    {
+      "type": 0,
+      "value": "から"
+    }
+  ],
+  "web.settings.appKeys.row.identityGone": [
+    {
+      "type": 0,
+      "value": "サインインできません：サインインプロバイダーのアカウントがリンクされていません"
+    }
+  ],
+  "web.settings.appKeys.row.kindApp": [
+    {
+      "type": 0,
+      "value": "ほかのアプリ"
+    }
+  ],
+  "web.settings.appKeys.row.kindDevice": [
+    {
+      "type": 0,
+      "value": "Siloアプリ"
+    }
+  ],
+  "web.settings.appKeys.row.lastUsed": [
+    {
+      "type": 0,
+      "value": "最終サインイン："
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.settings.appKeys.row.notUsed": [
+    {
+      "type": 0,
+      "value": "まだキーでサインインしていません"
+    }
+  ],
+  "web.settings.appKeys.row.preapproval": [
+    {
+      "type": 0,
+      "value": "事前承認済み · 有効期限："
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.settings.appKeys.row.provider": [
+    {
+      "type": 0,
+      "value": "サインインプロバイダーで確認"
+    }
+  ],
+  "web.settings.appKeys.row.remove": [
+    {
+      "type": 0,
+      "value": "削除"
+    }
+  ],
+  "web.settings.appKeys.row.removeLabel": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "を削除"
+    }
+  ],
+  "web.settings.appKeys.row.viaAppCode": [
+    {
+      "type": 0,
+      "value": "サーバーのWebページのワンタイムコードで追加"
+    }
+  ],
+  "web.settings.appKeys.row.viaPersonKey": [
+    {
+      "type": 0,
+      "value": "別のデバイスのSiloアプリで追加"
+    }
+  ],
+  "web.settings.appKeys.row.viaSession": [
+    {
+      "type": 0,
+      "value": "サインイン中に追加"
+    }
+  ],
+  "web.settings.appKeys.row.waitingUntil": [
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "まで承認待ち"
+    }
+  ],
+  "web.settings.appKeys.row.withdraw": [
+    {
+      "type": 0,
+      "value": "取り消し"
+    }
+  ],
+  "web.settings.appKeys.row.withdrawLabel": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "の承認を取り消す"
+    }
+  ],
+  "web.settings.appKeys.signsBackIn": [
+    {
+      "type": 0,
+      "value": "Siloアプリでサインインしたデバイスは、自動的に再びサインインします。停止するには"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "デバイスを削除"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "してください。"
+    }
+  ],
+  "web.settings.appKeys.title": [
+    {
+      "type": 0,
+      "value": "Siloアプリのデバイス"
+    }
+  ],
+  "web.settings.appKeys.unavailable": [
+    {
+      "type": 0,
+      "value": "このサーバーではSiloアプリでのサインインを利用できないため、これらのデバイスはサインインできません。削除は引き続き可能です。"
+    }
+  ],
+  "web.settings.appKeys.waiting.description": [
+    {
+      "type": 0,
+      "value": "新しいデバイスから、Siloアプリでアカウントへのサインインがリクエストされました。設定したばかりのデバイスの場合のみ承認してください。"
+    }
+  ],
+  "web.settings.appKeys.waiting.title": [
+    {
+      "type": 0,
+      "value": "承認待ち"
+    }
+  ],
+  "web.settings.appKeys.withdrawn": [
+    {
+      "type": 0,
+      "value": "承認を取り消しました"
     }
   ],
   "web.settings.cardOverlay.adjust": [
@@ -127313,6 +129506,54 @@
       "value": "オフラインのため、この変更は保存されませんでした"
     }
   ],
+  "web.settings.openInSilo.action": [
+    {
+      "type": 0,
+      "value": "Siloアプリ用のコードを取得"
+    }
+  ],
+  "web.settings.openInSilo.codeInstructions": [
+    {
+      "type": 0,
+      "value": "スマートフォンまたはタブレットのSiloアプリで、このサーバーをアドレスで追加し、このコードを入力してください。コードを知っている人は誰でもこのアカウントにサインインできるため、共有しないでください。"
+    }
+  ],
+  "web.settings.openInSilo.codeTitle": [
+    {
+      "type": 0,
+      "value": "Siloアプリ用のコード"
+    }
+  ],
+  "web.settings.openInSilo.description": [
+    {
+      "type": 0,
+      "value": "パスワードなしで、スマートフォンまたはタブレットのSiloアプリをこのアカウントにサインインさせます。"
+    }
+  ],
+  "web.settings.openInSilo.loadFailed": [
+    {
+      "type": 0,
+      "value": "このブラウザーでSiloアプリ用のコードを取得できるか確認できませんでした。"
+    }
+  ],
+  "web.settings.openInSilo.mainProfileOnly": [
+    {
+      "type": 0,
+      "value": "Siloアプリ用のコードを取得できるのは、世帯のメインプロフィールだけです。メインプロフィールに切り替えて、もう一度お試しください。"
+    }
+  ],
+  "web.settings.openInSilo.pinDescription": [
+    {
+      "type": 0,
+      "value": "Siloアプリ用のコードを取得するには、メインプロフィールのPINを入力してください。"
+    }
+  ],
+  "web.settings.openInSilo.title": [
+    {
+      "type": 0,
+      "value": "Siloアプリ"
+    }
+  ],
   "web.settings.overlays.accent.amber": [
     {
       "type": 0,
@@ -130070,6 +132311,12 @@
       "value": "サインイン日時"
     }
   ],
+  "web.settings.sessions.row.signsBackIn": [
+    {
+      "type": 0,
+      "value": "このデバイスは自動的に再びサインインします"
+    }
+  ],
   "web.settings.sessions.row.summary": [
     {
       "type": 8,
@@ -130152,6 +132399,24 @@
     {
       "type": 0,
       "value": "設定"
+    }
+  ],
+  "web.settings.signInAgain.action": [
+    {
+      "type": 0,
+      "value": "再度サインイン"
+    }
+  ],
+  "web.settings.signInAgain.manageDevices": [
+    {
+      "type": 0,
+      "value": "デバイスを管理するには再度サインインしてください"
+    }
+  ],
+  "web.settings.signInAgain.useApp": [
+    {
+      "type": 0,
+      "value": "デバイスはSiloアプリで管理してください。"
     }
   ],
   "web.settings.signedInSessions.loadFailed": [

@@ -215,6 +215,12 @@
       "value": "Tai jau susieta su šia paskyra."
     }
   ],
+  "error.app_code_invalid": [
+    {
+      "type": 0,
+      "value": "Šis kodas nežinomas, jau panaudotas arba nebegalioja. Gaukite naują serverio puslapyje."
+    }
+  ],
   "error.authentication_required": [
     {
       "type": 0,
@@ -333,6 +339,12 @@
     {
       "type": 0,
       "value": "Šios reikšmės tipas netinkamas."
+    }
+  ],
+  "error.field.key_enrolled": [
+    {
+      "type": 0,
+      "value": "Šis raktas šiame serveryje jau naudojamas."
     }
   ],
   "error.field.malformed_form": [
@@ -2603,6 +2615,30 @@
     {
       "type": 0,
       "value": "Automatiškai"
+    }
+  ],
+  "settingsManifest.playback.connection_path.description": [
+    {
+      "type": 0,
+      "value": "Pasirinkus „Tik tiesiogiai“, vis tiek naudojamas vietinio tinklo ryšys, kai jis pasiekiamas."
+    }
+  ],
+  "settingsManifest.playback.connection_path.label": [
+    {
+      "type": 0,
+      "value": "Ryšio kelias"
+    }
+  ],
+  "settingsManifest.playback.connection_path.option.automatic": [
+    {
+      "type": 0,
+      "value": "Automatiškai"
+    }
+  ],
+  "settingsManifest.playback.connection_path.option.direct_only": [
+    {
+      "type": 0,
+      "value": "Tik tiesiogiai"
     }
   ],
   "settingsManifest.playback.intro_skip_mode.description": [
@@ -28559,6 +28595,87 @@
       }
     }
   ],
+  "web.admin.common.adminUserSignIn.unlinkConfirm.text": [
+    {
+      "type": 5,
+      "value": "last_way",
+      "options": {
+        "yes": {
+          "value": [
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " nebegalės prisijungti per šią teikėjo paskyrą. "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " negalės prisijungti, kol nenustatysite slaptažodžio arba vėl nesusiesite teikėjo."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " nebegalės prisijungti per šią teikėjo paskyrą."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 5,
+      "value": "keys",
+      "options": {
+        "yes": {
+          "value": [
+            {
+              "type": 0,
+              "value": " Naudotojo "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " „Silo“ programos raktai, susieti su šia teikėjo paskyra, pašalinami, o tie įrenginiai atjungiami."
+            }
+          ]
+        },
+        "unknown": {
+          "value": [
+            {
+              "type": 0,
+              "value": " Visi naudotojo "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " „Silo“ programos raktai, susieti su šia teikėjo paskyra (jei tokių yra), pašalinami, o tie įrenginiai atjungiami."
+            }
+          ]
+        },
+        "other": {
+          "value": []
+        }
+      }
+    }
+  ],
   "web.admin.common.adminUserSignIn.unlinkConfirm.title": [
     {
       "type": 0,
@@ -31253,6 +31370,18 @@
     {
       "type": 0,
       "value": "Sukuria miniatiūras, kurias leistuvai rodo persukant, sukonfigūruotoje viešųjų išteklių saugykloje. Failai apdorojami fone žemu prioritetu. Išjungus šią parinktį, bibliotekos peržiūros ištrinamos."
+    }
+  ],
+  "web.admin.common.libraryEditor.advanced.trickplayGenerate": [
+    {
+      "type": 0,
+      "value": "Generuoti trūkstamas peržiūras naudojant FFmpeg"
+    }
+  ],
+  "web.admin.common.libraryEditor.advanced.trickplayGenerateDescription": [
+    {
+      "type": 0,
+      "value": "Pirmiausia naudojami šalia medijos failų esantys .trickplay ir .bif gretimi failai. Išjunkite tai, kad būtų importuojami tik gretimi failai, o generavimas su FFmpeg būtų praleistas."
     }
   ],
   "web.admin.common.libraryEditor.advanced.trickplayUnavailable": [
@@ -36301,6 +36430,64 @@
       "value": "Administravimas: naudotojai"
     }
   ],
+  "web.admin.common.trickplay.badge.awaitingSidecarCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " failas laukia gretimo failo"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " failai laukia gretimo failo"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " failo laukia gretimo failo"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " failų laukia gretimo failo"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.common.trickplay.badge.detail": [
     {
       "type": 0,
@@ -36503,6 +36690,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.common.trickplay.badge.sidecarsOnly": [
+    {
+      "type": 0,
+      "value": "tik gretimi failai"
     }
   ],
   "web.admin.common.trickplay.badge.srDetail": [
@@ -36715,6 +36908,42 @@
     {
       "type": 0,
       "value": "Leistuvai naudoja dabartines peržiūras, kol bus paruoštos naujos."
+    }
+  ],
+  "web.admin.common.trickplay.sidecarStatus.awaiting_sidecar": [
+    {
+      "type": 0,
+      "value": "Laukiama gretimo failo"
+    }
+  ],
+  "web.admin.common.trickplay.sidecarStatus.sidecar_invalid": [
+    {
+      "type": 0,
+      "value": "Netinkamas gretimas failas"
+    }
+  ],
+  "web.admin.common.trickplay.sidecarStatus.sidecar_stale": [
+    {
+      "type": 0,
+      "value": "Pasenęs gretimas failas"
+    }
+  ],
+  "web.admin.common.trickplay.source.generated": [
+    {
+      "type": 0,
+      "value": "Sugeneruota"
+    }
+  ],
+  "web.admin.common.trickplay.source.sidecar_bif": [
+    {
+      "type": 0,
+      "value": "Gretimas failas (.bif)"
+    }
+  ],
+  "web.admin.common.trickplay.source.sidecar_trickplay": [
+    {
+      "type": 0,
+      "value": "Gretimas failas (.trickplay)"
     }
   ],
   "web.admin.common.trickplay.state.off": [
@@ -38988,7 +39217,7 @@
     },
     {
       "type": 0,
-      "value": "). Kiti šios paskyros įrenginiai liks prisijungę. Klientas galės vėl prisijungti su paskyros slaptažodžiu."
+      "value": "). Kiti šios paskyros įrenginiai liks prisijungę. Klientas galės vėl prisijungti."
     }
   ],
   "web.admin.dashboard.widgets.apiClients.confirmLabel": [
@@ -54877,6 +55106,12 @@
       "value": "Profilis"
     }
   ],
+  "web.admin.history.column.progress": [
+    {
+      "type": 0,
+      "value": "Eiga"
+    }
+  ],
   "web.admin.history.column.status": [
     {
       "type": 0,
@@ -54911,6 +55146,12 @@
     {
       "type": 0,
       "value": "Seanso žurnalai"
+    }
+  ],
+  "web.admin.history.detail.backToPlay": [
+    {
+      "type": 0,
+      "value": "Grįžti į sujungtą peržiūrą"
     }
   ],
   "web.admin.history.detail.column.delivered": [
@@ -55021,6 +55262,12 @@
       "value": "Žiūrėjimo laikas"
     }
   ],
+  "web.admin.history.detail.inspectSitting": [
+    {
+      "type": 0,
+      "value": "Išsamiau"
+    }
+  ],
   "web.admin.history.detail.keyboardHint": [
     {
       "type": 0,
@@ -55105,6 +55352,12 @@
       "value": "Kodėl nebuvo atkurta tiesiogiai"
     }
   ],
+  "web.admin.history.detail.section.sessions": [
+    {
+      "type": 0,
+      "value": "Šios peržiūros seansai"
+    }
+  ],
   "web.admin.history.detail.section.streams": [
     {
       "type": 0,
@@ -55115,6 +55368,126 @@
     {
       "type": 0,
       "value": "Laikas ir žiūrėjimo eiga"
+    }
+  ],
+  "web.admin.history.detail.sessionsCapped": [
+    {
+      "type": 0,
+      "value": "Šios peržiūros seansų: "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": ". Rodomi pirmieji "
+    },
+    {
+      "type": 1,
+      "value": "shown"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.history.detail.sessionsNotice": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Šią peržiūrą sudaro "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " seansas. Toliau pateikta srauto, įrenginio ir maršruto informacija atitinka jį."
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Šią peržiūrą sudaro "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " seansai. Toliau pateikta srauto, įrenginio ir maršruto informacija atitinka pagrindinį jos seansą; pasirinkite bet kurį toliau esantį seansą, kad peržiūrėtumėte jį atskirai."
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Šią peržiūrą sudaro "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " seanso. Toliau pateikta srauto, įrenginio ir maršruto informacija atitinka pagrindinį jos seansą; pasirinkite bet kurį toliau esantį seansą, kad peržiūrėtumėte jį atskirai."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Šią peržiūrą sudaro "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " seansų. Toliau pateikta srauto, įrenginio ir maršruto informacija atitinka pagrindinį jos seansą; pasirinkite bet kurį toliau esantį seansą, kad peržiūrėtumėte jį atskirai."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.ended": [
+    {
+      "type": 0,
+      "value": "Baigta"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.method": [
+    {
+      "type": 0,
+      "value": "Būdas"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.started": [
+    {
+      "type": 0,
+      "value": "Pradėta"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.watched": [
+    {
+      "type": 0,
+      "value": "Žiūrėta"
     }
   ],
   "web.admin.history.detail.subtitlesBurnIn": [
@@ -55343,6 +55716,12 @@
       "value": "Visi tinklai"
     }
   ],
+  "web.admin.history.filter.allMediaTypes": [
+    {
+      "type": 0,
+      "value": "Visa medija"
+    }
+  ],
   "web.admin.history.filter.allMethods": [
     {
       "type": 0,
@@ -55379,6 +55758,24 @@
       "value": "Užbaigta"
     }
   ],
+  "web.admin.history.filter.episodes": [
+    {
+      "type": 0,
+      "value": "Epizodai"
+    }
+  ],
+  "web.admin.history.filter.hideShort": [
+    {
+      "type": 0,
+      "value": "Slėpti <30 sek."
+    }
+  ],
+  "web.admin.history.filter.hideShortTitle": [
+    {
+      "type": 0,
+      "value": "Slėpti nebaigtus seansus, trumpesnius nei 30 sekundžių"
+    }
+  ],
   "web.admin.history.filter.locationLocal": [
     {
       "type": 0,
@@ -55389,6 +55786,12 @@
     {
       "type": 0,
       "value": "Nuotolinis"
+    }
+  ],
+  "web.admin.history.filter.movies": [
+    {
+      "type": 0,
+      "value": "Filmai"
     }
   ],
   "web.admin.history.filter.partial": [
@@ -55639,6 +56042,12 @@
       "value": "Naujausi atkūrimai"
     }
   ],
+  "web.admin.history.row.burnInBadgeTitle": [
+    {
+      "type": 0,
+      "value": "Subtitrai įrašyti į vaizdą"
+    }
+  ],
   "web.admin.history.row.completed": [
     {
       "type": 0,
@@ -55659,6 +56068,80 @@
     {
       "type": 0,
       "value": "Apytiksliai (įrašyta prieš pradedant tiksliai matuoti žiūrėjimo laiką)"
+    }
+  ],
+  "web.admin.history.row.groupedSessionsTitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sujungta iš "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " seanso"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sujungta iš "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " seansų"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sujungta iš "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " seanso"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sujungta iš "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " seansų"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.history.row.meta": [
@@ -55691,6 +56174,12 @@
       "value": "Iš dalies"
     }
   ],
+  "web.admin.history.row.progressLabel": [
+    {
+      "type": 0,
+      "value": "Atkūrimo eiga"
+    }
+  ],
   "web.admin.history.row.started": [
     {
       "type": 0,
@@ -55701,16 +56190,116 @@
       "value": "time"
     }
   ],
+  "web.admin.history.stats.accountsCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " paskyra"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " paskyros"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " paskyros"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " paskyrų"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.history.stats.completed": [
     {
       "type": 0,
       "value": "Užbaigta"
     }
   ],
+  "web.admin.history.stats.completionBreakdown": [
+    {
+      "type": 0,
+      "value": "Užbaigta: "
+    },
+    {
+      "type": 1,
+      "value": "completed"
+    },
+    {
+      "type": 0,
+      "value": " · Iš dalies: "
+    },
+    {
+      "type": 1,
+      "value": "partial"
+    }
+  ],
   "web.admin.history.stats.partial": [
     {
       "type": 0,
       "value": "Iš dalies"
+    }
+  ],
+  "web.admin.history.stats.totalPlays": [
+    {
+      "type": 0,
+      "value": "Iš viso peržiūrų"
+    }
+  ],
+  "web.admin.history.stats.totalSessions": [
+    {
+      "type": 0,
+      "value": "Iš viso seansų"
+    }
+  ],
+  "web.admin.history.stats.uniqueProfiles": [
+    {
+      "type": 0,
+      "value": "Skirtingi profiliai"
+    }
+  ],
+  "web.admin.history.stats.uniqueTitles": [
+    {
+      "type": 0,
+      "value": "Skirtingi kūriniai"
     }
   ],
   "web.admin.history.stats.visibleRows": [
@@ -55729,6 +56318,24 @@
     {
       "type": 0,
       "value": "Atkūrimo istorija"
+    }
+  ],
+  "web.admin.history.view.label": [
+    {
+      "type": 0,
+      "value": "Istorijos rodinys"
+    }
+  ],
+  "web.admin.history.view.plays": [
+    {
+      "type": 0,
+      "value": "Peržiūros"
+    }
+  ],
+  "web.admin.history.view.sessions": [
+    {
+      "type": 0,
+      "value": "Visi seansai"
     }
   ],
   "web.admin.historyImport.conflict.message": [
@@ -103262,6 +103869,234 @@
       "value": ")"
     }
   ],
+  "web.admin.users.detail.appKeys.confirm.denyDescription": [
+    {
+      "type": 0,
+      "value": "Įrenginys „"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "“ negalės prisijungti prie naudotojo "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " paskyros. Jei įrenginys priklausė šiam naudotojui, jį galima vėl pridėti „Silo“ programoje."
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKey": [
+    {
+      "type": 0,
+      "value": "Pašalinti raktą"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKeyDescription": [
+    {
+      "type": 0,
+      "value": "Jau prisijungę įrenginiai veiks toliau, kol jų nepašalinsite. Šiuo raktu nebebus galima pridėti naujų įrenginių, o jo pridėti ir dar laukiantys įrenginiai bus atmesti. Naudotojo "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " „Silo“ programa nustatys naują raktą, kai prisijungęs naudotojas kitą kartą pridės įrenginį."
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKeyTitle": [
+    {
+      "type": 0,
+      "value": "Pašalinti naudotojo "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " paskyros raktą?"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.removeDescription": [
+    {
+      "type": 0,
+      "value": "Pašalinus įrenginį „"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "“, jis iš karto atjungiamas nuo naudotojo "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " paskyros, o jo raktas nustoja veikti: įrenginys juo nebegalės vėl prisijungti. Kad galėtų vėl jį naudoti, "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " turi jį vėl pridėti „Silo“ programoje."
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.withdrawDescription": [
+    {
+      "type": 0,
+      "value": "Įrenginys „"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "“ negalės pasinaudoti šiuo patvirtinimu, kad prisijungtų prie naudotojo "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " paskyros."
+    }
+  ],
+  "web.admin.users.detail.appKeys.description": [
+    {
+      "type": 0,
+      "value": "Įrenginiai ir programos, kurie be slaptažodžio prisijungia prie naudotojo "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " paskyros per „Silo“ programą."
+    }
+  ],
+  "web.admin.users.detail.appKeys.empty": [
+    {
+      "type": 0,
+      "value": "Šioje paskyroje „Silo“ programos nenaudoja joks įrenginys."
+    }
+  ],
+  "web.admin.users.detail.appKeys.loadFailed": [
+    {
+      "type": 0,
+      "value": "Nepavyko įkelti įrenginių."
+    }
+  ],
+  "web.admin.users.detail.appKeys.off": [
+    {
+      "type": 0,
+      "value": "Prisijungimas per „Silo“ programą šiame serveryje išjungtas, todėl šie įrenginiai negali prisijungti. Juos vis tiek galite pašalinti."
+    }
+  ],
+  "web.admin.users.detail.appKeys.ownerOnly": [
+    {
+      "type": 0,
+      "value": "Kito administratoriaus ar savininko įrenginius pakeisti gali tik serverio savininkas."
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.description": [
+    {
+      "type": 0,
+      "value": "„Silo“ programa šiuo raktu prideda naujus naudotojo "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " įrenginius. Nustatyta: "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.none": [
+    {
+      "type": 0,
+      "value": "Paskyros rakto nėra. Naudotojo "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " „Silo“ programa jį nustatys, kai prisijungęs naudotojas kitą kartą pridės įrenginį."
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.remove": [
+    {
+      "type": 0,
+      "value": "Pašalinti paskyros raktą"
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKeyRemoved": [
+    {
+      "type": 0,
+      "value": "Paskyros raktas pašalintas"
+    }
+  ],
+  "web.admin.users.detail.appKeys.preapprovals.description": [
+    {
+      "type": 0,
+      "value": "Prisijungimai, kuriuos "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " patvirtino dar neprisijungusiam įrenginiui."
+    }
+  ],
+  "web.admin.users.detail.appKeys.waiting.description": [
+    {
+      "type": 0,
+      "value": "Naujas administratoriaus paskyros įrenginys laukia, kol "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " jį patvirtins iš įrenginio, kuriame prisijungė. Čia galite jį atmesti."
+    }
+  ],
+  "web.admin.users.detail.appKeys.waiting.title": [
+    {
+      "type": 0,
+      "value": "Laukia patvirtinimo"
+    }
+  ],
   "web.admin.users.detail.common.allProfiles": [
     {
       "type": 0,
@@ -107438,6 +108273,12 @@
       "value": "Paskyra pasiekė profilių limitą"
     }
   ],
+  "web.admin.users.detail.profiles.badge.changedHere": [
+    {
+      "type": 0,
+      "value": "Pakeista čia"
+    }
+  ],
   "web.admin.users.detail.profiles.badge.kids": [
     {
       "type": 0,
@@ -107639,6 +108480,680 @@
     {
       "type": 0,
       "value": "Išsaugoti PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowAgain": [
+    {
+      "type": 0,
+      "value": "Vėl leisti"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowAgainAria": [
+    {
+      "type": 0,
+      "value": "Leisti profiliui „"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "“ vėl atsirasti šiame serveryje"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowDescription": [
+    {
+      "type": 0,
+      "value": "Kitą kartą sinchronizuodama naudotojo programa gali vėl pridėti profilį „"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "“ kaip naują profilį be jo istorijos šiame serveryje, jei tarp jos profilių vis dar yra profilis „"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "“ ir šioje paskyroje yra vietos dar vienam profiliui."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowTitle": [
+    {
+      "type": 0,
+      "value": "Vėl leisti profilį „"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "“?"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.alreadyCleared": [
+    {
+      "type": 0,
+      "value": "Šis pakeitimas jau išvalytas arba "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " jį vėl pakeitė. Sąrašas atnaujintas."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedBy": [
+    {
+      "type": 0,
+      "value": "Pakeitė "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedSinceOpened": [
+    {
+      "type": 0,
+      "value": "Šis pakeitimas buvo atnaujintas po to, kai jį atidarėte, todėl niekas nebuvo išvalyta. Dar kartą perskaitykite jį sąraše ir, jei vis dar norite, išvalykite."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedWhileRunning": [
+    {
+      "type": 0,
+      "value": "Kol tai buvo vykdoma, profiliai pasikeitė, todėl niekas nebuvo pakeista. Sąrašas atnaujintas; jei vis dar norite, bandykite dar kartą."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clear": [
+    {
+      "type": 0,
+      "value": "Išvalyti"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearAndRemovePin": [
+    {
+      "type": 0,
+      "value": "Išvalyti ir pašalinti PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearAria": [
+    {
+      "type": 0,
+      "value": "Išvalyti lauko „"
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": "“ pakeitimą profilyje „"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "“"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearFailed": [
+    {
+      "type": 0,
+      "value": "Nepavyko išvalyti pakeitimo."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearInherit": [
+    {
+      "type": 0,
+      "value": "Profilio „"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "“ laukas „"
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": "“ grįš į tai, ką profilis „"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "“ dabar paveldi, kaip prašo naudotojo programa. Programos pakeitimai jam vėl bus taikomi."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearLater": [
+    {
+      "type": 0,
+      "value": "Laukas „"
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": "“ liks nepakeistas, kol naudotojo programa kitą kartą jį atsiųs. Po to programos pakeitimai jam vėl bus taikomi."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearNow": [
+    {
+      "type": 0,
+      "value": "Profilis „"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "“ dabar grįš prie naudotojo programos reikšmės, o programos pakeitimai jam vėl bus taikomi."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearNowValue": [
+    {
+      "type": 0,
+      "value": "Profilio „"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "“ laukas „"
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": "“ dabar grįš į reikšmę "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": ", gautą iš naudotojo programos. Programos pakeitimai jam vėl bus taikomi."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearPin": [
+    {
+      "type": 0,
+      "value": "Profilis „"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "“ išlaikys jūsų nustatytą PIN, kol naudotojo programa kitą kartą atsiųs PIN. Po to programos pakeitimai jam vėl bus taikomi."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearPinRemoves": [
+    {
+      "type": 0,
+      "value": "Naudotojo programa siunčia profilį „"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "“ be PIN, todėl išvalius jūsų nustatytas PIN bus pašalintas iš karto. Tada bet kas, naudojantis šią paskyrą, galės atidaryti profilį „"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "“ be PIN."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearTitle": [
+    {
+      "type": 0,
+      "value": "Išvalyti lauko „"
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": "“ pakeitimą profilyje „"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "“?"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.deletedAccount": [
+    {
+      "type": 0,
+      "value": "ištrinta paskyra"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.description": [
+    {
+      "type": 0,
+      "value": "Šie profiliai gaunami iš naudotojo "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " programos. Jūsų čia atliktas pakeitimas lieka šiame serveryje, kol jį išvalysite. Tai nėra užraktas: "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " taip pat gali čia pakeisti tą patį."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismiss": [
+    {
+      "type": 0,
+      "value": "Atmesti"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismissAria": [
+    {
+      "type": 0,
+      "value": "Atmesti pastabą apie lauką „"
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": "“ profilyje „"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "“"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismissFailed": [
+    {
+      "type": 0,
+      "value": "Nepavyko atmesti pastabos."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.isChild": [
+    {
+      "type": 0,
+      "value": "Vaikų profilis"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.maxAdvisoryAge": [
+    {
+      "type": 0,
+      "value": "Amžiaus riba"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.maxContentRating": [
+    {
+      "type": 0,
+      "value": "Amžiaus cenzo riba"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.name": [
+    {
+      "type": 0,
+      "value": "Vardas"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.picture": [
+    {
+      "type": 0,
+      "value": "Paveikslėlis"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.pin": [
+    {
+      "type": 0,
+      "value": "PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.requests": [
+    {
+      "type": 0,
+      "value": "Užklausos"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.requireAdvisoryAge": [
+    {
+      "type": 0,
+      "value": "Reikalauti amžiaus cenzo"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.fieldValue": [
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.hidden": [
+    {
+      "type": 0,
+      "value": "Šiame serveryje pašalino "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "). Naudotojo programa jo vėl nepridės, kol neleisite."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.loadFailed": [
+    {
+      "type": 0,
+      "value": "Nepavyko įkelti šiame serveryje atliktų pakeitimų."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.nameTaken": [
+    {
+      "type": 0,
+      "value": "Profiliui „"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "“ negalima grąžinti vardo „"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "“ iš naudotojo programos, nes kitas profilis čia jau turi šį vardą. Pirmiausia pervardykite tą profilį, tada išvalykite šį pakeitimą dar kartą."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeHiddenNextSync": [
+    {
+      "type": 0,
+      "value": "Profilis „"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "“ gali vėl atsirasti, kai naudotojo "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " programa kitą kartą sinchronizuos, jei tarp jos profilių jis vis dar yra."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeHiddenWoken": [
+    {
+      "type": 0,
+      "value": "Profilis „"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "“ gali vėl atsirasti, kai naudotojo programa kitą kartą sinchronizuos, jei tarp jos profilių jis vis dar yra. Naudotojo "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " telefono paprašyta sinchronizuoti."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeNextSync": [
+    {
+      "type": 0,
+      "value": "Išvalyta. Pakeitimas pasieks naudotojo "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " programą, kai ji kitą kartą sinchronizuos."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeWoken": [
+    {
+      "type": 0,
+      "value": "Išvalyta. Naudotojo "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " telefono paprašyta sinchronizuoti."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.removedBy": [
+    {
+      "type": 0,
+      "value": "Pašalino "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.replacedOwner": [
+    {
+      "type": 0,
+      "value": "Tai pakeitė jūsų nustatytą reikšmę."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.setBy": [
+    {
+      "type": 0,
+      "value": "Nustatė "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.settled": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " tai pakeitė ("
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "); jūsų nustatyta reikšmė nebetaikoma."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.title": [
+    {
+      "type": 0,
+      "value": "Pakeista šiame serveryje"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.inherited": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (paveldėta)"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.noPicture": [
+    {
+      "type": 0,
+      "value": "Paveikslėlio nėra"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.none": [
+    {
+      "type": 0,
+      "value": "Nėra"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.off": [
+    {
+      "type": 0,
+      "value": "Išjungta"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.on": [
+    {
+      "type": 0,
+      "value": "Įjungta"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.picture": [
+    {
+      "type": 0,
+      "value": "Pasirinktinis paveikslėlis"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.pinNone": [
+    {
+      "type": 0,
+      "value": "PIN nėra"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.pinSet": [
+    {
+      "type": 0,
+      "value": "PIN nustatytas"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.requestsAllowed": [
+    {
+      "type": 0,
+      "value": "Leidžiama"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.requestsBlocked": [
+    {
+      "type": 0,
+      "value": "Užblokuota"
     }
   ],
   "web.admin.users.detail.profiles.setPin": [
@@ -108958,6 +110473,144 @@
     {
       "type": 0,
       "value": "Nustatyti slaptažodį"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.action": [
+    {
+      "type": 0,
+      "value": "Sukurti prisijungimo nuorodą"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.actionHint": [
+    {
+      "type": 0,
+      "value": "Prarado visus įrenginius"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.description": [
+    {
+      "type": 0,
+      "value": "Vienkartinė nuoroda naudotojui "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": ", jei jis prarado visus įrenginius. Ji atveria puslapį, kuriame pateikiamas kodas „Silo“ programai arba galima pasirinkti slaptažodį. Nuoroda galioja 24 val., o nauja nuoroda pakeičia ankstesnę."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailAction": [
+    {
+      "type": 0,
+      "value": "Išsiųsti el. paštu"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHint": [
+    {
+      "type": 0,
+      "value": "Sukurkite nuorodą, kad ją nukopijuotumėte ir išsiųstumėte patys, arba išsiųskite ją el. paštu adresu "
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHintNoAddress": [
+    {
+      "type": 0,
+      "value": "Sukurkite nuorodą, tada nukopijuokite ją ir išsiųskite patys. Šioje paskyroje nėra el. pašto adreso, kuriuo būtų galima ją išsiųsti."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHintNoMail": [
+    {
+      "type": 0,
+      "value": "Sukurkite nuorodą, tada nukopijuokite ją ir išsiųskite patys. Nustatykite el. paštą skiltyje „Nustatymai“, kad galėtumėte ją išsiųsti iš čia."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailSent": [
+    {
+      "type": 0,
+      "value": "Nuoroda išsiųsta adresu "
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": ". Ji nustos galioti "
+    },
+    {
+      "type": 1,
+      "value": "expires"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Pašto serveris nepatvirtino pristatymo. Toliau pateikta nuoroda vis tiek veikia: nukopijuokite ją ir išsiųskite kitu būdu."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.failed": [
+    {
+      "type": 0,
+      "value": "Nepavyko sukurti prisijungimo nuorodos."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.linkShare": [
+    {
+      "type": 0,
+      "value": "Siųskite šią nuorodą tik naudotojui "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": ". Bet kas, turintis šią nuorodą, gali prisijungti prie šios paskyros, kol ji bus panaudota arba nustos galioti "
+    },
+    {
+      "type": 1,
+      "value": "expires"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.providerRequired": [
+    {
+      "type": 0,
+      "value": "Prisijungimas vietiniu slaptažodžiu šiame serveryje išjungtas, todėl prisijungimo nuoroda apeitų jo prisijungimo teikėją. Paprašykite naudotojo "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " prisijungti per teikėją šio serverio svetainėje, tada savo paskyros nustatymuose naudoti veiksmą „Atidaryti ‚Silo‘“."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.title": [
+    {
+      "type": 0,
+      "value": "Prisijungimo nuoroda naudotojui "
+    },
+    {
+      "type": 1,
+      "value": "username"
     }
   ],
   "web.audiobooks.chapter.fallbackTitle": [
@@ -111260,6 +112913,120 @@
       "value": "Patvirtinti prisijungimą"
     }
   ],
+  "web.auth.appCode.code": [
+    {
+      "type": 0,
+      "value": "Kodas"
+    }
+  ],
+  "web.auth.appCode.codeCopied": [
+    {
+      "type": 0,
+      "value": "Kodas nukopijuotas"
+    }
+  ],
+  "web.auth.appCode.copyCode": [
+    {
+      "type": 0,
+      "value": "Kopijuoti kodą"
+    }
+  ],
+  "web.auth.appCode.copyFailed": [
+    {
+      "type": 0,
+      "value": "Nepavyko nukopijuoti kodo. Pažymėkite jį ir nukopijuokite rankiniu būdu."
+    }
+  ],
+  "web.auth.appCode.expired": [
+    {
+      "type": 0,
+      "value": "Šio kodo galiojimas baigėsi."
+    }
+  ],
+  "web.auth.appCode.failed": [
+    {
+      "type": 0,
+      "value": "„Silo“ nepavyko sugeneruoti kodo. Bandykite dar kartą."
+    }
+  ],
+  "web.auth.appCode.instructions": [
+    {
+      "type": 0,
+      "value": "Paspauskite „Atidaryti ‚Silo‘“, kad tęstumėte „Silo“ programėlėje šiame įrenginyje. Jei programėlė neįdiegta, įdiekite ją, grįžkite į šį skirtuką ir dar kartą paspauskite „Atidaryti ‚Silo‘“."
+    }
+  ],
+  "web.auth.appCode.noScanCode": [
+    {
+      "type": 0,
+      "value": "Šio serverio adresas per ilgas skenuojamam kodui. Įveskite serverio adresą ir kodą „Silo“ programėlėje arba nukopijuokite kodą ir įklijuokite jį ten."
+    }
+  ],
+  "web.auth.appCode.open": [
+    {
+      "type": 0,
+      "value": "Atidaryti „Silo“"
+    }
+  ],
+  "web.auth.appCode.renew": [
+    {
+      "type": 0,
+      "value": "Gauti naują kodą"
+    }
+  ],
+  "web.auth.appCode.scanCodeLabel": [
+    {
+      "type": 0,
+      "value": "Skenuojamas kodas „Silo“ programėlei"
+    }
+  ],
+  "web.auth.appCode.scanCodeUnavailable": [
+    {
+      "type": 0,
+      "value": "Šiam serveriui negalima parodyti skenuojamo kodo. Įveskite serverio adresą ir kodą „Silo“ programėlėje arba nukopijuokite kodą ir įklijuokite jį ten."
+    }
+  ],
+  "web.auth.appCode.scanHint": [
+    {
+      "type": 0,
+      "value": "Nuskenuokite šį kodą „Silo“ programėlės skeneriu arba įveskite ar nukopijuokite toliau pateiktą serverio adresą ir kodą."
+    }
+  ],
+  "web.auth.appCode.serverAddress": [
+    {
+      "type": 0,
+      "value": "Serverio adresas"
+    }
+  ],
+  "web.auth.appCode.singleUse": [
+    {
+      "type": 0,
+      "value": "Šis kodas veikia vieną kartą, o jo galiojimas baigiasi po kelių minučių."
+    }
+  ],
+  "web.auth.appCode.title": [
+    {
+      "type": 0,
+      "value": "Atidaryti „Silo“"
+    }
+  ],
+  "web.auth.appCode.typeInstructions": [
+    {
+      "type": 0,
+      "value": "„Silo“ programėlėje telefone arba planšetėje pridėkite šį serverį pagal jo adresą ir įveskite šį kodą, kad sukurtumėte paskyrą. Bet kas, turintis šį kodą, gali prisijungti vietoj jūsų, todėl juo nesidalykite."
+    }
+  ],
+  "web.auth.appCode.typeTitle": [
+    {
+      "type": 0,
+      "value": "Prisijungti su šiuo kodu"
+    }
+  ],
+  "web.auth.appCode.webLink": [
+    {
+      "type": 0,
+      "value": "Vietoj to atidaryti per siloserver.org nuorodą"
+    }
+  ],
   "web.auth.card.rememberedIt": [
     {
       "type": 0,
@@ -111462,10 +113229,50 @@
       ]
     }
   ],
+  "web.auth.invite.appAccountEmail": [
+    {
+      "type": 0,
+      "value": "Jūsų paskyrai bus naudojamas adresas "
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.auth.invite.appContinue": [
+    {
+      "type": 0,
+      "value": "Tęsti"
+    }
+  ],
+  "web.auth.invite.appEmailHint": [
+    {
+      "type": 0,
+      "value": "Turėdamas el. pašto adresą, šis serveris galės atsiųsti jums prisijungimo nuorodą, jei prarasite savo įrenginius."
+    }
+  ],
   "web.auth.invite.appMissing": [
     {
       "type": 0,
       "value": "Nieko neįvyksta? Programėlė neįdiegta – tiesiog tęskite toliau."
+    }
+  ],
+  "web.auth.invite.appProviderOnly": [
+    {
+      "type": 0,
+      "value": "Serveris "
+    },
+    {
+      "type": 1,
+      "value": "server"
+    },
+    {
+      "type": 0,
+      "value": " prideda naudotojus per savo prisijungimo teikėją. Prisijunkite per jį šioje svetainėje, tada atidarykite „Silo“ iš paskyros nustatymų."
     }
   ],
   "web.auth.invite.created": [
@@ -111494,6 +113301,18 @@
       "value": "Įveskite el. pašto adresą ir pasirinkite slaptažodį. Prisijungimui naudosite savo el. pašto adresą."
     }
   ],
+  "web.auth.invite.descriptionWithApp": [
+    {
+      "type": 0,
+      "value": "Prisijunkite per „Silo“ programėlę telefone ar planšetėje arba pasirinkite slaptažodį, kuriuo prisijungsite."
+    }
+  ],
+  "web.auth.invite.emailOptional": [
+    {
+      "type": 0,
+      "value": "El. paštas (neprivaloma)"
+    }
+  ],
   "web.auth.invite.emailPlaceholder": [
     {
       "type": 0,
@@ -111514,6 +113333,18 @@
     {
       "type": 1,
       "value": "inviter"
+    }
+  ],
+  "web.auth.invite.joinWithApp": [
+    {
+      "type": 0,
+      "value": "Prisijungti per „Silo“ programėlę"
+    }
+  ],
+  "web.auth.invite.joinWithAppInstead": [
+    {
+      "type": 0,
+      "value": "Vietoj to prisijungti per „Silo“ programėlę"
     }
   ],
   "web.auth.invite.loadFailed": [
@@ -111618,6 +113449,30 @@
     {
       "type": 0,
       "value": "Kvietimas nepasiekiamas"
+    }
+  ],
+  "web.auth.invite.usePassword": [
+    {
+      "type": 0,
+      "value": "Vietoj to naudoti slaptažodį"
+    }
+  ],
+  "web.auth.invite.usernameIsAddress": [
+    {
+      "type": 0,
+      "value": "Naudotojo vardas su @ turi būti el. pašto adresas, kurį įvesite toliau."
+    }
+  ],
+  "web.auth.invite.usernameRequired": [
+    {
+      "type": 0,
+      "value": "Pasirinkite naudotojo vardą."
+    }
+  ],
+  "web.auth.invite.usernameTaken": [
+    {
+      "type": 0,
+      "value": "Šis naudotojo vardas jau naudojamas. Pasirinkite kitą."
     }
   ],
   "web.auth.languagePicker.label": [
@@ -112702,6 +114557,126 @@
     {
       "type": 0,
       "value": "Prisijungti"
+    }
+  ],
+  "web.auth.signInLink.backToCode": [
+    {
+      "type": 0,
+      "value": "Grįžti prie kodo"
+    }
+  ],
+  "web.auth.signInLink.codeExpired": [
+    {
+      "type": 0,
+      "value": "Paprašykite šio serverio administratoriaus naujos nuorodos, kad gautumėte kitą kodą."
+    }
+  ],
+  "web.auth.signInLink.documentTitle": [
+    {
+      "type": 0,
+      "value": "Prisijungimo nuoroda"
+    }
+  ],
+  "web.auth.signInLink.failed": [
+    {
+      "type": 0,
+      "value": "„Silo“ nepavyko atidaryti šios nuorodos. Bandykite dar kartą."
+    }
+  ],
+  "web.auth.signInLink.installFirst": [
+    {
+      "type": 0,
+      "value": "Nuoroda veikia vieną kartą, o kodas galioja kelias minutes. Pirmiausia įdiekite „Silo“ programėlę telefone arba planšetėje, tada paspauskite „Tęsti“."
+    }
+  ],
+  "web.auth.signInLink.intro": [
+    {
+      "type": 0,
+      "value": "Administratorius atsiuntė jums šią nuorodą, kad galėtumėte vėl prisijungti. Tęskite, kad gautumėte kodą „Silo“ programėlei arba pasirinktumėte slaptažodį."
+    }
+  ],
+  "web.auth.signInLink.keepOpen": [
+    {
+      "type": 0,
+      "value": "Neuždarykite šio puslapio, kol baigsite. Nuoroda jau panaudota, todėl, jei įkelsite puslapį iš naujo arba jį paliksite, prarasite tai, ką ji suteikė."
+    }
+  ],
+  "web.auth.signInLink.leaveAction": [
+    {
+      "type": 0,
+      "value": "Išeiti"
+    }
+  ],
+  "web.auth.signInLink.leaveDescription": [
+    {
+      "type": 0,
+      "value": "Nuoroda jau panaudota. Jei išeisite, „Silo“ programėlės kodas ir galimybė nustatyti slaptažodį dings, ir jums reikės naujos nuorodos."
+    }
+  ],
+  "web.auth.signInLink.leaveTitle": [
+    {
+      "type": 0,
+      "value": "Išeiti iš šio puslapio?"
+    }
+  ],
+  "web.auth.signInLink.noCodeAdministrator": [
+    {
+      "type": 0,
+      "value": "Tai administratoriaus paskyra, todėl ši nuoroda tik nustato slaptažodį. Nustatykite jį, prisijunkite šio serverio svetainėje, tada ten atidarykite „Silo“ programėlę iš paskyros nustatymų."
+    }
+  ],
+  "web.auth.signInLink.noCodeAppKeysOff": [
+    {
+      "type": 0,
+      "value": "„Silo“ programėlė šiuo metu negali prisijungti prie šio serverio, todėl ši nuoroda tik nustato slaptažodį."
+    }
+  ],
+  "web.auth.signInLink.passwordDescription": [
+    {
+      "type": 0,
+      "value": "Išsaugojus ši paskyra bus atjungta visuose įrenginiuose. Įrenginiai, kuriuose prisijungta per „Silo“ programėlę, vėl prisijungs patys."
+    }
+  ],
+  "web.auth.signInLink.passwordSet": [
+    {
+      "type": 0,
+      "value": "Slaptažodis išsaugotas. Prisijunkite su juo."
+    }
+  ],
+  "web.auth.signInLink.passwordSetLostDevices": [
+    {
+      "type": 0,
+      "value": "Prarasti įrenginiai, kuriuose buvo naudojama „Silo“ programėlė, vis dar gali prisijungti, kol jų nepašalinsite. Kai prisijungsite, pašalinkite juos iš įrenginių sąrašo paskyros nustatymuose."
+    }
+  ],
+  "web.auth.signInLink.passwordTitle": [
+    {
+      "type": 0,
+      "value": "Pasirinkite slaptažodį"
+    }
+  ],
+  "web.auth.signInLink.providerRequired": [
+    {
+      "type": 0,
+      "value": "Šis serveris prijungia naudotojus per savo prisijungimo teikėją, todėl ši nuoroda neveikia. Vietoj to prisijunkite per teikėją."
+    }
+  ],
+  "web.auth.signInLink.setPasswordInstead": [
+    {
+      "type": 0,
+      "value": "Vietoj to nustatyti slaptažodį"
+    }
+  ],
+  "web.auth.signInLink.title": [
+    {
+      "type": 0,
+      "value": "Atgaukite prieigą prie paskyros"
+    }
+  ],
+  "web.auth.signInLink.unavailable": [
+    {
+      "type": 0,
+      "value": "Ši nuoroda jau panaudota, pakeista naujesne arba jos galiojimas baigėsi. Paprašykite šio serverio administratoriaus naujos."
     }
   ],
   "web.auth.signup.closed": [
@@ -159304,7 +161279,7 @@
   "web.settings.account.password.signOutOthersDescription": [
     {
       "type": 0,
-      "value": "Kitose naršyklėse ir programose reikės vėl prisijungti su nauju slaptažodžiu. Šioje naršyklėje liksite prisijungę, o API raktai veiks toliau."
+      "value": "Kitose naršyklėse ir programose atsijungta. Ši naršyklė liks prisijungusi, o API raktai veiks toliau."
     }
   ],
   "web.settings.account.password.title": [
@@ -160217,6 +162192,528 @@
     {
       "type": 0,
       "value": "Kaip naudoti šį raktą"
+    }
+  ],
+  "web.settings.appKeys.actionFailed": [
+    {
+      "type": 0,
+      "value": "Nepavyko atlikti šio pakeitimo. Bandykite dar kartą."
+    }
+  ],
+  "web.settings.appKeys.approveMainOnly": [
+    {
+      "type": 0,
+      "value": "Patvirtinti įrenginį gali tik pagrindinis namų ūkio profilis. Kad patvirtintumėte, persijunkite į jį."
+    }
+  ],
+  "web.settings.appKeys.approved": [
+    {
+      "type": 0,
+      "value": "Įrenginys „"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "“ patvirtintas"
+    }
+  ],
+  "web.settings.appKeys.confirm.approve": [
+    {
+      "type": 0,
+      "value": "Patvirtinti įrenginį"
+    }
+  ],
+  "web.settings.appKeys.confirm.approveDescription": [
+    {
+      "type": 0,
+      "value": "Įrenginys „"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "“ galės prisijungti prie jūsų paskyros per „Silo“ programą, kol jo nepašalinsite. Patvirtinkite jį tik tuo atveju, jei ką tik jį nustatėte."
+    }
+  ],
+  "web.settings.appKeys.confirm.approveTitle": [
+    {
+      "type": 0,
+      "value": "Patvirtinti įrenginį „"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "“?"
+    }
+  ],
+  "web.settings.appKeys.confirm.deny": [
+    {
+      "type": 0,
+      "value": "Atmesti įrenginį"
+    }
+  ],
+  "web.settings.appKeys.confirm.denyDescription": [
+    {
+      "type": 0,
+      "value": "Įrenginys „"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "“ negalės prisijungti prie jūsų paskyros. Jei jis buvo jūsų, vėl pridėkite jį „Silo“ programoje."
+    }
+  ],
+  "web.settings.appKeys.confirm.denyTitle": [
+    {
+      "type": 0,
+      "value": "Atmesti įrenginį „"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "“?"
+    }
+  ],
+  "web.settings.appKeys.confirm.remove": [
+    {
+      "type": 0,
+      "value": "Pašalinti įrenginį"
+    }
+  ],
+  "web.settings.appKeys.confirm.removeDescription": [
+    {
+      "type": 0,
+      "value": "Pašalintas įrenginys „"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "“ bus iš karto atjungtas, o jo raktas nustos veikti: juo nebebus galima vėl prisijungti. Kad vėl jį naudotumėte, iš naujo pridėkite jį „Silo“ programoje."
+    }
+  ],
+  "web.settings.appKeys.confirm.removeTitle": [
+    {
+      "type": 0,
+      "value": "Pašalinti įrenginį „"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "“?"
+    }
+  ],
+  "web.settings.appKeys.confirm.withdraw": [
+    {
+      "type": 0,
+      "value": "Atšaukti patvirtinimą"
+    }
+  ],
+  "web.settings.appKeys.confirm.withdrawDescription": [
+    {
+      "type": 0,
+      "value": "Įrenginys „"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "“ negalės pasinaudoti šiuo patvirtinimu, kad prisijungtų prie jūsų paskyros."
+    }
+  ],
+  "web.settings.appKeys.confirm.withdrawTitle": [
+    {
+      "type": 0,
+      "value": "Atšaukti įrenginio „"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "“ patvirtinimą?"
+    }
+  ],
+  "web.settings.appKeys.confirm.working": [
+    {
+      "type": 0,
+      "value": "Išsaugoma…"
+    }
+  ],
+  "web.settings.appKeys.denied": [
+    {
+      "type": 0,
+      "value": "Įrenginys „"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "“ atmestas"
+    }
+  ],
+  "web.settings.appKeys.description": [
+    {
+      "type": 0,
+      "value": "Įrenginiai ir programos, kurie prisijungia prie jūsų paskyros per „Silo“ programą be slaptažodžio."
+    }
+  ],
+  "web.settings.appKeys.devices.title": [
+    {
+      "type": 0,
+      "value": "Įrenginiai"
+    }
+  ],
+  "web.settings.appKeys.empty": [
+    {
+      "type": 0,
+      "value": "Jūsų paskyroje „Silo“ programos nenaudoja joks įrenginys."
+    }
+  ],
+  "web.settings.appKeys.footnote": [
+    {
+      "type": 0,
+      "value": "Pašalinus įrenginį, jis atjungiamas, o jo raktas nustoja veikti. Atjungus seansą, įrenginys nepašalinamas: jis vėl prisijungia savo raktu."
+    }
+  ],
+  "web.settings.appKeys.loadFailed": [
+    {
+      "type": 0,
+      "value": "Nepavyko įkelti jūsų įrenginių."
+    }
+  ],
+  "web.settings.appKeys.loading": [
+    {
+      "type": 0,
+      "value": "Įkeliami įrenginiai…"
+    }
+  ],
+  "web.settings.appKeys.off": [
+    {
+      "type": 0,
+      "value": "Prisijungimas per „Silo“ programą šiame serveryje išjungtas, todėl šie įrenginiai negali prisijungti, o laukiančių įrenginių negalima patvirtinti. Juos vis tiek galite pašalinti."
+    }
+  ],
+  "web.settings.appKeys.personKey.description": [
+    {
+      "type": 0,
+      "value": "„Silo“ programa šiuo raktu prideda naujus jūsų įrenginius. Nustatyta "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.settings.appKeys.personKey.none": [
+    {
+      "type": 0,
+      "value": "Paskyros rakto nėra. „Silo“ programa jį nustatys, kai kitą kartą pridėsite įrenginį prisijungimo seanso metu."
+    }
+  ],
+  "web.settings.appKeys.personKey.title": [
+    {
+      "type": 0,
+      "value": "Paskyros raktas"
+    }
+  ],
+  "web.settings.appKeys.pinDescription": [
+    {
+      "type": 0,
+      "value": "Įveskite pagrindinio profilio PIN, kad patvirtintumėte šį įrenginį."
+    }
+  ],
+  "web.settings.appKeys.preapprovals.description": [
+    {
+      "type": 0,
+      "value": "Prisijungimai, kuriuos patvirtinote įrenginiui, kuris dar neprisijungė."
+    }
+  ],
+  "web.settings.appKeys.preapprovals.loadFailed": [
+    {
+      "type": 0,
+      "value": "Nepavyko įkelti iš anksto patvirtintų prisijungimų."
+    }
+  ],
+  "web.settings.appKeys.preapprovals.title": [
+    {
+      "type": 0,
+      "value": "Patvirtinta iš anksto"
+    }
+  ],
+  "web.settings.appKeys.refreshLabel": [
+    {
+      "type": 0,
+      "value": "Atnaujinti „Silo“ programos įrenginius"
+    }
+  ],
+  "web.settings.appKeys.removed": [
+    {
+      "type": 0,
+      "value": "Įrenginys „"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "“ pašalintas"
+    }
+  ],
+  "web.settings.appKeys.row.allowedBy": [
+    {
+      "type": 0,
+      "value": "Leido naudotojas "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "web.settings.appKeys.row.approve": [
+    {
+      "type": 0,
+      "value": "Patvirtinti"
+    }
+  ],
+  "web.settings.appKeys.row.approveLabel": [
+    {
+      "type": 0,
+      "value": "Patvirtinti įrenginį „"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "“"
+    }
+  ],
+  "web.settings.appKeys.row.deny": [
+    {
+      "type": 0,
+      "value": "Atmesti"
+    }
+  ],
+  "web.settings.appKeys.row.denyLabel": [
+    {
+      "type": 0,
+      "value": "Atmesti įrenginį „"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "“"
+    }
+  ],
+  "web.settings.appKeys.row.enrolledFrom": [
+    {
+      "type": 0,
+      "value": "Iš adreso "
+    },
+    {
+      "type": 1,
+      "value": "address"
+    }
+  ],
+  "web.settings.appKeys.row.identityGone": [
+    {
+      "type": 0,
+      "value": "Negali prisijungti: jo prisijungimo teikėjo paskyra nebesusieta"
+    }
+  ],
+  "web.settings.appKeys.row.kindApp": [
+    {
+      "type": 0,
+      "value": "Kita programa"
+    }
+  ],
+  "web.settings.appKeys.row.kindDevice": [
+    {
+      "type": 0,
+      "value": "„Silo“ programa"
+    }
+  ],
+  "web.settings.appKeys.row.lastUsed": [
+    {
+      "type": 0,
+      "value": "Paskutinį kartą prisijungė "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.settings.appKeys.row.notUsed": [
+    {
+      "type": 0,
+      "value": "Savo raktu dar neprisijungė"
+    }
+  ],
+  "web.settings.appKeys.row.preapproval": [
+    {
+      "type": 0,
+      "value": "Patvirtinta iš anksto · galioja iki "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.settings.appKeys.row.provider": [
+    {
+      "type": 0,
+      "value": "Patikrinta per prisijungimo teikėją"
+    }
+  ],
+  "web.settings.appKeys.row.remove": [
+    {
+      "type": 0,
+      "value": "Pašalinti"
+    }
+  ],
+  "web.settings.appKeys.row.removeLabel": [
+    {
+      "type": 0,
+      "value": "Pašalinti įrenginį „"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "“"
+    }
+  ],
+  "web.settings.appKeys.row.viaAppCode": [
+    {
+      "type": 0,
+      "value": "Pridėta vienkartiniu kodu iš serverio tinklalapio"
+    }
+  ],
+  "web.settings.appKeys.row.viaPersonKey": [
+    {
+      "type": 0,
+      "value": "Pridėjo „Silo“ programa kitame įrenginyje"
+    }
+  ],
+  "web.settings.appKeys.row.viaSession": [
+    {
+      "type": 0,
+      "value": "Pridėta prisijungus"
+    }
+  ],
+  "web.settings.appKeys.row.waitingUntil": [
+    {
+      "type": 0,
+      "value": "Laukia patvirtinimo iki "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.settings.appKeys.row.withdraw": [
+    {
+      "type": 0,
+      "value": "Atšaukti"
+    }
+  ],
+  "web.settings.appKeys.row.withdrawLabel": [
+    {
+      "type": 0,
+      "value": "Atšaukti įrenginio „"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "“ patvirtinimą"
+    }
+  ],
+  "web.settings.appKeys.signsBackIn": [
+    {
+      "type": 0,
+      "value": "Per „Silo“ programą prisijungę įrenginiai vėl prisijungia patys. "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Pašalinkite įrenginį"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", kad tai sustabdytumėte."
+    }
+  ],
+  "web.settings.appKeys.title": [
+    {
+      "type": 0,
+      "value": "„Silo“ programos įrenginiai"
+    }
+  ],
+  "web.settings.appKeys.unavailable": [
+    {
+      "type": 0,
+      "value": "Prisijungimas per „Silo“ programą šiame serveryje nepasiekiamas, todėl šie įrenginiai negali prisijungti. Juos vis tiek galite pašalinti."
+    }
+  ],
+  "web.settings.appKeys.waiting.description": [
+    {
+      "type": 0,
+      "value": "Naujas įrenginys paprašė prisijungti prie jūsų paskyros per „Silo“ programą. Patvirtinkite jį tik tuo atveju, jei ką tik jį nustatėte."
+    }
+  ],
+  "web.settings.appKeys.waiting.title": [
+    {
+      "type": 0,
+      "value": "Laukia jūsų patvirtinimo"
+    }
+  ],
+  "web.settings.appKeys.withdrawn": [
+    {
+      "type": 0,
+      "value": "Patvirtinimas atšauktas"
     }
   ],
   "web.settings.cardOverlay.adjust": [
@@ -165843,6 +168340,54 @@
       "value": "Nėra interneto ryšio, todėl šis pakeitimas neišsaugotas"
     }
   ],
+  "web.settings.openInSilo.action": [
+    {
+      "type": 0,
+      "value": "Gauti kodą „Silo“ programai"
+    }
+  ],
+  "web.settings.openInSilo.codeInstructions": [
+    {
+      "type": 0,
+      "value": "Telefono ar planšetės „Silo“ programoje pridėkite šį serverį pagal jo adresą ir įveskite šį kodą. Su šiuo kodu bet kas gali prisijungti prie šios paskyros, todėl juo nesidalykite."
+    }
+  ],
+  "web.settings.openInSilo.codeTitle": [
+    {
+      "type": 0,
+      "value": "Kodas „Silo“ programai"
+    }
+  ],
+  "web.settings.openInSilo.description": [
+    {
+      "type": 0,
+      "value": "Prijunkite telefono ar planšetės „Silo“ programą prie šios paskyros be slaptažodžio."
+    }
+  ],
+  "web.settings.openInSilo.loadFailed": [
+    {
+      "type": 0,
+      "value": "Nepavyko patikrinti, ar ši naršyklė gali gauti kodą „Silo“ programai."
+    }
+  ],
+  "web.settings.openInSilo.mainProfileOnly": [
+    {
+      "type": 0,
+      "value": "Gauti kodą „Silo“ programai gali tik pagrindinis namų ūkio profilis. Persijunkite į jį ir bandykite dar kartą."
+    }
+  ],
+  "web.settings.openInSilo.pinDescription": [
+    {
+      "type": 0,
+      "value": "Įveskite pagrindinio profilio PIN, kad gautumėte kodą „Silo“ programai."
+    }
+  ],
+  "web.settings.openInSilo.title": [
+    {
+      "type": 0,
+      "value": "„Silo“ programa"
+    }
+  ],
   "web.settings.overlays.accent.amber": [
     {
       "type": 0,
@@ -169165,6 +171710,12 @@
       "value": "Prisijungta"
     }
   ],
+  "web.settings.sessions.row.signsBackIn": [
+    {
+      "type": 0,
+      "value": "Šis įrenginys vėl prisijungia pats"
+    }
+  ],
   "web.settings.sessions.row.summary": [
     {
       "type": 8,
@@ -169251,6 +171802,24 @@
     {
       "type": 0,
       "value": "Nustatymai"
+    }
+  ],
+  "web.settings.signInAgain.action": [
+    {
+      "type": 0,
+      "value": "Prisijungti iš naujo"
+    }
+  ],
+  "web.settings.signInAgain.manageDevices": [
+    {
+      "type": 0,
+      "value": "Prisijunkite iš naujo, kad galėtumėte tvarkyti savo įrenginius"
+    }
+  ],
+  "web.settings.signInAgain.useApp": [
+    {
+      "type": 0,
+      "value": "Tvarkykite savo įrenginius „Silo“ programoje."
     }
   ],
   "web.settings.signedInSessions.loadFailed": [

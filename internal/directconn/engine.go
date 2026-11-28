@@ -11,13 +11,22 @@ import (
 	"sync"
 	"time"
 
+	"github.com/darthShadow/shunpike/coordination/protocol"
+	"github.com/darthShadow/shunpike/coordination/server"
 	"github.com/darthShadow/shunpike/engine"
 	"github.com/darthShadow/shunpike/engine/n4"
 )
 
 const (
+	// hostRefreshInterval is how often the host entry and the confirmations are
+	// written again, so none lapses while the engine is healthy.
+	hostRefreshInterval = 30 * time.Second
+	// storeTimeout bounds one coordination store write from the engine's events.
+	storeTimeout = 5 * time.Second
+
 	reasonEngineStartFailed = "engine_start_failed"
 	reasonPortBindFailed    = "udp_port_bind_failed"
+	reasonStoreUnavailable  = "state_store_unavailable"
 )
 
 type engineHandle interface {
@@ -25,6 +34,9 @@ type engineHandle interface {
 	Changed() <-chan struct{}
 	PacketConn() net.PacketConn
 	SetPeers([]engine.Peer) error
+	IsPeer(protocol.NodeKey) bool
+	Registration() (protocol.Registration, error)
+	Path(protocol.NodeKey) engine.PathStatus
 	Close() error
 }
 
@@ -78,6 +90,13 @@ type engineState struct {
 	// waiting out the grace period; the lifecycle sets it for a stop caused by
 	// the lease and clears it after.
 	graceless bool
+
+	// coord, paths, storeDown and coordWorkers belong to the coordination
+	// service attached with SetCoordination; mu protects the first three.
+	coord        *Coordination
+	paths        *pathTracker
+	storeDown    bool
+	coordWorkers sync.WaitGroup
 }
 
 // errStaleStart marks a candidate engine closed unpublished because the
@@ -122,13 +141,18 @@ func (s *Service) initEngine() {
 	go s.engineControl()
 }
 
-// Shutdown drains HTTP/3 under ctx, closes the engine synchronously, then stops
-// and joins the lease monitor, which releases the lease under its own bound
-// even when ctx has expired. It waits for all lifecycle goroutines even after
-// ctx expires; engine close has no timeout wrapper. Repeated calls return the
-// same shutdown error.
+// Shutdown stops answering holds, drains HTTP/3 until drainReserve before ctx's
+// deadline (when it has one) and then closes any open streams, closes the region,
+// removes the API host entry, closes the engine synchronously, then stops and
+// joins the lease monitor, which releases the lease under its own bound even when
+// ctx has expired, then cancels the service context. It waits for all lifecycle
+// goroutines even after ctx expires; engine close has no timeout wrapper.
+// Repeated calls return the same shutdown error.
 func (s *Service) Shutdown(ctx context.Context) error {
 	l := s.lifecycle
+	// Held netmaps go first: the control loop may be busy, and a device must not
+	// wait out its hold while the HTTP servers drain.
+	s.beginStop()
 	select {
 	case l.shutdown <- ctx:
 	case <-l.done:
@@ -304,7 +328,9 @@ func (s *Service) reconcileEngine(drift engineHandle) {
 	if retry || gate != l.gate {
 		l.failed = false
 		l.restarted = false
+		l.mu.Lock()
 		l.gate = gate
+		l.mu.Unlock()
 	}
 	if reason := s.engineStopReason(values, gate); reason != "" {
 		// A stop the lease forces closes connections at once: the lease no longer
@@ -330,7 +356,7 @@ func (s *Service) reconcileEngine(drift engineHandle) {
 	}
 	if l.current != nil {
 		l.mu.Lock()
-		l.feature.Reason = gate.Reason
+		l.feature.Reason = s.liveReason(gate)
 		l.mu.Unlock()
 		return
 	}
@@ -376,10 +402,11 @@ func (s *Service) restartReady() bool {
 // current. One critical section detaches the engine, turns the feature off and
 // records both restart marks, with no blocking step before it, so a peer update
 // no longer reaches the failed engine and a lease operation that completes
-// during the publication counts as after the exit. Then it publishes, and
-// teardownEngine joins the event worker, drains and closes the detached engine.
-// The first exit schedules one restart and starts a settings reread for it; a
-// second exit before any settings or gate change leaves the engine failed.
+// during the publication counts as after the exit. Then it publishes, joins the
+// event worker, so no host write follows the removal of the API host entry,
+// removes that entry, and drains and closes the detached engine. The first exit
+// schedules one restart and starts a settings reread for it; a second exit
+// before any settings or gate change leaves the engine failed.
 func (s *Service) serveExited() {
 	l := s.lifecycle
 	l.peersMu.Lock()
@@ -402,7 +429,27 @@ func (s *Service) serveExited() {
 		l.restartPending = true
 		s.startAsyncReread()
 	}
-	s.teardownEngine(e, reasonEngineStartFailed, nil)
+	if e == nil {
+		return
+	}
+	s.joinEngineEvents()
+	// Devices are not offered a host whose HTTP/3 server no longer serves.
+	if coord, _ := s.coordination(); coord != nil {
+		_ = s.deleteHost(coord, "host withdrawal")
+	}
+	s.closeEngine(e, reasonEngineStartFailed, nil)
+}
+
+// deleteHost removes the API host entry and every confirmation under it,
+// bounded by storeTimeout, and classifies the result as the store write what.
+// On Redis the removal is fenced by the lease: while another process holds it,
+// the removal is refused and that process's entries stay.
+func (s *Service) deleteHost(c *Coordination, what string) error {
+	ctx, cancel := context.WithTimeout(s.ctx, storeTimeout)
+	defer cancel()
+	err := c.srv.DeleteHost(ctx, coordinationHostLabel)
+	s.storeResult(ctx, what, err)
+	return err //nolint:wrapcheck // The caller only branches on success; storeResult logged the error.
 }
 
 // haltReplica stops the census and lease and releases the lease. A release
@@ -436,6 +483,24 @@ func (s *Service) startEngine(values settings) error {
 	if err != nil {
 		return err
 	}
+	// One fence per engine, bound to the grant it starts under: the HTTP/3
+	// packet path, the engine's discovery and the coordination writes close
+	// together. A grant that changes during construction is in its hold, so the
+	// stale check below closes the candidate.
+	var fence *grantFence
+	if s.replica != nil {
+		grant, _ := s.replica.window()
+		fence = newGrantFence(s.replica, grant)
+		c.Window = fence.until
+	}
+	// The engine dials its own region at construction. The gate holds that dial
+	// until the host entry exists, so the region never misses the API host.
+	coord, paths := s.coordination()
+	host := &hostPublication{fence: fence}
+	if coord != nil {
+		host.gate = newDialGate()
+		c.Signaling = &engine.Signaling{RegionID: 0, Dial: coord.dialLocal(host.gate, s.ctx)}
+	}
 	e, err := s.cfg.newEngine(s.ctx, c)
 	if err != nil {
 		if errors.Is(err, engine.ErrPortUnavailable) {
@@ -444,14 +509,19 @@ func (s *Service) startEngine(values settings) error {
 		return err
 	}
 	l.peersMu.Lock()
+	if coord != nil {
+		// The records and confirmations of an earlier engine describe its paths,
+		// not this one's: a device is ready again when this engine confirms it.
+		paths.reset()
+		// The cache may have changed since the last notification was handled.
+		entries := coord.directory.Devices()
+		paths.setDevices(entries)
+		l.peers = enginePeers(entries)
+	}
 	err = e.SetPeers(l.peers)
 	l.mu.Lock()
-	var grant uint64
 	stale := false
 	if err == nil {
-		if s.replica != nil {
-			grant, _ = s.replica.window()
-		}
 		stale = l.values != values || s.engineStopReason(l.values, s.ReplicaGate()) != ""
 	}
 	if !stale {
@@ -469,13 +539,20 @@ func (s *Service) startEngine(values settings) error {
 		s.stopEngine(reasonEngineStartFailed, nil)
 		return fmt.Errorf("apply direct engine peers: %w", err)
 	}
+	if coord != nil {
+		// The host entry exists before the first event or timer tick. A store
+		// outage here leaves the engine up and the gate shut; the next tick clears
+		// the previous holder's entries if that is still due, writes the entry and
+		// opens the gate.
+		s.publishHost(coord, e, host)
+	}
 	if s.cfg.newServer != nil {
 		l.server = s.cfg.newServer(e, policy)
 		if l.server != nil {
 			srv := l.server
 			done := make(chan struct{})
 			l.serveDone = done
-			conn := fenceFor(e.PacketConn(), s.replica, grant)
+			conn := fenceFor(e.PacketConn(), fence)
 			go func() {
 				defer close(done)
 				if err := srv.Serve(conn); err != nil && !errors.Is(err, net.ErrClosed) && !errors.Is(err, http.ErrServerClosed) {
@@ -486,20 +563,29 @@ func (s *Service) startEngine(values settings) error {
 	}
 	eventsCtx, cancel := context.WithCancel(s.ctx)
 	l.eventsCancel, l.eventsDone = cancel, make(chan struct{})
-	go s.engineEvents(eventsCtx, e, l.eventsDone)
+	go s.engineEvents(eventsCtx, e, host, l.eventsDone)
 	l.applied = values
 	l.mu.Lock()
-	l.feature.State, l.feature.Reason = stateOn, l.gate.Reason
+	l.feature.State, l.feature.Reason = stateOn, s.liveReason(l.gate)
 	l.pending = append(l.pending, l.feature)
 	l.mu.Unlock()
 	return nil
 }
 
-// engineEvents is the sole reader of Changed for this engine. Stop joins it
+// engineEvents is the sole reader of Changed for this engine. On each event it
+// checks for port drift first, then writes the host entry and publishes the
+// confirmation changes. A 30 s tick writes the host entry again and renews every
+// live confirmation, because an unchanged pong fires no event. A drift restart
+// ends this goroutine; the next engine's start begins another. Stop joins it
 // before closing the engine, including when the next engine replaces it.
-func (s *Service) engineEvents(ctx context.Context, e engineHandle, done chan struct{}) {
+func (s *Service) engineEvents(ctx context.Context, e engineHandle, host *hostPublication, done chan struct{}) {
 	defer close(done)
+	coord, _ := s.coordination()
+	ticker := time.NewTicker(hostRefreshInterval)
+	defer ticker.Stop()
+	published := map[protocol.NodeKey]protocol.Confirmation{}
 	for {
+		renew := false
 		select {
 		case <-ctx.Done():
 			return
@@ -508,16 +594,177 @@ func (s *Service) engineEvents(ctx context.Context, e engineHandle, done chan st
 				select {
 				case s.lifecycle.drift <- e:
 				case <-ctx.Done():
-					return
 				}
+				return
 			}
+		case <-ticker.C:
+			renew = true
+		}
+		if coord == nil {
+			continue
+		}
+		if reg, ok := s.publishHost(coord, e, host); ok {
+			published = s.syncConfirmations(ctx, coord, host.fence, reg.Confirmations, published, renew)
 		}
 	}
 }
 
-// stopEngine detaches the current engine and tears it down. A non-empty reason
-// publishes the engine row off with that reason; an empty reason is a restart
-// and leaves the row as it is until the next start or stop sets it.
+// hostPublication is one engine's host entry state. startEngine and then the
+// engine's event worker use it in turn, never at once.
+type hostPublication struct {
+	// gate holds the engine's first region dial until the host entry exists.
+	gate *dialGate
+	// cleared is set once the previous holder's host entry and confirmations
+	// are gone.
+	cleared bool
+	// fence is the engine's grant fence; nil without a lease.
+	fence *grantFence
+}
+
+// publishHost writes the engine's host entry. Before the first write it removes
+// the API host entry and every confirmation under it, so no device reads a
+// previous lease holder's confirmations beside this engine's host; on Redis the
+// removal is fenced by the lease. Until that removal succeeds nothing is
+// published and the dial gate stays shut. It returns the engine's registration
+// and whether confirmations may be published: the engine was still open to give
+// a registration and the removal is done. A store failure is classified but
+// does not hide the registration. The first host write that the store accepts
+// drops any remembered miss for the host's key and opens the dial gate. Once
+// the engine's grant fence has closed it writes nothing and returns false.
+func (s *Service) publishHost(c *Coordination, e engineHandle, host *hostPublication) (protocol.Registration, bool) {
+	reg, err := e.Registration()
+	if err != nil {
+		return protocol.Registration{}, false
+	}
+	if !host.cleared {
+		if !host.fence.open() || s.deleteHost(c, "host cleanup") != nil {
+			return reg, false
+		}
+		host.cleared = true
+	}
+	if !host.fence.open() {
+		return reg, false
+	}
+	ctx, cancel := context.WithTimeout(s.ctx, storeTimeout)
+	defer cancel()
+	err = c.putHost(ctx, reg)
+	s.storeResult(ctx, "host entry", err)
+	if err == nil {
+		host.gate.release(func() { c.directory.Invalidate(reg.NodeKey) })
+	}
+	return reg, true
+}
+
+// syncConfirmations publishes the engine's confirmations: a changed or new one
+// is set, an unchanged one is set again only when renew is true, and one the
+// engine dropped is cleared on an event, not on a renewal. It returns the set
+// that is now published. A set that failed keeps the previously published value
+// of its peer, if any, and a clear that failed stays in the set, so the next
+// call retries. Once fence has closed it writes nothing, and a clear it skips
+// stays in the set.
+func (s *Service) syncConfirmations(ctx context.Context, c *Coordination, fence *grantFence, current []protocol.Confirmation, published map[protocol.NodeKey]protocol.Confirmation, renew bool) map[protocol.NodeKey]protocol.Confirmation {
+	_, paths := s.coordination()
+	next := make(map[protocol.NodeKey]protocol.Confirmation, len(current))
+	present := make(map[protocol.NodeKey]bool, len(current))
+	for _, confirmation := range current {
+		present[confirmation.Peer] = true
+		if old, ok := published[confirmation.Peer]; ok && old == confirmation && !renew {
+			next[confirmation.Peer] = confirmation
+			continue
+		}
+		if !fence.open() {
+			continue
+		}
+		writeCtx, cancel := context.WithTimeout(ctx, storeTimeout)
+		err := c.setConfirmation(writeCtx, confirmation)
+		cancel()
+		if err == nil {
+			next[confirmation.Peer] = confirmation
+			paths.setConfirmed(confirmation.Peer, true)
+			// Observe the path now, so a peer's Since is when its path became
+			// direct and not when something first read it.
+			s.devicePath(confirmation.Peer)
+			s.storeResult(ctx, "confirmation", nil)
+		} else if !errors.Is(err, server.ErrNotFound) {
+			// The store may still hold the previous confirmation. Keeping it in next
+			// lets the following call retry the write, or clear it once the engine
+			// drops the peer. A missing device holds none: its confirmations went
+			// with it.
+			if old, ok := published[confirmation.Peer]; ok {
+				next[confirmation.Peer] = old
+			}
+			s.storeResult(ctx, "confirmation", err)
+		}
+	}
+	for peer, old := range published {
+		if present[peer] {
+			continue
+		}
+		if renew {
+			// The engine fires Changed when it drops a confirmation, and that event
+			// clears it. A renewal only extends what is live, so a dropped one
+			// lapses at the end of its stored lifetime.
+			next[peer] = old
+			continue
+		}
+		if !fence.open() {
+			next[peer] = old
+			continue
+		}
+		writeCtx, cancel := context.WithTimeout(ctx, storeTimeout)
+		err := c.clearConfirmation(writeCtx, peer)
+		cancel()
+		if err == nil || errors.Is(err, server.ErrNotFound) {
+			paths.setConfirmed(peer, false)
+			continue
+		}
+		next[peer] = old
+		s.storeResult(ctx, "confirmation", err)
+	}
+	return next
+}
+
+// storeResult records whether the coordination store answered. An outage sets
+// the engine's reason to state_store_unavailable until a write succeeds; the
+// first failure of an outage is logged. Any other failure is logged and changes
+// nothing, a fenced write refused because another process holds the lease
+// included: the next census fails the renewal and stops the engine.
+func (s *Service) storeResult(ctx context.Context, what string, err error) {
+	l := s.lifecycle
+	down := errors.Is(err, server.ErrUnavailable)
+	if err != nil && !down {
+		s.cfg.Logger.WarnContext(ctx, "direct connections: coordination write failed", "component", "directconn", "write", what, "error", err)
+		return
+	}
+	l.mu.Lock()
+	changed := l.storeDown != down
+	l.storeDown = down
+	if changed && l.current != nil {
+		l.feature.Reason = s.liveReason(l.gate)
+		l.pending = append(l.pending, l.feature)
+	}
+	l.mu.Unlock()
+	if changed {
+		if down {
+			s.cfg.Logger.WarnContext(ctx, "direct connections: coordination store unavailable", "component", "directconn", "write", what)
+		}
+		s.wakeEngine()
+	}
+}
+
+// liveReason is the reason a running engine reports. The caller holds l.mu.
+func (s *Service) liveReason(gate ReplicaGate) string {
+	if s.lifecycle.storeDown {
+		return reasonStoreUnavailable
+	}
+	return gate.Reason
+}
+
+// stopEngine detaches the current engine and tears it down; with a shutdown
+// context it also runs the shutdown steps, with or without an engine. A
+// non-empty reason publishes the engine row off with that reason; an empty
+// reason is a restart and leaves the row as it is until the next start or stop
+// sets it.
 func (s *Service) stopEngine(reason string, shutdownCtx context.Context) {
 	l := s.lifecycle
 	l.peersMu.Lock()
@@ -530,26 +777,46 @@ func (s *Service) stopEngine(reason string, shutdownCtx context.Context) {
 	s.teardownEngine(e, reason, shutdownCtx)
 }
 
-// teardownEngine ends a detached engine: it joins the event worker, drains
-// HTTP/3, closes the engine, and on shutdown then stops the replica monitor,
-// which releases the lease, and joins the check workers. On shutdown the engine
-// closes before the lease is released, so no successor takes the lease while
-// this engine is open. On a stop the lease forces, the lease may already have
-// passed to another process: the packet fence has cut the engine off by then,
-// and the drain closes connections at once. A nil engine with no shutdown
-// context has nothing to end.
+// teardownEngine ends a detached engine: it joins the event worker, then
+// closeEngine drains, closes and, on shutdown, releases the lease. On a stop the
+// lease forces, the lease may already have passed to another process: the packet
+// fence has cut the engine off by then, and the drain closes connections at once.
+// A nil engine with no shutdown context has nothing to end.
 func (s *Service) teardownEngine(e engineHandle, reason string, shutdownCtx context.Context) {
-	l := s.lifecycle
 	if e == nil && shutdownCtx == nil {
 		return
 	}
+	s.joinEngineEvents()
+	s.closeEngine(e, reason, shutdownCtx)
+}
+
+// joinEngineEvents cancels and joins the event worker of the engine just
+// detached, so no host or confirmation write runs once it returns.
+func (s *Service) joinEngineEvents() {
+	l := s.lifecycle
 	if l.eventsCancel != nil {
 		l.eventsCancel()
 		<-l.eventsDone
 		l.eventsCancel = nil
 	}
+}
+
+// closeEngine drains the HTTP/3 server and closes e, which is nil at a shutdown
+// with no engine. On shutdown it closes the region and removes the API host
+// entry between the drain and the close, then stops the replica monitor, which
+// releases the lease, and joins the workers. The engine closes before the lease
+// is released, so no successor holds the lease while this engine is open, and
+// the host entry is removed while this process still holds it.
+func (s *Service) closeEngine(e engineHandle, reason string, shutdownCtx context.Context) {
+	l := s.lifecycle
 	if l.server != nil {
 		s.drainServer(shutdownCtx)
+	}
+	if shutdownCtx != nil {
+		s.beginStop()
+		if coord, _ := s.coordination(); coord != nil {
+			l.shutdownErr = errors.Join(l.shutdownErr, coord.closeForShutdown(e != nil))
+		}
 	}
 	if e != nil {
 		if err := e.Close(); err != nil {
@@ -564,8 +831,11 @@ func (s *Service) teardownEngine(e engineHandle, reason string, shutdownCtx cont
 			// halt ends a census or renewal in flight, so the stop does not wait for it.
 			l.shutdownErr = errors.Join(l.shutdownErr, s.replica.halt(shutdownCtx))
 		}
+		// The service context ends last: the engine and its workers ran under it
+		// until the engine closed.
 		s.cancelService()
 		s.checkWorkers.Wait()
+		l.coordWorkers.Wait()
 		if s.replicaEventsDone != nil {
 			<-s.replicaEventsDone
 		}
@@ -582,13 +852,18 @@ func (s *Service) teardownEngine(e engineHandle, reason string, shutdownCtx cont
 }
 
 // drainServer shuts the HTTP/3 server down and joins its Serve goroutine. A nil
-// shutdownCtx uses a checkTimeout bound and leaves failures to the log.
+// shutdownCtx uses a checkTimeout bound and leaves failures to the log. When
+// shutdownCtx has a deadline, open streams may run until drainReserve before it;
+// the server then closes them, so the steps after the drain keep that time.
 func (s *Service) drainServer(shutdownCtx context.Context) {
 	l := s.lifecycle
 	ctx := shutdownCtx
 	cancel := func() {}
 	switch {
 	case ctx != nil:
+		if deadline, ok := ctx.Deadline(); ok {
+			ctx, cancel = context.WithDeadline(ctx, deadline.Add(-drainReserve))
+		}
 	case l.graceless:
 		// An ended context makes the server close every connection now.
 		ctx, cancel = context.WithCancel(context.Background())
@@ -596,7 +871,13 @@ func (s *Service) drainServer(shutdownCtx context.Context) {
 	default:
 		ctx, cancel = context.WithTimeout(context.Background(), checkTimeout)
 	}
-	if err := l.server.Shutdown(ctx); err != nil {
+	switch err := l.server.Shutdown(ctx); {
+	case err == nil:
+	case shutdownCtx != nil && shutdownCtx.Err() == nil && errors.Is(err, context.DeadlineExceeded):
+		// The server closed the streams that were still open when the drain
+		// time ended. That is the designed cut, not a failure.
+		s.cfg.Logger.WarnContext(shutdownCtx, "direct connections: open HTTP/3 streams closed at the drain deadline", "component", "directconn")
+	default:
 		if shutdownCtx != nil {
 			l.shutdownErr = errors.Join(l.shutdownErr, err)
 		}

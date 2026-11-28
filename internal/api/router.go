@@ -43,6 +43,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/demomode"
 	"github.com/Silo-Server/silo-server/internal/diagnostics"
+	"github.com/Silo-Server/silo-server/internal/directconn"
 	"github.com/Silo-Server/silo-server/internal/downloads"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/historyimport"
@@ -133,7 +134,15 @@ type ArtworkDelivery struct {
 
 type Dependencies struct {
 	DirectConnections apiv2.DirectConnectionsService
-	Config            *config.Config
+	// DirectCoordination enrolls devices for direct connections and describes
+	// them to clients; DirectRevoker withdraws their enrollments on sign-out and
+	// device removal. Both are nil when this process is not an API host.
+	DirectCoordination apiv2.DirectCoordinationService
+	DirectRevoker      handlers.DirectRevoker
+	// DirectState answers playback's direct-connection questions; nil when this
+	// process is not an API host.
+	DirectState directconn.DirectState
+	Config      *config.Config
 	// SubtitlePlaySync receives subtitles a player is served, so one never
 	// synced is aligned the first time it is played. The routes here connect
 	// it to the subtitle sync service; the Jellyfin routes share it. May be nil.
@@ -317,6 +326,10 @@ type Dependencies struct {
 	ChapterThumbnailQueuer catalog.ChapterThumbnailQueuer
 	PlaybackRealtimeHub    *playback.RealtimeHub
 	OnUserSessionsRevoked  func(ctx context.Context, userID int)
+	// OnUserOtherSessionsRevoked runs after a password change signed the
+	// account out of its other login sessions; keptSessionID is the session
+	// that made the change and stays signed in.
+	OnUserOtherSessionsRevoked func(ctx context.Context, userID int, keptSessionID string)
 	// OnDownloadService receives the configured download service when the
 	// router builds one, so the Jellyfin-compatible listener serves its
 	// downloads under the same policy and bandwidth limiters. Optional.
@@ -715,7 +728,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 			settingsRepo,
 			deps.UserStoreProvider,
 		)
-		authService.OnSessionsRevoked(deps.OnUserSessionsRevoked)
+		authService.OnSessionsRevoked(deps.OnUserOtherSessionsRevoked)
 		for _, registration := range deps.AuthProviders {
 			authService.RegisterProvider(registration.Info, registration.Provider)
 		}
@@ -771,6 +784,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 		authHandler = handlers.NewAuthHandler(authService, jwtService, deviceLoginService)
 		authHandler.SetPrimaryProfileChecker(checkPrimaryProfile)
 		authService.OnAuthProvidersChanged(deps.OnAuthProvidersChanged)
+		if deps.DirectRevoker != nil {
+			authHandler.SetDirectRevoker(deps.DirectRevoker)
+		}
 		if accessGroupStore != nil {
 			authHandler.SetAccessGroupProvider(accessGroupStore)
 		}
@@ -1275,6 +1291,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 			profileHandler.AccessGroups = accessGroupStore
 		}
 		profileHandler.EventsHub = deps.EventsHub
+		profileHandler.DirectRevoker = deps.DirectRevoker
 		if deps.RecWorker != nil {
 			profileHandler.RecWorker = deps.RecWorker
 		}
@@ -1402,6 +1419,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		}
 		deviceHandler = handlers.NewDeviceHandler(deps.UserStoreProvider)
 		deviceHandler.EventsHub = deps.EventsHub
+		deviceHandler.DirectRevoker = deps.DirectRevoker
 		if deps.DB != nil {
 			deviceHandler.Connections = &connectionstore.Store{Pool: deps.DB}
 		}
@@ -1488,6 +1506,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 		playbackHandler.ExtraLookup = extraRepo
 		playbackHandler.OriginalLangLookup = itemRepo
 		playbackHandler.FFmpegLogSink = deps.FFmpegLogSink
+		if deps.DirectState != nil {
+			playbackHandler.DirectState = deps.DirectState
+		}
 		if deps.DB != nil {
 			playbackHandler.PlanStoreV3 = planstore.NewPostgres(deps.DB)
 			playbackHandler.Connections = &connectionstore.Store{Pool: deps.DB}
@@ -1853,6 +1874,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		if deps.OnUserSessionsRevoked != nil {
 			adminHandler.OnUserSessionsRevoked = deps.OnUserSessionsRevoked
 		}
+		adminHandler.DirectRevoker = deps.DirectRevoker
 		// Refresh the administrator defaults before the handler tells clients
 		// to re-read, so their next request already sees the new default.
 		adminHandler.OnServerSettingUpdated = func(ctx context.Context, key, value string) {
@@ -3301,6 +3323,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 	}
 	if deps.DirectConnections != nil {
 		v2deps.DirectConnections = deps.DirectConnections
+	}
+	if deps.DirectCoordination != nil {
+		v2deps.DirectCoordination = deps.DirectCoordination
 	}
 	if deps.TaskManager != nil && deps.DB != nil {
 		v2deps.AdminTasks = deps.TaskManager

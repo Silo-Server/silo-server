@@ -215,6 +215,12 @@
       "value": "此項目已連結至這個帳號。"
     }
   ],
+  "error.app_code_invalid": [
+    {
+      "type": 0,
+      "value": "此代碼無法辨識、已使用或已過期。請從伺服器的網頁取得新的代碼。"
+    }
+  ],
   "error.authentication_required": [
     {
       "type": 0,
@@ -333,6 +339,12 @@
     {
       "type": 0,
       "value": "此值的類型錯誤。"
+    }
+  ],
+  "error.field.key_enrolled": [
+    {
+      "type": 0,
+      "value": "此金鑰已在這台伺服器上使用中。"
     }
   ],
   "error.field.malformed_form": [
@@ -2496,6 +2508,30 @@
     {
       "type": 0,
       "value": "自動"
+    }
+  ],
+  "settingsManifest.playback.connection_path.description": [
+    {
+      "type": 0,
+      "value": "選擇「僅限直接連線」時，若有可用的區域網路連線，仍會使用該連線。"
+    }
+  ],
+  "settingsManifest.playback.connection_path.label": [
+    {
+      "type": 0,
+      "value": "連線路徑"
+    }
+  ],
+  "settingsManifest.playback.connection_path.option.automatic": [
+    {
+      "type": 0,
+      "value": "自動"
+    }
+  ],
+  "settingsManifest.playback.connection_path.option.direct_only": [
+    {
+      "type": 0,
+      "value": "僅限直接連線"
     }
   ],
   "settingsManifest.playback.intro_skip_mode.description": [
@@ -21580,6 +21616,79 @@
       }
     }
   ],
+  "web.admin.common.adminUserSignIn.unlinkConfirm.text": [
+    {
+      "type": 5,
+      "value": "last_way",
+      "options": {
+        "yes": {
+          "value": [
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " 將無法再使用此提供者帳號登入。在你設定密碼或重新連結提供者之前，"
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " 將無法登入。"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " 將無法再使用此提供者帳號登入。"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 5,
+      "value": "keys",
+      "options": {
+        "yes": {
+          "value": [
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " 與此提供者帳號綁定的 Silo App 金鑰會被移除，相關裝置也會登出。"
+            }
+          ]
+        },
+        "unknown": {
+          "value": [
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " 若有與此提供者帳號綁定的 Silo App 金鑰，都會被移除，相關裝置也會登出。"
+            }
+          ]
+        },
+        "other": {
+          "value": []
+        }
+      }
+    }
+  ],
   "web.admin.common.adminUserSignIn.unlinkConfirm.title": [
     {
       "type": 0,
@@ -23696,6 +23805,18 @@
     {
       "type": 0,
       "value": "在已設定的公開素材儲存空間中，產生播放器快轉時顯示的縮圖。檔案會在背景以低優先順序處理。關閉此選項會刪除此媒體庫的預覽。"
+    }
+  ],
+  "web.admin.common.libraryEditor.advanced.trickplayGenerate": [
+    {
+      "type": 0,
+      "value": "使用 FFmpeg 產生缺少的預覽"
+    }
+  ],
+  "web.admin.common.libraryEditor.advanced.trickplayGenerateDescription": [
+    {
+      "type": 0,
+      "value": "會優先使用媒體檔案旁現有的 .trickplay 與 .bif 附屬檔案。關閉此選項即可只匯入附屬檔案，不使用 FFmpeg 產生預覽。"
     }
   ],
   "web.admin.common.libraryEditor.advanced.trickplayUnavailable": [
@@ -27332,6 +27453,28 @@
       "value": "管理：使用者"
     }
   ],
+  "web.admin.common.trickplay.badge.awaitingSidecarCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " 個正在等待附屬檔案"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.common.trickplay.badge.detail": [
     {
       "type": 0,
@@ -27426,6 +27569,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.common.trickplay.badge.sidecarsOnly": [
+    {
+      "type": 0,
+      "value": "僅限附屬檔案"
     }
   ],
   "web.admin.common.trickplay.badge.srDetail": [
@@ -27566,6 +27715,42 @@
     {
       "type": 0,
       "value": "新的預覽就緒前，播放器會繼續使用目前的預覽。"
+    }
+  ],
+  "web.admin.common.trickplay.sidecarStatus.awaiting_sidecar": [
+    {
+      "type": 0,
+      "value": "正在等待附屬檔案"
+    }
+  ],
+  "web.admin.common.trickplay.sidecarStatus.sidecar_invalid": [
+    {
+      "type": 0,
+      "value": "附屬檔案無效"
+    }
+  ],
+  "web.admin.common.trickplay.sidecarStatus.sidecar_stale": [
+    {
+      "type": 0,
+      "value": "附屬檔案已過時"
+    }
+  ],
+  "web.admin.common.trickplay.source.generated": [
+    {
+      "type": 0,
+      "value": "已產生"
+    }
+  ],
+  "web.admin.common.trickplay.source.sidecar_bif": [
+    {
+      "type": 0,
+      "value": "附屬檔案（.bif）"
+    }
+  ],
+  "web.admin.common.trickplay.source.sidecar_trickplay": [
+    {
+      "type": 0,
+      "value": "附屬檔案（.trickplay）"
     }
   ],
   "web.admin.common.trickplay.state.off": [
@@ -29216,7 +29401,7 @@
     },
     {
       "type": 0,
-      "value": " 的一個登入工作階段，該使用者的其他裝置仍會保持登入。用戶端可以使用帳號密碼重新登入。"
+      "value": " 的一個登入工作階段，該使用者的其他裝置仍會保持登入。用戶端可以重新登入。"
     }
   ],
   "web.admin.dashboard.widgets.apiClients.confirmLabel": [
@@ -39189,6 +39374,12 @@
       "value": "個人檔案"
     }
   ],
+  "web.admin.history.column.progress": [
+    {
+      "type": 0,
+      "value": "進度"
+    }
+  ],
   "web.admin.history.column.status": [
     {
       "type": 0,
@@ -39223,6 +39414,12 @@
     {
       "type": 0,
       "value": "工作階段記錄"
+    }
+  ],
+  "web.admin.history.detail.backToPlay": [
+    {
+      "type": 0,
+      "value": "返回合併的播放"
     }
   ],
   "web.admin.history.detail.column.delivered": [
@@ -39333,6 +39530,12 @@
       "value": "觀看時間"
     }
   ],
+  "web.admin.history.detail.inspectSitting": [
+    {
+      "type": 0,
+      "value": "檢視"
+    }
+  ],
   "web.admin.history.detail.keyboardHint": [
     {
       "type": 0,
@@ -39417,6 +39620,12 @@
       "value": "未直接播放的原因"
     }
   ],
+  "web.admin.history.detail.section.sessions": [
+    {
+      "type": 0,
+      "value": "此次播放的工作階段"
+    }
+  ],
   "web.admin.history.detail.section.streams": [
     {
       "type": 0,
@@ -39427,6 +39636,78 @@
     {
       "type": 0,
       "value": "時間與觀看進度"
+    }
+  ],
+  "web.admin.history.detail.sessionsCapped": [
+    {
+      "type": 0,
+      "value": "顯示此次播放 "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": " 個工作階段中的前 "
+    },
+    {
+      "type": 1,
+      "value": "shown"
+    },
+    {
+      "type": 0,
+      "value": " 個。"
+    }
+  ],
+  "web.admin.history.detail.sessionsNotice": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "此次播放包含 "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " 個工作階段。下方的串流、裝置與路由詳細資料來自其主要工作階段；選擇下方任一工作階段即可個別檢視。"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.ended": [
+    {
+      "type": 0,
+      "value": "結束時間"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.method": [
+    {
+      "type": 0,
+      "value": "方式"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.started": [
+    {
+      "type": 0,
+      "value": "開始時間"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.watched": [
+    {
+      "type": 0,
+      "value": "觀看時間"
     }
   ],
   "web.admin.history.detail.subtitlesBurnIn": [
@@ -39663,6 +39944,12 @@
       "value": "所有網路"
     }
   ],
+  "web.admin.history.filter.allMediaTypes": [
+    {
+      "type": 0,
+      "value": "所有媒體"
+    }
+  ],
   "web.admin.history.filter.allMethods": [
     {
       "type": 0,
@@ -39699,6 +39986,24 @@
       "value": "已完成"
     }
   ],
+  "web.admin.history.filter.episodes": [
+    {
+      "type": 0,
+      "value": "集"
+    }
+  ],
+  "web.admin.history.filter.hideShort": [
+    {
+      "type": 0,
+      "value": "隱藏 <30 秒"
+    }
+  ],
+  "web.admin.history.filter.hideShortTitle": [
+    {
+      "type": 0,
+      "value": "隱藏未完成且短於 30 秒的工作階段"
+    }
+  ],
   "web.admin.history.filter.locationLocal": [
     {
       "type": 0,
@@ -39709,6 +40014,12 @@
     {
       "type": 0,
       "value": "遠端"
+    }
+  ],
+  "web.admin.history.filter.movies": [
+    {
+      "type": 0,
+      "value": "電影"
     }
   ],
   "web.admin.history.filter.partial": [
@@ -39886,6 +40197,12 @@
       "value": "最近播放"
     }
   ],
+  "web.admin.history.row.burnInBadgeTitle": [
+    {
+      "type": 0,
+      "value": "字幕已燒錄至影片"
+    }
+  ],
   "web.admin.history.row.completed": [
     {
       "type": 0,
@@ -39906,6 +40223,32 @@
     {
       "type": 0,
       "value": "估計值（記錄於開始追蹤確切觀看時間之前）"
+    }
+  ],
+  "web.admin.history.row.groupedSessionsTitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "由 "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " 個工作階段合併"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.history.row.meta": [
@@ -39938,6 +40281,12 @@
       "value": "部分觀看"
     }
   ],
+  "web.admin.history.row.progressLabel": [
+    {
+      "type": 0,
+      "value": "播放進度"
+    }
+  ],
   "web.admin.history.row.started": [
     {
       "type": 0,
@@ -39948,16 +40297,80 @@
       "value": "time"
     }
   ],
+  "web.admin.history.stats.accountsCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " 個帳號"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.history.stats.completed": [
     {
       "type": 0,
       "value": "已完成"
     }
   ],
+  "web.admin.history.stats.completionBreakdown": [
+    {
+      "type": 1,
+      "value": "completed"
+    },
+    {
+      "type": 0,
+      "value": " 已完成 · "
+    },
+    {
+      "type": 1,
+      "value": "partial"
+    },
+    {
+      "type": 0,
+      "value": " 部分觀看"
+    }
+  ],
   "web.admin.history.stats.partial": [
     {
       "type": 0,
       "value": "部分觀看"
+    }
+  ],
+  "web.admin.history.stats.totalPlays": [
+    {
+      "type": 0,
+      "value": "播放總數"
+    }
+  ],
+  "web.admin.history.stats.totalSessions": [
+    {
+      "type": 0,
+      "value": "工作階段總數"
+    }
+  ],
+  "web.admin.history.stats.uniqueProfiles": [
+    {
+      "type": 0,
+      "value": "不重複個人檔案"
+    }
+  ],
+  "web.admin.history.stats.uniqueTitles": [
+    {
+      "type": 0,
+      "value": "不重複作品"
     }
   ],
   "web.admin.history.stats.visibleRows": [
@@ -39976,6 +40389,24 @@
     {
       "type": 0,
       "value": "播放記錄"
+    }
+  ],
+  "web.admin.history.view.label": [
+    {
+      "type": 0,
+      "value": "記錄檢視"
+    }
+  ],
+  "web.admin.history.view.plays": [
+    {
+      "type": 0,
+      "value": "播放"
+    }
+  ],
+  "web.admin.history.view.sessions": [
+    {
+      "type": 0,
+      "value": "所有工作階段"
     }
   ],
   "web.admin.historyImport.conflict.message": [
@@ -79574,6 +80005,222 @@
       "value": " 筆"
     }
   ],
+  "web.admin.users.detail.appKeys.confirm.denyDescription": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " 將無法登入 "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " 的帳號。如果這是對方的裝置，對方可以在 Silo App 中重新新增。"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKey": [
+    {
+      "type": 0,
+      "value": "移除金鑰"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKeyDescription": [
+    {
+      "type": 0,
+      "value": "已登入的裝置會繼續運作，直到你將其移除。此金鑰將無法再新增任何裝置，由它新增且仍在等待中的裝置也會被拒絕。"
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " 下次在登入狀態下新增裝置時，其 Silo App 會設定新的金鑰。"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKeyTitle": [
+    {
+      "type": 0,
+      "value": "要移除 "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " 的帳號金鑰嗎？"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.removeDescription": [
+    {
+      "type": 0,
+      "value": "移除 "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " 會立即將其從 "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " 的帳號登出，並停用其金鑰：該裝置將無法再用此金鑰登入。若要再次使用，"
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " 需要在 Silo App 中重新新增。"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.withdrawDescription": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " 將無法使用此核准登入 "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " 的帳號。"
+    }
+  ],
+  "web.admin.users.detail.appKeys.description": [
+    {
+      "type": 0,
+      "value": "透過 Silo App 登入 "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " 的帳號、無須密碼的裝置與 App。"
+    }
+  ],
+  "web.admin.users.detail.appKeys.empty": [
+    {
+      "type": 0,
+      "value": "此帳號沒有任何裝置使用 Silo App。"
+    }
+  ],
+  "web.admin.users.detail.appKeys.loadFailed": [
+    {
+      "type": 0,
+      "value": "無法載入裝置。"
+    }
+  ],
+  "web.admin.users.detail.appKeys.off": [
+    {
+      "type": 0,
+      "value": "此伺服器已關閉 Silo App 登入，因此這些裝置無法登入。你仍可以移除它們。"
+    }
+  ],
+  "web.admin.users.detail.appKeys.ownerOnly": [
+    {
+      "type": 0,
+      "value": "只有伺服器擁有者可以變更其他管理員或擁有者的裝置。"
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.description": [
+    {
+      "type": 0,
+      "value": "Silo App 會使用此金鑰新增 "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " 的新裝置。設定於 "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "。"
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.none": [
+    {
+      "type": 0,
+      "value": "沒有帳號金鑰。"
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " 下次在登入狀態下新增裝置時，其 Silo App 會設定一組金鑰。"
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.remove": [
+    {
+      "type": 0,
+      "value": "移除帳號金鑰"
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKeyRemoved": [
+    {
+      "type": 0,
+      "value": "已移除帳號金鑰"
+    }
+  ],
+  "web.admin.users.detail.appKeys.preapprovals.description": [
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " 為尚未連線的裝置預先核准的登入。"
+    }
+  ],
+  "web.admin.users.detail.appKeys.waiting.description": [
+    {
+      "type": 0,
+      "value": "管理員帳號上的新裝置需等待 "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " 從已登入的裝置核准。你可以在此拒絕。"
+    }
+  ],
+  "web.admin.users.detail.appKeys.waiting.title": [
+    {
+      "type": 0,
+      "value": "等待核准"
+    }
+  ],
   "web.admin.users.detail.common.allProfiles": [
     {
       "type": 0,
@@ -82838,6 +83485,12 @@
       "value": "此帳號的個人檔案數已達上限"
     }
   ],
+  "web.admin.users.detail.profiles.badge.changedHere": [
+    {
+      "type": 0,
+      "value": "已在此變更"
+    }
+  ],
   "web.admin.users.detail.profiles.badge.kids": [
     {
       "type": 0,
@@ -83039,6 +83692,648 @@
     {
       "type": 0,
       "value": "儲存 PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowAgain": [
+    {
+      "type": 0,
+      "value": "重新允許"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowAgainAria": [
+    {
+      "type": 0,
+      "value": "讓 "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " 回到這台伺服器"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowDescription": [
+    {
+      "type": 0,
+      "value": "如果對方 App 的個人檔案仍包含 "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "，且此帳號還有空間新增個人檔案，對方的 App 下次同步時可以重新加入 "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "，作為新的個人檔案，不含其在此伺服器上的記錄。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowTitle": [
+    {
+      "type": 0,
+      "value": "要重新允許 "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " 嗎？"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.alreadyCleared": [
+    {
+      "type": 0,
+      "value": "此變更已被清除，或 "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 已再次變更。清單已是最新狀態。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedBy": [
+    {
+      "type": 0,
+      "value": "由 "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 於 "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": " 變更"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedSinceOpened": [
+    {
+      "type": 0,
+      "value": "此變更在你開啟後已更新，因此未清除任何內容。請在清單中重新查看，如果仍要清除，再進行清除。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedWhileRunning": [
+    {
+      "type": 0,
+      "value": "執行期間個人檔案已變更，因此未做任何變更。清單已是最新狀態；如果仍要執行，請再試一次。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clear": [
+    {
+      "type": 0,
+      "value": "清除"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearAndRemovePin": [
+    {
+      "type": 0,
+      "value": "清除並移除 PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearAria": [
+    {
+      "type": 0,
+      "value": "清除 "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " 上 "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " 的變更"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearFailed": [
+    {
+      "type": 0,
+      "value": "無法清除變更。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearInherit": [
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " 的 "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " 會依對方 App 的要求，改回 "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " 目前繼承的值。來自對方 App 的變更會再次套用。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearLater": [
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " 會維持現狀，直到對方的 App 下次傳送此值。之後，來自對方 App 的變更會再次套用。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearNow": [
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " 會立即改回來自對方 App 的值，且來自對方 App 的變更會再次套用。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearNowValue": [
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " 的 "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " 會立即改回 "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": "，即來自對方 App 的值。來自對方 App 的變更會再次套用。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearPin": [
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " 會保留你設定的 PIN，直到對方的 App 下次傳送 PIN。之後，來自對方 App 的變更會再次套用。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearPinRemoves": [
+    {
+      "type": 0,
+      "value": "對方的 App 傳送的 "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " 沒有 PIN，因此清除會立即移除你設定的 PIN。之後，任何使用此帳號的人都能不需 PIN 開啟 "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearTitle": [
+    {
+      "type": 0,
+      "value": "要清除 "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " 上 "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " 的變更嗎？"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.deletedAccount": [
+    {
+      "type": 0,
+      "value": "已刪除的帳號"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.description": [
+    {
+      "type": 0,
+      "value": "這些個人檔案來自 "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 的 App。你在此所做的變更會保留在這台伺服器上，直到你清除為止。這並非鎖定："
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 也可以在此變更相同的項目。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismiss": [
+    {
+      "type": 0,
+      "value": "忽略"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismissAria": [
+    {
+      "type": 0,
+      "value": "忽略 "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " 上 "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " 的備註"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismissFailed": [
+    {
+      "type": 0,
+      "value": "無法忽略備註。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.isChild": [
+    {
+      "type": 0,
+      "value": "兒童個人檔案"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.maxAdvisoryAge": [
+    {
+      "type": 0,
+      "value": "年齡限制"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.maxContentRating": [
+    {
+      "type": 0,
+      "value": "內容分級限制"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.name": [
+    {
+      "type": 0,
+      "value": "名稱"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.picture": [
+    {
+      "type": 0,
+      "value": "圖片"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.pin": [
+    {
+      "type": 0,
+      "value": "PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.requests": [
+    {
+      "type": 0,
+      "value": "請求"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.requireAdvisoryAge": [
+    {
+      "type": 0,
+      "value": "要求年齡分級"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.fieldValue": [
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": "："
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.hidden": [
+    {
+      "type": 0,
+      "value": "已由 "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 於 "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": " 在此伺服器上移除。在你允許之前，對方的 App 不會重新加入。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.loadFailed": [
+    {
+      "type": 0,
+      "value": "無法載入在此伺服器上所做的變更。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.nameTaken": [
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " 無法改回對方 App 中的名稱 "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "，因為此處另一個個人檔案已使用該名稱。請先重新命名該個人檔案，再重新清除。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeHiddenNextSync": [
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " 可在 "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 的 App 下次同步時回來，前提是該 App 的個人檔案仍包含它。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeHiddenWoken": [
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " 可在對方的 App 下次同步時回來，前提是該 App 的個人檔案仍包含它。已要求 "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 的手機進行同步。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeNextSync": [
+    {
+      "type": 0,
+      "value": "已清除。"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 的 App 下次同步時會收到此變更。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeWoken": [
+    {
+      "type": 0,
+      "value": "已清除。已要求 "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 的手機進行同步。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.removedBy": [
+    {
+      "type": 0,
+      "value": "由 "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 於 "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": " 移除"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.replacedOwner": [
+    {
+      "type": 0,
+      "value": "這取代了你設定的值。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.setBy": [
+    {
+      "type": 0,
+      "value": "由 "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 於 "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": " 設定"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.settled": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 已於 "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": " 變更此項目；你設定的值已不再適用。"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.title": [
+    {
+      "type": 0,
+      "value": "已在此伺服器上變更"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.inherited": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": "（繼承）"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.noPicture": [
+    {
+      "type": 0,
+      "value": "無圖片"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.none": [
+    {
+      "type": 0,
+      "value": "無"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.off": [
+    {
+      "type": 0,
+      "value": "關閉"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.on": [
+    {
+      "type": 0,
+      "value": "開啟"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.picture": [
+    {
+      "type": 0,
+      "value": "自訂圖片"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.pinNone": [
+    {
+      "type": 0,
+      "value": "無 PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.pinSet": [
+    {
+      "type": 0,
+      "value": "已設定 PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.requestsAllowed": [
+    {
+      "type": 0,
+      "value": "已允許"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.requestsBlocked": [
+    {
+      "type": 0,
+      "value": "已封鎖"
     }
   ],
   "web.admin.users.detail.profiles.setPin": [
@@ -84264,6 +85559,144 @@
     {
       "type": 0,
       "value": "設定密碼"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.action": [
+    {
+      "type": 0,
+      "value": "建立登入連結"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.actionHint": [
+    {
+      "type": 0,
+      "value": "遺失所有裝置"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.description": [
+    {
+      "type": 0,
+      "value": "供 "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " 在遺失所有裝置時使用的單次連結。它會開啟一個頁面，提供 Silo App 用的代碼，或讓對方選擇密碼。連結有效 24 小時，建立新連結會取代上一個。"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailAction": [
+    {
+      "type": 0,
+      "value": "以電子郵件傳送"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHint": [
+    {
+      "type": 0,
+      "value": "建立連結後自行複製並傳送，或以電子郵件傳送至 "
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": "。"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHintNoAddress": [
+    {
+      "type": 0,
+      "value": "建立連結後，請自行複製並傳送。此帳號沒有可傳送的電子郵件地址。"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHintNoMail": [
+    {
+      "type": 0,
+      "value": "建立連結後，請自行複製並傳送。在設定中設定電子郵件，即可從這裡傳送。"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailSent": [
+    {
+      "type": 0,
+      "value": "已將連結傳送至 "
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": "。連結將於 "
+    },
+    {
+      "type": 1,
+      "value": "expires"
+    },
+    {
+      "type": 0,
+      "value": " 過期。"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailUnconfirmed": [
+    {
+      "type": 0,
+      "value": "郵件伺服器未確認是否已送達。下方的連結仍可使用：請複製後透過其他方式傳送。"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.failed": [
+    {
+      "type": 0,
+      "value": "無法建立登入連結。"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.linkShare": [
+    {
+      "type": 0,
+      "value": "請只將此連結傳送給 "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "。在連結被使用或於 "
+    },
+    {
+      "type": 1,
+      "value": "expires"
+    },
+    {
+      "type": 0,
+      "value": " 過期之前，任何持有連結的人都能登入此帳號。"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.providerRequired": [
+    {
+      "type": 0,
+      "value": "此伺服器已關閉本機密碼登入，因此登入連結會略過其登入提供者。請要求 "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " 在此伺服器的網站上透過提供者登入，然後使用其帳號設定中的「在 Silo 中開啟」。"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.title": [
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " 的登入連結"
     }
   ],
   "web.audiobooks.chapter.fallbackTitle": [
@@ -85857,6 +87290,120 @@
       "value": "核准登入"
     }
   ],
+  "web.auth.appCode.code": [
+    {
+      "type": 0,
+      "value": "代碼"
+    }
+  ],
+  "web.auth.appCode.codeCopied": [
+    {
+      "type": 0,
+      "value": "已複製代碼"
+    }
+  ],
+  "web.auth.appCode.copyCode": [
+    {
+      "type": 0,
+      "value": "複製代碼"
+    }
+  ],
+  "web.auth.appCode.copyFailed": [
+    {
+      "type": 0,
+      "value": "無法複製代碼。請選取代碼並手動複製。"
+    }
+  ],
+  "web.auth.appCode.expired": [
+    {
+      "type": 0,
+      "value": "此代碼已過期。"
+    }
+  ],
+  "web.auth.appCode.failed": [
+    {
+      "type": 0,
+      "value": "Silo 無法產生代碼。請再試一次。"
+    }
+  ],
+  "web.auth.appCode.instructions": [
+    {
+      "type": 0,
+      "value": "按下「開啟 Silo」，即可在這部裝置上的 Silo App 中繼續。如果尚未安裝 App，請先安裝，再回到此分頁並再次按下「開啟 Silo」。"
+    }
+  ],
+  "web.auth.appCode.noScanCode": [
+    {
+      "type": 0,
+      "value": "此伺服器的位址太長，無法產生 QR 碼。請在 Silo App 中輸入伺服器位址和代碼，或複製代碼後貼到 App 中。"
+    }
+  ],
+  "web.auth.appCode.open": [
+    {
+      "type": 0,
+      "value": "開啟 Silo"
+    }
+  ],
+  "web.auth.appCode.renew": [
+    {
+      "type": 0,
+      "value": "取得新代碼"
+    }
+  ],
+  "web.auth.appCode.scanCodeLabel": [
+    {
+      "type": 0,
+      "value": "供 Silo App 掃描的 QR 碼"
+    }
+  ],
+  "web.auth.appCode.scanCodeUnavailable": [
+    {
+      "type": 0,
+      "value": "無法為此伺服器顯示 QR 碼。請在 Silo App 中輸入伺服器位址和代碼，或複製代碼後貼到 App 中。"
+    }
+  ],
+  "web.auth.appCode.scanHint": [
+    {
+      "type": 0,
+      "value": "請使用 Silo App 中的掃描器掃描此 QR 碼，或輸入、複製下方的伺服器位址和代碼。"
+    }
+  ],
+  "web.auth.appCode.serverAddress": [
+    {
+      "type": 0,
+      "value": "伺服器位址"
+    }
+  ],
+  "web.auth.appCode.singleUse": [
+    {
+      "type": 0,
+      "value": "此代碼僅能使用一次，並會在幾分鐘後過期。"
+    }
+  ],
+  "web.auth.appCode.title": [
+    {
+      "type": 0,
+      "value": "開啟 Silo"
+    }
+  ],
+  "web.auth.appCode.typeInstructions": [
+    {
+      "type": 0,
+      "value": "在你手機或平板電腦上的 Silo App 中，以位址新增此伺服器，並輸入此代碼來建立你的帳號。任何取得此代碼的人都能代替你加入，因此請勿分享。"
+    }
+  ],
+  "web.auth.appCode.typeTitle": [
+    {
+      "type": 0,
+      "value": "使用此代碼加入"
+    }
+  ],
+  "web.auth.appCode.webLink": [
+    {
+      "type": 0,
+      "value": "改用 siloserver.org 連結開啟"
+    }
+  ],
   "web.auth.card.rememberedIt": [
     {
       "type": 0,
@@ -86059,10 +87606,46 @@
       ]
     }
   ],
+  "web.auth.invite.appAccountEmail": [
+    {
+      "type": 0,
+      "value": "你的帳號將使用 "
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": "。"
+    }
+  ],
+  "web.auth.invite.appContinue": [
+    {
+      "type": 0,
+      "value": "繼續"
+    }
+  ],
+  "web.auth.invite.appEmailHint": [
+    {
+      "type": 0,
+      "value": "如果你提供電子郵件地址，當你遺失裝置時，此伺服器可以傳送登入連結給你。"
+    }
+  ],
   "web.auth.invite.appMissing": [
     {
       "type": 0,
       "value": "沒有反應嗎？表示尚未安裝 App，請直接在下方繼續。"
+    }
+  ],
+  "web.auth.invite.appProviderOnly": [
+    {
+      "type": 1,
+      "value": "server"
+    },
+    {
+      "type": 0,
+      "value": " 透過其登入提供者新增使用者。請在此網站上使用該提供者登入，然後從你的帳號設定開啟 Silo。"
     }
   ],
   "web.auth.invite.created": [
@@ -86091,6 +87674,18 @@
       "value": "輸入你的電子郵件地址並選擇密碼。你將使用電子郵件地址登入。"
     }
   ],
+  "web.auth.invite.descriptionWithApp": [
+    {
+      "type": 0,
+      "value": "使用手機或平板電腦上的 Silo App 加入，或選擇密碼來登入。"
+    }
+  ],
+  "web.auth.invite.emailOptional": [
+    {
+      "type": 0,
+      "value": "電子郵件（選填）"
+    }
+  ],
   "web.auth.invite.emailPlaceholder": [
     {
       "type": 0,
@@ -86111,6 +87706,18 @@
     {
       "type": 0,
       "value": " 邀請你"
+    }
+  ],
+  "web.auth.invite.joinWithApp": [
+    {
+      "type": 0,
+      "value": "使用 Silo App 加入"
+    }
+  ],
+  "web.auth.invite.joinWithAppInstead": [
+    {
+      "type": 0,
+      "value": "改用 Silo App 加入"
     }
   ],
   "web.auth.invite.loadFailed": [
@@ -86211,6 +87818,30 @@
     {
       "type": 0,
       "value": "無法使用邀請"
+    }
+  ],
+  "web.auth.invite.usePassword": [
+    {
+      "type": 0,
+      "value": "改用密碼"
+    }
+  ],
+  "web.auth.invite.usernameIsAddress": [
+    {
+      "type": 0,
+      "value": "含有 @ 的使用者名稱必須是你在下方輸入的電子郵件地址。"
+    }
+  ],
+  "web.auth.invite.usernameRequired": [
+    {
+      "type": 0,
+      "value": "請選擇使用者名稱。"
+    }
+  ],
+  "web.auth.invite.usernameTaken": [
+    {
+      "type": 0,
+      "value": "此使用者名稱已有人使用。請選擇其他名稱。"
     }
   ],
   "web.auth.languagePicker.label": [
@@ -87097,6 +88728,126 @@
     {
       "type": 0,
       "value": "登入"
+    }
+  ],
+  "web.auth.signInLink.backToCode": [
+    {
+      "type": 0,
+      "value": "返回代碼"
+    }
+  ],
+  "web.auth.signInLink.codeExpired": [
+    {
+      "type": 0,
+      "value": "請向此伺服器的管理員索取新連結，以取得另一組代碼。"
+    }
+  ],
+  "web.auth.signInLink.documentTitle": [
+    {
+      "type": 0,
+      "value": "登入連結"
+    }
+  ],
+  "web.auth.signInLink.failed": [
+    {
+      "type": 0,
+      "value": "Silo 無法開啟此連結。請再試一次。"
+    }
+  ],
+  "web.auth.signInLink.installFirst": [
+    {
+      "type": 0,
+      "value": "此連結只能使用一次，代碼的有效時間為幾分鐘。請先在手機或平板電腦上安裝 Silo App，再按下「繼續」。"
+    }
+  ],
+  "web.auth.signInLink.intro": [
+    {
+      "type": 0,
+      "value": "管理員傳送此連結給你，讓你可以重新登入。請繼續以取得 Silo App 的代碼，或選擇密碼。"
+    }
+  ],
+  "web.auth.signInLink.keepOpen": [
+    {
+      "type": 0,
+      "value": "完成之前請保持此頁面開啟。此連結已使用過，重新載入或離開頁面會遺失它提供的內容。"
+    }
+  ],
+  "web.auth.signInLink.leaveAction": [
+    {
+      "type": 0,
+      "value": "離開"
+    }
+  ],
+  "web.auth.signInLink.leaveDescription": [
+    {
+      "type": 0,
+      "value": "此連結已使用過。如果你離開，Silo App 的代碼和設定密碼的機會都會消失，你將需要新的連結。"
+    }
+  ],
+  "web.auth.signInLink.leaveTitle": [
+    {
+      "type": 0,
+      "value": "要離開此頁面嗎？"
+    }
+  ],
+  "web.auth.signInLink.noCodeAdministrator": [
+    {
+      "type": 0,
+      "value": "這是管理員帳號，因此此連結只能設定密碼。請設定密碼、在此伺服器的網站上登入，然後從該處的帳號設定開啟 Silo App。"
+    }
+  ],
+  "web.auth.signInLink.noCodeAppKeysOff": [
+    {
+      "type": 0,
+      "value": "Silo App 目前無法在此伺服器上登入，因此此連結只能設定密碼。"
+    }
+  ],
+  "web.auth.signInLink.passwordDescription": [
+    {
+      "type": 0,
+      "value": "儲存後，此帳號會在所有裝置上登出。使用 Silo App 登入的裝置會自動重新登入。"
+    }
+  ],
+  "web.auth.signInLink.passwordSet": [
+    {
+      "type": 0,
+      "value": "你的密碼已儲存。請使用新密碼登入。"
+    }
+  ],
+  "web.auth.signInLink.passwordSetLostDevices": [
+    {
+      "type": 0,
+      "value": "使用 Silo App 的遺失裝置在你移除之前仍可登入。登入後，請在帳號設定的裝置中移除這些裝置。"
+    }
+  ],
+  "web.auth.signInLink.passwordTitle": [
+    {
+      "type": 0,
+      "value": "選擇密碼"
+    }
+  ],
+  "web.auth.signInLink.providerRequired": [
+    {
+      "type": 0,
+      "value": "此伺服器透過其登入提供者讓使用者登入，因此此連結無效。請改用該提供者登入。"
+    }
+  ],
+  "web.auth.signInLink.setPasswordInstead": [
+    {
+      "type": 0,
+      "value": "改為設定密碼"
+    }
+  ],
+  "web.auth.signInLink.title": [
+    {
+      "type": 0,
+      "value": "重新存取你的帳號"
+    }
+  ],
+  "web.auth.signInLink.unavailable": [
+    {
+      "type": 0,
+      "value": "此連結已被使用、已被較新的連結取代，或已過期。請向此伺服器的管理員索取新連結。"
     }
   ],
   "web.auth.signup.closed": [
@@ -123502,7 +125253,7 @@
   "web.settings.account.password.signOutOthersDescription": [
     {
       "type": 0,
-      "value": "其他瀏覽器和 App 必須使用新密碼重新登入。這個瀏覽器會保持登入，API 金鑰也會繼續有效。"
+      "value": "其他瀏覽器和 App 會被登出。這個瀏覽器會保持登入，API 金鑰也會繼續有效。"
     }
   ],
   "web.settings.account.password.title": [
@@ -124347,6 +126098,500 @@
     {
       "type": 0,
       "value": "如何使用此金鑰"
+    }
+  ],
+  "web.settings.appKeys.actionFailed": [
+    {
+      "type": 0,
+      "value": "無法完成這項變更。請再試一次。"
+    }
+  ],
+  "web.settings.appKeys.approveMainOnly": [
+    {
+      "type": 0,
+      "value": "只有家庭的主要個人檔案可以核准裝置。請切換至主要個人檔案後再核准。"
+    }
+  ],
+  "web.settings.appKeys.approved": [
+    {
+      "type": 0,
+      "value": "已核准 "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.confirm.approve": [
+    {
+      "type": 0,
+      "value": "核准裝置"
+    }
+  ],
+  "web.settings.appKeys.confirm.approveDescription": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " 將可以使用 Silo App 登入你的帳號，直到你將其移除為止。請只在你剛設定好這部裝置時才核准。"
+    }
+  ],
+  "web.settings.appKeys.confirm.approveTitle": [
+    {
+      "type": 0,
+      "value": "要核准 "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " 嗎？"
+    }
+  ],
+  "web.settings.appKeys.confirm.deny": [
+    {
+      "type": 0,
+      "value": "拒絕裝置"
+    }
+  ],
+  "web.settings.appKeys.confirm.denyDescription": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " 將無法登入你的帳號。如果這是你的裝置，請在 Silo App 中重新新增。"
+    }
+  ],
+  "web.settings.appKeys.confirm.denyTitle": [
+    {
+      "type": 0,
+      "value": "要拒絕 "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " 嗎？"
+    }
+  ],
+  "web.settings.appKeys.confirm.remove": [
+    {
+      "type": 0,
+      "value": "移除裝置"
+    }
+  ],
+  "web.settings.appKeys.confirm.removeDescription": [
+    {
+      "type": 0,
+      "value": "移除 "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " 會立即將其登出並停用其金鑰：這部裝置將無法再用該金鑰登入。若要再次使用，請在 Silo App 中重新新增。"
+    }
+  ],
+  "web.settings.appKeys.confirm.removeTitle": [
+    {
+      "type": 0,
+      "value": "要移除 "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " 嗎？"
+    }
+  ],
+  "web.settings.appKeys.confirm.withdraw": [
+    {
+      "type": 0,
+      "value": "撤回核准"
+    }
+  ],
+  "web.settings.appKeys.confirm.withdrawDescription": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " 將無法使用這項核准登入你的帳號。"
+    }
+  ],
+  "web.settings.appKeys.confirm.withdrawTitle": [
+    {
+      "type": 0,
+      "value": "要撤回 "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " 的核准嗎？"
+    }
+  ],
+  "web.settings.appKeys.confirm.working": [
+    {
+      "type": 0,
+      "value": "正在儲存……"
+    }
+  ],
+  "web.settings.appKeys.denied": [
+    {
+      "type": 0,
+      "value": "已拒絕 "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.description": [
+    {
+      "type": 0,
+      "value": "使用 Silo App 登入你帳號（無需密碼）的裝置和 App。"
+    }
+  ],
+  "web.settings.appKeys.devices.title": [
+    {
+      "type": 0,
+      "value": "裝置"
+    }
+  ],
+  "web.settings.appKeys.empty": [
+    {
+      "type": 0,
+      "value": "你的帳號沒有任何裝置使用 Silo App。"
+    }
+  ],
+  "web.settings.appKeys.footnote": [
+    {
+      "type": 0,
+      "value": "移除裝置會將其登出並讓其金鑰失效。登出工作階段不會移除裝置：裝置會使用其金鑰重新登入。"
+    }
+  ],
+  "web.settings.appKeys.loadFailed": [
+    {
+      "type": 0,
+      "value": "無法載入你的裝置。"
+    }
+  ],
+  "web.settings.appKeys.loading": [
+    {
+      "type": 0,
+      "value": "正在載入裝置……"
+    }
+  ],
+  "web.settings.appKeys.off": [
+    {
+      "type": 0,
+      "value": "這台伺服器已關閉 Silo App 登入，因此這些裝置無法登入，等待中的裝置也無法核准。你仍然可以移除這些裝置。"
+    }
+  ],
+  "web.settings.appKeys.personKey.description": [
+    {
+      "type": 0,
+      "value": "你的 Silo App 會使用這個金鑰新增你的新裝置。設定時間："
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "。"
+    }
+  ],
+  "web.settings.appKeys.personKey.none": [
+    {
+      "type": 0,
+      "value": "沒有帳號金鑰。下次你在登入狀態下新增裝置時，Silo App 會設定一個。"
+    }
+  ],
+  "web.settings.appKeys.personKey.title": [
+    {
+      "type": 0,
+      "value": "帳號金鑰"
+    }
+  ],
+  "web.settings.appKeys.pinDescription": [
+    {
+      "type": 0,
+      "value": "輸入主要個人檔案的 PIN 以核准這部裝置。"
+    }
+  ],
+  "web.settings.appKeys.preapprovals.description": [
+    {
+      "type": 0,
+      "value": "你為尚未連線的裝置核准的登入。"
+    }
+  ],
+  "web.settings.appKeys.preapprovals.loadFailed": [
+    {
+      "type": 0,
+      "value": "無法載入預先核准的登入。"
+    }
+  ],
+  "web.settings.appKeys.preapprovals.title": [
+    {
+      "type": 0,
+      "value": "預先核准"
+    }
+  ],
+  "web.settings.appKeys.refreshLabel": [
+    {
+      "type": 0,
+      "value": "重新整理 Silo App 裝置"
+    }
+  ],
+  "web.settings.appKeys.removed": [
+    {
+      "type": 0,
+      "value": "已移除 "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.row.allowedBy": [
+    {
+      "type": 0,
+      "value": "由 "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 允許"
+    }
+  ],
+  "web.settings.appKeys.row.approve": [
+    {
+      "type": 0,
+      "value": "核准"
+    }
+  ],
+  "web.settings.appKeys.row.approveLabel": [
+    {
+      "type": 0,
+      "value": "核准 "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.row.deny": [
+    {
+      "type": 0,
+      "value": "拒絕"
+    }
+  ],
+  "web.settings.appKeys.row.denyLabel": [
+    {
+      "type": 0,
+      "value": "拒絕 "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.row.enrolledFrom": [
+    {
+      "type": 0,
+      "value": "來自 "
+    },
+    {
+      "type": 1,
+      "value": "address"
+    }
+  ],
+  "web.settings.appKeys.row.identityGone": [
+    {
+      "type": 0,
+      "value": "無法登入：其登入提供者帳號已不再連結"
+    }
+  ],
+  "web.settings.appKeys.row.kindApp": [
+    {
+      "type": 0,
+      "value": "其他 App"
+    }
+  ],
+  "web.settings.appKeys.row.kindDevice": [
+    {
+      "type": 0,
+      "value": "Silo App"
+    }
+  ],
+  "web.settings.appKeys.row.lastUsed": [
+    {
+      "type": 0,
+      "value": "上次登入："
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.settings.appKeys.row.notUsed": [
+    {
+      "type": 0,
+      "value": "尚未使用其金鑰登入"
+    }
+  ],
+  "web.settings.appKeys.row.preapproval": [
+    {
+      "type": 0,
+      "value": "預先核准 · "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": " 到期"
+    }
+  ],
+  "web.settings.appKeys.row.provider": [
+    {
+      "type": 0,
+      "value": "已透過登入提供者驗證"
+    }
+  ],
+  "web.settings.appKeys.row.remove": [
+    {
+      "type": 0,
+      "value": "移除"
+    }
+  ],
+  "web.settings.appKeys.row.removeLabel": [
+    {
+      "type": 0,
+      "value": "移除 "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.row.viaAppCode": [
+    {
+      "type": 0,
+      "value": "使用伺服器網頁上的一次性代碼新增"
+    }
+  ],
+  "web.settings.appKeys.row.viaPersonKey": [
+    {
+      "type": 0,
+      "value": "由另一部裝置上的 Silo App 新增"
+    }
+  ],
+  "web.settings.appKeys.row.viaSession": [
+    {
+      "type": 0,
+      "value": "在登入狀態下新增"
+    }
+  ],
+  "web.settings.appKeys.row.waitingUntil": [
+    {
+      "type": 0,
+      "value": "等待核准，直到 "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.settings.appKeys.row.withdraw": [
+    {
+      "type": 0,
+      "value": "撤回"
+    }
+  ],
+  "web.settings.appKeys.row.withdrawLabel": [
+    {
+      "type": 0,
+      "value": "撤回 "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " 的核准"
+    }
+  ],
+  "web.settings.appKeys.signsBackIn": [
+    {
+      "type": 0,
+      "value": "使用 Silo App 登入的裝置會自動重新登入。"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "移除裝置"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "即可停止。"
+    }
+  ],
+  "web.settings.appKeys.title": [
+    {
+      "type": 0,
+      "value": "Silo App 裝置"
+    }
+  ],
+  "web.settings.appKeys.unavailable": [
+    {
+      "type": 0,
+      "value": "這台伺服器無法使用 Silo App 登入，因此這些裝置無法登入。你仍然可以移除這些裝置。"
+    }
+  ],
+  "web.settings.appKeys.waiting.description": [
+    {
+      "type": 0,
+      "value": "有新裝置要求使用 Silo App 登入你的帳號。請只在你剛設定好這部裝置時才核准。"
+    }
+  ],
+  "web.settings.appKeys.waiting.title": [
+    {
+      "type": 0,
+      "value": "等待你核准"
+    }
+  ],
+  "web.settings.appKeys.withdrawn": [
+    {
+      "type": 0,
+      "value": "已撤回核准"
     }
   ],
   "web.settings.cardOverlay.adjust": [
@@ -129167,6 +131412,54 @@
       "value": "你目前處於離線狀態，因此這項變更未儲存"
     }
   ],
+  "web.settings.openInSilo.action": [
+    {
+      "type": 0,
+      "value": "取得 Silo App 代碼"
+    }
+  ],
+  "web.settings.openInSilo.codeInstructions": [
+    {
+      "type": 0,
+      "value": "在你手機或平板電腦上的 Silo App 中，以位址新增這台伺服器並輸入這組代碼。任何擁有這組代碼的人都能登入這個帳號，所以請勿分享。"
+    }
+  ],
+  "web.settings.openInSilo.codeTitle": [
+    {
+      "type": 0,
+      "value": "Silo App 代碼"
+    }
+  ],
+  "web.settings.openInSilo.description": [
+    {
+      "type": 0,
+      "value": "讓你手機或平板電腦上的 Silo App 登入這個帳號，無需密碼。"
+    }
+  ],
+  "web.settings.openInSilo.loadFailed": [
+    {
+      "type": 0,
+      "value": "無法確認這個瀏覽器是否可以取得 Silo App 代碼。"
+    }
+  ],
+  "web.settings.openInSilo.mainProfileOnly": [
+    {
+      "type": 0,
+      "value": "只有家庭的主要個人檔案可以取得 Silo App 代碼。請切換至主要個人檔案後再試一次。"
+    }
+  ],
+  "web.settings.openInSilo.pinDescription": [
+    {
+      "type": 0,
+      "value": "輸入主要個人檔案的 PIN 以取得 Silo App 代碼。"
+    }
+  ],
+  "web.settings.openInSilo.title": [
+    {
+      "type": 0,
+      "value": "Silo App"
+    }
+  ],
   "web.settings.overlays.accent.amber": [
     {
       "type": 0,
@@ -131952,6 +134245,12 @@
       "value": "登入時間"
     }
   ],
+  "web.settings.sessions.row.signsBackIn": [
+    {
+      "type": 0,
+      "value": "這部裝置會自動重新登入"
+    }
+  ],
   "web.settings.sessions.row.summary": [
     {
       "type": 8,
@@ -132034,6 +134333,24 @@
     {
       "type": 0,
       "value": "設定"
+    }
+  ],
+  "web.settings.signInAgain.action": [
+    {
+      "type": 0,
+      "value": "重新登入"
+    }
+  ],
+  "web.settings.signInAgain.manageDevices": [
+    {
+      "type": 0,
+      "value": "重新登入以管理你的裝置"
+    }
+  ],
+  "web.settings.signInAgain.useApp": [
+    {
+      "type": 0,
+      "value": "請在 Silo App 中管理你的裝置。"
     }
   ],
   "web.settings.signedInSessions.loadFailed": [

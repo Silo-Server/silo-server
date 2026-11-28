@@ -2,6 +2,8 @@ package streamtelemetry
 
 import (
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/httpstream"
@@ -47,6 +49,8 @@ type SessionView struct {
 	DeviceIDsOverflowed         bool
 	ClientVariants              []ClientVariant
 	ClientVariantsOverflowed    bool
+	Transports                  []Transport
+	TransportsOverflowed        bool
 	UserAgents                  []string
 	UserAgentsOverflowed        bool
 	TokenIssuedAts              []time.Time
@@ -105,6 +109,7 @@ func sessionViewOf(s *logicalSession) SessionView {
 		RealtimeConnectionAlive: s.realtimeAlive, RequestCount: s.requestCount,
 		RoutesOverflowed: s.routesOverflowed, ViewerIPsOverflowed: s.viewerIPs.overflowed,
 		DeviceIDsOverflowed: s.deviceIDs.overflowed, ClientVariantsOverflowed: s.clientVariants.overflowed,
+		TransportsOverflowed: s.transports.overflowed,
 		UserAgentsOverflowed: s.userAgents.overflowed, TokenIssuedAtsOverflowed: s.tokenIssuedAts.overflowed,
 		TokenIssuedAtSources: cloneTokenSources(s.tokenIssuedSources),
 		Outcomes:             cloneOutcomes(s.outcomes), HasIdentityConflict: s.hasIdentityConflict,
@@ -125,6 +130,9 @@ func sessionViewOf(s *logicalSession) SessionView {
 	}
 	for value := range s.clientVariants.values {
 		view.ClientVariants = append(view.ClientVariants, value)
+	}
+	for value := range s.transports.values {
+		view.Transports = append(view.Transports, value)
 	}
 	for value := range s.userAgents.values {
 		view.UserAgents = append(view.UserAgents, value)
@@ -149,6 +157,7 @@ func sessionViewOf(s *logicalSession) SessionView {
 	sort.Slice(view.ClientVariants, func(i, j int) bool {
 		return clientVariantKey(view.ClientVariants[i]) < clientVariantKey(view.ClientVariants[j])
 	})
+	sort.Slice(view.Transports, func(i, j int) bool { return transportKey(view.Transports[i]) < transportKey(view.Transports[j]) })
 	sort.Slice(view.TokenIssuedAts, func(i, j int) bool { return view.TokenIssuedAts[i].Before(view.TokenIssuedAts[j]) })
 	return view
 }
@@ -171,6 +180,7 @@ func cloneSnapshot(source Snapshot) Snapshot {
 		destination.Sessions[i].ViewerIPs = append([]string(nil), source.Sessions[i].ViewerIPs...)
 		destination.Sessions[i].DeviceIDs = append([]string(nil), source.Sessions[i].DeviceIDs...)
 		destination.Sessions[i].ClientVariants = append([]ClientVariant(nil), source.Sessions[i].ClientVariants...)
+		destination.Sessions[i].Transports = append([]Transport(nil), source.Sessions[i].Transports...)
 		destination.Sessions[i].UserAgents = append([]string(nil), source.Sessions[i].UserAgents...)
 		destination.Sessions[i].MediaFileIDs = append([]int(nil), source.Sessions[i].MediaFileIDs...)
 		destination.Sessions[i].PlayMethods = append([]string(nil), source.Sessions[i].PlayMethods...)
@@ -205,4 +215,9 @@ func cloneOutcomes(source map[httpstream.StreamOutcome]int64) map[httpstream.Str
 
 func clientVariantKey(value ClientVariant) string {
 	return value.Name + "\x00" + value.Version + "\x00" + value.Build + "\x00" + value.Channel
+}
+
+func transportKey(value Transport) string {
+	return strings.Join([]string{string(value.PathKind), value.Class, value.HostID, value.AddressFamily,
+		strconv.Itoa(value.LocalPort), strconv.Itoa(value.PeerPort), strconv.FormatUint(value.PathGeneration, 10)}, "\x00")
 }

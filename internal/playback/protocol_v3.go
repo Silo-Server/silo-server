@@ -16,6 +16,12 @@ const (
 	LearnedLimitIgnoreV3                = "ignore"
 	LearnedLimitClearV3                 = "clear"
 
+	// MediaTransportRegularV3 and MediaTransportDirectV3 are the closed values
+	// of media_transport: the transport a client asks for on start and replan,
+	// and the one a plan reports.
+	MediaTransportRegularV3 = "regular"
+	MediaTransportDirectV3  = "direct"
+
 	ProtocolV3                               = 3
 	FeatureBufferingQualityV1                = "buffering_quality_v1"
 	FeatureConnectionSpeedV1                 = "connection_speed_v1"
@@ -252,7 +258,10 @@ const (
 	TransportFeatureRemuxRangeRefusalV1 = "remux_range_refusal_v1"
 	// Theme audio markers: a proxy that serves /stream/theme, and a transcode
 	// node that approves theme files as progressive AAC inputs.
-	TransportFeatureBandwidthProbeV1      = "bandwidth_probe_v1"
+	TransportFeatureBandwidthProbeV1 = "bandwidth_probe_v1"
+	// A proxy that sends a Silo-Connection-Receipt header with the probe bytes
+	// it serves for a probe token that names a device.
+	TransportFeatureConnectionReceiptV1   = "connection_receipt_v1"
 	TransportFeatureThemeAudioEgressV1    = "theme_audio_egress_v1"
 	TransportFeatureThemeAudioExecutionV1 = "theme_audio_execution_v1"
 	// A transcode node that executes the multi-track prepared-download layout
@@ -861,22 +870,25 @@ type StartRequestV3 struct {
 	QualityPreference string   `json:"quality_preference"`
 	// False pins the source file through start and every replan. Encoding and
 	// delivery can still adapt to the viewer without changing the timeline.
-	AllowAlternateVersions     *bool                     `json:"allow_alternate_versions,omitempty"`
-	SubtitleFidelityPreference SubtitleFidelityV3        `json:"subtitle_fidelity_preference"`
-	StartPosition              *float64                  `json:"start_position,omitempty"`
-	ProgressPersistence        ProgressPersistenceV3     `json:"progress_persistence,omitempty"`
-	AudioTrackID               string                    `json:"audio_track_id,omitempty"`
-	AudioTrackIndex            *int                      `json:"audio_track_index,omitempty"`
-	SubtitleTrackID            string                    `json:"subtitle_track_id,omitempty"`
-	SubtitleTrackIndex         *int                      `json:"subtitle_track_index,omitempty"`
-	Metered                    bool                      `json:"metered"`
-	BandwidthEstimateKbps      *int                      `json:"bandwidth_estimate_kbps,omitempty"`
-	BandwidthEstimateSource    string                    `json:"bandwidth_estimate_source,omitempty"`
-	ObservedThroughputKbps     *int                      `json:"observed_throughput_kbps,omitempty"`
-	LearnedLimit               string                    `json:"learned_limit,omitempty"`
-	BandwidthCapKbps           *int                      `json:"bandwidth_cap_kbps,omitempty"`
-	Capabilities               ClientCodecCapabilitiesV3 `json:"client_capabilities"`
-	ClientPlaybackContext      ClientPlaybackContextV3   `json:"client_playback_context"`
+	AllowAlternateVersions     *bool                 `json:"allow_alternate_versions,omitempty"`
+	SubtitleFidelityPreference SubtitleFidelityV3    `json:"subtitle_fidelity_preference"`
+	StartPosition              *float64              `json:"start_position,omitempty"`
+	ProgressPersistence        ProgressPersistenceV3 `json:"progress_persistence,omitempty"`
+	AudioTrackID               string                `json:"audio_track_id,omitempty"`
+	AudioTrackIndex            *int                  `json:"audio_track_index,omitempty"`
+	SubtitleTrackID            string                `json:"subtitle_track_id,omitempty"`
+	SubtitleTrackIndex         *int                  `json:"subtitle_track_index,omitempty"`
+	Metered                    bool                  `json:"metered"`
+	BandwidthEstimateKbps      *int                  `json:"bandwidth_estimate_kbps,omitempty"`
+	BandwidthEstimateSource    string                `json:"bandwidth_estimate_source,omitempty"`
+	ObservedThroughputKbps     *int                  `json:"observed_throughput_kbps,omitempty"`
+	LearnedLimit               string                `json:"learned_limit,omitempty"`
+	BandwidthCapKbps           *int                  `json:"bandwidth_cap_kbps,omitempty"`
+	// MediaTransport is the transport the client asks the media to use:
+	// regular or direct. Omitted means regular. Only /api/v2 honors it.
+	MediaTransport        string                    `json:"media_transport,omitempty"`
+	Capabilities          ClientCodecCapabilitiesV3 `json:"client_capabilities"`
+	ClientPlaybackContext ClientPlaybackContextV3   `json:"client_playback_context"`
 }
 
 func (r StartRequestV3) AllowsAlternateVersions() bool {
@@ -944,20 +956,23 @@ type ReplanRequestV3 struct {
 	// LocalMutations reports client-applied local plan mutations (for example
 	// a PCM recovery route) so the server can fold them into the attempt key it
 	// computes for the failed plan. Clients never hash anything themselves.
-	LocalMutations          []string                  `json:"local_mutations,omitempty"`
-	AttemptCount            int                       `json:"attempt_count"`
-	QualityPreference       string                    `json:"quality_preference"`
-	PositionSeconds         float64                   `json:"position_seconds"`
-	Metered                 bool                      `json:"metered"`
-	BandwidthEstimateKbps   *int                      `json:"bandwidth_estimate_kbps,omitempty"`
-	BandwidthEstimateSource string                    `json:"bandwidth_estimate_source,omitempty"`
-	ObservedThroughputKbps  *int                      `json:"observed_throughput_kbps,omitempty"`
-	LearnedLimit            string                    `json:"learned_limit,omitempty"`
-	BandwidthCapKbps        *int                      `json:"bandwidth_cap_kbps,omitempty"`
-	SelectedTracks          SelectedTracksV3          `json:"selected_tracks"`
-	Failure                 FailureV3                 `json:"failure,omitzero"`
-	Capabilities            ClientCodecCapabilitiesV3 `json:"client_capabilities"`
-	ClientPlaybackContext   ClientPlaybackContextV3   `json:"client_playback_context"`
+	LocalMutations          []string `json:"local_mutations,omitempty"`
+	AttemptCount            int      `json:"attempt_count"`
+	QualityPreference       string   `json:"quality_preference"`
+	PositionSeconds         float64  `json:"position_seconds"`
+	Metered                 bool     `json:"metered"`
+	BandwidthEstimateKbps   *int     `json:"bandwidth_estimate_kbps,omitempty"`
+	BandwidthEstimateSource string   `json:"bandwidth_estimate_source,omitempty"`
+	ObservedThroughputKbps  *int     `json:"observed_throughput_kbps,omitempty"`
+	LearnedLimit            string   `json:"learned_limit,omitempty"`
+	BandwidthCapKbps        *int     `json:"bandwidth_cap_kbps,omitempty"`
+	// MediaTransport is the transport the client asks the replacement plan's
+	// media to use; omitted means regular. Only /api/v2 honors it.
+	MediaTransport        string                    `json:"media_transport,omitempty"`
+	SelectedTracks        SelectedTracksV3          `json:"selected_tracks"`
+	Failure               FailureV3                 `json:"failure,omitzero"`
+	Capabilities          ClientCodecCapabilitiesV3 `json:"client_capabilities"`
+	ClientPlaybackContext ClientPlaybackContextV3   `json:"client_playback_context"`
 }
 
 const (
@@ -1306,6 +1321,9 @@ type PlanV3 struct {
 	// empty when it delivers none of them (see activeQualityV3). Published
 	// on /api/v2 only, under FeaturePlanActiveQualityV3.
 	ActiveQuality string `json:"active_quality,omitempty"`
+	// MediaTransport is the transport the plan's media uses, regular or direct.
+	// Published on /api/v2 only.
+	MediaTransport string `json:"media_transport,omitempty"`
 }
 
 type TerminalV3 struct {
@@ -1369,6 +1387,9 @@ func (r *StartRequestV3) NormalizeAndValidate() ([]DegradationWarningV3, error) 
 		return nil, err
 	}
 	if err := validateOptionalBoundedIntV3(r.BandwidthCapKbps, 100, 1_000_000, "bandwidth_cap_kbps"); err != nil {
+		return nil, err
+	}
+	if err := validateMediaTransportV3(r.MediaTransport); err != nil {
 		return nil, err
 	}
 	if r.SubtitleFidelityPreference != SubtitleFidelityPreserveV3 && r.SubtitleFidelityPreference != SubtitleFidelityCompatibleV3 {
@@ -1450,6 +1471,9 @@ func (r *ReplanRequestV3) Validate() error {
 		return err
 	}
 	if err := validateOptionalBoundedIntV3(r.BandwidthCapKbps, 100, 1_000_000, "bandwidth_cap_kbps"); err != nil {
+		return err
+	}
+	if err := validateMediaTransportV3(r.MediaTransport); err != nil {
 		return err
 	}
 	if err := validateSelectedTrackIdentityV3("audio", r.SelectedTracks.Audio); err != nil {
@@ -1912,6 +1936,15 @@ func boundExceedsV3(output, panel int) bool {
 
 func boundExceedsFloatV3(output, panel float64) bool {
 	return panel > 0 && (output == 0 || output > panel)
+}
+
+// validateMediaTransportV3 accepts the two closed values and the omitted field.
+func validateMediaTransportV3(transport string) error {
+	switch transport {
+	case "", MediaTransportRegularV3, MediaTransportDirectV3:
+		return nil
+	}
+	return errors.New("invalid media_transport")
 }
 
 func validateBufferingQualityV3(features []string, source, limit string, estimate, observed *int) error {

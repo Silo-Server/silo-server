@@ -70,6 +70,7 @@ type logicalSession struct {
 	viewerIPs           boundedSet[string]
 	deviceIDs           boundedSet[string]
 	clientVariants      boundedSet[ClientVariant]
+	transports          boundedSet[Transport]
 	userAgents          boundedSet[string]
 	mediaFileIDs        boundedSet[int]
 	playMethods         boundedSet[string]
@@ -112,6 +113,7 @@ func newLogicalSession(a Attachment, cfg Config, observedAt time.Time) *logicalS
 		viewerIPs:          newBoundedSet[string](cfg.MaxViewerIPsPerSession),
 		deviceIDs:          newBoundedSet[string](cfg.MaxDeviceIDsPerSession),
 		clientVariants:     newBoundedSet[ClientVariant](cfg.MaxClientVariantsPerSession),
+		transports:         newBoundedSet[Transport](cfg.MaxClientVariantsPerSession),
 		userAgents:         newBoundedSet[string](cfg.MaxClientVariantsPerSession),
 		mediaFileIDs:       newBoundedSet[int](cfg.MaxMediaFileIDsPerSession),
 		playMethods:        newBoundedSet[string](cfg.MaxPlayMethodsPerSession),

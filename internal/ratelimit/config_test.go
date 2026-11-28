@@ -51,3 +51,15 @@ func TestLoadConfigFallsBackFromRatesOutsideLimiterBounds(t *testing.T) {
 		t.Errorf("login requests per minute = %g, want default %g", cfg.AuthEndpoints["login"].RequestsPerMinute, defaults.AuthEndpoints["login"].RequestsPerMinute)
 	}
 }
+
+// The middleware skips an auth bucket it does not find, so a missing entry
+// would silently remove the limit on direct-connection signaling.
+func TestDefaultConfigHasDirectSignalingBucket(t *testing.T) {
+	ep, ok := DefaultConfig().AuthEndpoints["direct_signaling"]
+	if !ok {
+		t.Fatal("direct_signaling is missing from AuthEndpoints")
+	}
+	if ep.RequestsPerMinute != 240 || ep.Burst != 60 {
+		t.Fatalf("direct_signaling = %g/min burst %d, want 240/min burst 60", ep.RequestsPerMinute, ep.Burst)
+	}
+}

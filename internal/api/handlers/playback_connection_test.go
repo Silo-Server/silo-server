@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +17,8 @@ import (
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/clientip"
+	"github.com/Silo-Server/silo-server/internal/directconn"
+	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/playback/connectionstore"
@@ -58,6 +61,7 @@ func TestSeekReplayKeepsLearnedLimitDB(t *testing.T) {
 	requestCtx := apimw.SetClaims(WithNativeAPIV2(ctx), &auth.Claims{UserID: user, Role: "user", TokenType: auth.TokenTypeAccess})
 	requestCtx = context.WithValue(clientip.SetContext(requestCtx, "192.168.1.10"), playbackConnectionDeviceContextKey{}, "tv-1")
 	r := httptest.NewRequest(http.MethodPost, "/", nil).WithContext(requestCtx)
+	key, _ := connectionstore.Key(requestCtx, h.JWTSecret, connectionstore.ClassRegular, "")
 	request := func(source string, estimate *int, control string) playback.StartRequestV3 {
 		return playback.StartRequestV3{QualityPreference: playback.QualityAutoV3, ClientFeatures: []string{playback.FeatureBufferingQualityV1},
 			BandwidthEstimateKbps: estimate, BandwidthEstimateSource: source, LearnedLimit: control}
@@ -78,7 +82,7 @@ func TestSeekReplayKeepsLearnedLimitDB(t *testing.T) {
 	// for a remote transcode that is a call to its node.
 	notAsked := func() bool { t.Fatal("asked whether a transcode paced a request that records nothing"); return false }
 	lowered := request(playback.BandwidthEstimateObservedRebufferV3, new(44100), "")
-	if limit, err := h.applyLearnedLimit(r, &lowered, true, nil); err != nil || limit == nil || limit.Kbps != 44100 {
+	if limit, err := h.applyLearnedLimit(r, &lowered, true, key, key, nil); err != nil || limit == nil || limit.Kbps != 44100 {
 		t.Fatalf("client lowering: limit=%+v err=%v", limit, err)
 	}
 	if _, err := pool.Exec(ctx, `UPDATE playback_connections SET observed_at = now() - interval '1 hour' WHERE user_id = $1`, user); err != nil {
@@ -89,7 +93,7 @@ func TestSeekReplayKeepsLearnedLimitDB(t *testing.T) {
 	// it plans with min(estimate, limit) and records nothing.
 	for _, tc := range []struct{ sent, planned int }{{50000, 44100}, {44100, 44100}, {30000, 30000}} {
 		kept := request("", new(tc.sent), "")
-		if _, err := h.applyLearnedLimit(r, &kept, true, notAsked); err != nil || kept.BandwidthEstimateKbps == nil || *kept.BandwidthEstimateKbps != tc.planned {
+		if _, err := h.applyLearnedLimit(r, &kept, true, key, key, notAsked); err != nil || kept.BandwidthEstimateKbps == nil || *kept.BandwidthEstimateKbps != tc.planned {
 			t.Fatalf("kept estimate %d planned %v, want %d (err %v)", tc.sent, kept.BandwidthEstimateKbps, tc.planned, err)
 		}
 	}
@@ -97,11 +101,11 @@ func TestSeekReplayKeepsLearnedLimitDB(t *testing.T) {
 		t.Fatalf("a kept estimate changed the limit: kbps=%d observed=%v", kbps, observed)
 	}
 	probed := request(playback.BandwidthEstimateProbeV3, new(20000), "")
-	if limit, err := h.applyLearnedLimit(r, &probed, true, notAsked); err != nil || limit != nil {
+	if limit, err := h.applyLearnedLimit(r, &probed, true, key, key, notAsked); err != nil || limit != nil {
 		t.Fatalf("lower probe: limit=%+v err=%v", limit, err)
 	}
 	for _, replay := range []playback.StartRequestV3{lowered, probed} {
-		if _, err := h.applyLearnedLimit(r, &replay, false, notAsked); err != nil {
+		if _, err := h.applyLearnedLimit(r, &replay, false, key, key, notAsked); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -111,13 +115,13 @@ func TestSeekReplayKeepsLearnedLimitDB(t *testing.T) {
 
 	cleared := request("", nil, playback.LearnedLimitClearV3)
 	replayedClear := cleared
-	if _, err := h.applyLearnedLimit(r, &replayedClear, false, nil); err != nil {
+	if _, err := h.applyLearnedLimit(r, &replayedClear, false, key, key, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, ok := stored(); !ok {
 		t.Fatal("a replayed clear removed the limit")
 	}
-	if _, err := h.applyLearnedLimit(r, &cleared, true, nil); err != nil {
+	if _, err := h.applyLearnedLimit(r, &cleared, true, key, key, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, ok := stored(); ok {
@@ -127,7 +131,7 @@ func TestSeekReplayKeepsLearnedLimitDB(t *testing.T) {
 	// estimate plans with, and records, the throughput.
 	measured := request(playback.BandwidthEstimateObservedRebufferV3, new(44100), "")
 	measured.ObservedThroughputKbps = new(31000)
-	if _, err := h.applyLearnedLimit(r, &measured, true, nil); err != nil {
+	if _, err := h.applyLearnedLimit(r, &measured, true, key, key, nil); err != nil {
 		t.Fatal(err)
 	}
 	if kbps, _, _ := stored(); kbps != 31000 || *measured.BandwidthEstimateKbps != 31000 {
@@ -139,7 +143,7 @@ func TestSeekReplayKeepsLearnedLimitDB(t *testing.T) {
 	// estimate, but the device learns nothing from it.
 	_, observedBefore, _ := stored()
 	encoderBound := request(playback.BandwidthEstimateObservedRebufferV3, new(5163), "")
-	if _, err := h.applyLearnedLimit(r, &encoderBound, true, func() bool { return true }); err != nil {
+	if _, err := h.applyLearnedLimit(r, &encoderBound, true, key, key, func() bool { return true }); err != nil {
 		t.Fatal(err)
 	}
 	if kbps, observed, _ := stored(); kbps != 31000 || !observed.Equal(observedBefore) || *encoderBound.BandwidthEstimateKbps != 5163 {
@@ -219,7 +223,7 @@ func TestConnectionBudgetAppliesAdminCapDB(t *testing.T) {
 
 	h := &PlaybackHandler{Connections: &connectionstore.Store{Pool: pool}, JWTSecret: "connection-budget-secret"}
 	remote := clientip.SetContext(apimw.SetClaims(ctx, &auth.Claims{UserID: user, Role: "user", TokenType: auth.TokenTypeAccess}), "203.0.113.7")
-	if err := h.ReportPlaybackProbe(remote, "tv-1", connectionstore.ProbeResult{Kbps: 48000, Bytes: 12_000_000, DurationMS: 2000, Transport: "wifi"}); err != nil {
+	if err := h.ReportPlaybackProbe(remote, "tv-1", connectionstore.ProbeResult{Kbps: 48000, Bytes: 12_000_000, DurationMS: 2000, Transport: "wifi"}, ""); err != nil {
 		t.Fatal(err)
 	}
 	for _, tc := range []struct {
@@ -241,7 +245,7 @@ func TestConnectionBudgetAppliesAdminCapDB(t *testing.T) {
 		}
 	}
 	// A device ID Postgres cannot store is no identity, not a failed request.
-	if err := h.ReportPlaybackProbe(remote, "tv-\xff", connectionstore.ProbeResult{Kbps: 1000, Bytes: 250_000, DurationMS: 2000, Transport: "wifi"}); err != nil {
+	if err := h.ReportPlaybackProbe(remote, "tv-\xff", connectionstore.ProbeResult{Kbps: 1000, Bytes: 250_000, DurationMS: 2000, Transport: "wifi"}, ""); err != nil {
 		t.Fatalf("invalid device ID report: %v", err)
 	}
 	if state, err := h.PlaybackConnection(remote, "tv-\xff", false); err != nil || state.Probe != nil {
@@ -366,7 +370,7 @@ func TestLearnedLimitMarksOnlyAStartItLoweredDB(t *testing.T) {
 			if unlimited.EffectiveMediaFileID != want || unlimited.BandwidthLimit != nil {
 				t.Fatalf("without a limit played file %d with bandwidth_limit %+v, want %d unlimited", unlimited.EffectiveMediaFileID, unlimited.BandwidthLimit, want)
 			}
-			key, _ := connectionstore.Key(ctx, handler.JWTSecret)
+			key, _ := connectionstore.Key(ctx, handler.JWTSecret, connectionstore.ClassRegular, "")
 			if err := handler.Connections.Observe(ctx, user, device, key, 44100); err != nil {
 				t.Fatal(err)
 			}
@@ -470,7 +474,7 @@ func reportReadingV3(t *testing.T, h *PlaybackHandler, ctx context.Context, devi
 	if kbps == 0 {
 		return
 	}
-	if err := h.ReportPlaybackProbe(ctx, device, connectionstore.ProbeResult{Kbps: kbps, Bytes: 3000000, DurationMS: 500, Transport: "ethernet"}); err != nil {
+	if err := h.ReportPlaybackProbe(ctx, device, connectionstore.ProbeResult{Kbps: kbps, Bytes: 3000000, DurationMS: 500, Transport: "ethernet"}, ""); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -492,8 +496,8 @@ func TestConnectionReadingsDB(t *testing.T) {
 	connections := &connectionstore.Store{Pool: pool}
 	h := &PlaybackHandler{Connections: connections, JWTSecret: "connection-readings-secret", NodeKeys: nodeauthtest.SameKey("connection-readings-secret")}
 	remote := clientip.SetContext(apimw.SetClaims(ctx, &auth.Claims{UserID: user, Role: "user", TokenType: auth.TokenTypeAccess}), "203.0.113.7")
-	key, _ := connectionstore.Key(remote, h.JWTSecret)
-	if err := h.ReportPlaybackProbe(remote, "tv-1", connectionstore.ProbeResult{Kbps: 48000, Bytes: 3000000, DurationMS: 500, Transport: "ethernet", LowerBound: true}); err != nil {
+	key, _ := connectionstore.Key(remote, h.JWTSecret, connectionstore.ClassRegular, "")
+	if err := h.ReportPlaybackProbe(remote, "tv-1", connectionstore.ProbeResult{Kbps: 48000, Bytes: 3000000, DurationMS: 500, Transport: "ethernet", LowerBound: true}, ""); err != nil {
 		t.Fatal(err)
 	}
 	summary := func(throughput string) {
@@ -520,7 +524,7 @@ func TestConnectionReadingsDB(t *testing.T) {
 	estimated := func(estimate *int, control string) *int {
 		t.Helper()
 		req := playback.StartRequestV3{QualityPreference: playback.QualityAutoV3, ClientFeatures: []string{playback.FeatureBufferingQualityV1}, BandwidthEstimateKbps: estimate, LearnedLimit: control}
-		if err := h.applyConnectionReading(r, &req); err != nil {
+		if err := h.applyConnectionReading(r, &req, key); err != nil {
 			t.Fatal(err)
 		}
 		if req.BandwidthEstimateKbps != nil && estimate == nil && req.BandwidthEstimateSource != playback.BandwidthEstimateProbeV3 {
@@ -547,6 +551,93 @@ func TestConnectionReadingsDB(t *testing.T) {
 	}
 	if got := estimated(nil, ""); got != nil {
 		t.Fatalf("expired readings planned under %d, want no estimate", *got)
+	}
+	requireDirectReadingsV3(t, pool, user, connections, h.JWTSecret)
+}
+
+// requireDirectReadingsV3 covers the direct connection class: readings keep
+// to the transport that carried them, a reading from an earlier path
+// generation is dropped, and a start plans under the key of the transport it
+// asked for.
+func requireDirectReadingsV3(t *testing.T, pool *pgxpool.Pool, user int, connections *connectionstore.Store, secret string) {
+	t.Helper()
+	ctx := t.Context()
+	const directKey = "direct:path-record-1"
+	state := &directStateV3{enrolled: true, generation: 3, device: directconn.DeviceDirect{Policy: "automatic", APIReady: true, ConnectionKey: directKey, PathGeneration: 3}}
+	sessions := playback.NewSessionManager(0, 0)
+	h := NewPlaybackHandler(sessions)
+	h.Connections, h.JWTSecret, h.DirectState = connections, secret, state
+	sessions.RegisterReconstructed(&playback.Session{ID: "session-direct", UserID: user, MediaTransport: playback.MediaTransportDirectV3, PathGeneration: 3})
+	sessions.RegisterReconstructed(&playback.Session{ID: "session-proxy", UserID: user, MediaTransport: playback.MediaTransportRegularV3})
+	remote := clientip.SetContext(apimw.SetClaims(ctx, &auth.Claims{UserID: user, Role: "user", TokenType: auth.TokenTypeAccess}), "203.0.113.7")
+	regularKey, _ := connectionstore.Key(remote, secret, connectionstore.ClassRegular, "")
+	report := func(key string, kbps int) {
+		t.Helper()
+		event := playback.RouteEventRecordV3{RouteEventV3: playback.RouteEventV3{Event: playback.RouteEventPlanSummaryV3, PlanID: "plan-direct", Diagnostics: map[string]string{"throughput_kbps": strconv.Itoa(kbps)}},
+			EventID: fmt.Sprintf("direct-%d-%d", kbps, time.Now().UnixNano()), UserID: user, ConnectionDeviceID: "tv-1", ConnectionKey: key, ReceivedAt: time.Now(), SampleLifetime: 7 * 24 * time.Hour}
+		recordRouteEventV3(playback.NewMemoryPlanStoreV3(), event, connections)
+	}
+	sampleOf := func(key string) (int, string) {
+		t.Helper()
+		c, err := connections.Connection(ctx, user, "tv-1", key)
+		if err != nil || c == nil || c.PlaybackSample == nil {
+			return 0, ""
+		}
+		return c.PlaybackSample.Kbps, c.Connection
+	}
+
+	// (a) A direct API plan's reading and a regular proxy plan's reading stay
+	// in separate entries, each under its own class label.
+	directSampleKey := h.sampleConnectionKeyV3(remote, user, "tv-1", "session-direct")
+	proxySampleKey := h.sampleConnectionKeyV3(remote, user, "tv-1", "session-proxy")
+	if directSampleKey != directKey || proxySampleKey != regularKey {
+		t.Fatalf("sample keys %q and %q, want the direct key and the regular key", directSampleKey, proxySampleKey)
+	}
+	report(directSampleKey, 90000)
+	report(proxySampleKey, 61000)
+	if kbps, label := sampleOf(directKey); kbps != 90000 || label != "direct" {
+		t.Fatalf("direct entry = %d (%s), want 90000 (direct)", kbps, label)
+	}
+	if kbps, label := sampleOf(regularKey); kbps != 61000 || label != "remote" {
+		t.Fatalf("regular entry = %d (%s), want 61000 (remote)", kbps, label)
+	}
+
+	// (b) The path was replaced after the plan started: its reading belongs to
+	// a connection that no longer exists and is dropped.
+	state.device.PathGeneration = 4
+	if key := h.sampleConnectionKeyV3(remote, user, "tv-1", "session-direct"); key != "" {
+		t.Fatalf("a reading from an earlier path generation kept key %q", key)
+	}
+	report(h.sampleConnectionKeyV3(remote, user, "tv-1", "session-direct"), 99000)
+	if kbps, _ := sampleOf(directKey); kbps != 90000 {
+		t.Fatalf("a stale-generation reading changed the direct entry to %d", kbps)
+	}
+	state.device.PathGeneration = 3
+
+	// (c) One API host with a pinned LAN route and a live direct path: the
+	// route keys as local and the path as direct, with different speeds stored
+	// for each. A regular start plans with local, a direct start with direct.
+	if err := connections.ReportSample(ctx, user, "tv-1", "local", 30000, 7*24*time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	lan := clientip.SetContext(apimw.SetClaims(WithNativeAPIV2(ctx), &auth.Claims{UserID: user, Role: "user", TokenType: auth.TokenTypeAccess}), "192.168.1.10")
+	lan = context.WithValue(lan, playbackConnectionDeviceContextKey{}, "tv-1")
+	onDirectPath := netaccess.WithPath(lan, netaccess.Path{Direct: &netaccess.DirectPath{HostID: "api", PeerKey: "nodekey:peer", UserID: user, DeviceID: "tv-1", Class: "direct"}})
+	for name, base := range map[string]context.Context{"on the LAN route": lan, "on the direct path": onDirectPath} {
+		for transport, want := range map[string]int{playback.MediaTransportRegularV3: 30000, playback.MediaTransportDirectV3: 90000} {
+			r := httptest.NewRequest(http.MethodPost, "/", nil).WithContext(h.withDirectRequestV3(base, user, transport))
+			req := playback.StartRequestV3{QualityPreference: playback.QualityAutoV3, ClientFeatures: []string{playback.FeatureBufferingQualityV1}}
+			if err := h.applyConnectionReading(r, &req, h.connectionKeyV3(r.Context(), mediaHostAPI)); err != nil {
+				t.Fatal(err)
+			}
+			got := 0 // no estimate
+			if req.BandwidthEstimateKbps != nil {
+				got = *req.BandwidthEstimateKbps
+			}
+			if got != want {
+				t.Fatalf("%s, %s start planned under %d, want %d", name, transport, got, want)
+			}
+		}
 	}
 }
 

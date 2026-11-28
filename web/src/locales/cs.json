@@ -215,6 +215,12 @@
       "value": "To už je s tímto účtem propojeno."
     }
   ],
+  "error.app_code_invalid": [
+    {
+      "type": 0,
+      "value": "Tento kód je neznámý, už použitý nebo jeho platnost vypršela. Získejte nový na stránce serveru."
+    }
+  ],
   "error.authentication_required": [
     {
       "type": 0,
@@ -333,6 +339,12 @@
     {
       "type": 0,
       "value": "Tato hodnota má nesprávný typ."
+    }
+  ],
+  "error.field.key_enrolled": [
+    {
+      "type": 0,
+      "value": "Tento klíč se na tomto serveru už používá."
     }
   ],
   "error.field.malformed_form": [
@@ -2587,6 +2599,30 @@
     {
       "type": 0,
       "value": "Automaticky"
+    }
+  ],
+  "settingsManifest.playback.connection_path.description": [
+    {
+      "type": 0,
+      "value": "Možnost Pouze přímé stále používá připojení přes místní síť, pokud je k dispozici."
+    }
+  ],
+  "settingsManifest.playback.connection_path.label": [
+    {
+      "type": 0,
+      "value": "Cesta připojení"
+    }
+  ],
+  "settingsManifest.playback.connection_path.option.automatic": [
+    {
+      "type": 0,
+      "value": "Automaticky"
+    }
+  ],
+  "settingsManifest.playback.connection_path.option.direct_only": [
+    {
+      "type": 0,
+      "value": "Pouze přímé"
     }
   ],
   "settingsManifest.playback.intro_skip_mode.description": [
@@ -28263,6 +28299,95 @@
       }
     }
   ],
+  "web.admin.common.adminUserSignIn.unlinkConfirm.text": [
+    {
+      "type": 5,
+      "value": "last_way",
+      "options": {
+        "yes": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Účet "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " se už nebude moci přihlásit tímto účtem poskytovatele. Účet "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " se nebude moci přihlásit, dokud nenastavíte heslo nebo znovu nepřipojíte poskytovatele."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Účet "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " se už nebude moci přihlásit tímto účtem poskytovatele."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 5,
+      "value": "keys",
+      "options": {
+        "yes": {
+          "value": [
+            {
+              "type": 0,
+              "value": " Klíče aplikace Silo účtu "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " vázané na tento účet poskytovatele budou odebrány a tato zařízení budou odhlášena."
+            }
+          ]
+        },
+        "unknown": {
+          "value": [
+            {
+              "type": 0,
+              "value": " Případné klíče aplikace Silo účtu "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " vázané na tento účet poskytovatele budou odebrány a tato zařízení budou odhlášena."
+            }
+          ]
+        },
+        "other": {
+          "value": []
+        }
+      }
+    }
+  ],
   "web.admin.common.adminUserSignIn.unlinkConfirm.title": [
     {
       "type": 0,
@@ -30941,6 +31066,18 @@
     {
       "type": 0,
       "value": "Vytváří náhledy, které přehrávače zobrazují při posouvání, v nakonfigurovaném veřejném úložišti souborů. Soubory se zpracovávají na pozadí s nízkou prioritou. Vypnutím se náhledy knihovny smažou."
+    }
+  ],
+  "web.admin.common.libraryEditor.advanced.trickplayGenerate": [
+    {
+      "type": 0,
+      "value": "Generovat chybějící náhledy pomocí FFmpeg"
+    }
+  ],
+  "web.admin.common.libraryEditor.advanced.trickplayGenerateDescription": [
+    {
+      "type": 0,
+      "value": "Nejprve se použijí existující doprovodné soubory .trickplay a .bif uložené vedle mediálních souborů. Po vypnutí se budou načítat jen doprovodné soubory a generování pomocí FFmpeg se přeskočí."
     }
   ],
   "web.admin.common.libraryEditor.advanced.trickplayUnavailable": [
@@ -35977,6 +36114,64 @@
       "value": "Správa – Uživatelé"
     }
   ],
+  "web.admin.common.trickplay.badge.awaitingSidecarCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " čeká na doprovodný soubor"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " čekají na doprovodný soubor"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " čeká na doprovodný soubor"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " čeká na doprovodný soubor"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.common.trickplay.badge.detail": [
     {
       "type": 0,
@@ -36179,6 +36374,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.common.trickplay.badge.sidecarsOnly": [
+    {
+      "type": 0,
+      "value": "jen doprovodné soubory"
     }
   ],
   "web.admin.common.trickplay.badge.srDetail": [
@@ -36391,6 +36592,42 @@
     {
       "type": 0,
       "value": "Přehrávače používají stávající náhledy, dokud nebudou připravené nové."
+    }
+  ],
+  "web.admin.common.trickplay.sidecarStatus.awaiting_sidecar": [
+    {
+      "type": 0,
+      "value": "Čeká na doprovodný soubor"
+    }
+  ],
+  "web.admin.common.trickplay.sidecarStatus.sidecar_invalid": [
+    {
+      "type": 0,
+      "value": "Neplatný doprovodný soubor"
+    }
+  ],
+  "web.admin.common.trickplay.sidecarStatus.sidecar_stale": [
+    {
+      "type": 0,
+      "value": "Zastaralý doprovodný soubor"
+    }
+  ],
+  "web.admin.common.trickplay.source.generated": [
+    {
+      "type": 0,
+      "value": "Vygenerováno"
+    }
+  ],
+  "web.admin.common.trickplay.source.sidecar_bif": [
+    {
+      "type": 0,
+      "value": "Doprovodný soubor (.bif)"
+    }
+  ],
+  "web.admin.common.trickplay.source.sidecar_trickplay": [
+    {
+      "type": 0,
+      "value": "Doprovodná složka (.trickplay)"
     }
   ],
   "web.admin.common.trickplay.state.off": [
@@ -38692,7 +38929,7 @@
     },
     {
       "type": 0,
-      "value": ". Ostatní zařízení tohoto účtu zůstanou přihlášená. Klient se může znovu přihlásit heslem k účtu."
+      "value": ". Ostatní zařízení tohoto účtu zůstanou přihlášená. Klient se může znovu přihlásit."
     }
   ],
   "web.admin.dashboard.widgets.apiClients.confirmLabel": [
@@ -54374,6 +54611,12 @@
       "value": "Profil"
     }
   ],
+  "web.admin.history.column.progress": [
+    {
+      "type": 0,
+      "value": "Průběh"
+    }
+  ],
   "web.admin.history.column.status": [
     {
       "type": 0,
@@ -54408,6 +54651,12 @@
     {
       "type": 0,
       "value": "Logy relace"
+    }
+  ],
+  "web.admin.history.detail.backToPlay": [
+    {
+      "type": 0,
+      "value": "Zpět na sloučené přehrání"
     }
   ],
   "web.admin.history.detail.column.delivered": [
@@ -54518,6 +54767,12 @@
       "value": "Doba sledování"
     }
   ],
+  "web.admin.history.detail.inspectSitting": [
+    {
+      "type": 0,
+      "value": "Prozkoumat"
+    }
+  ],
   "web.admin.history.detail.keyboardHint": [
     {
       "type": 0,
@@ -54602,6 +54857,12 @@
       "value": "Proč neproběhlo přímé přehrávání"
     }
   ],
+  "web.admin.history.detail.section.sessions": [
+    {
+      "type": 0,
+      "value": "Relace v tomto přehrání"
+    }
+  ],
   "web.admin.history.detail.section.streams": [
     {
       "type": 0,
@@ -54612,6 +54873,126 @@
     {
       "type": 0,
       "value": "Časování a průběh sledování"
+    }
+  ],
+  "web.admin.history.detail.sessionsCapped": [
+    {
+      "type": 0,
+      "value": "Zobrazeno prvních "
+    },
+    {
+      "type": 1,
+      "value": "shown"
+    },
+    {
+      "type": 0,
+      "value": " z "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": " relací v tomto přehrání."
+    }
+  ],
+  "web.admin.history.detail.sessionsNotice": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Toto přehrání má "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " relaci. Níže uvedené podrobnosti o streamu, zařízení a trase odpovídají této relaci."
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Toto přehrání zahrnuje "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " relace. Níže uvedené podrobnosti o streamu, zařízení a trase odpovídají jeho hlavní relaci; chcete-li některou relaci prozkoumat samostatně, vyberte ji níže."
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Toto přehrání zahrnuje "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " relace. Níže uvedené podrobnosti o streamu, zařízení a trase odpovídají jeho hlavní relaci; chcete-li některou relaci prozkoumat samostatně, vyberte ji níže."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Toto přehrání zahrnuje "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " relací. Níže uvedené podrobnosti o streamu, zařízení a trase odpovídají jeho hlavní relaci; chcete-li některou relaci prozkoumat samostatně, vyberte ji níže."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.ended": [
+    {
+      "type": 0,
+      "value": "Ukončeno"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.method": [
+    {
+      "type": 0,
+      "value": "Metoda"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.started": [
+    {
+      "type": 0,
+      "value": "Zahájeno"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.watched": [
+    {
+      "type": 0,
+      "value": "Sledováno"
     }
   ],
   "web.admin.history.detail.subtitlesBurnIn": [
@@ -54840,6 +55221,12 @@
       "value": "Všechny sítě"
     }
   ],
+  "web.admin.history.filter.allMediaTypes": [
+    {
+      "type": 0,
+      "value": "Všechna média"
+    }
+  ],
   "web.admin.history.filter.allMethods": [
     {
       "type": 0,
@@ -54876,6 +55263,24 @@
       "value": "Dokončeno"
     }
   ],
+  "web.admin.history.filter.episodes": [
+    {
+      "type": 0,
+      "value": "Díly"
+    }
+  ],
+  "web.admin.history.filter.hideShort": [
+    {
+      "type": 0,
+      "value": "Skrýt <30 s"
+    }
+  ],
+  "web.admin.history.filter.hideShortTitle": [
+    {
+      "type": 0,
+      "value": "Skrýt nedokončené relace kratší než 30 sekund"
+    }
+  ],
   "web.admin.history.filter.locationLocal": [
     {
       "type": 0,
@@ -54886,6 +55291,12 @@
     {
       "type": 0,
       "value": "Vzdálené"
+    }
+  ],
+  "web.admin.history.filter.movies": [
+    {
+      "type": 0,
+      "value": "Filmy"
     }
   ],
   "web.admin.history.filter.partial": [
@@ -55136,6 +55547,12 @@
       "value": "Nedávné přehrávání"
     }
   ],
+  "web.admin.history.row.burnInBadgeTitle": [
+    {
+      "type": 0,
+      "value": "Titulky vypálené do videa"
+    }
+  ],
   "web.admin.history.row.completed": [
     {
       "type": 0,
@@ -55156,6 +55573,80 @@
     {
       "type": 0,
       "value": "Odhad (zaznamenáno před zavedením přesného měření doby sledování)"
+    }
+  ],
+  "web.admin.history.row.groupedSessionsTitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sloučeno z "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " relace"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sloučeno z "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " relací"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sloučeno z "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " relace"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sloučeno z "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " relací"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.history.row.meta": [
@@ -55188,6 +55679,12 @@
       "value": "Částečně"
     }
   ],
+  "web.admin.history.row.progressLabel": [
+    {
+      "type": 0,
+      "value": "Průběh přehrávání"
+    }
+  ],
   "web.admin.history.row.started": [
     {
       "type": 0,
@@ -55198,16 +55695,116 @@
       "value": "time"
     }
   ],
+  "web.admin.history.stats.accountsCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " účet"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " účty"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " účtu"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " účtů"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.history.stats.completed": [
     {
       "type": 0,
       "value": "Dokončeno"
     }
   ],
+  "web.admin.history.stats.completionBreakdown": [
+    {
+      "type": 0,
+      "value": "Dokončeno: "
+    },
+    {
+      "type": 1,
+      "value": "completed"
+    },
+    {
+      "type": 0,
+      "value": " · částečně: "
+    },
+    {
+      "type": 1,
+      "value": "partial"
+    }
+  ],
   "web.admin.history.stats.partial": [
     {
       "type": 0,
       "value": "Částečně"
+    }
+  ],
+  "web.admin.history.stats.totalPlays": [
+    {
+      "type": 0,
+      "value": "Přehrání celkem"
+    }
+  ],
+  "web.admin.history.stats.totalSessions": [
+    {
+      "type": 0,
+      "value": "Relace celkem"
+    }
+  ],
+  "web.admin.history.stats.uniqueProfiles": [
+    {
+      "type": 0,
+      "value": "Jedinečné profily"
+    }
+  ],
+  "web.admin.history.stats.uniqueTitles": [
+    {
+      "type": 0,
+      "value": "Jedinečné tituly"
     }
   ],
   "web.admin.history.stats.visibleRows": [
@@ -55226,6 +55823,24 @@
     {
       "type": 0,
       "value": "Historie přehrávání"
+    }
+  ],
+  "web.admin.history.view.label": [
+    {
+      "type": 0,
+      "value": "Zobrazení historie"
+    }
+  ],
+  "web.admin.history.view.plays": [
+    {
+      "type": 0,
+      "value": "Přehrání"
+    }
+  ],
+  "web.admin.history.view.sessions": [
+    {
+      "type": 0,
+      "value": "Všechny relace"
     }
   ],
   "web.admin.historyImport.conflict.message": [
@@ -102367,6 +102982,234 @@
       "value": ")"
     }
   ],
+  "web.admin.users.detail.appKeys.confirm.denyDescription": [
+    {
+      "type": 0,
+      "value": "Zařízení "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " se nebude moci přihlásit k účtu "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": ". Pokud patřilo tomuto uživateli, může ho znovu přidat v aplikaci Silo."
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKey": [
+    {
+      "type": 0,
+      "value": "Odebrat klíč"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKeyDescription": [
+    {
+      "type": 0,
+      "value": "Již přihlášená zařízení budou fungovat, dokud je neodeberete. S tímto klíčem už nepůjde přidat žádné nové zařízení a čekající zařízení přidaná tímto klíčem budou zamítnuta. Aplikace Silo uživatele "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " nastaví nový klíč při příštím přidání zařízení v přihlášeném stavu."
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKeyTitle": [
+    {
+      "type": 0,
+      "value": "Odebrat klíč účtu uživatele "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.removeDescription": [
+    {
+      "type": 0,
+      "value": "Odebráním zařízení "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " se zařízení ihned odhlásí z účtu "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " a jeho klíč přestane platit: už se jím nebude moci znovu přihlásit. Pro další používání ho uživatel "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " musí znovu přidat v aplikaci Silo."
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.withdrawDescription": [
+    {
+      "type": 0,
+      "value": "Zařízení "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " nebude moci použít toto schválení k přihlášení k účtu "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.detail.appKeys.description": [
+    {
+      "type": 0,
+      "value": "Zařízení a aplikace, které se k účtu "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " přihlašují přes aplikaci Silo, bez hesla."
+    }
+  ],
+  "web.admin.users.detail.appKeys.empty": [
+    {
+      "type": 0,
+      "value": "Aplikaci Silo na tomto účtu nepoužívá žádné zařízení."
+    }
+  ],
+  "web.admin.users.detail.appKeys.loadFailed": [
+    {
+      "type": 0,
+      "value": "Zařízení se nepodařilo načíst."
+    }
+  ],
+  "web.admin.users.detail.appKeys.off": [
+    {
+      "type": 0,
+      "value": "Přihlašování přes aplikaci Silo je na tomto serveru vypnuté, takže se tato zařízení nemohou přihlásit. Stále je můžete odebrat."
+    }
+  ],
+  "web.admin.users.detail.appKeys.ownerOnly": [
+    {
+      "type": 0,
+      "value": "Zařízení jiného správce nebo vlastníka může změnit jen vlastník serveru."
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.description": [
+    {
+      "type": 0,
+      "value": "Aplikace Silo tímto klíčem přidává nová zařízení uživatele "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": ". Nastaveno: "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.none": [
+    {
+      "type": 0,
+      "value": "Žádný klíč účtu. Aplikace Silo uživatele "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " ho nastaví při příštím přidání zařízení v přihlášeném stavu."
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.remove": [
+    {
+      "type": 0,
+      "value": "Odebrat klíč účtu"
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKeyRemoved": [
+    {
+      "type": 0,
+      "value": "Klíč účtu odebrán"
+    }
+  ],
+  "web.admin.users.detail.appKeys.preapprovals.description": [
+    {
+      "type": 0,
+      "value": "Přihlášení, která uživatel "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " schválil pro zařízení, jež se ještě nepřipojilo."
+    }
+  ],
+  "web.admin.users.detail.appKeys.waiting.description": [
+    {
+      "type": 0,
+      "value": "Nové zařízení na účtu správce čeká, dokud ho uživatel "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " neschválí ze zařízení, na kterém je přihlášen. Zde ho můžete zamítnout."
+    }
+  ],
+  "web.admin.users.detail.appKeys.waiting.title": [
+    {
+      "type": 0,
+      "value": "Čeká na schválení"
+    }
+  ],
   "web.admin.users.detail.common.allProfiles": [
     {
       "type": 0,
@@ -106511,6 +107354,12 @@
       "value": "Účet dosáhl limitu profilů"
     }
   ],
+  "web.admin.users.detail.profiles.badge.changedHere": [
+    {
+      "type": 0,
+      "value": "Změněno zde"
+    }
+  ],
   "web.admin.users.detail.profiles.badge.kids": [
     {
       "type": 0,
@@ -106708,6 +107557,664 @@
     {
       "type": 0,
       "value": "Uložit PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowAgain": [
+    {
+      "type": 0,
+      "value": "Znovu povolit"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowAgainAria": [
+    {
+      "type": 0,
+      "value": "Povolit návrat profilu "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " na tento server"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowDescription": [
+    {
+      "type": 0,
+      "value": "Aplikace tohoto uživatele může profil "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " při příští synchronizaci znovu přidat jako nový profil bez jeho historie na tomto serveru, pokud její profily stále zahrnují profil "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " a tento účet má místo pro další profil."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowTitle": [
+    {
+      "type": 0,
+      "value": "Znovu povolit profil "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.alreadyCleared": [
+    {
+      "type": 0,
+      "value": "Tato změna už byla vymazána, nebo došlo k další změně ("
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "). Seznam je aktuální."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedBy": [
+    {
+      "type": 0,
+      "value": "Změněno: "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedSinceOpened": [
+    {
+      "type": 0,
+      "value": "Tato změna byla po otevření aktualizována, takže se nic nevymazalo. Přečtěte si ji znovu v seznamu a pak ji vymažte, pokud to stále chcete."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedWhileRunning": [
+    {
+      "type": 0,
+      "value": "Profily se během operace změnily, takže se nic nezměnilo. Seznam je aktuální; pokud to stále chcete, zkuste to znovu."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clear": [
+    {
+      "type": 0,
+      "value": "Vymazat"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearAndRemovePin": [
+    {
+      "type": 0,
+      "value": "Vymazat a odebrat PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearAria": [
+    {
+      "type": 0,
+      "value": "Vymazat změnu pole "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " u profilu "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearFailed": [
+    {
+      "type": 0,
+      "value": "Změnu se nepodařilo vymazat."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearInherit": [
+    {
+      "type": 0,
+      "value": "Pole "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " u profilu "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " se vrátí k hodnotě, kterou profil "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " nyní dědí, jak požaduje aplikace uživatele. Změny z aplikace uživatele se na něj budou opět uplatňovat."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearLater": [
+    {
+      "type": 0,
+      "value": "Pole "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " zůstane beze změny, dokud ho aplikace uživatele příště neodešle. Poté se na něj budou změny z aplikace opět uplatňovat."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearNow": [
+    {
+      "type": 0,
+      "value": "Profil "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " se nyní vrátí k hodnotě z aplikace uživatele a změny z aplikace se na něj budou opět uplatňovat."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearNowValue": [
+    {
+      "type": 0,
+      "value": "Pole "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " u profilu "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " se nyní vrátí na hodnotu "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " z aplikace uživatele. Změny z aplikace se na něj budou opět uplatňovat."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearPin": [
+    {
+      "type": 0,
+      "value": "Profil "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " si ponechá vámi nastavený PIN, dokud aplikace uživatele příště nějaký neodešle. Poté se na něj budou změny z aplikace opět uplatňovat."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearPinRemoves": [
+    {
+      "type": 0,
+      "value": "Aplikace uživatele odesílá profil "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " bez PIN, takže vymazáním se ihned odebere vámi nastavený PIN. Profil "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " pak bude moci bez PIN otevřít kdokoli, kdo používá tento účet."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearTitle": [
+    {
+      "type": 0,
+      "value": "Vymazat změnu pole "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " u profilu "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.deletedAccount": [
+    {
+      "type": 0,
+      "value": "smazaný účet"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.description": [
+    {
+      "type": 0,
+      "value": "Tyto profily pocházejí z aplikace uživatele "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ". Změna, kterou zde provedete, zůstane na tomto serveru, dokud ji nevymažete. Nejde o zámek: uživatel "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " může totéž zde změnit také."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismiss": [
+    {
+      "type": 0,
+      "value": "Zavřít"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismissAria": [
+    {
+      "type": 0,
+      "value": "Zavřít poznámku k poli "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " u profilu "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismissFailed": [
+    {
+      "type": 0,
+      "value": "Poznámku se nepodařilo zavřít."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.isChild": [
+    {
+      "type": 0,
+      "value": "Dětský profil"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.maxAdvisoryAge": [
+    {
+      "type": 0,
+      "value": "Věkový limit"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.maxContentRating": [
+    {
+      "type": 0,
+      "value": "Limit klasifikace obsahu"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.name": [
+    {
+      "type": 0,
+      "value": "Jméno"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.picture": [
+    {
+      "type": 0,
+      "value": "Obrázek"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.pin": [
+    {
+      "type": 0,
+      "value": "PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.requests": [
+    {
+      "type": 0,
+      "value": "Žádosti"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.requireAdvisoryAge": [
+    {
+      "type": 0,
+      "value": "Vyžadovat věkovou klasifikaci"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.fieldValue": [
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.hidden": [
+    {
+      "type": 0,
+      "value": "Odebráno na tomto serveru: "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": ". Aplikace uživatele ho znovu nepřidá, dokud to nepovolíte."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.loadFailed": [
+    {
+      "type": 0,
+      "value": "Změny provedené na tomto serveru se nepodařilo načíst."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.nameTaken": [
+    {
+      "type": 0,
+      "value": "Profil "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " se nemůže vrátit ke jménu "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " z aplikace uživatele, protože toto jméno už má jiný profil. Nejprve tento profil přejmenujte a pak změnu vymažte znovu."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeHiddenNextSync": [
+    {
+      "type": 0,
+      "value": "Profil "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " se může vrátit při příští synchronizaci aplikace uživatele "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", pokud ho její profily stále zahrnují."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeHiddenWoken": [
+    {
+      "type": 0,
+      "value": "Profil "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " se může vrátit při příští synchronizaci aplikace uživatele, pokud ho její profily stále zahrnují. Telefon uživatele "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " byl požádán o synchronizaci."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeNextSync": [
+    {
+      "type": 0,
+      "value": "Vymazáno. Do aplikace uživatele "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " se změna dostane při příští synchronizaci."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeWoken": [
+    {
+      "type": 0,
+      "value": "Vymazáno. Telefon uživatele "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " byl požádán o synchronizaci."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.removedBy": [
+    {
+      "type": 0,
+      "value": "Odebráno: "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.replacedOwner": [
+    {
+      "type": 0,
+      "value": "Tím byla nahrazena vámi nastavená hodnota."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.setBy": [
+    {
+      "type": 0,
+      "value": "Nastaveno: "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.settled": [
+    {
+      "type": 0,
+      "value": "Změněno: "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "; vámi nastavená hodnota už neplatí."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.title": [
+    {
+      "type": 0,
+      "value": "Změněno na tomto serveru"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.inherited": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (zděděno)"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.noPicture": [
+    {
+      "type": 0,
+      "value": "Bez obrázku"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.none": [
+    {
+      "type": 0,
+      "value": "Žádný"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.off": [
+    {
+      "type": 0,
+      "value": "Vypnuto"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.on": [
+    {
+      "type": 0,
+      "value": "Zapnuto"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.picture": [
+    {
+      "type": 0,
+      "value": "Vlastní obrázek"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.pinNone": [
+    {
+      "type": 0,
+      "value": "Bez PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.pinSet": [
+    {
+      "type": 0,
+      "value": "PIN nastaven"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.requestsAllowed": [
+    {
+      "type": 0,
+      "value": "Povoleno"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.requestsBlocked": [
+    {
+      "type": 0,
+      "value": "Zablokováno"
     }
   ],
   "web.admin.users.detail.profiles.setPin": [
@@ -108015,6 +109522,144 @@
     {
       "type": 0,
       "value": "Nastavit heslo"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.action": [
+    {
+      "type": 0,
+      "value": "Vytvořit přihlašovací odkaz"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.actionHint": [
+    {
+      "type": 0,
+      "value": "Ztráta všech zařízení"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.description": [
+    {
+      "type": 0,
+      "value": "Jednorázový odkaz pro uživatele "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": ", pokud ztratil všechna zařízení. Otevře stránku, která mu dá kód pro aplikaci Silo nebo mu umožní zvolit heslo. Platí 24 hodin a nový odkaz nahradí předchozí."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailAction": [
+    {
+      "type": 0,
+      "value": "Poslat e-mailem"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHint": [
+    {
+      "type": 0,
+      "value": "Vytvořte odkaz, zkopírujte ho a pošlete sami, nebo ho pošlete e-mailem na adresu "
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHintNoAddress": [
+    {
+      "type": 0,
+      "value": "Vytvořte odkaz, pak ho zkopírujte a pošlete sami. Tento účet nemá e-mailovou adresu, na kterou by šlo odkaz poslat."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHintNoMail": [
+    {
+      "type": 0,
+      "value": "Vytvořte odkaz, pak ho zkopírujte a pošlete sami. Pokud ho chcete posílat odsud, nastavte e-mail v Nastavení."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailSent": [
+    {
+      "type": 0,
+      "value": "Odkaz byl odeslán na adresu "
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": ". Platnost vyprší "
+    },
+    {
+      "type": 1,
+      "value": "expires"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Poštovní server nepotvrdil doručení. Odkaz níže stále funguje: zkopírujte ho a pošlete jiným způsobem."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.failed": [
+    {
+      "type": 0,
+      "value": "Přihlašovací odkaz se nepodařilo vytvořit."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.linkShare": [
+    {
+      "type": 0,
+      "value": "Tento odkaz pošlete jen uživateli "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": ". Kdokoli, kdo ho má, se může přihlásit k tomuto účtu, dokud nebude použit, nejpozději do "
+    },
+    {
+      "type": 1,
+      "value": "expires"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.providerRequired": [
+    {
+      "type": 0,
+      "value": "Přihlašování místním heslem je na tomto serveru vypnuté, takže by přihlašovací odkaz obešel poskytovatele přihlášení. Požádejte uživatele "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": ", aby se přihlásil přes poskytovatele na webu tohoto serveru a pak v nastavení účtu použil „Otevřít v Silo“."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.title": [
+    {
+      "type": 0,
+      "value": "Přihlašovací odkaz pro uživatele "
+    },
+    {
+      "type": 1,
+      "value": "username"
     }
   ],
   "web.audiobooks.chapter.fallbackTitle": [
@@ -110313,6 +111958,120 @@
       "value": "Schválit přihlášení"
     }
   ],
+  "web.auth.appCode.code": [
+    {
+      "type": 0,
+      "value": "Kód"
+    }
+  ],
+  "web.auth.appCode.codeCopied": [
+    {
+      "type": 0,
+      "value": "Kód byl zkopírován"
+    }
+  ],
+  "web.auth.appCode.copyCode": [
+    {
+      "type": 0,
+      "value": "Kopírovat kód"
+    }
+  ],
+  "web.auth.appCode.copyFailed": [
+    {
+      "type": 0,
+      "value": "Kód se nepodařilo zkopírovat. Označte ho a zkopírujte ručně."
+    }
+  ],
+  "web.auth.appCode.expired": [
+    {
+      "type": 0,
+      "value": "Platnost tohoto kódu vypršela."
+    }
+  ],
+  "web.auth.appCode.failed": [
+    {
+      "type": 0,
+      "value": "Kód se nepodařilo vytvořit. Zkuste to znovu."
+    }
+  ],
+  "web.auth.appCode.instructions": [
+    {
+      "type": 0,
+      "value": "Stiskněte Otevřít Silo a pokračujte v aplikaci Silo na tomto zařízení. Pokud aplikaci nemáte nainstalovanou, nainstalujte ji, vraťte se na tuto kartu a znovu stiskněte Otevřít Silo."
+    }
+  ],
+  "web.auth.appCode.noScanCode": [
+    {
+      "type": 0,
+      "value": "Adresa tohoto serveru je pro kód ke skenování příliš dlouhá. Zadejte adresu serveru a kód v aplikaci Silo, nebo kód zkopírujte a vložte ho tam."
+    }
+  ],
+  "web.auth.appCode.open": [
+    {
+      "type": 0,
+      "value": "Otevřít Silo"
+    }
+  ],
+  "web.auth.appCode.renew": [
+    {
+      "type": 0,
+      "value": "Získat nový kód"
+    }
+  ],
+  "web.auth.appCode.scanCodeLabel": [
+    {
+      "type": 0,
+      "value": "Kód ke skenování pro aplikaci Silo"
+    }
+  ],
+  "web.auth.appCode.scanCodeUnavailable": [
+    {
+      "type": 0,
+      "value": "Pro tento server nelze zobrazit kód ke skenování. Zadejte adresu serveru a kód v aplikaci Silo, nebo kód zkopírujte a vložte ho tam."
+    }
+  ],
+  "web.auth.appCode.scanHint": [
+    {
+      "type": 0,
+      "value": "Naskenujte ho skenerem v aplikaci Silo, nebo níže zadejte či zkopírujte adresu serveru a kód."
+    }
+  ],
+  "web.auth.appCode.serverAddress": [
+    {
+      "type": 0,
+      "value": "Adresa serveru"
+    }
+  ],
+  "web.auth.appCode.singleUse": [
+    {
+      "type": 0,
+      "value": "Tento kód funguje jen jednou a jeho platnost vyprší za několik minut."
+    }
+  ],
+  "web.auth.appCode.title": [
+    {
+      "type": 0,
+      "value": "Otevřít Silo"
+    }
+  ],
+  "web.auth.appCode.typeInstructions": [
+    {
+      "type": 0,
+      "value": "V aplikaci Silo na telefonu nebo tabletu přidejte tento server podle jeho adresy a zadáním tohoto kódu vytvořte účet. Kdokoli s tímto kódem se může připojit místo vás, proto ho nikomu nesdílejte."
+    }
+  ],
+  "web.auth.appCode.typeTitle": [
+    {
+      "type": 0,
+      "value": "Připojte se pomocí tohoto kódu"
+    }
+  ],
+  "web.auth.appCode.webLink": [
+    {
+      "type": 0,
+      "value": "Raději otevřít pomocí odkazu siloserver.org"
+    }
+  ],
   "web.auth.card.rememberedIt": [
     {
       "type": 0,
@@ -110515,10 +112274,50 @@
       ]
     }
   ],
+  "web.auth.invite.appAccountEmail": [
+    {
+      "type": 0,
+      "value": "Váš účet bude používat adresu "
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.auth.invite.appContinue": [
+    {
+      "type": 0,
+      "value": "Pokračovat"
+    }
+  ],
+  "web.auth.invite.appEmailHint": [
+    {
+      "type": 0,
+      "value": "Pokud zadáte e-mailovou adresu, může vám tento server poslat odkaz pro přihlášení, když přijdete o svá zařízení."
+    }
+  ],
   "web.auth.invite.appMissing": [
     {
       "type": 0,
       "value": "Nic se neděje? Aplikace není nainstalovaná — pokračujte níže."
+    }
+  ],
+  "web.auth.invite.appProviderOnly": [
+    {
+      "type": 0,
+      "value": "Server "
+    },
+    {
+      "type": 1,
+      "value": "server"
+    },
+    {
+      "type": 0,
+      "value": " přidává uživatele přes svého poskytovatele přihlášení. Přihlaste se přes něj na tomto webu a potom otevřete Silo z nastavení účtu."
     }
   ],
   "web.auth.invite.created": [
@@ -110547,6 +112346,18 @@
       "value": "Zadejte e-mailovou adresu a zvolte heslo. Přihlašovat se budete svou e-mailovou adresou."
     }
   ],
+  "web.auth.invite.descriptionWithApp": [
+    {
+      "type": 0,
+      "value": "Připojte se pomocí aplikace Silo na telefonu nebo tabletu, nebo si pro přihlášení zvolte heslo."
+    }
+  ],
+  "web.auth.invite.emailOptional": [
+    {
+      "type": 0,
+      "value": "E-mail (volitelné)"
+    }
+  ],
   "web.auth.invite.emailPlaceholder": [
     {
       "type": 0,
@@ -110567,6 +112378,18 @@
     {
       "type": 1,
       "value": "inviter"
+    }
+  ],
+  "web.auth.invite.joinWithApp": [
+    {
+      "type": 0,
+      "value": "Připojit se pomocí aplikace Silo"
+    }
+  ],
+  "web.auth.invite.joinWithAppInstead": [
+    {
+      "type": 0,
+      "value": "Raději se připojit pomocí aplikace Silo"
     }
   ],
   "web.auth.invite.loadFailed": [
@@ -110667,6 +112490,30 @@
     {
       "type": 0,
       "value": "Pozvánka není k dispozici"
+    }
+  ],
+  "web.auth.invite.usePassword": [
+    {
+      "type": 0,
+      "value": "Raději použít heslo"
+    }
+  ],
+  "web.auth.invite.usernameIsAddress": [
+    {
+      "type": 0,
+      "value": "Uživatelské jméno se znakem @ musí být e-mailová adresa, kterou zadáte níže."
+    }
+  ],
+  "web.auth.invite.usernameRequired": [
+    {
+      "type": 0,
+      "value": "Zvolte uživatelské jméno."
+    }
+  ],
+  "web.auth.invite.usernameTaken": [
+    {
+      "type": 0,
+      "value": "Toto uživatelské jméno se už používá. Zvolte jiné."
     }
   ],
   "web.auth.languagePicker.label": [
@@ -111739,6 +113586,126 @@
     {
       "type": 0,
       "value": "Přihlásit se"
+    }
+  ],
+  "web.auth.signInLink.backToCode": [
+    {
+      "type": 0,
+      "value": "Zpět na kód"
+    }
+  ],
+  "web.auth.signInLink.codeExpired": [
+    {
+      "type": 0,
+      "value": "Pro další kód požádejte správce tohoto serveru o nový odkaz."
+    }
+  ],
+  "web.auth.signInLink.documentTitle": [
+    {
+      "type": 0,
+      "value": "Odkaz pro přihlášení"
+    }
+  ],
+  "web.auth.signInLink.failed": [
+    {
+      "type": 0,
+      "value": "Odkaz se nepodařilo otevřít. Zkuste to znovu."
+    }
+  ],
+  "web.auth.signInLink.installFirst": [
+    {
+      "type": 0,
+      "value": "Odkaz funguje jen jednou a kód platí několik minut. Nejdřív si na telefon nebo tablet nainstalujte aplikaci Silo a potom stiskněte Pokračovat."
+    }
+  ],
+  "web.auth.signInLink.intro": [
+    {
+      "type": 0,
+      "value": "Správce vám poslal tento odkaz, abyste se mohli znovu přihlásit. Pokračujte a získejte kód pro aplikaci Silo, nebo si zvolte heslo."
+    }
+  ],
+  "web.auth.signInLink.keepOpen": [
+    {
+      "type": 0,
+      "value": "Nechte tuto stránku otevřenou, dokud vše nedokončíte. Odkaz je už spotřebovaný, takže opětovným načtením nebo odchodem přijdete o to, co poskytl."
+    }
+  ],
+  "web.auth.signInLink.leaveAction": [
+    {
+      "type": 0,
+      "value": "Odejít"
+    }
+  ],
+  "web.auth.signInLink.leaveDescription": [
+    {
+      "type": 0,
+      "value": "Odkaz je už spotřebovaný. Pokud odejdete, přijdete o kód pro aplikaci Silo i o možnost nastavit heslo a budete potřebovat nový odkaz."
+    }
+  ],
+  "web.auth.signInLink.leaveTitle": [
+    {
+      "type": 0,
+      "value": "Opustit tuto stránku?"
+    }
+  ],
+  "web.auth.signInLink.noCodeAdministrator": [
+    {
+      "type": 0,
+      "value": "Toto je účet správce, takže tento odkaz jen nastaví heslo. Nastavte ho, přihlaste se na webu tohoto serveru a potom tam otevřete aplikaci Silo z nastavení účtu."
+    }
+  ],
+  "web.auth.signInLink.noCodeAppKeysOff": [
+    {
+      "type": 0,
+      "value": "Aplikace Silo se teď na tomto serveru nemůže přihlásit, takže tento odkaz jen nastaví heslo."
+    }
+  ],
+  "web.auth.signInLink.passwordDescription": [
+    {
+      "type": 0,
+      "value": "Uložením se tento účet odhlásí na všech zařízeních. Zařízení přihlášená přes aplikaci Silo se znovu přihlásí sama."
+    }
+  ],
+  "web.auth.signInLink.passwordSet": [
+    {
+      "type": 0,
+      "value": "Heslo je uloženo. Přihlaste se s ním."
+    }
+  ],
+  "web.auth.signInLink.passwordSetLostDevices": [
+    {
+      "type": 0,
+      "value": "Ztracená zařízení, která používala aplikaci Silo, se mohou dál přihlašovat, dokud je neodeberete. Po přihlášení je odeberte ze seznamu zařízení v nastavení účtu."
+    }
+  ],
+  "web.auth.signInLink.passwordTitle": [
+    {
+      "type": 0,
+      "value": "Zvolte heslo"
+    }
+  ],
+  "web.auth.signInLink.providerRequired": [
+    {
+      "type": 0,
+      "value": "Tento server přihlašuje uživatele přes svého poskytovatele přihlášení, takže tento odkaz nefunguje. Přihlaste se raději přes poskytovatele."
+    }
+  ],
+  "web.auth.signInLink.setPasswordInstead": [
+    {
+      "type": 0,
+      "value": "Raději nastavit heslo"
+    }
+  ],
+  "web.auth.signInLink.title": [
+    {
+      "type": 0,
+      "value": "Znovu získejte přístup k účtu"
+    }
+  ],
+  "web.auth.signInLink.unavailable": [
+    {
+      "type": 0,
+      "value": "Tento odkaz už byl použit, nahrazen novějším, nebo mu vypršela platnost. Požádejte správce tohoto serveru o nový."
     }
   ],
   "web.auth.signup.closed": [
@@ -157766,7 +159733,7 @@
   "web.settings.account.password.signOutOthersDescription": [
     {
       "type": 0,
-      "value": "Ostatní prohlížeče a aplikace se budou muset znovu přihlásit novým heslem. Tento prohlížeč zůstane přihlášený a klíče API budou dál fungovat."
+      "value": "Ostatní prohlížeče a aplikace budou odhlášeny. Tento prohlížeč zůstane přihlášený a klíče API budou dál fungovat."
     }
   ],
   "web.settings.account.password.title": [
@@ -158655,6 +160622,512 @@
     {
       "type": 0,
       "value": "Jak tento klíč používat"
+    }
+  ],
+  "web.settings.appKeys.actionFailed": [
+    {
+      "type": 0,
+      "value": "Změnu se nepodařilo provést. Zkuste to znovu."
+    }
+  ],
+  "web.settings.appKeys.approveMainOnly": [
+    {
+      "type": 0,
+      "value": "Zařízení může schválit pouze hlavní profil domácnosti. Pro schválení se na něj přepněte."
+    }
+  ],
+  "web.settings.appKeys.approved": [
+    {
+      "type": 0,
+      "value": "Zařízení "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " schváleno"
+    }
+  ],
+  "web.settings.appKeys.confirm.approve": [
+    {
+      "type": 0,
+      "value": "Schválit zařízení"
+    }
+  ],
+  "web.settings.appKeys.confirm.approveDescription": [
+    {
+      "type": 0,
+      "value": "Zařízení "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " se bude moci přihlašovat k vašemu účtu přes aplikaci Silo, dokud ho neodeberete. Schvalte ho, jen pokud jde o vaše právě nastavené zařízení."
+    }
+  ],
+  "web.settings.appKeys.confirm.approveTitle": [
+    {
+      "type": 0,
+      "value": "Schválit zařízení "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.settings.appKeys.confirm.deny": [
+    {
+      "type": 0,
+      "value": "Zamítnout zařízení"
+    }
+  ],
+  "web.settings.appKeys.confirm.denyDescription": [
+    {
+      "type": 0,
+      "value": "Zařízení "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " se nebude moci přihlásit k vašemu účtu. Pokud je vaše, přidejte ho znovu v aplikaci Silo."
+    }
+  ],
+  "web.settings.appKeys.confirm.denyTitle": [
+    {
+      "type": 0,
+      "value": "Zamítnout zařízení "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.settings.appKeys.confirm.remove": [
+    {
+      "type": 0,
+      "value": "Odebrat zařízení"
+    }
+  ],
+  "web.settings.appKeys.confirm.removeDescription": [
+    {
+      "type": 0,
+      "value": "Odebráním zařízení "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " ho ihned odhlásíte a zneplatníte jeho klíč: už se s ním nebude moci přihlásit. Chcete-li ho znovu používat, přidejte ho znovu v aplikaci Silo."
+    }
+  ],
+  "web.settings.appKeys.confirm.removeTitle": [
+    {
+      "type": 0,
+      "value": "Odebrat zařízení "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.settings.appKeys.confirm.withdraw": [
+    {
+      "type": 0,
+      "value": "Odvolat schválení"
+    }
+  ],
+  "web.settings.appKeys.confirm.withdrawDescription": [
+    {
+      "type": 0,
+      "value": "Zařízení "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " nebude moci toto schválení použít k přihlášení k vašemu účtu."
+    }
+  ],
+  "web.settings.appKeys.confirm.withdrawTitle": [
+    {
+      "type": 0,
+      "value": "Odvolat schválení pro zařízení "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.settings.appKeys.confirm.working": [
+    {
+      "type": 0,
+      "value": "Ukládání…"
+    }
+  ],
+  "web.settings.appKeys.denied": [
+    {
+      "type": 0,
+      "value": "Zařízení "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " zamítnuto"
+    }
+  ],
+  "web.settings.appKeys.description": [
+    {
+      "type": 0,
+      "value": "Zařízení a aplikace, které se k vašemu účtu přihlašují přes aplikaci Silo bez hesla."
+    }
+  ],
+  "web.settings.appKeys.devices.title": [
+    {
+      "type": 0,
+      "value": "Zařízení"
+    }
+  ],
+  "web.settings.appKeys.empty": [
+    {
+      "type": 0,
+      "value": "Na vašem účtu aplikaci Silo nepoužívá žádné zařízení."
+    }
+  ],
+  "web.settings.appKeys.footnote": [
+    {
+      "type": 0,
+      "value": "Odebráním zařízení ho odhlásíte a jeho klíč přestane fungovat. Odhlášení relace zařízení neodebere: znovu se přihlásí svým klíčem."
+    }
+  ],
+  "web.settings.appKeys.loadFailed": [
+    {
+      "type": 0,
+      "value": "Vaše zařízení se nepodařilo načíst."
+    }
+  ],
+  "web.settings.appKeys.loading": [
+    {
+      "type": 0,
+      "value": "Načítání zařízení…"
+    }
+  ],
+  "web.settings.appKeys.off": [
+    {
+      "type": 0,
+      "value": "Přihlašování přes aplikaci Silo je na tomto serveru vypnuté, takže se tato zařízení nemohou přihlásit a čekající zařízení nelze schválit. Stále je však můžete odebrat."
+    }
+  ],
+  "web.settings.appKeys.personKey.description": [
+    {
+      "type": 0,
+      "value": "Vaše aplikace Silo tento klíč používá k přidávání vašich nových zařízení. Nastaveno "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.settings.appKeys.personKey.none": [
+    {
+      "type": 0,
+      "value": "Žádný klíč účtu. Aplikace Silo ho nastaví, až příště přidáte zařízení během přihlášení."
+    }
+  ],
+  "web.settings.appKeys.personKey.title": [
+    {
+      "type": 0,
+      "value": "Klíč účtu"
+    }
+  ],
+  "web.settings.appKeys.pinDescription": [
+    {
+      "type": 0,
+      "value": "Pro schválení tohoto zařízení zadejte PIN hlavního profilu."
+    }
+  ],
+  "web.settings.appKeys.preapprovals.description": [
+    {
+      "type": 0,
+      "value": "Přihlášení schválená pro zařízení, které se ještě nepřipojilo."
+    }
+  ],
+  "web.settings.appKeys.preapprovals.loadFailed": [
+    {
+      "type": 0,
+      "value": "Předem schválená přihlášení se nepodařilo načíst."
+    }
+  ],
+  "web.settings.appKeys.preapprovals.title": [
+    {
+      "type": 0,
+      "value": "Schváleno předem"
+    }
+  ],
+  "web.settings.appKeys.refreshLabel": [
+    {
+      "type": 0,
+      "value": "Obnovit zařízení s aplikací Silo"
+    }
+  ],
+  "web.settings.appKeys.removed": [
+    {
+      "type": 0,
+      "value": "Zařízení "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " odebráno"
+    }
+  ],
+  "web.settings.appKeys.row.allowedBy": [
+    {
+      "type": 0,
+      "value": "Povolil uživatel "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "web.settings.appKeys.row.approve": [
+    {
+      "type": 0,
+      "value": "Schválit"
+    }
+  ],
+  "web.settings.appKeys.row.approveLabel": [
+    {
+      "type": 0,
+      "value": "Schválit zařízení "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.row.deny": [
+    {
+      "type": 0,
+      "value": "Zamítnout"
+    }
+  ],
+  "web.settings.appKeys.row.denyLabel": [
+    {
+      "type": 0,
+      "value": "Zamítnout zařízení "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.row.enrolledFrom": [
+    {
+      "type": 0,
+      "value": "Z adresy "
+    },
+    {
+      "type": 1,
+      "value": "address"
+    }
+  ],
+  "web.settings.appKeys.row.identityGone": [
+    {
+      "type": 0,
+      "value": "Nelze se přihlásit: jeho účet u poskytovatele přihlášení už není propojen"
+    }
+  ],
+  "web.settings.appKeys.row.kindApp": [
+    {
+      "type": 0,
+      "value": "Jiná aplikace"
+    }
+  ],
+  "web.settings.appKeys.row.kindDevice": [
+    {
+      "type": 0,
+      "value": "Aplikace Silo"
+    }
+  ],
+  "web.settings.appKeys.row.lastUsed": [
+    {
+      "type": 0,
+      "value": "Naposledy přihlášeno "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.settings.appKeys.row.notUsed": [
+    {
+      "type": 0,
+      "value": "Svým klíčem se zatím nepřihlásilo"
+    }
+  ],
+  "web.settings.appKeys.row.preapproval": [
+    {
+      "type": 0,
+      "value": "Schváleno předem · vyprší "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.settings.appKeys.row.provider": [
+    {
+      "type": 0,
+      "value": "Ověřeno u poskytovatele přihlášení"
+    }
+  ],
+  "web.settings.appKeys.row.remove": [
+    {
+      "type": 0,
+      "value": "Odebrat"
+    }
+  ],
+  "web.settings.appKeys.row.removeLabel": [
+    {
+      "type": 0,
+      "value": "Odebrat zařízení "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.row.viaAppCode": [
+    {
+      "type": 0,
+      "value": "Přidáno jednorázovým kódem z webové stránky serveru"
+    }
+  ],
+  "web.settings.appKeys.row.viaPersonKey": [
+    {
+      "type": 0,
+      "value": "Přidáno aplikací Silo na jiném zařízení"
+    }
+  ],
+  "web.settings.appKeys.row.viaSession": [
+    {
+      "type": 0,
+      "value": "Přidáno během přihlášení"
+    }
+  ],
+  "web.settings.appKeys.row.waitingUntil": [
+    {
+      "type": 0,
+      "value": "Čeká na schválení do "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.settings.appKeys.row.withdraw": [
+    {
+      "type": 0,
+      "value": "Odvolat"
+    }
+  ],
+  "web.settings.appKeys.row.withdrawLabel": [
+    {
+      "type": 0,
+      "value": "Odvolat schválení pro zařízení "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.signsBackIn": [
+    {
+      "type": 0,
+      "value": "Zařízení přihlášená přes aplikaci Silo se znovu přihlásí sama. Chcete-li to zastavit, "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "odeberte zařízení"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.settings.appKeys.title": [
+    {
+      "type": 0,
+      "value": "Zařízení s aplikací Silo"
+    }
+  ],
+  "web.settings.appKeys.unavailable": [
+    {
+      "type": 0,
+      "value": "Přihlašování přes aplikaci Silo není na tomto serveru k dispozici, takže se tato zařízení nemohou přihlásit. Stále je však můžete odebrat."
+    }
+  ],
+  "web.settings.appKeys.waiting.description": [
+    {
+      "type": 0,
+      "value": "Nové zařízení požádalo o přihlášení k vašemu účtu přes aplikaci Silo. Schvalte ho, jen pokud jde o vaše právě nastavené zařízení."
+    }
+  ],
+  "web.settings.appKeys.waiting.title": [
+    {
+      "type": 0,
+      "value": "Čeká na vaše schválení"
+    }
+  ],
+  "web.settings.appKeys.withdrawn": [
+    {
+      "type": 0,
+      "value": "Schválení odvoláno"
     }
   ],
   "web.settings.cardOverlay.adjust": [
@@ -164245,6 +166718,54 @@
       "value": "Jste offline, změnu se proto nepodařilo uložit"
     }
   ],
+  "web.settings.openInSilo.action": [
+    {
+      "type": 0,
+      "value": "Získat kód pro aplikaci Silo"
+    }
+  ],
+  "web.settings.openInSilo.codeInstructions": [
+    {
+      "type": 0,
+      "value": "V aplikaci Silo v telefonu nebo tabletu přidejte tento server podle jeho adresy a zadejte tento kód. Kdokoli s tímto kódem se může přihlásit k tomuto účtu, proto ho s nikým nesdílejte."
+    }
+  ],
+  "web.settings.openInSilo.codeTitle": [
+    {
+      "type": 0,
+      "value": "Kód pro aplikaci Silo"
+    }
+  ],
+  "web.settings.openInSilo.description": [
+    {
+      "type": 0,
+      "value": "Přihlaste aplikaci Silo v telefonu nebo tabletu k tomuto účtu bez hesla."
+    }
+  ],
+  "web.settings.openInSilo.loadFailed": [
+    {
+      "type": 0,
+      "value": "Nepodařilo se ověřit, zda tento prohlížeč může získat kód pro aplikaci Silo."
+    }
+  ],
+  "web.settings.openInSilo.mainProfileOnly": [
+    {
+      "type": 0,
+      "value": "Kód pro aplikaci Silo může získat pouze hlavní profil domácnosti. Přepněte se na něj a zkuste to znovu."
+    }
+  ],
+  "web.settings.openInSilo.pinDescription": [
+    {
+      "type": 0,
+      "value": "Pro získání kódu pro aplikaci Silo zadejte PIN hlavního profilu."
+    }
+  ],
+  "web.settings.openInSilo.title": [
+    {
+      "type": 0,
+      "value": "Aplikace Silo"
+    }
+  ],
   "web.settings.overlays.accent.amber": [
     {
       "type": 0,
@@ -167535,6 +170056,12 @@
       "value": "Přihlášeno"
     }
   ],
+  "web.settings.sessions.row.signsBackIn": [
+    {
+      "type": 0,
+      "value": "Toto zařízení se znovu přihlásí samo"
+    }
+  ],
   "web.settings.sessions.row.summary": [
     {
       "type": 8,
@@ -167621,6 +170148,24 @@
     {
       "type": 0,
       "value": "Nastavení"
+    }
+  ],
+  "web.settings.signInAgain.action": [
+    {
+      "type": 0,
+      "value": "Přihlásit se znovu"
+    }
+  ],
+  "web.settings.signInAgain.manageDevices": [
+    {
+      "type": 0,
+      "value": "Chcete-li spravovat svá zařízení, přihlaste se znovu"
+    }
+  ],
+  "web.settings.signInAgain.useApp": [
+    {
+      "type": 0,
+      "value": "Svá zařízení spravujte v aplikaci Silo."
     }
   ],
   "web.settings.signedInSessions.loadFailed": [

@@ -12,7 +12,7 @@ type Feature struct {
 	Feature   string `json:"feature" enum:"direct,engine,nat_mapping,nat_hairpin,ipv4,ipv6,port_mapping,reachability,socket_receive_buffer,socket_send_buffer,gso,gro,pmtu_fallback,cap_net_admin"`
 	Kind      string `json:"kind" enum:"local,network"`
 	State     string `json:"state" enum:"on,off,capped,fallback,degraded,unknown"`
-	Reason    string `json:"reason,omitempty" enum:"disabled,admin_off,kernel_unsupported,limit,force_failed,no_cap_net_admin,net_admin_dropped,unsupported_platform,probe_failed,not_available,no_gateway,gateway_unsupported,mapping_varies,not_measured,multiple_api_replicas,replica_census_unavailable,replica_lease_pending,replica_lease_held,udp_port_invalid,udp_port_bind_failed,engine_start_failed"`
+	Reason    string `json:"reason,omitempty" enum:"disabled,admin_off,kernel_unsupported,limit,force_failed,no_cap_net_admin,net_admin_dropped,unsupported_platform,probe_failed,not_available,no_gateway,gateway_unsupported,mapping_varies,not_measured,multiple_api_replicas,replica_census_unavailable,replica_lease_pending,replica_lease_held,udp_port_invalid,udp_port_bind_failed,engine_start_failed,state_store_unavailable"`
 	Requested string `json:"requested,omitempty"`
 	Granted   string `json:"granted,omitempty"`
 	Detail    string `json:"detail,omitempty"`

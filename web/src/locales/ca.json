@@ -215,6 +215,12 @@
       "value": "Això ja està vinculat a aquest compte."
     }
   ],
+  "error.app_code_invalid": [
+    {
+      "type": 0,
+      "value": "Aquest codi és desconegut, ja s’ha utilitzat o ha caducat. Obtén-ne un de nou a la pàgina del servidor."
+    }
+  ],
   "error.authentication_required": [
     {
       "type": 0,
@@ -333,6 +339,12 @@
     {
       "type": 0,
       "value": "Aquest valor és d’un tipus incorrecte."
+    }
+  ],
+  "error.field.key_enrolled": [
+    {
+      "type": 0,
+      "value": "Aquesta clau ja està en ús en aquest servidor."
     }
   ],
   "error.field.malformed_form": [
@@ -2554,6 +2566,30 @@
     {
       "type": 0,
       "value": "Automàtica"
+    }
+  ],
+  "settingsManifest.playback.connection_path.description": [
+    {
+      "type": 0,
+      "value": "L’opció Només directa continua utilitzant la connexió de xarxa local quan n’hi ha una de disponible."
+    }
+  ],
+  "settingsManifest.playback.connection_path.label": [
+    {
+      "type": 0,
+      "value": "Ruta de connexió"
+    }
+  ],
+  "settingsManifest.playback.connection_path.option.automatic": [
+    {
+      "type": 0,
+      "value": "Automàtica"
+    }
+  ],
+  "settingsManifest.playback.connection_path.option.direct_only": [
+    {
+      "type": 0,
+      "value": "Només directa"
     }
   ],
   "settingsManifest.playback.intro_skip_mode.description": [
@@ -25918,6 +25954,87 @@
       }
     }
   ],
+  "web.admin.common.adminUserSignIn.unlinkConfirm.text": [
+    {
+      "type": 5,
+      "value": "last_way",
+      "options": {
+        "yes": {
+          "value": [
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " ja no podrà iniciar la sessió amb aquest compte del proveïdor. "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " no podrà iniciar la sessió fins que defineixis una contrasenya o tornis a connectar un proveïdor."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " ja no podrà iniciar la sessió amb aquest compte del proveïdor."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 5,
+      "value": "keys",
+      "options": {
+        "yes": {
+          "value": [
+            {
+              "type": 0,
+              "value": " S’eliminaran les claus de l’aplicació Silo del compte "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " vinculades a aquest compte del proveïdor, i es tancarà la sessió en aquests dispositius."
+            }
+          ]
+        },
+        "unknown": {
+          "value": [
+            {
+              "type": 0,
+              "value": " S’eliminaran les claus de l’aplicació Silo del compte "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " vinculades a aquest compte del proveïdor, si n’hi ha, i es tancarà la sessió en aquests dispositius."
+            }
+          ]
+        },
+        "other": {
+          "value": []
+        }
+      }
+    }
+  ],
   "web.admin.common.adminUserSignIn.unlinkConfirm.title": [
     {
       "type": 0,
@@ -28390,6 +28507,18 @@
     {
       "type": 0,
       "value": "Crea les miniatures que mostren els reproductors en desplaçar-se per la barra de progrés, a l’emmagatzematge públic de recursos configurat. Els fitxers es processen en segon pla amb prioritat baixa. Si ho desactives, s’eliminen les previsualitzacions de la biblioteca."
+    }
+  ],
+  "web.admin.common.libraryEditor.advanced.trickplayGenerate": [
+    {
+      "type": 0,
+      "value": "Genera les previsualitzacions que falten amb FFmpeg"
+    }
+  ],
+  "web.admin.common.libraryEditor.advanced.trickplayGenerateDescription": [
+    {
+      "type": 0,
+      "value": "Primer s’utilitzen els fitxers associats .trickplay i .bif que hi hagi al costat dels fitxers multimèdia. Desactiva-ho per importar només els fitxers associats i ometre la generació amb FFmpeg."
     }
   ],
   "web.admin.common.libraryEditor.advanced.trickplayUnavailable": [
@@ -32912,6 +33041,52 @@
       "value": "Administració: usuaris"
     }
   ],
+  "web.admin.common.trickplay.badge.awaitingSidecarCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " a l’espera del fitxer associat"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " a l’espera del fitxer associat"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " a l’espera del fitxer associat"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.common.trickplay.badge.detail": [
     {
       "type": 0,
@@ -33078,6 +33253,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.common.trickplay.badge.sidecarsOnly": [
+    {
+      "type": 0,
+      "value": "només fitxers associats"
     }
   ],
   "web.admin.common.trickplay.badge.srDetail": [
@@ -33266,6 +33447,42 @@
     {
       "type": 0,
       "value": "Els reproductors mantenen les previsualitzacions actuals fins que les noves estiguin a punt."
+    }
+  ],
+  "web.admin.common.trickplay.sidecarStatus.awaiting_sidecar": [
+    {
+      "type": 0,
+      "value": "A l’espera del fitxer associat"
+    }
+  ],
+  "web.admin.common.trickplay.sidecarStatus.sidecar_invalid": [
+    {
+      "type": 0,
+      "value": "Fitxer associat no vàlid"
+    }
+  ],
+  "web.admin.common.trickplay.sidecarStatus.sidecar_stale": [
+    {
+      "type": 0,
+      "value": "Fitxer associat obsolet"
+    }
+  ],
+  "web.admin.common.trickplay.source.generated": [
+    {
+      "type": 0,
+      "value": "Generades"
+    }
+  ],
+  "web.admin.common.trickplay.source.sidecar_bif": [
+    {
+      "type": 0,
+      "value": "Fitxer associat (.bif)"
+    }
+  ],
+  "web.admin.common.trickplay.source.sidecar_trickplay": [
+    {
+      "type": 0,
+      "value": "Fitxer associat (.trickplay)"
     }
   ],
   "web.admin.common.trickplay.state.off": [
@@ -35330,7 +35547,7 @@
     },
     {
       "type": 0,
-      "value": ". Els altres dispositius del compte mantenen la sessió iniciada. El client pot tornar a iniciar la sessió amb la contrasenya del compte."
+      "value": ". Els altres dispositius del compte mantenen la sessió iniciada. El client pot tornar a iniciar la sessió."
     }
   ],
   "web.admin.dashboard.widgets.apiClients.confirmLabel": [
@@ -49096,6 +49313,12 @@
       "value": "Perfil"
     }
   ],
+  "web.admin.history.column.progress": [
+    {
+      "type": 0,
+      "value": "Progrés"
+    }
+  ],
   "web.admin.history.column.status": [
     {
       "type": 0,
@@ -49130,6 +49353,12 @@
     {
       "type": 0,
       "value": "Registres de la sessió"
+    }
+  ],
+  "web.admin.history.detail.backToPlay": [
+    {
+      "type": 0,
+      "value": "Torna a la reproducció combinada"
     }
   ],
   "web.admin.history.detail.column.delivered": [
@@ -49240,6 +49469,12 @@
       "value": "Temps de visualització"
     }
   ],
+  "web.admin.history.detail.inspectSitting": [
+    {
+      "type": 0,
+      "value": "Inspecciona"
+    }
+  ],
   "web.admin.history.detail.keyboardHint": [
     {
       "type": 0,
@@ -49324,6 +49559,12 @@
       "value": "Per què no s’ha reproduït directament"
     }
   ],
+  "web.admin.history.detail.section.sessions": [
+    {
+      "type": 0,
+      "value": "Sessions d’aquesta reproducció"
+    }
+  ],
   "web.admin.history.detail.section.streams": [
     {
       "type": 0,
@@ -49334,6 +49575,110 @@
     {
       "type": 0,
       "value": "Temps i progrés de visualització"
+    }
+  ],
+  "web.admin.history.detail.sessionsCapped": [
+    {
+      "type": 0,
+      "value": "Es mostren les "
+    },
+    {
+      "type": 1,
+      "value": "shown"
+    },
+    {
+      "type": 0,
+      "value": " primeres sessions d’un total de "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": " en aquesta reproducció."
+    }
+  ],
+  "web.admin.history.detail.sessionsNotice": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Aquesta reproducció té "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " sessió. Els detalls de transmissió, dispositiu i ruta que hi ha a continuació hi corresponen."
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Aquesta reproducció abasta "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " de sessions. Els detalls de transmissió, dispositiu i ruta que hi ha a continuació corresponen a la sessió principal; tria qualsevol sessió de sota per inspeccionar-la individualment."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Aquesta reproducció abasta "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " sessions. Els detalls de transmissió, dispositiu i ruta que hi ha a continuació corresponen a la sessió principal; tria qualsevol sessió de sota per inspeccionar-la individualment."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.ended": [
+    {
+      "type": 0,
+      "value": "Final"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.method": [
+    {
+      "type": 0,
+      "value": "Mètode"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.started": [
+    {
+      "type": 0,
+      "value": "Inici"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.watched": [
+    {
+      "type": 0,
+      "value": "Temps vist"
     }
   ],
   "web.admin.history.detail.subtitlesBurnIn": [
@@ -49562,6 +49907,12 @@
       "value": "Totes les xarxes"
     }
   ],
+  "web.admin.history.filter.allMediaTypes": [
+    {
+      "type": 0,
+      "value": "Tot el contingut"
+    }
+  ],
   "web.admin.history.filter.allMethods": [
     {
       "type": 0,
@@ -49598,6 +49949,24 @@
       "value": "Completades"
     }
   ],
+  "web.admin.history.filter.episodes": [
+    {
+      "type": 0,
+      "value": "Episodis"
+    }
+  ],
+  "web.admin.history.filter.hideShort": [
+    {
+      "type": 0,
+      "value": "Amaga <30 s"
+    }
+  ],
+  "web.admin.history.filter.hideShortTitle": [
+    {
+      "type": 0,
+      "value": "Amaga les sessions no acabades de menys de 30 segons"
+    }
+  ],
   "web.admin.history.filter.locationLocal": [
     {
       "type": 0,
@@ -49608,6 +49977,12 @@
     {
       "type": 0,
       "value": "Remota"
+    }
+  ],
+  "web.admin.history.filter.movies": [
+    {
+      "type": 0,
+      "value": "Pel·lícules"
     }
   ],
   "web.admin.history.filter.partial": [
@@ -49835,6 +50210,12 @@
       "value": "Reproduccions recents"
     }
   ],
+  "web.admin.history.row.burnInBadgeTitle": [
+    {
+      "type": 0,
+      "value": "Subtítols incrustats al vídeo"
+    }
+  ],
   "web.admin.history.row.completed": [
     {
       "type": 0,
@@ -49855,6 +50236,64 @@
     {
       "type": 0,
       "value": "Estimat (registrat abans que es fes el seguiment del temps de visualització exacte)"
+    }
+  ],
+  "web.admin.history.row.groupedSessionsTitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Combinada a partir de "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " sessió"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Combinada a partir de "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " de sessions"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Combinada a partir de "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " sessions"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.history.row.meta": [
@@ -49887,6 +50326,12 @@
       "value": "Parcial"
     }
   ],
+  "web.admin.history.row.progressLabel": [
+    {
+      "type": 0,
+      "value": "Progrés de reproducció"
+    }
+  ],
   "web.admin.history.row.started": [
     {
       "type": 0,
@@ -49897,16 +50342,104 @@
       "value": "time"
     }
   ],
+  "web.admin.history.stats.accountsCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " compte"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " de comptes"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " comptes"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.history.stats.completed": [
     {
       "type": 0,
       "value": "Completades"
     }
   ],
+  "web.admin.history.stats.completionBreakdown": [
+    {
+      "type": 0,
+      "value": "Completades: "
+    },
+    {
+      "type": 1,
+      "value": "completed"
+    },
+    {
+      "type": 0,
+      "value": " · Parcials: "
+    },
+    {
+      "type": 1,
+      "value": "partial"
+    }
+  ],
   "web.admin.history.stats.partial": [
     {
       "type": 0,
       "value": "Parcials"
+    }
+  ],
+  "web.admin.history.stats.totalPlays": [
+    {
+      "type": 0,
+      "value": "Total de reproduccions"
+    }
+  ],
+  "web.admin.history.stats.totalSessions": [
+    {
+      "type": 0,
+      "value": "Total de sessions"
+    }
+  ],
+  "web.admin.history.stats.uniqueProfiles": [
+    {
+      "type": 0,
+      "value": "Perfils únics"
+    }
+  ],
+  "web.admin.history.stats.uniqueTitles": [
+    {
+      "type": 0,
+      "value": "Títols únics"
     }
   ],
   "web.admin.history.stats.visibleRows": [
@@ -49925,6 +50458,24 @@
     {
       "type": 0,
       "value": "Historial de reproducció"
+    }
+  ],
+  "web.admin.history.view.label": [
+    {
+      "type": 0,
+      "value": "Vista de l’historial"
+    }
+  ],
+  "web.admin.history.view.plays": [
+    {
+      "type": 0,
+      "value": "Reproduccions"
+    }
+  ],
+  "web.admin.history.view.sessions": [
+    {
+      "type": 0,
+      "value": "Totes les sessions"
     }
   ],
   "web.admin.historyImport.conflict.message": [
@@ -94393,6 +94944,226 @@
       "value": "count"
     }
   ],
+  "web.admin.users.detail.appKeys.confirm.denyDescription": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " no podrà iniciar la sessió al compte "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": ". Si era un dispositiu seu, el pot tornar a afegir a l’aplicació Silo."
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKey": [
+    {
+      "type": 0,
+      "value": "Elimina la clau"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKeyDescription": [
+    {
+      "type": 0,
+      "value": "Els dispositius que ja han iniciat la sessió continuen funcionant fins que els eliminis. No es podrà afegir cap dispositiu nou amb aquesta clau, i es rebutjaran els dispositius que hagi afegit i que encara estiguin en espera. L’aplicació Silo del compte "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " configurarà una clau nova la propera vegada que s’afegeixi un dispositiu amb la sessió iniciada."
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKeyTitle": [
+    {
+      "type": 0,
+      "value": "Vols eliminar la clau del compte "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.removeDescription": [
+    {
+      "type": 0,
+      "value": "Si elimines el dispositiu "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": ", se’n tancarà ara la sessió al compte "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " i se’n desactivarà la clau: no podrà tornar a iniciar la sessió amb aquesta clau. Per tornar-lo a utilitzar, "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " l’ha de tornar a afegir a l’aplicació Silo."
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.withdrawDescription": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " no podrà utilitzar aquesta aprovació per iniciar la sessió al compte "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.detail.appKeys.description": [
+    {
+      "type": 0,
+      "value": "Dispositius i aplicacions que inicien la sessió al compte "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " amb l’aplicació Silo, sense contrasenya."
+    }
+  ],
+  "web.admin.users.detail.appKeys.empty": [
+    {
+      "type": 0,
+      "value": "Cap dispositiu utilitza l’aplicació Silo en aquest compte."
+    }
+  ],
+  "web.admin.users.detail.appKeys.loadFailed": [
+    {
+      "type": 0,
+      "value": "No s’han pogut carregar els dispositius."
+    }
+  ],
+  "web.admin.users.detail.appKeys.off": [
+    {
+      "type": 0,
+      "value": "L’inici de sessió amb l’aplicació Silo està desactivat en aquest servidor, així que aquests dispositius no poden iniciar la sessió. Encara els pots eliminar."
+    }
+  ],
+  "web.admin.users.detail.appKeys.ownerOnly": [
+    {
+      "type": 0,
+      "value": "Només el propietari del servidor pot canviar els dispositius d’un altre administrador o del propietari."
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.description": [
+    {
+      "type": 0,
+      "value": "L’aplicació Silo utilitza aquesta clau per afegir dispositius nous del compte "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": ". Data de configuració: "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.none": [
+    {
+      "type": 0,
+      "value": "No hi ha cap clau del compte. L’aplicació Silo del compte "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " en configurarà una la propera vegada que s’afegeixi un dispositiu amb la sessió iniciada."
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.remove": [
+    {
+      "type": 0,
+      "value": "Elimina la clau del compte"
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKeyRemoved": [
+    {
+      "type": 0,
+      "value": "S’ha eliminat la clau del compte"
+    }
+  ],
+  "web.admin.users.detail.appKeys.preapprovals.description": [
+    {
+      "type": 0,
+      "value": "Inicis de sessió que "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " ha aprovat per a un dispositiu que encara no s’ha connectat."
+    }
+  ],
+  "web.admin.users.detail.appKeys.waiting.description": [
+    {
+      "type": 0,
+      "value": "Un dispositiu nou en un compte d’administrador espera fins que "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " l’aprovi des d’un dispositiu on tingui la sessió iniciada. Aquí el pots rebutjar."
+    }
+  ],
+  "web.admin.users.detail.appKeys.waiting.title": [
+    {
+      "type": 0,
+      "value": "Pendent d’aprovació"
+    }
+  ],
   "web.admin.users.detail.common.allProfiles": [
     {
       "type": 0,
@@ -98225,6 +98996,12 @@
       "value": "El compte ha arribat al límit de perfils"
     }
   ],
+  "web.admin.users.detail.profiles.badge.changedHere": [
+    {
+      "type": 0,
+      "value": "Canviat aquí"
+    }
+  ],
   "web.admin.users.detail.profiles.badge.kids": [
     {
       "type": 0,
@@ -98422,6 +99199,652 @@
     {
       "type": 0,
       "value": "Desa el PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowAgain": [
+    {
+      "type": 0,
+      "value": "Torna a permetre"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowAgainAria": [
+    {
+      "type": 0,
+      "value": "Permet que el perfil "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " torni a aparèixer en aquest servidor"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowDescription": [
+    {
+      "type": 0,
+      "value": "La seva aplicació pot tornar a afegir el perfil "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " la propera vegada que se sincronitzi, com a perfil nou sense l’historial que tenia en aquest servidor, si els seus perfils encara inclouen el perfil "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " i aquest compte té espai per a un altre perfil."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowTitle": [
+    {
+      "type": 0,
+      "value": "Vols tornar a permetre el perfil "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.alreadyCleared": [
+    {
+      "type": 0,
+      "value": "Aquest canvi ja s’havia esborrat, o "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " l’ha tornat a canviar. La llista està actualitzada."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedBy": [
+    {
+      "type": 0,
+      "value": "Canviat per "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " en data "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedSinceOpened": [
+    {
+      "type": 0,
+      "value": "Aquest canvi s’ha actualitzat després que l’obrissis, així que no s’ha esborrat res. Torna’l a llegir a la llista i, després, esborra’l si encara vols fer-ho."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedWhileRunning": [
+    {
+      "type": 0,
+      "value": "Els perfils han canviat mentre s’executava l’acció, així que no s’ha canviat res. La llista està actualitzada; torna-ho a provar si encara vols fer-ho."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clear": [
+    {
+      "type": 0,
+      "value": "Esborra"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearAndRemovePin": [
+    {
+      "type": 0,
+      "value": "Esborra i treu el PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearAria": [
+    {
+      "type": 0,
+      "value": "Esborra el canvi al camp "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " del perfil "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearFailed": [
+    {
+      "type": 0,
+      "value": "No s’ha pogut esborrar el canvi."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearInherit": [
+    {
+      "type": 0,
+      "value": "El camp "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " del perfil "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " torna al valor que hereta ara, tal com demana la seva aplicació. Els canvis de la seva aplicació s’hi tornen a aplicar."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearLater": [
+    {
+      "type": 0,
+      "value": "El camp "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " es manté tal com està fins que la seva aplicació el torni a enviar. Després, els canvis de la seva aplicació s’hi tornen a aplicar."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearNow": [
+    {
+      "type": 0,
+      "value": "El perfil "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " torna ara al valor de la seva aplicació, i els canvis de la seva aplicació s’hi tornen a aplicar."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearNowValue": [
+    {
+      "type": 0,
+      "value": "El camp "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " del perfil "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " torna ara a "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": ", el valor de la seva aplicació. Els canvis de la seva aplicació s’hi tornen a aplicar."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearPin": [
+    {
+      "type": 0,
+      "value": "El perfil "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " conserva el PIN que has definit fins que la seva aplicació n’enviï un. Després, els canvis de la seva aplicació s’hi tornen a aplicar."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearPinRemoves": [
+    {
+      "type": 0,
+      "value": "La seva aplicació envia el perfil "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " sense PIN, així que, en esborrar el canvi, es treu ara el PIN que has definit. Llavors, qualsevol persona que utilitzi aquest compte podrà obrir el perfil "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " sense PIN."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearTitle": [
+    {
+      "type": 0,
+      "value": "Vols esborrar el canvi al camp "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " del perfil "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.deletedAccount": [
+    {
+      "type": 0,
+      "value": "un compte eliminat"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.description": [
+    {
+      "type": 0,
+      "value": "Aquests perfils provenen de l’aplicació de l’usuari "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ". Un canvi que facis aquí es manté en aquest servidor fins que l’esborris. No és un bloqueig: "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " també pot canviar el mateix aquí."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismiss": [
+    {
+      "type": 0,
+      "value": "Descarta"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismissAria": [
+    {
+      "type": 0,
+      "value": "Descarta la nota sobre el camp "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " del perfil "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismissFailed": [
+    {
+      "type": 0,
+      "value": "No s’ha pogut descartar la nota."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.isChild": [
+    {
+      "type": 0,
+      "value": "Perfil infantil"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.maxAdvisoryAge": [
+    {
+      "type": 0,
+      "value": "Límit d’edat"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.maxContentRating": [
+    {
+      "type": 0,
+      "value": "Límit de qualificació del contingut"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.name": [
+    {
+      "type": 0,
+      "value": "Nom"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.picture": [
+    {
+      "type": 0,
+      "value": "Imatge"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.pin": [
+    {
+      "type": 0,
+      "value": "PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.requests": [
+    {
+      "type": 0,
+      "value": "Sol·licituds"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.requireAdvisoryAge": [
+    {
+      "type": 0,
+      "value": "Qualificació per edats obligatòria"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.fieldValue": [
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.hidden": [
+    {
+      "type": 0,
+      "value": "Eliminat en aquest servidor per "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " en data "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": ". La seva aplicació no el tornarà a afegir fins que ho permetis."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.loadFailed": [
+    {
+      "type": 0,
+      "value": "No s’han pogut carregar els canvis fets en aquest servidor."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.nameTaken": [
+    {
+      "type": 0,
+      "value": "El perfil "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " no pot tornar al nom "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " de la seva aplicació perquè un altre perfil d’aquí ja té aquest nom. Primer canvia el nom d’aquell perfil i després torna a esborrar aquest canvi."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeHiddenNextSync": [
+    {
+      "type": 0,
+      "value": "El perfil "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " pot tornar la propera vegada que l’aplicació de l’usuari "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " se sincronitzi, si els seus perfils encara l’inclouen."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeHiddenWoken": [
+    {
+      "type": 0,
+      "value": "El perfil "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " pot tornar quan la seva aplicació se sincronitzi, si els seus perfils encara l’inclouen. S’ha demanat al telèfon de l’usuari "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " que se sincronitzi."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeNextSync": [
+    {
+      "type": 0,
+      "value": "S’ha esborrat. Arribarà a l’aplicació de l’usuari "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " la propera vegada que se sincronitzi."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeWoken": [
+    {
+      "type": 0,
+      "value": "S’ha esborrat. S’ha demanat al telèfon de l’usuari "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " que se sincronitzi."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.removedBy": [
+    {
+      "type": 0,
+      "value": "Eliminat per "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " en data "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.replacedOwner": [
+    {
+      "type": 0,
+      "value": "Això ha substituït el valor que havies definit."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.setBy": [
+    {
+      "type": 0,
+      "value": "Definit per "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " en data "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.settled": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " ho ha canviat en data "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "; el valor que havies definit ja no s’aplica."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.title": [
+    {
+      "type": 0,
+      "value": "Canvis en aquest servidor"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.inherited": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (valor heretat)"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.noPicture": [
+    {
+      "type": 0,
+      "value": "Sense imatge"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.none": [
+    {
+      "type": 0,
+      "value": "Cap"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.off": [
+    {
+      "type": 0,
+      "value": "Desactivat"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.on": [
+    {
+      "type": 0,
+      "value": "Activat"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.picture": [
+    {
+      "type": 0,
+      "value": "Imatge personalitzada"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.pinNone": [
+    {
+      "type": 0,
+      "value": "Sense PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.pinSet": [
+    {
+      "type": 0,
+      "value": "PIN definit"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.requestsAllowed": [
+    {
+      "type": 0,
+      "value": "Permeses"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.requestsBlocked": [
+    {
+      "type": 0,
+      "value": "Bloquejades"
     }
   ],
   "web.admin.users.detail.profiles.setPin": [
@@ -99683,6 +101106,144 @@
     {
       "type": 0,
       "value": "Defineix una contrasenya"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.action": [
+    {
+      "type": 0,
+      "value": "Crea un enllaç d’inici de sessió"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.actionHint": [
+    {
+      "type": 0,
+      "value": "Ha perdut tots els dispositius"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.description": [
+    {
+      "type": 0,
+      "value": "Un enllaç d’un sol ús per a l’usuari "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " si ha perdut tots els dispositius. Obre una pàgina que li dona un codi per a l’aplicació Silo o li permet triar una contrasenya. Funciona durant 24 hores, i un enllaç nou substitueix l’anterior."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailAction": [
+    {
+      "type": 0,
+      "value": "Envia’l per correu"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHint": [
+    {
+      "type": 0,
+      "value": "Crea l’enllaç per copiar-lo i enviar-lo per altres mitjans, o envia’l per correu a "
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHintNoAddress": [
+    {
+      "type": 0,
+      "value": "Crea l’enllaç i, després, copia’l i envia’l per altres mitjans. Aquest compte no té cap adreça electrònica on enviar-lo."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHintNoMail": [
+    {
+      "type": 0,
+      "value": "Crea l’enllaç i, després, copia’l i envia’l per altres mitjans. Configura el correu electrònic a Configuració per enviar-lo des d’aquí."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailSent": [
+    {
+      "type": 0,
+      "value": "S’ha enviat l’enllaç a "
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": ". Caduca: "
+    },
+    {
+      "type": 1,
+      "value": "expires"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailUnconfirmed": [
+    {
+      "type": 0,
+      "value": "El servidor de correu no ha confirmat el lliurament. L’enllaç de sota continua funcionant: copia’l i envia’l per un altre mitjà."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.failed": [
+    {
+      "type": 0,
+      "value": "No s’ha pogut crear un enllaç d’inici de sessió."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.linkShare": [
+    {
+      "type": 0,
+      "value": "Envia aquest enllaç només a "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": ". Qualsevol persona que el tingui pot iniciar la sessió en aquest compte fins que s’utilitzi o caduqui (data de caducitat: "
+    },
+    {
+      "type": 1,
+      "value": "expires"
+    },
+    {
+      "type": 0,
+      "value": ")."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.providerRequired": [
+    {
+      "type": 0,
+      "value": "L’inici de sessió amb contrasenya local està desactivat en aquest servidor, així que un enllaç d’inici de sessió ometria el seu proveïdor d’inici de sessió. Demana a "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " que iniciï la sessió amb el proveïdor al lloc web d’aquest servidor i que després utilitzi Obre a Silo a la configuració del compte."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.title": [
+    {
+      "type": 0,
+      "value": "Enllaç d’inici de sessió per a "
+    },
+    {
+      "type": 1,
+      "value": "username"
     }
   ],
   "web.audiobooks.chapter.fallbackTitle": [
@@ -101742,6 +103303,120 @@
       "value": "Aprova l’inici de sessió"
     }
   ],
+  "web.auth.appCode.code": [
+    {
+      "type": 0,
+      "value": "Codi"
+    }
+  ],
+  "web.auth.appCode.codeCopied": [
+    {
+      "type": 0,
+      "value": "S’ha copiat el codi"
+    }
+  ],
+  "web.auth.appCode.copyCode": [
+    {
+      "type": 0,
+      "value": "Copia el codi"
+    }
+  ],
+  "web.auth.appCode.copyFailed": [
+    {
+      "type": 0,
+      "value": "No s’ha pogut copiar el codi. Selecciona’l i copia’l a mà."
+    }
+  ],
+  "web.auth.appCode.expired": [
+    {
+      "type": 0,
+      "value": "Aquest codi ha caducat."
+    }
+  ],
+  "web.auth.appCode.failed": [
+    {
+      "type": 0,
+      "value": "Silo no ha pogut generar cap codi. Torna-ho a provar."
+    }
+  ],
+  "web.auth.appCode.instructions": [
+    {
+      "type": 0,
+      "value": "Prem Obre Silo per continuar a l’aplicació Silo en aquest dispositiu. Si l’aplicació no està instal·lada, instal·la-la, torna a aquesta pestanya i torna a prémer Obre Silo."
+    }
+  ],
+  "web.auth.appCode.noScanCode": [
+    {
+      "type": 0,
+      "value": "L’adreça d’aquest servidor és massa llarga per a un codi per escanejar. Escriu l’adreça del servidor i el codi a l’aplicació Silo, o copia el codi i enganxa’l allà."
+    }
+  ],
+  "web.auth.appCode.open": [
+    {
+      "type": 0,
+      "value": "Obre Silo"
+    }
+  ],
+  "web.auth.appCode.renew": [
+    {
+      "type": 0,
+      "value": "Obtén un codi nou"
+    }
+  ],
+  "web.auth.appCode.scanCodeLabel": [
+    {
+      "type": 0,
+      "value": "Codi per escanejar amb l’aplicació Silo"
+    }
+  ],
+  "web.auth.appCode.scanCodeUnavailable": [
+    {
+      "type": 0,
+      "value": "No es pot mostrar cap codi per escanejar per a aquest servidor. Escriu l’adreça del servidor i el codi a l’aplicació Silo, o copia el codi i enganxa’l allà."
+    }
+  ],
+  "web.auth.appCode.scanHint": [
+    {
+      "type": 0,
+      "value": "Escaneja’l amb l’escàner de l’aplicació Silo, o escriu o copia l’adreça del servidor i el codi que hi ha a sota."
+    }
+  ],
+  "web.auth.appCode.serverAddress": [
+    {
+      "type": 0,
+      "value": "Adreça del servidor"
+    }
+  ],
+  "web.auth.appCode.singleUse": [
+    {
+      "type": 0,
+      "value": "Aquest codi funciona una sola vegada i caduca al cap d’uns minuts."
+    }
+  ],
+  "web.auth.appCode.title": [
+    {
+      "type": 0,
+      "value": "Obre Silo"
+    }
+  ],
+  "web.auth.appCode.typeInstructions": [
+    {
+      "type": 0,
+      "value": "A l’aplicació Silo del telèfon o la tauleta, afegeix aquest servidor amb la seva adreça i escriu aquest codi per crear el compte. Qualsevol persona que tingui el codi pot unir-se en lloc teu, així que no el comparteixis."
+    }
+  ],
+  "web.auth.appCode.typeTitle": [
+    {
+      "type": 0,
+      "value": "Uneix-te amb aquest codi"
+    }
+  ],
+  "web.auth.appCode.webLink": [
+    {
+      "type": 0,
+      "value": "Obre amb l’enllaç de siloserver.org en lloc d’això"
+    }
+  ],
   "web.auth.card.rememberedIt": [
     {
       "type": 0,
@@ -101944,10 +103619,46 @@
       ]
     }
   ],
+  "web.auth.invite.appAccountEmail": [
+    {
+      "type": 0,
+      "value": "El compte utilitzarà "
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.auth.invite.appContinue": [
+    {
+      "type": 0,
+      "value": "Continua"
+    }
+  ],
+  "web.auth.invite.appEmailHint": [
+    {
+      "type": 0,
+      "value": "Amb una adreça electrònica, aquest servidor et pot enviar un enllaç d’inici de sessió si perds els dispositius."
+    }
+  ],
   "web.auth.invite.appMissing": [
     {
       "type": 0,
       "value": "No passa res? L’aplicació no està instal·lada — continua aquí sota."
+    }
+  ],
+  "web.auth.invite.appProviderOnly": [
+    {
+      "type": 1,
+      "value": "server"
+    },
+    {
+      "type": 0,
+      "value": " afegeix persones mitjançant el seu proveïdor d’inici de sessió. Inicia la sessió amb aquest proveïdor en aquest lloc web i després obre Silo des de la Configuració del compte."
     }
   ],
   "web.auth.invite.created": [
@@ -101976,6 +103687,18 @@
       "value": "Introdueix l’adreça electrònica i tria una contrasenya. Per iniciar la sessió, utilitzaràs la teva adreça electrònica."
     }
   ],
+  "web.auth.invite.descriptionWithApp": [
+    {
+      "type": 0,
+      "value": "Uneix-te amb l’aplicació Silo al telèfon o la tauleta, o tria una contrasenya per iniciar la sessió."
+    }
+  ],
+  "web.auth.invite.emailOptional": [
+    {
+      "type": 0,
+      "value": "Adreça electrònica (opcional)"
+    }
+  ],
   "web.auth.invite.emailPlaceholder": [
     {
       "type": 0,
@@ -101996,6 +103719,18 @@
     {
       "type": 0,
       "value": " t’ha convidat"
+    }
+  ],
+  "web.auth.invite.joinWithApp": [
+    {
+      "type": 0,
+      "value": "Uneix-te amb l’aplicació Silo"
+    }
+  ],
+  "web.auth.invite.joinWithAppInstead": [
+    {
+      "type": 0,
+      "value": "Uneix-te amb l’aplicació Silo en lloc d’això"
     }
   ],
   "web.auth.invite.loadFailed": [
@@ -102096,6 +103831,30 @@
     {
       "type": 0,
       "value": "Invitació no disponible"
+    }
+  ],
+  "web.auth.invite.usePassword": [
+    {
+      "type": 0,
+      "value": "Utilitza una contrasenya en lloc d’això"
+    }
+  ],
+  "web.auth.invite.usernameIsAddress": [
+    {
+      "type": 0,
+      "value": "Un nom d’usuari amb @ ha de ser l’adreça electrònica que introdueixis a sota."
+    }
+  ],
+  "web.auth.invite.usernameRequired": [
+    {
+      "type": 0,
+      "value": "Tria un nom d’usuari."
+    }
+  ],
+  "web.auth.invite.usernameTaken": [
+    {
+      "type": 0,
+      "value": "Aquest nom d’usuari ja està en ús. Tria’n un altre."
     }
   ],
   "web.auth.languagePicker.label": [
@@ -103102,6 +104861,126 @@
     {
       "type": 0,
       "value": "Inicia la sessió"
+    }
+  ],
+  "web.auth.signInLink.backToCode": [
+    {
+      "type": 0,
+      "value": "Torna al codi"
+    }
+  ],
+  "web.auth.signInLink.codeExpired": [
+    {
+      "type": 0,
+      "value": "Demana un enllaç nou a un administrador d’aquest servidor per obtenir un altre codi."
+    }
+  ],
+  "web.auth.signInLink.documentTitle": [
+    {
+      "type": 0,
+      "value": "Enllaç d’inici de sessió"
+    }
+  ],
+  "web.auth.signInLink.failed": [
+    {
+      "type": 0,
+      "value": "Silo no ha pogut obrir aquest enllaç. Torna-ho a provar."
+    }
+  ],
+  "web.auth.signInLink.installFirst": [
+    {
+      "type": 0,
+      "value": "L’enllaç funciona una sola vegada i el codi dura uns minuts. Primer instal·la l’aplicació Silo al telèfon o la tauleta i després prem Continua."
+    }
+  ],
+  "web.auth.signInLink.intro": [
+    {
+      "type": 0,
+      "value": "Un administrador t’ha enviat aquest enllaç perquè puguis tornar a iniciar la sessió. Continua per obtenir un codi per a l’aplicació Silo o per triar una contrasenya."
+    }
+  ],
+  "web.auth.signInLink.keepOpen": [
+    {
+      "type": 0,
+      "value": "Mantén aquesta pàgina oberta fins que acabis. L’enllaç ja s’ha utilitzat, de manera que si tornes a carregar la pàgina o en surts, perdràs el que t’ha donat."
+    }
+  ],
+  "web.auth.signInLink.leaveAction": [
+    {
+      "type": 0,
+      "value": "Surt"
+    }
+  ],
+  "web.auth.signInLink.leaveDescription": [
+    {
+      "type": 0,
+      "value": "L’enllaç ja s’ha utilitzat. Si en surts, perdràs el codi per a l’aplicació Silo i la possibilitat de definir una contrasenya, i necessitaràs un enllaç nou."
+    }
+  ],
+  "web.auth.signInLink.leaveTitle": [
+    {
+      "type": 0,
+      "value": "Vols sortir d’aquesta pàgina?"
+    }
+  ],
+  "web.auth.signInLink.noCodeAdministrator": [
+    {
+      "type": 0,
+      "value": "Aquest és un compte d’administrador, de manera que aquest enllaç només defineix una contrasenya. Defineix-ne una, inicia la sessió al lloc web d’aquest servidor i després obre l’aplicació Silo des de la Configuració del compte d’aquell lloc web."
+    }
+  ],
+  "web.auth.signInLink.noCodeAppKeysOff": [
+    {
+      "type": 0,
+      "value": "Ara mateix l’aplicació Silo no pot iniciar la sessió en aquest servidor, de manera que aquest enllaç només defineix una contrasenya."
+    }
+  ],
+  "web.auth.signInLink.passwordDescription": [
+    {
+      "type": 0,
+      "value": "En desar, es tanca la sessió d’aquest compte a tots els dispositius. Els dispositius que han iniciat la sessió amb l’aplicació Silo la tornen a iniciar automàticament."
+    }
+  ],
+  "web.auth.signInLink.passwordSet": [
+    {
+      "type": 0,
+      "value": "S’ha desat la contrasenya. Inicia la sessió amb aquesta contrasenya."
+    }
+  ],
+  "web.auth.signInLink.passwordSetLostDevices": [
+    {
+      "type": 0,
+      "value": "Els dispositius perduts que utilitzaven l’aplicació Silo poden continuar iniciant la sessió fins que els treguis. Quan hagis iniciat la sessió, treu-los de la llista de dispositius a la Configuració del compte."
+    }
+  ],
+  "web.auth.signInLink.passwordTitle": [
+    {
+      "type": 0,
+      "value": "Tria una contrasenya"
+    }
+  ],
+  "web.auth.signInLink.providerRequired": [
+    {
+      "type": 0,
+      "value": "Aquest servidor fa iniciar la sessió mitjançant el seu proveïdor d’inici de sessió, de manera que aquest enllaç no funciona. Inicia la sessió amb el proveïdor."
+    }
+  ],
+  "web.auth.signInLink.setPasswordInstead": [
+    {
+      "type": 0,
+      "value": "Defineix una contrasenya en lloc d’això"
+    }
+  ],
+  "web.auth.signInLink.title": [
+    {
+      "type": 0,
+      "value": "Torna a accedir al compte"
+    }
+  ],
+  "web.auth.signInLink.unavailable": [
+    {
+      "type": 0,
+      "value": "Aquest enllaç ja s’ha utilitzat, s’ha substituït per un de més recent o ha caducat. Demana’n un de nou a un administrador d’aquest servidor."
     }
   ],
   "web.auth.signup.closed": [
@@ -145798,7 +147677,7 @@
   "web.settings.account.password.signOutOthersDescription": [
     {
       "type": 0,
-      "value": "Els altres navegadors i aplicacions hauran de tornar a iniciar la sessió amb la contrasenya nova. Aquest navegador manté la sessió iniciada i les claus d’API continuen funcionant."
+      "value": "Es tanca la sessió als altres navegadors i aplicacions. Aquest navegador manté la sessió iniciada i les claus d’API continuen funcionant."
     }
   ],
   "web.settings.account.password.title": [
@@ -146663,6 +148542,500 @@
     {
       "type": 0,
       "value": "Com s’utilitza aquesta clau"
+    }
+  ],
+  "web.settings.appKeys.actionFailed": [
+    {
+      "type": 0,
+      "value": "No s’ha pogut fer aquest canvi. Torna-ho a provar."
+    }
+  ],
+  "web.settings.appKeys.approveMainOnly": [
+    {
+      "type": 0,
+      "value": "Només el perfil principal de la llar pot aprovar un dispositiu. Canvia-hi per aprovar-lo."
+    }
+  ],
+  "web.settings.appKeys.approved": [
+    {
+      "type": 0,
+      "value": "S’ha aprovat el dispositiu "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.confirm.approve": [
+    {
+      "type": 0,
+      "value": "Aprova el dispositiu"
+    }
+  ],
+  "web.settings.appKeys.confirm.approveDescription": [
+    {
+      "type": 0,
+      "value": "El dispositiu "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " podrà iniciar la sessió al teu compte amb l’aplicació Silo fins que el treguis. Aprova’l només si l’acabes de configurar."
+    }
+  ],
+  "web.settings.appKeys.confirm.approveTitle": [
+    {
+      "type": 0,
+      "value": "Vols aprovar el dispositiu "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.settings.appKeys.confirm.deny": [
+    {
+      "type": 0,
+      "value": "Rebutja el dispositiu"
+    }
+  ],
+  "web.settings.appKeys.confirm.denyDescription": [
+    {
+      "type": 0,
+      "value": "El dispositiu "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " no podrà iniciar la sessió al teu compte. Si era teu, torna’l a afegir a l’aplicació Silo."
+    }
+  ],
+  "web.settings.appKeys.confirm.denyTitle": [
+    {
+      "type": 0,
+      "value": "Vols rebutjar el dispositiu "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.settings.appKeys.confirm.remove": [
+    {
+      "type": 0,
+      "value": "Treu el dispositiu"
+    }
+  ],
+  "web.settings.appKeys.confirm.removeDescription": [
+    {
+      "type": 0,
+      "value": "Si treus el dispositiu "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": ", se’n tancarà la sessió ara i la seva clau deixarà de funcionar: no podrà tornar a iniciar la sessió amb aquesta clau. Per tornar-lo a utilitzar, torna’l a afegir a l’aplicació Silo."
+    }
+  ],
+  "web.settings.appKeys.confirm.removeTitle": [
+    {
+      "type": 0,
+      "value": "Vols treure el dispositiu "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.settings.appKeys.confirm.withdraw": [
+    {
+      "type": 0,
+      "value": "Retira l’aprovació"
+    }
+  ],
+  "web.settings.appKeys.confirm.withdrawDescription": [
+    {
+      "type": 0,
+      "value": "El dispositiu "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " no podrà utilitzar aquesta aprovació per iniciar la sessió al teu compte."
+    }
+  ],
+  "web.settings.appKeys.confirm.withdrawTitle": [
+    {
+      "type": 0,
+      "value": "Vols retirar l’aprovació del dispositiu "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.settings.appKeys.confirm.working": [
+    {
+      "type": 0,
+      "value": "S’està desant…"
+    }
+  ],
+  "web.settings.appKeys.denied": [
+    {
+      "type": 0,
+      "value": "S’ha rebutjat el dispositiu "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.description": [
+    {
+      "type": 0,
+      "value": "Dispositius i aplicacions que inicien la sessió al teu compte amb l’aplicació Silo, sense contrasenya."
+    }
+  ],
+  "web.settings.appKeys.devices.title": [
+    {
+      "type": 0,
+      "value": "Dispositius"
+    }
+  ],
+  "web.settings.appKeys.empty": [
+    {
+      "type": 0,
+      "value": "Cap dispositiu utilitza l’aplicació Silo al teu compte."
+    }
+  ],
+  "web.settings.appKeys.footnote": [
+    {
+      "type": 0,
+      "value": "Si treus un dispositiu, se’n tanca la sessió i la seva clau deixa de funcionar. Tancar una sessió no treu el dispositiu: torna a iniciar la sessió amb la seva clau."
+    }
+  ],
+  "web.settings.appKeys.loadFailed": [
+    {
+      "type": 0,
+      "value": "No s’han pogut carregar els teus dispositius."
+    }
+  ],
+  "web.settings.appKeys.loading": [
+    {
+      "type": 0,
+      "value": "S’estan carregant els dispositius…"
+    }
+  ],
+  "web.settings.appKeys.off": [
+    {
+      "type": 0,
+      "value": "L’inici de sessió amb l’aplicació Silo està desactivat en aquest servidor, de manera que aquests dispositius no poden iniciar la sessió i els dispositius en espera no es poden aprovar. Encara els pots treure."
+    }
+  ],
+  "web.settings.appKeys.personKey.description": [
+    {
+      "type": 0,
+      "value": "L’aplicació Silo utilitza aquesta clau per afegir els teus dispositius nous. Configurada: "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.settings.appKeys.personKey.none": [
+    {
+      "type": 0,
+      "value": "No hi ha cap clau del compte. L’aplicació Silo en configurarà una la propera vegada que afegeixis un dispositiu amb la sessió iniciada."
+    }
+  ],
+  "web.settings.appKeys.personKey.title": [
+    {
+      "type": 0,
+      "value": "Clau del compte"
+    }
+  ],
+  "web.settings.appKeys.pinDescription": [
+    {
+      "type": 0,
+      "value": "Introdueix el PIN del perfil principal per aprovar aquest dispositiu."
+    }
+  ],
+  "web.settings.appKeys.preapprovals.description": [
+    {
+      "type": 0,
+      "value": "Inicis de sessió que has aprovat per a un dispositiu que encara no s’ha connectat."
+    }
+  ],
+  "web.settings.appKeys.preapprovals.loadFailed": [
+    {
+      "type": 0,
+      "value": "No s’han pogut carregar els inicis de sessió aprovats per endavant."
+    }
+  ],
+  "web.settings.appKeys.preapprovals.title": [
+    {
+      "type": 0,
+      "value": "Aprovats per endavant"
+    }
+  ],
+  "web.settings.appKeys.refreshLabel": [
+    {
+      "type": 0,
+      "value": "Actualitza els dispositius de l’aplicació Silo"
+    }
+  ],
+  "web.settings.appKeys.removed": [
+    {
+      "type": 0,
+      "value": "S’ha tret el dispositiu "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.row.allowedBy": [
+    {
+      "type": 0,
+      "value": "Permès per l’usuari "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "web.settings.appKeys.row.approve": [
+    {
+      "type": 0,
+      "value": "Aprova"
+    }
+  ],
+  "web.settings.appKeys.row.approveLabel": [
+    {
+      "type": 0,
+      "value": "Aprova el dispositiu "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.row.deny": [
+    {
+      "type": 0,
+      "value": "Rebutja"
+    }
+  ],
+  "web.settings.appKeys.row.denyLabel": [
+    {
+      "type": 0,
+      "value": "Rebutja el dispositiu "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.row.enrolledFrom": [
+    {
+      "type": 0,
+      "value": "Des de "
+    },
+    {
+      "type": 1,
+      "value": "address"
+    }
+  ],
+  "web.settings.appKeys.row.identityGone": [
+    {
+      "type": 0,
+      "value": "No pot iniciar la sessió: el seu compte del proveïdor d’inici de sessió ja no està vinculat"
+    }
+  ],
+  "web.settings.appKeys.row.kindApp": [
+    {
+      "type": 0,
+      "value": "Una altra aplicació"
+    }
+  ],
+  "web.settings.appKeys.row.kindDevice": [
+    {
+      "type": 0,
+      "value": "Aplicació Silo"
+    }
+  ],
+  "web.settings.appKeys.row.lastUsed": [
+    {
+      "type": 0,
+      "value": "Últim inici de sessió: "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.settings.appKeys.row.notUsed": [
+    {
+      "type": 0,
+      "value": "Encara no ha iniciat la sessió amb la seva clau"
+    }
+  ],
+  "web.settings.appKeys.row.preapproval": [
+    {
+      "type": 0,
+      "value": "Aprovat per endavant · caduca: "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.settings.appKeys.row.provider": [
+    {
+      "type": 0,
+      "value": "Verificat amb el proveïdor d’inici de sessió"
+    }
+  ],
+  "web.settings.appKeys.row.remove": [
+    {
+      "type": 0,
+      "value": "Treu"
+    }
+  ],
+  "web.settings.appKeys.row.removeLabel": [
+    {
+      "type": 0,
+      "value": "Treu el dispositiu "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.row.viaAppCode": [
+    {
+      "type": 0,
+      "value": "Afegit amb un codi d’un sol ús de la pàgina web del servidor"
+    }
+  ],
+  "web.settings.appKeys.row.viaPersonKey": [
+    {
+      "type": 0,
+      "value": "Afegit per l’aplicació Silo en un altre dispositiu"
+    }
+  ],
+  "web.settings.appKeys.row.viaSession": [
+    {
+      "type": 0,
+      "value": "Afegit amb la sessió iniciada"
+    }
+  ],
+  "web.settings.appKeys.row.waitingUntil": [
+    {
+      "type": 0,
+      "value": "En espera d’aprovació fins a "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.settings.appKeys.row.withdraw": [
+    {
+      "type": 0,
+      "value": "Retira"
+    }
+  ],
+  "web.settings.appKeys.row.withdrawLabel": [
+    {
+      "type": 0,
+      "value": "Retira l’aprovació del dispositiu "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.signsBackIn": [
+    {
+      "type": 0,
+      "value": "Els dispositius amb la sessió iniciada a l’aplicació Silo tornen a iniciar la sessió automàticament. "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Treu un dispositiu"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " per aturar-ho."
+    }
+  ],
+  "web.settings.appKeys.title": [
+    {
+      "type": 0,
+      "value": "Dispositius de l’aplicació Silo"
+    }
+  ],
+  "web.settings.appKeys.unavailable": [
+    {
+      "type": 0,
+      "value": "L’inici de sessió amb l’aplicació Silo no està disponible en aquest servidor, de manera que aquests dispositius no poden iniciar la sessió. Encara els pots treure."
+    }
+  ],
+  "web.settings.appKeys.waiting.description": [
+    {
+      "type": 0,
+      "value": "Un dispositiu nou ha demanat iniciar la sessió al teu compte amb l’aplicació Silo. Aprova’l només si l’acabes de configurar."
+    }
+  ],
+  "web.settings.appKeys.waiting.title": [
+    {
+      "type": 0,
+      "value": "Pendents de la teva aprovació"
+    }
+  ],
+  "web.settings.appKeys.withdrawn": [
+    {
+      "type": 0,
+      "value": "S’ha retirat l’aprovació"
     }
   ],
   "web.settings.cardOverlay.adjust": [
@@ -151987,6 +154360,54 @@
       "value": "Estàs sense connexió, així que aquest canvi no s’ha desat"
     }
   ],
+  "web.settings.openInSilo.action": [
+    {
+      "type": 0,
+      "value": "Obtén un codi per a l’aplicació Silo"
+    }
+  ],
+  "web.settings.openInSilo.codeInstructions": [
+    {
+      "type": 0,
+      "value": "A l’aplicació Silo del telèfon o la tauleta, afegeix aquest servidor amb la seva adreça i escriu aquest codi. Qualsevol persona que tingui el codi pot iniciar la sessió en aquest compte, així que no el comparteixis."
+    }
+  ],
+  "web.settings.openInSilo.codeTitle": [
+    {
+      "type": 0,
+      "value": "Codi per a l’aplicació Silo"
+    }
+  ],
+  "web.settings.openInSilo.description": [
+    {
+      "type": 0,
+      "value": "Inicia la sessió en aquest compte a l’aplicació Silo del telèfon o la tauleta, sense contrasenya."
+    }
+  ],
+  "web.settings.openInSilo.loadFailed": [
+    {
+      "type": 0,
+      "value": "No s’ha pogut comprovar si aquest navegador pot obtenir un codi per a l’aplicació Silo."
+    }
+  ],
+  "web.settings.openInSilo.mainProfileOnly": [
+    {
+      "type": 0,
+      "value": "Només el perfil principal de la llar pot obtenir un codi per a l’aplicació Silo. Canvia-hi i torna-ho a provar."
+    }
+  ],
+  "web.settings.openInSilo.pinDescription": [
+    {
+      "type": 0,
+      "value": "Introdueix el PIN del perfil principal per obtenir un codi per a l’aplicació Silo."
+    }
+  ],
+  "web.settings.openInSilo.title": [
+    {
+      "type": 0,
+      "value": "Aplicació Silo"
+    }
+  ],
   "web.settings.overlays.accent.amber": [
     {
       "type": 0,
@@ -155118,6 +157539,12 @@
       "value": "Sessió iniciada"
     }
   ],
+  "web.settings.sessions.row.signsBackIn": [
+    {
+      "type": 0,
+      "value": "Aquest dispositiu torna a iniciar la sessió automàticament"
+    }
+  ],
   "web.settings.sessions.row.summary": [
     {
       "type": 8,
@@ -155200,6 +157627,24 @@
     {
       "type": 0,
       "value": "Configuració"
+    }
+  ],
+  "web.settings.signInAgain.action": [
+    {
+      "type": 0,
+      "value": "Torna a iniciar la sessió"
+    }
+  ],
+  "web.settings.signInAgain.manageDevices": [
+    {
+      "type": 0,
+      "value": "Torna a iniciar la sessió per gestionar els teus dispositius"
+    }
+  ],
+  "web.settings.signInAgain.useApp": [
+    {
+      "type": 0,
+      "value": "Gestiona els teus dispositius a l’aplicació Silo."
     }
   ],
   "web.settings.signedInSessions.loadFailed": [

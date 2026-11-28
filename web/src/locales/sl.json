@@ -215,6 +215,12 @@
       "value": "To je že povezano s tem računom."
     }
   ],
+  "error.app_code_invalid": [
+    {
+      "type": 0,
+      "value": "Ta koda je neznana, že uporabljena ali je potekla. Novo pridobite na strani strežnika."
+    }
+  ],
   "error.authentication_required": [
     {
       "type": 0,
@@ -333,6 +339,12 @@
     {
       "type": 0,
       "value": "Ta vrednost je napačnega tipa."
+    }
+  ],
+  "error.field.key_enrolled": [
+    {
+      "type": 0,
+      "value": "Ta ključ je na tem strežniku že v uporabi."
     }
   ],
   "error.field.malformed_form": [
@@ -2587,6 +2599,30 @@
     {
       "type": 0,
       "value": "Samodejno"
+    }
+  ],
+  "settingsManifest.playback.connection_path.description": [
+    {
+      "type": 0,
+      "value": "Možnost „Samo neposredno“ še vedno uporablja povezavo prek lokalnega omrežja, kadar je ta na voljo."
+    }
+  ],
+  "settingsManifest.playback.connection_path.label": [
+    {
+      "type": 0,
+      "value": "Pot povezave"
+    }
+  ],
+  "settingsManifest.playback.connection_path.option.automatic": [
+    {
+      "type": 0,
+      "value": "Samodejno"
+    }
+  ],
+  "settingsManifest.playback.connection_path.option.direct_only": [
+    {
+      "type": 0,
+      "value": "Samo neposredno"
     }
   ],
   "settingsManifest.playback.intro_skip_mode.description": [
@@ -28191,6 +28227,95 @@
       }
     }
   ],
+  "web.admin.common.adminUserSignIn.unlinkConfirm.text": [
+    {
+      "type": 5,
+      "value": "last_way",
+      "options": {
+        "yes": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Račun "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " se s tem računom pri ponudniku ne bo več mogel prijaviti. Račun "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " se ne bo mogel prijaviti, dokler ne nastavite gesla ali znova povežete ponudnika."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Račun "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " se s tem računom pri ponudniku ne bo več mogel prijaviti."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 5,
+      "value": "keys",
+      "options": {
+        "yes": {
+          "value": [
+            {
+              "type": 0,
+              "value": " Ključi aplikacije Silo za račun "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": ", vezani na ta račun pri ponudniku, bodo odstranjeni, te naprave pa bodo odjavljene."
+            }
+          ]
+        },
+        "unknown": {
+          "value": [
+            {
+              "type": 0,
+              "value": " Morebitni ključi aplikacije Silo za račun "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": ", vezani na ta račun pri ponudniku, bodo odstranjeni, te naprave pa bodo odjavljene."
+            }
+          ]
+        },
+        "other": {
+          "value": []
+        }
+      }
+    }
+  ],
   "web.admin.common.adminUserSignIn.unlinkConfirm.title": [
     {
       "type": 0,
@@ -30849,6 +30974,18 @@
     {
       "type": 0,
       "value": "Ustvari sličice, ki jih predvajalniki prikazujejo med previjanjem, v nastavljeni javni shrambi sredstev. Datoteke se obdelujejo v ozadju z nizko prioriteto. Izklop izbriše predoglede te knjižnice."
+    }
+  ],
+  "web.admin.common.libraryEditor.advanced.trickplayGenerate": [
+    {
+      "type": 0,
+      "value": "Ustvari manjkajoče predoglede z orodjem FFmpeg"
+    }
+  ],
+  "web.admin.common.libraryEditor.advanced.trickplayGenerateDescription": [
+    {
+      "type": 0,
+      "value": "Najprej se uporabijo obstoječe spremne datoteke .trickplay in .bif ob predstavnostnih datotekah. To izklopite, če želite samo uvažati spremne datoteke in preskočiti ustvarjanje z orodjem FFmpeg."
     }
   ],
   "web.admin.common.libraryEditor.advanced.trickplayUnavailable": [
@@ -35901,6 +36038,64 @@
       "value": "Skrbniški uporabniki"
     }
   ],
+  "web.admin.common.trickplay.badge.awaitingSidecarCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " datoteka čaka na spremno datoteko"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " datoteki čakata na spremno datoteko"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " datoteke čakajo na spremno datoteko"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " datotek čaka na spremno datoteko"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.common.trickplay.badge.detail": [
     {
       "type": 0,
@@ -36103,6 +36298,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.common.trickplay.badge.sidecarsOnly": [
+    {
+      "type": 0,
+      "value": "samo spremne datoteke"
     }
   ],
   "web.admin.common.trickplay.badge.srDetail": [
@@ -36315,6 +36516,42 @@
     {
       "type": 0,
       "value": "Predvajalniki obdržijo trenutne predoglede, dokler novi niso pripravljeni."
+    }
+  ],
+  "web.admin.common.trickplay.sidecarStatus.awaiting_sidecar": [
+    {
+      "type": 0,
+      "value": "Čaka na spremno datoteko"
+    }
+  ],
+  "web.admin.common.trickplay.sidecarStatus.sidecar_invalid": [
+    {
+      "type": 0,
+      "value": "Neveljavna spremna datoteka"
+    }
+  ],
+  "web.admin.common.trickplay.sidecarStatus.sidecar_stale": [
+    {
+      "type": 0,
+      "value": "Zastarela spremna datoteka"
+    }
+  ],
+  "web.admin.common.trickplay.source.generated": [
+    {
+      "type": 0,
+      "value": "Ustvarjeno"
+    }
+  ],
+  "web.admin.common.trickplay.source.sidecar_bif": [
+    {
+      "type": 0,
+      "value": "Spremna datoteka (.bif)"
+    }
+  ],
+  "web.admin.common.trickplay.source.sidecar_trickplay": [
+    {
+      "type": 0,
+      "value": "Spremna datoteka (.trickplay)"
     }
   ],
   "web.admin.common.trickplay.state.off": [
@@ -38584,7 +38821,7 @@
     },
     {
       "type": 0,
-      "value": ". Druge naprave tega računa ostanejo prijavljene. Odjemalec se lahko znova prijavi z geslom računa."
+      "value": ". Druge naprave tega računa ostanejo prijavljene. Odjemalec se lahko znova prijavi."
     }
   ],
   "web.admin.dashboard.widgets.apiClients.confirmLabel": [
@@ -54177,6 +54414,12 @@
       "value": "Profil"
     }
   ],
+  "web.admin.history.column.progress": [
+    {
+      "type": 0,
+      "value": "Napredek"
+    }
+  ],
   "web.admin.history.column.status": [
     {
       "type": 0,
@@ -54211,6 +54454,12 @@
     {
       "type": 0,
       "value": "Dnevniki seje"
+    }
+  ],
+  "web.admin.history.detail.backToPlay": [
+    {
+      "type": 0,
+      "value": "Nazaj na združeno predvajanje"
     }
   ],
   "web.admin.history.detail.column.delivered": [
@@ -54321,6 +54570,12 @@
       "value": "Čas ogleda"
     }
   ],
+  "web.admin.history.detail.inspectSitting": [
+    {
+      "type": 0,
+      "value": "Preglej"
+    }
+  ],
   "web.admin.history.detail.keyboardHint": [
     {
       "type": 0,
@@ -54405,6 +54660,12 @@
       "value": "Zakaj ni bilo neposrednega predvajanja"
     }
   ],
+  "web.admin.history.detail.section.sessions": [
+    {
+      "type": 0,
+      "value": "Seje v tem predvajanju"
+    }
+  ],
   "web.admin.history.detail.section.streams": [
     {
       "type": 0,
@@ -54415,6 +54676,126 @@
     {
       "type": 0,
       "value": "Čas in napredek ogleda"
+    }
+  ],
+  "web.admin.history.detail.sessionsCapped": [
+    {
+      "type": 0,
+      "value": "Prikazane so prve seje tega predvajanja: "
+    },
+    {
+      "type": 1,
+      "value": "shown"
+    },
+    {
+      "type": 0,
+      "value": " od "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.history.detail.sessionsNotice": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "To predvajanje ima "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " sejo. Spodnje podrobnosti o pretoku, napravi in poti se nanašajo nanjo."
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "To predvajanje obsega "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " seji. Spodnje podrobnosti o pretoku, napravi in poti se nanašajo na njegovo glavno sejo; izberite katero koli sejo spodaj, da jo pregledate posamično."
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "To predvajanje obsega "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " seje. Spodnje podrobnosti o pretoku, napravi in poti se nanašajo na njegovo glavno sejo; izberite katero koli sejo spodaj, da jo pregledate posamično."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "To predvajanje obsega "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " sej. Spodnje podrobnosti o pretoku, napravi in poti se nanašajo na njegovo glavno sejo; izberite katero koli sejo spodaj, da jo pregledate posamično."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.ended": [
+    {
+      "type": 0,
+      "value": "Konec"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.method": [
+    {
+      "type": 0,
+      "value": "Način"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.started": [
+    {
+      "type": 0,
+      "value": "Začetek"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.watched": [
+    {
+      "type": 0,
+      "value": "Ogledano"
     }
   ],
   "web.admin.history.detail.subtitlesBurnIn": [
@@ -54643,6 +55024,12 @@
       "value": "Vsa omrežja"
     }
   ],
+  "web.admin.history.filter.allMediaTypes": [
+    {
+      "type": 0,
+      "value": "Vse vsebine"
+    }
+  ],
   "web.admin.history.filter.allMethods": [
     {
       "type": 0,
@@ -54679,6 +55066,24 @@
       "value": "Dokončano"
     }
   ],
+  "web.admin.history.filter.episodes": [
+    {
+      "type": 0,
+      "value": "Epizode"
+    }
+  ],
+  "web.admin.history.filter.hideShort": [
+    {
+      "type": 0,
+      "value": "Skrij <30 s"
+    }
+  ],
+  "web.admin.history.filter.hideShortTitle": [
+    {
+      "type": 0,
+      "value": "Skrij nedokončane seje, krajše od 30 sekund"
+    }
+  ],
   "web.admin.history.filter.locationLocal": [
     {
       "type": 0,
@@ -54689,6 +55094,12 @@
     {
       "type": 0,
       "value": "Oddaljeno"
+    }
+  ],
+  "web.admin.history.filter.movies": [
+    {
+      "type": 0,
+      "value": "Filmi"
     }
   ],
   "web.admin.history.filter.partial": [
@@ -54939,6 +55350,12 @@
       "value": "Nedavno predvajanje"
     }
   ],
+  "web.admin.history.row.burnInBadgeTitle": [
+    {
+      "type": 0,
+      "value": "Podnapisi, vžgani v video"
+    }
+  ],
   "web.admin.history.row.completed": [
     {
       "type": 0,
@@ -54959,6 +55376,80 @@
     {
       "type": 0,
       "value": "Ocenjeno (zabeleženo, preden se je beležil natančen čas ogleda)"
+    }
+  ],
+  "web.admin.history.row.groupedSessionsTitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Združeno iz "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " seje"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Združeno iz "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " sej"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Združeno iz "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " sej"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Združeno iz "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " sej"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.history.row.meta": [
@@ -54991,6 +55482,12 @@
       "value": "Delno"
     }
   ],
+  "web.admin.history.row.progressLabel": [
+    {
+      "type": 0,
+      "value": "Napredek predvajanja"
+    }
+  ],
   "web.admin.history.row.started": [
     {
       "type": 0,
@@ -55001,16 +55498,116 @@
       "value": "time"
     }
   ],
+  "web.admin.history.stats.accountsCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " račun"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " računa"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " računi"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " računov"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.history.stats.completed": [
     {
       "type": 0,
       "value": "Dokončano"
     }
   ],
+  "web.admin.history.stats.completionBreakdown": [
+    {
+      "type": 0,
+      "value": "Dokončano: "
+    },
+    {
+      "type": 1,
+      "value": "completed"
+    },
+    {
+      "type": 0,
+      "value": " · delno: "
+    },
+    {
+      "type": 1,
+      "value": "partial"
+    }
+  ],
   "web.admin.history.stats.partial": [
     {
       "type": 0,
       "value": "Delno"
+    }
+  ],
+  "web.admin.history.stats.totalPlays": [
+    {
+      "type": 0,
+      "value": "Skupaj predvajanj"
+    }
+  ],
+  "web.admin.history.stats.totalSessions": [
+    {
+      "type": 0,
+      "value": "Skupaj sej"
+    }
+  ],
+  "web.admin.history.stats.uniqueProfiles": [
+    {
+      "type": 0,
+      "value": "Različni profili"
+    }
+  ],
+  "web.admin.history.stats.uniqueTitles": [
+    {
+      "type": 0,
+      "value": "Različni naslovi"
     }
   ],
   "web.admin.history.stats.visibleRows": [
@@ -55029,6 +55626,24 @@
     {
       "type": 0,
       "value": "Zgodovina predvajanja"
+    }
+  ],
+  "web.admin.history.view.label": [
+    {
+      "type": 0,
+      "value": "Pogled zgodovine"
+    }
+  ],
+  "web.admin.history.view.plays": [
+    {
+      "type": 0,
+      "value": "Predvajanja"
+    }
+  ],
+  "web.admin.history.view.sessions": [
+    {
+      "type": 0,
+      "value": "Vse seje"
     }
   ],
   "web.admin.historyImport.conflict.message": [
@@ -102158,6 +102773,234 @@
       "value": "count"
     }
   ],
+  "web.admin.users.detail.appKeys.confirm.denyDescription": [
+    {
+      "type": 0,
+      "value": "Naprava "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " se ne bo mogla prijaviti v račun "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": ". Če naprava pripada lastniku računa, jo lahko ta znova doda v aplikaciji Silo."
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKey": [
+    {
+      "type": 0,
+      "value": "Odstrani ključ"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKeyDescription": [
+    {
+      "type": 0,
+      "value": "Naprave, ki so že prijavljene, delujejo naprej, dokler jih ne odstranite. S tem ključem ni več mogoče dodati nobene nove naprave, naprave, ki jih je dodal in še čakajo, pa so zavrnjene. Aplikacija Silo računa "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " ob naslednjem dodajanju naprave v prijavljeni seji nastavi nov ključ."
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKeyTitle": [
+    {
+      "type": 0,
+      "value": "Želite odstraniti ključ računa "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.removeDescription": [
+    {
+      "type": 0,
+      "value": "Odstranitev naprave "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " jo takoj odjavi iz računa "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " in ustavi njen ključ: z njim se ne bo mogla več prijaviti. Za ponovno uporabo jo mora uporabnik "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " znova dodati v aplikaciji Silo."
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.withdrawDescription": [
+    {
+      "type": 0,
+      "value": "Naprava "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " te odobritve ne bo mogla uporabiti za prijavo v račun "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.detail.appKeys.description": [
+    {
+      "type": 0,
+      "value": "Naprave in aplikacije, ki se v račun "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " prijavljajo z aplikacijo Silo brez gesla."
+    }
+  ],
+  "web.admin.users.detail.appKeys.empty": [
+    {
+      "type": 0,
+      "value": "V tem računu nobena naprava ne uporablja aplikacije Silo."
+    }
+  ],
+  "web.admin.users.detail.appKeys.loadFailed": [
+    {
+      "type": 0,
+      "value": "Naprav ni bilo mogoče naložiti."
+    }
+  ],
+  "web.admin.users.detail.appKeys.off": [
+    {
+      "type": 0,
+      "value": "Prijava z aplikacijo Silo je na tem strežniku izklopljena, zato se te naprave ne morejo prijaviti. Še vedno jih lahko odstranite."
+    }
+  ],
+  "web.admin.users.detail.appKeys.ownerOnly": [
+    {
+      "type": 0,
+      "value": "Naprave drugega skrbnika ali lastnika lahko spremeni samo lastnik strežnika."
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.description": [
+    {
+      "type": 0,
+      "value": "Aplikacija Silo s tem ključem dodaja nove naprave računa "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": ". Nastavljeno: "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.none": [
+    {
+      "type": 0,
+      "value": "Ni ključa računa. Aplikacija Silo računa "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " ga nastavi ob naslednjem dodajanju naprave v prijavljeni seji."
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.remove": [
+    {
+      "type": 0,
+      "value": "Odstrani ključ računa"
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKeyRemoved": [
+    {
+      "type": 0,
+      "value": "Ključ računa je odstranjen"
+    }
+  ],
+  "web.admin.users.detail.appKeys.preapprovals.description": [
+    {
+      "type": 0,
+      "value": "Prijave, ki jih je uporabnik "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " odobril za napravo, ki se še ni povezala."
+    }
+  ],
+  "web.admin.users.detail.appKeys.waiting.description": [
+    {
+      "type": 0,
+      "value": "Nova naprava v skrbniškem računu čaka, dokler je uporabnik "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " ne odobri v napravi, v kateri je prijavljen. Tukaj jo lahko zavrnete."
+    }
+  ],
+  "web.admin.users.detail.appKeys.waiting.title": [
+    {
+      "type": 0,
+      "value": "Čaka na odobritev"
+    }
+  ],
   "web.admin.users.detail.common.allProfiles": [
     {
       "type": 0,
@@ -106294,6 +107137,12 @@
       "value": "Račun je dosegel omejitev profilov"
     }
   ],
+  "web.admin.users.detail.profiles.badge.changedHere": [
+    {
+      "type": 0,
+      "value": "Spremenjeno tukaj"
+    }
+  ],
   "web.admin.users.detail.profiles.badge.kids": [
     {
       "type": 0,
@@ -106491,6 +107340,664 @@
     {
       "type": 0,
       "value": "Shrani PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowAgain": [
+    {
+      "type": 0,
+      "value": "Znova dovoli"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowAgainAria": [
+    {
+      "type": 0,
+      "value": "Dovoli, da se profil "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " vrne na ta strežnik"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowDescription": [
+    {
+      "type": 0,
+      "value": "Aplikacija uporabnika lahko ob naslednji sinhronizaciji znova doda profil "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " kot nov profil brez zgodovine na tem strežniku, če njeni profili še vključujejo profil "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " in ima ta račun prostor za še en profil."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowTitle": [
+    {
+      "type": 0,
+      "value": "Želite znova dovoliti profil "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.alreadyCleared": [
+    {
+      "type": 0,
+      "value": "Ta sprememba je bila že počiščena ali pa jo je znova spremenil uporabnik ("
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "). Seznam je posodobljen."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedBy": [
+    {
+      "type": 0,
+      "value": "Spremenjeno: "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedSinceOpened": [
+    {
+      "type": 0,
+      "value": "Ta sprememba je bila posodobljena, potem ko ste jo odprli, zato ni bilo nič počiščeno. Znova jo preberite na seznamu in jo nato počistite, če to še želite."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedWhileRunning": [
+    {
+      "type": 0,
+      "value": "Profili so se med izvajanjem spremenili, zato ni bilo nič spremenjeno. Seznam je posodobljen; če to še želite, poskusite znova."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clear": [
+    {
+      "type": 0,
+      "value": "Počisti"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearAndRemovePin": [
+    {
+      "type": 0,
+      "value": "Počisti in odstrani PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearAria": [
+    {
+      "type": 0,
+      "value": "Počisti spremembo polja "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " v profilu "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearFailed": [
+    {
+      "type": 0,
+      "value": "Spremembe ni bilo mogoče počistiti."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearInherit": [
+    {
+      "type": 0,
+      "value": "Polje "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " v profilu "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " se vrne na vrednost, ki jo profil "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " zdaj podeduje, kot zahteva aplikacija uporabnika. Spremembe iz aplikacije uporabnika zanj znova veljajo."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearLater": [
+    {
+      "type": 0,
+      "value": "Polje "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " ostane nespremenjeno, dokler ga aplikacija uporabnika znova ne pošlje. Nato zanj znova veljajo spremembe iz aplikacije uporabnika."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearNow": [
+    {
+      "type": 0,
+      "value": "Profil "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " se zdaj vrne na vrednost iz aplikacije uporabnika, spremembe iz aplikacije pa zanj znova veljajo."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearNowValue": [
+    {
+      "type": 0,
+      "value": "Polje "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " v profilu "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " se zdaj vrne na vrednost iz aplikacije uporabnika: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": ". Spremembe iz aplikacije zanj znova veljajo."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearPin": [
+    {
+      "type": 0,
+      "value": "Profil "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " ohrani PIN, ki ste ga nastavili, dokler aplikacija uporabnika ne pošlje novega. Nato zanj znova veljajo spremembe iz aplikacije uporabnika."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearPinRemoves": [
+    {
+      "type": 0,
+      "value": "Aplikacija uporabnika pošilja profil "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " brez PIN-kode, zato čiščenje zdaj odstrani PIN, ki ste ga nastavili. Nato lahko vsak, ki uporablja ta račun, odpre profil "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " brez PIN-kode."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearTitle": [
+    {
+      "type": 0,
+      "value": "Želite počistiti spremembo polja "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " v profilu "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.deletedAccount": [
+    {
+      "type": 0,
+      "value": "izbrisan račun"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.description": [
+    {
+      "type": 0,
+      "value": "Ti profili prihajajo iz aplikacije uporabnika "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ". Sprememba, ki jo naredite tukaj, ostane na tem strežniku, dokler je ne počistite. To ni zaklepanje: uporabnik "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " lahko tukaj spremeni isto stvar."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismiss": [
+    {
+      "type": 0,
+      "value": "Opusti"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismissAria": [
+    {
+      "type": 0,
+      "value": "Opusti opombo o polju "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " v profilu "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismissFailed": [
+    {
+      "type": 0,
+      "value": "Opombe ni bilo mogoče opustiti."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.isChild": [
+    {
+      "type": 0,
+      "value": "Otroški profil"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.maxAdvisoryAge": [
+    {
+      "type": 0,
+      "value": "Starostna omejitev"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.maxContentRating": [
+    {
+      "type": 0,
+      "value": "Omejitev oznake vsebine"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.name": [
+    {
+      "type": 0,
+      "value": "Ime"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.picture": [
+    {
+      "type": 0,
+      "value": "Slika"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.pin": [
+    {
+      "type": 0,
+      "value": "PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.requests": [
+    {
+      "type": 0,
+      "value": "Zahteve"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.requireAdvisoryAge": [
+    {
+      "type": 0,
+      "value": "Zahtevaj starostno oznako"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.fieldValue": [
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.hidden": [
+    {
+      "type": 0,
+      "value": "Na tem strežniku odstranjeno: "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": ". Aplikacija uporabnika ga ne bo znova dodala, dokler tega ne dovolite."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.loadFailed": [
+    {
+      "type": 0,
+      "value": "Sprememb, narejenih na tem strežniku, ni bilo mogoče naložiti."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.nameTaken": [
+    {
+      "type": 0,
+      "value": "Profilu "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " ni mogoče vrniti imena "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " iz aplikacije uporabnika, ker ima to ime že drug profil tukaj. Najprej preimenujte tisti profil, nato znova počistite to spremembo."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeHiddenNextSync": [
+    {
+      "type": 0,
+      "value": "Profil "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " se lahko vrne ob naslednji sinhronizaciji aplikacije uporabnika "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", če ga njeni profili še vključujejo."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeHiddenWoken": [
+    {
+      "type": 0,
+      "value": "Profil "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " se lahko vrne ob naslednji sinhronizaciji aplikacije uporabnika, če ga njeni profili še vključujejo. Telefonu uporabnika "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " je bil poslan poziv k sinhronizaciji."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeNextSync": [
+    {
+      "type": 0,
+      "value": "Počiščeno. Sprememba bo v aplikacijo uporabnika "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " prispela ob naslednji sinhronizaciji."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeWoken": [
+    {
+      "type": 0,
+      "value": "Počiščeno. Telefonu uporabnika "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " je bil poslan poziv k sinhronizaciji."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.removedBy": [
+    {
+      "type": 0,
+      "value": "Odstranjeno: "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.replacedOwner": [
+    {
+      "type": 0,
+      "value": "To je zamenjalo vrednost, ki ste jo nastavili."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.setBy": [
+    {
+      "type": 0,
+      "value": "Nastavljeno: "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.settled": [
+    {
+      "type": 0,
+      "value": "Spremenjeno: "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "; vrednost, ki ste jo nastavili, ne velja več."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.title": [
+    {
+      "type": 0,
+      "value": "Spremenjeno na tem strežniku"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.inherited": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (podedovano)"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.noPicture": [
+    {
+      "type": 0,
+      "value": "Brez slike"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.none": [
+    {
+      "type": 0,
+      "value": "Brez"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.off": [
+    {
+      "type": 0,
+      "value": "Izklopljeno"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.on": [
+    {
+      "type": 0,
+      "value": "Vklopljeno"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.picture": [
+    {
+      "type": 0,
+      "value": "Slika po meri"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.pinNone": [
+    {
+      "type": 0,
+      "value": "Brez PIN-kode"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.pinSet": [
+    {
+      "type": 0,
+      "value": "PIN-koda nastavljena"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.requestsAllowed": [
+    {
+      "type": 0,
+      "value": "Dovoljeno"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.requestsBlocked": [
+    {
+      "type": 0,
+      "value": "Blokirano"
     }
   ],
   "web.admin.users.detail.profiles.setPin": [
@@ -107798,6 +109305,144 @@
     {
       "type": 0,
       "value": "Nastavitev gesla"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.action": [
+    {
+      "type": 0,
+      "value": "Ustvari povezavo za prijavo"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.actionHint": [
+    {
+      "type": 0,
+      "value": "Izgubljene vse naprave"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.description": [
+    {
+      "type": 0,
+      "value": "Povezava za enkratno uporabo za uporabnika "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": ", če je izgubil vse naprave. Odpre stran, ki mu da kodo za aplikacijo Silo ali mu omogoči izbiro gesla. Velja 24 ur, nova povezava pa nadomesti prejšnjo."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailAction": [
+    {
+      "type": 0,
+      "value": "Pošlji po e-pošti"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHint": [
+    {
+      "type": 0,
+      "value": "Ustvarite povezavo, da jo kopirate in pošljete sami, ali jo pošljite po e-pošti na naslov "
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHintNoAddress": [
+    {
+      "type": 0,
+      "value": "Ustvarite povezavo, nato jo kopirajte in pošljite sami. Ta račun nima e-poštnega naslova, na katerega bi jo bilo mogoče poslati."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHintNoMail": [
+    {
+      "type": 0,
+      "value": "Ustvarite povezavo, nato jo kopirajte in pošljite sami. Če jo želite poslati od tukaj, nastavite e-pošto v Nastavitvah."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailSent": [
+    {
+      "type": 0,
+      "value": "Povezava je bila poslana na naslov "
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": ". Poteče "
+    },
+    {
+      "type": 1,
+      "value": "expires"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Poštni strežnik ni potrdil dostave. Spodnja povezava še vedno deluje: kopirajte jo in jo pošljite drugače."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.failed": [
+    {
+      "type": 0,
+      "value": "Povezave za prijavo ni bilo mogoče ustvariti."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.linkShare": [
+    {
+      "type": 0,
+      "value": "To povezavo pošljite samo uporabniku "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": ". Kdor jo ima, se lahko prijavi v ta račun, dokler ni uporabljena ali ne poteče "
+    },
+    {
+      "type": 1,
+      "value": "expires"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.providerRequired": [
+    {
+      "type": 0,
+      "value": "Lokalna prijava z geslom je na tem strežniku izklopljena, zato bi povezava za prijavo zaobšla ponudnika prijave. Prosite uporabnika "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": ", naj se prijavi s ponudnikom na spletnem mestu tega strežnika in nato v nastavitvah računa uporabi „Odpri v aplikaciji Silo“."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.title": [
+    {
+      "type": 0,
+      "value": "Povezava za prijavo za uporabnika "
+    },
+    {
+      "type": 1,
+      "value": "username"
     }
   ],
   "web.audiobooks.chapter.fallbackTitle": [
@@ -110096,6 +111741,120 @@
       "value": "Odobri prijavo"
     }
   ],
+  "web.auth.appCode.code": [
+    {
+      "type": 0,
+      "value": "Koda"
+    }
+  ],
+  "web.auth.appCode.codeCopied": [
+    {
+      "type": 0,
+      "value": "Koda je kopirana"
+    }
+  ],
+  "web.auth.appCode.copyCode": [
+    {
+      "type": 0,
+      "value": "Kopiraj kodo"
+    }
+  ],
+  "web.auth.appCode.copyFailed": [
+    {
+      "type": 0,
+      "value": "Kode ni bilo mogoče kopirati. Izberite jo in jo kopirajte ročno."
+    }
+  ],
+  "web.auth.appCode.expired": [
+    {
+      "type": 0,
+      "value": "Ta koda je potekla."
+    }
+  ],
+  "web.auth.appCode.failed": [
+    {
+      "type": 0,
+      "value": "Kode ni bilo mogoče ustvariti. Poskusite znova."
+    }
+  ],
+  "web.auth.appCode.instructions": [
+    {
+      "type": 0,
+      "value": "Pritisnite „Odpri Silo“, da nadaljujete v aplikaciji Silo v tej napravi. Če aplikacija ni nameščena, jo namestite, se vrnite na ta zavihek in znova pritisnite „Odpri Silo“."
+    }
+  ],
+  "web.auth.appCode.noScanCode": [
+    {
+      "type": 0,
+      "value": "Naslov tega strežnika je predolg za kodo za skeniranje. V aplikacijo Silo vnesite naslov strežnika in kodo ali pa kodo kopirajte in jo prilepite tja."
+    }
+  ],
+  "web.auth.appCode.open": [
+    {
+      "type": 0,
+      "value": "Odpri Silo"
+    }
+  ],
+  "web.auth.appCode.renew": [
+    {
+      "type": 0,
+      "value": "Pridobi novo kodo"
+    }
+  ],
+  "web.auth.appCode.scanCodeLabel": [
+    {
+      "type": 0,
+      "value": "Koda za skeniranje v aplikaciji Silo"
+    }
+  ],
+  "web.auth.appCode.scanCodeUnavailable": [
+    {
+      "type": 0,
+      "value": "Kode za skeniranje za ta strežnik ni mogoče prikazati. V aplikacijo Silo vnesite naslov strežnika in kodo ali pa kodo kopirajte in jo prilepite tja."
+    }
+  ],
+  "web.auth.appCode.scanHint": [
+    {
+      "type": 0,
+      "value": "To kodo skenirajte s skenerjem v aplikaciji Silo ali pa spodnji naslov strežnika in kodo vnesite ročno oziroma ju kopirajte."
+    }
+  ],
+  "web.auth.appCode.serverAddress": [
+    {
+      "type": 0,
+      "value": "Naslov strežnika"
+    }
+  ],
+  "web.auth.appCode.singleUse": [
+    {
+      "type": 0,
+      "value": "Ta koda deluje enkrat in poteče po nekaj minutah."
+    }
+  ],
+  "web.auth.appCode.title": [
+    {
+      "type": 0,
+      "value": "Odpri Silo"
+    }
+  ],
+  "web.auth.appCode.typeInstructions": [
+    {
+      "type": 0,
+      "value": "V aplikaciji Silo v telefonu ali tabličnem računalniku dodajte ta strežnik z njegovim naslovom in vnesite to kodo, da ustvarite račun. Kdor koli ima kodo, se lahko pridruži namesto vas, zato je ne delite z nikomer."
+    }
+  ],
+  "web.auth.appCode.typeTitle": [
+    {
+      "type": 0,
+      "value": "Pridružite se s to kodo"
+    }
+  ],
+  "web.auth.appCode.webLink": [
+    {
+      "type": 0,
+      "value": "Raje odpri s povezavo siloserver.org"
+    }
+  ],
   "web.auth.card.rememberedIt": [
     {
       "type": 0,
@@ -110298,10 +112057,50 @@
       ]
     }
   ],
+  "web.auth.invite.appAccountEmail": [
+    {
+      "type": 0,
+      "value": "Vaš račun bo uporabljal naslov "
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.auth.invite.appContinue": [
+    {
+      "type": 0,
+      "value": "Nadaljuj"
+    }
+  ],
+  "web.auth.invite.appEmailHint": [
+    {
+      "type": 0,
+      "value": "Če navedete e-poštni naslov, vam lahko ta strežnik pošlje povezavo za prijavo, če izgubite svoje naprave."
+    }
+  ],
   "web.auth.invite.appMissing": [
     {
       "type": 0,
       "value": "Se nič ne zgodi? Aplikacija ni nameščena – kar nadaljujte spodaj."
+    }
+  ],
+  "web.auth.invite.appProviderOnly": [
+    {
+      "type": 0,
+      "value": "Strežnik "
+    },
+    {
+      "type": 1,
+      "value": "server"
+    },
+    {
+      "type": 0,
+      "value": " dodaja uporabnike prek svojega ponudnika prijave. Z njim se prijavite na tem spletnem mestu, nato pa odprite Silo v nastavitvah računa."
     }
   ],
   "web.auth.invite.created": [
@@ -110330,6 +112129,18 @@
       "value": "Vnesite e-poštni naslov in izberite geslo. Prijavljali se boste z e-poštnim naslovom."
     }
   ],
+  "web.auth.invite.descriptionWithApp": [
+    {
+      "type": 0,
+      "value": "Pridružite se z aplikacijo Silo v telefonu ali tabličnem računalniku ali pa izberite geslo za prijavo."
+    }
+  ],
+  "web.auth.invite.emailOptional": [
+    {
+      "type": 0,
+      "value": "E-pošta (neobvezno)"
+    }
+  ],
   "web.auth.invite.emailPlaceholder": [
     {
       "type": 0,
@@ -110350,6 +112161,18 @@
     {
       "type": 1,
       "value": "inviter"
+    }
+  ],
+  "web.auth.invite.joinWithApp": [
+    {
+      "type": 0,
+      "value": "Pridruži se z aplikacijo Silo"
+    }
+  ],
+  "web.auth.invite.joinWithAppInstead": [
+    {
+      "type": 0,
+      "value": "Raje se pridruži z aplikacijo Silo"
     }
   ],
   "web.auth.invite.loadFailed": [
@@ -110450,6 +112273,30 @@
     {
       "type": 0,
       "value": "Povabilo ni na voljo"
+    }
+  ],
+  "web.auth.invite.usePassword": [
+    {
+      "type": 0,
+      "value": "Raje uporabi geslo"
+    }
+  ],
+  "web.auth.invite.usernameIsAddress": [
+    {
+      "type": 0,
+      "value": "Uporabniško ime z znakom @ mora biti e-poštni naslov, ki ga vnesete spodaj."
+    }
+  ],
+  "web.auth.invite.usernameRequired": [
+    {
+      "type": 0,
+      "value": "Izberite uporabniško ime."
+    }
+  ],
+  "web.auth.invite.usernameTaken": [
+    {
+      "type": 0,
+      "value": "To uporabniško ime je že v uporabi. Izberite drugo."
     }
   ],
   "web.auth.languagePicker.label": [
@@ -111522,6 +113369,126 @@
     {
       "type": 0,
       "value": "Prijava"
+    }
+  ],
+  "web.auth.signInLink.backToCode": [
+    {
+      "type": 0,
+      "value": "Nazaj na kodo"
+    }
+  ],
+  "web.auth.signInLink.codeExpired": [
+    {
+      "type": 0,
+      "value": "Če želite novo kodo, prosite skrbnika tega strežnika za novo povezavo."
+    }
+  ],
+  "web.auth.signInLink.documentTitle": [
+    {
+      "type": 0,
+      "value": "Povezava za prijavo"
+    }
+  ],
+  "web.auth.signInLink.failed": [
+    {
+      "type": 0,
+      "value": "Te povezave ni bilo mogoče odpreti. Poskusite znova."
+    }
+  ],
+  "web.auth.signInLink.installFirst": [
+    {
+      "type": 0,
+      "value": "Povezava deluje enkrat, koda pa velja nekaj minut. Najprej namestite aplikacijo Silo v telefon ali tablični računalnik, nato pritisnite „Nadaljuj“."
+    }
+  ],
+  "web.auth.signInLink.intro": [
+    {
+      "type": 0,
+      "value": "Skrbnik vam je poslal to povezavo, da se lahko znova prijavite. Nadaljujte, da pridobite kodo za aplikacijo Silo ali izberete geslo."
+    }
+  ],
+  "web.auth.signInLink.keepOpen": [
+    {
+      "type": 0,
+      "value": "To stran pustite odprto, dokler ne končate. Povezava je porabljena, zato z vnovičnim nalaganjem ali zapustitvijo strani izgubite, kar ste z njo prejeli."
+    }
+  ],
+  "web.auth.signInLink.leaveAction": [
+    {
+      "type": 0,
+      "value": "Zapusti"
+    }
+  ],
+  "web.auth.signInLink.leaveDescription": [
+    {
+      "type": 0,
+      "value": "Povezava je porabljena. Če zapustite stran, izgubite kodo za aplikacijo Silo in možnost nastavitve gesla, zato boste potrebovali novo povezavo."
+    }
+  ],
+  "web.auth.signInLink.leaveTitle": [
+    {
+      "type": 0,
+      "value": "Želite zapustiti to stran?"
+    }
+  ],
+  "web.auth.signInLink.noCodeAdministrator": [
+    {
+      "type": 0,
+      "value": "To je skrbniški račun, zato lahko s to povezavo le nastavite geslo. Nastavite ga, se prijavite na spletnem mestu tega strežnika, nato pa tam odprite aplikacijo Silo v nastavitvah računa."
+    }
+  ],
+  "web.auth.signInLink.noCodeAppKeysOff": [
+    {
+      "type": 0,
+      "value": "Aplikacija Silo se trenutno ne more prijaviti na tem strežniku, zato lahko s to povezavo le nastavite geslo."
+    }
+  ],
+  "web.auth.signInLink.passwordDescription": [
+    {
+      "type": 0,
+      "value": "Ob shranjevanju se ta račun odjavi v vseh napravah. Naprave, prijavljene z aplikacijo Silo, se znova prijavijo samodejno."
+    }
+  ],
+  "web.auth.signInLink.passwordSet": [
+    {
+      "type": 0,
+      "value": "Geslo je shranjeno. Prijavite se z njim."
+    }
+  ],
+  "web.auth.signInLink.passwordSetLostDevices": [
+    {
+      "type": 0,
+      "value": "Izgubljene naprave, ki so uporabljale aplikacijo Silo, se lahko še vedno prijavijo, dokler jih ne odstranite. Ko se prijavite, jih odstranite s seznama naprav v nastavitvah računa."
+    }
+  ],
+  "web.auth.signInLink.passwordTitle": [
+    {
+      "type": 0,
+      "value": "Izberite geslo"
+    }
+  ],
+  "web.auth.signInLink.providerRequired": [
+    {
+      "type": 0,
+      "value": "Ta strežnik prijavlja uporabnike prek svojega ponudnika prijave, zato ta povezava ne deluje. Raje se prijavite prek ponudnika."
+    }
+  ],
+  "web.auth.signInLink.setPasswordInstead": [
+    {
+      "type": 0,
+      "value": "Raje nastavi geslo"
+    }
+  ],
+  "web.auth.signInLink.title": [
+    {
+      "type": 0,
+      "value": "Ponovno pridobite dostop do računa"
+    }
+  ],
+  "web.auth.signInLink.unavailable": [
+    {
+      "type": 0,
+      "value": "Ta povezava je bila že uporabljena ali nadomeščena z novejšo ali pa je potekla. Za novo prosite skrbnika tega strežnika."
     }
   ],
   "web.auth.signup.closed": [
@@ -157368,7 +159335,7 @@
   "web.settings.account.password.signOutOthersDescription": [
     {
       "type": 0,
-      "value": "Drugi brskalniki in aplikacije se morajo znova prijaviti z novim geslom. Ta brskalnik ostane prijavljen, ključi API pa še naprej delujejo."
+      "value": "Drugi brskalniki in aplikacije so odjavljeni. Ta brskalnik ostane prijavljen, ključi API pa še naprej delujejo."
     }
   ],
   "web.settings.account.password.title": [
@@ -158261,6 +160228,512 @@
     {
       "type": 0,
       "value": "Kako uporabljati ta ključ"
+    }
+  ],
+  "web.settings.appKeys.actionFailed": [
+    {
+      "type": 0,
+      "value": "Te spremembe ni bilo mogoče izvesti. Poskusite znova."
+    }
+  ],
+  "web.settings.appKeys.approveMainOnly": [
+    {
+      "type": 0,
+      "value": "Naprave lahko odobri samo glavni profil gospodinjstva. Za odobritev preklopite nanj."
+    }
+  ],
+  "web.settings.appKeys.approved": [
+    {
+      "type": 0,
+      "value": "Naprava "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " je odobrena"
+    }
+  ],
+  "web.settings.appKeys.confirm.approve": [
+    {
+      "type": 0,
+      "value": "Odobri napravo"
+    }
+  ],
+  "web.settings.appKeys.confirm.approveDescription": [
+    {
+      "type": 0,
+      "value": "Naprava "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " se bo lahko prijavljala v vaš račun z aplikacijo Silo, dokler je ne odstranite. Odobrite jo samo, če ste jo pravkar nastavili."
+    }
+  ],
+  "web.settings.appKeys.confirm.approveTitle": [
+    {
+      "type": 0,
+      "value": "Želite odobriti napravo "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.settings.appKeys.confirm.deny": [
+    {
+      "type": 0,
+      "value": "Zavrni napravo"
+    }
+  ],
+  "web.settings.appKeys.confirm.denyDescription": [
+    {
+      "type": 0,
+      "value": "Naprava "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " se ne bo mogla prijaviti v vaš račun. Če je bila vaša, jo znova dodajte v aplikaciji Silo."
+    }
+  ],
+  "web.settings.appKeys.confirm.denyTitle": [
+    {
+      "type": 0,
+      "value": "Želite zavrniti napravo "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.settings.appKeys.confirm.remove": [
+    {
+      "type": 0,
+      "value": "Odstrani napravo"
+    }
+  ],
+  "web.settings.appKeys.confirm.removeDescription": [
+    {
+      "type": 0,
+      "value": "Odstranitev naprave "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " jo takoj odjavi in onemogoči njen ključ: z njim se ne bo mogla več prijaviti. Če jo želite znova uporabljati, jo znova dodajte v aplikaciji Silo."
+    }
+  ],
+  "web.settings.appKeys.confirm.removeTitle": [
+    {
+      "type": 0,
+      "value": "Želite odstraniti napravo "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.settings.appKeys.confirm.withdraw": [
+    {
+      "type": 0,
+      "value": "Prekliči odobritev"
+    }
+  ],
+  "web.settings.appKeys.confirm.withdrawDescription": [
+    {
+      "type": 0,
+      "value": "Naprava "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " te odobritve ne bo mogla uporabiti za prijavo v vaš račun."
+    }
+  ],
+  "web.settings.appKeys.confirm.withdrawTitle": [
+    {
+      "type": 0,
+      "value": "Želite preklicati odobritev za napravo "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.settings.appKeys.confirm.working": [
+    {
+      "type": 0,
+      "value": "Shranjevanje …"
+    }
+  ],
+  "web.settings.appKeys.denied": [
+    {
+      "type": 0,
+      "value": "Naprava "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " je zavrnjena"
+    }
+  ],
+  "web.settings.appKeys.description": [
+    {
+      "type": 0,
+      "value": "Naprave in aplikacije, ki se v vaš račun prijavljajo z aplikacijo Silo brez gesla."
+    }
+  ],
+  "web.settings.appKeys.devices.title": [
+    {
+      "type": 0,
+      "value": "Naprave"
+    }
+  ],
+  "web.settings.appKeys.empty": [
+    {
+      "type": 0,
+      "value": "V vašem računu nobena naprava ne uporablja aplikacije Silo."
+    }
+  ],
+  "web.settings.appKeys.footnote": [
+    {
+      "type": 0,
+      "value": "Odstranitev naprave jo odjavi in onemogoči njen ključ. Odjava seje naprave ne odstrani: s svojim ključem se znova prijavi."
+    }
+  ],
+  "web.settings.appKeys.loadFailed": [
+    {
+      "type": 0,
+      "value": "Ni bilo mogoče naložiti vaših naprav."
+    }
+  ],
+  "web.settings.appKeys.loading": [
+    {
+      "type": 0,
+      "value": "Nalaganje naprav …"
+    }
+  ],
+  "web.settings.appKeys.off": [
+    {
+      "type": 0,
+      "value": "Prijava z aplikacijo Silo je na tem strežniku izklopljena, zato se te naprave ne morejo prijaviti, naprav, ki čakajo, pa ni mogoče odobriti. Še vedno jih lahko odstranite."
+    }
+  ],
+  "web.settings.appKeys.personKey.description": [
+    {
+      "type": 0,
+      "value": "Vaša aplikacija Silo s tem ključem dodaja vaše nove naprave. Nastavljeno: "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.settings.appKeys.personKey.none": [
+    {
+      "type": 0,
+      "value": "Ni ključa računa. Vaša aplikacija Silo ga bo nastavila, ko boste naslednjič dodali napravo, medtem ko boste prijavljeni."
+    }
+  ],
+  "web.settings.appKeys.personKey.title": [
+    {
+      "type": 0,
+      "value": "Ključ računa"
+    }
+  ],
+  "web.settings.appKeys.pinDescription": [
+    {
+      "type": 0,
+      "value": "Za odobritev te naprave vnesite PIN glavnega profila."
+    }
+  ],
+  "web.settings.appKeys.preapprovals.description": [
+    {
+      "type": 0,
+      "value": "Prijave, ki ste jih odobrili za napravo, ki se še ni povezala."
+    }
+  ],
+  "web.settings.appKeys.preapprovals.loadFailed": [
+    {
+      "type": 0,
+      "value": "Ni bilo mogoče naložiti vnaprej odobrenih prijav."
+    }
+  ],
+  "web.settings.appKeys.preapprovals.title": [
+    {
+      "type": 0,
+      "value": "Vnaprej odobreno"
+    }
+  ],
+  "web.settings.appKeys.refreshLabel": [
+    {
+      "type": 0,
+      "value": "Osveži naprave z aplikacijo Silo"
+    }
+  ],
+  "web.settings.appKeys.removed": [
+    {
+      "type": 0,
+      "value": "Naprava "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " je odstranjena"
+    }
+  ],
+  "web.settings.appKeys.row.allowedBy": [
+    {
+      "type": 0,
+      "value": "Dovolil uporabnik "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "web.settings.appKeys.row.approve": [
+    {
+      "type": 0,
+      "value": "Odobri"
+    }
+  ],
+  "web.settings.appKeys.row.approveLabel": [
+    {
+      "type": 0,
+      "value": "Odobri napravo "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.row.deny": [
+    {
+      "type": 0,
+      "value": "Zavrni"
+    }
+  ],
+  "web.settings.appKeys.row.denyLabel": [
+    {
+      "type": 0,
+      "value": "Zavrni napravo "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.row.enrolledFrom": [
+    {
+      "type": 0,
+      "value": "Z naslova "
+    },
+    {
+      "type": 1,
+      "value": "address"
+    }
+  ],
+  "web.settings.appKeys.row.identityGone": [
+    {
+      "type": 0,
+      "value": "Prijava ni mogoča: njen račun pri ponudniku prijave ni več povezan"
+    }
+  ],
+  "web.settings.appKeys.row.kindApp": [
+    {
+      "type": 0,
+      "value": "Druga aplikacija"
+    }
+  ],
+  "web.settings.appKeys.row.kindDevice": [
+    {
+      "type": 0,
+      "value": "Aplikacija Silo"
+    }
+  ],
+  "web.settings.appKeys.row.lastUsed": [
+    {
+      "type": 0,
+      "value": "Zadnja prijava: "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.settings.appKeys.row.notUsed": [
+    {
+      "type": 0,
+      "value": "S svojim ključem se še ni prijavila"
+    }
+  ],
+  "web.settings.appKeys.row.preapproval": [
+    {
+      "type": 0,
+      "value": "Vnaprej odobreno · poteče "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.settings.appKeys.row.provider": [
+    {
+      "type": 0,
+      "value": "Preverjeno pri ponudniku prijave"
+    }
+  ],
+  "web.settings.appKeys.row.remove": [
+    {
+      "type": 0,
+      "value": "Odstrani"
+    }
+  ],
+  "web.settings.appKeys.row.removeLabel": [
+    {
+      "type": 0,
+      "value": "Odstrani napravo "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.row.viaAppCode": [
+    {
+      "type": 0,
+      "value": "Dodano z enkratno kodo s spletne strani strežnika"
+    }
+  ],
+  "web.settings.appKeys.row.viaPersonKey": [
+    {
+      "type": 0,
+      "value": "Dodano z aplikacijo Silo v drugi napravi"
+    }
+  ],
+  "web.settings.appKeys.row.viaSession": [
+    {
+      "type": 0,
+      "value": "Dodano med prijavljeno sejo"
+    }
+  ],
+  "web.settings.appKeys.row.waitingUntil": [
+    {
+      "type": 0,
+      "value": "Čaka na odobritev do "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.settings.appKeys.row.withdraw": [
+    {
+      "type": 0,
+      "value": "Prekliči"
+    }
+  ],
+  "web.settings.appKeys.row.withdrawLabel": [
+    {
+      "type": 0,
+      "value": "Prekliči odobritev za napravo "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.signsBackIn": [
+    {
+      "type": 0,
+      "value": "Naprave, prijavljene z aplikacijo Silo, se znova prijavijo samodejno. "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Odstranite napravo"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", da to preprečite."
+    }
+  ],
+  "web.settings.appKeys.title": [
+    {
+      "type": 0,
+      "value": "Naprave z aplikacijo Silo"
+    }
+  ],
+  "web.settings.appKeys.unavailable": [
+    {
+      "type": 0,
+      "value": "Prijava z aplikacijo Silo na tem strežniku ni na voljo, zato se te naprave ne morejo prijaviti. Še vedno jih lahko odstranite."
+    }
+  ],
+  "web.settings.appKeys.waiting.description": [
+    {
+      "type": 0,
+      "value": "Nova naprava je zahtevala prijavo v vaš račun z aplikacijo Silo. Odobrite jo samo, če ste jo pravkar nastavili."
+    }
+  ],
+  "web.settings.appKeys.waiting.title": [
+    {
+      "type": 0,
+      "value": "Čaka na vašo odobritev"
+    }
+  ],
+  "web.settings.appKeys.withdrawn": [
+    {
+      "type": 0,
+      "value": "Odobritev je preklicana"
     }
   ],
   "web.settings.cardOverlay.adjust": [
@@ -163835,6 +166308,54 @@
       "value": "Brez povezave ste, zato ta sprememba ni bila shranjena"
     }
   ],
+  "web.settings.openInSilo.action": [
+    {
+      "type": 0,
+      "value": "Pridobi kodo za aplikacijo Silo"
+    }
+  ],
+  "web.settings.openInSilo.codeInstructions": [
+    {
+      "type": 0,
+      "value": "V aplikaciji Silo v svojem telefonu ali tabličnem računalniku dodajte ta strežnik z njegovim naslovom in vnesite to kodo. Kdor ima kodo, se lahko prijavi v ta račun, zato je ne delite z nikomer."
+    }
+  ],
+  "web.settings.openInSilo.codeTitle": [
+    {
+      "type": 0,
+      "value": "Koda za aplikacijo Silo"
+    }
+  ],
+  "web.settings.openInSilo.description": [
+    {
+      "type": 0,
+      "value": "Prijavite aplikacijo Silo v svojem telefonu ali tabličnem računalniku v ta račun brez gesla."
+    }
+  ],
+  "web.settings.openInSilo.loadFailed": [
+    {
+      "type": 0,
+      "value": "Ni bilo mogoče preveriti, ali lahko ta brskalnik pridobi kodo za aplikacijo Silo."
+    }
+  ],
+  "web.settings.openInSilo.mainProfileOnly": [
+    {
+      "type": 0,
+      "value": "Kodo za aplikacijo Silo lahko pridobi samo glavni profil gospodinjstva. Preklopite nanj in poskusite znova."
+    }
+  ],
+  "web.settings.openInSilo.pinDescription": [
+    {
+      "type": 0,
+      "value": "Za pridobitev kode za aplikacijo Silo vnesite PIN glavnega profila."
+    }
+  ],
+  "web.settings.openInSilo.title": [
+    {
+      "type": 0,
+      "value": "Aplikacija Silo"
+    }
+  ],
   "web.settings.overlays.accent.amber": [
     {
       "type": 0,
@@ -167137,6 +169658,12 @@
       "value": "Prijavljeno"
     }
   ],
+  "web.settings.sessions.row.signsBackIn": [
+    {
+      "type": 0,
+      "value": "Ta naprava se znova prijavi samodejno"
+    }
+  ],
   "web.settings.sessions.row.summary": [
     {
       "type": 8,
@@ -167223,6 +169750,24 @@
     {
       "type": 0,
       "value": "Nastavitve"
+    }
+  ],
+  "web.settings.signInAgain.action": [
+    {
+      "type": 0,
+      "value": "Ponovna prijava"
+    }
+  ],
+  "web.settings.signInAgain.manageDevices": [
+    {
+      "type": 0,
+      "value": "Za upravljanje svojih naprav se znova prijavite"
+    }
+  ],
+  "web.settings.signInAgain.useApp": [
+    {
+      "type": 0,
+      "value": "Svoje naprave upravljajte v aplikaciji Silo."
     }
   ],
   "web.settings.signedInSessions.loadFailed": [

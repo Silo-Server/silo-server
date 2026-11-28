@@ -43,7 +43,25 @@ const (
 	// a theme token can never reach a video route or an older worker.
 	PlayMethodThemeDirect = "theme_direct_v1"
 	PlayMethodThemeAAC    = "theme_aac_v1"
+	// PlayMethodConnectionReceipt marks a receipt: the signed statement a host
+	// sends with the probe bytes it served, naming the account, the device and
+	// the connection class that carried them. It authorizes no media route.
+	PlayMethodConnectionReceipt = "connection_receipt"
 )
+
+// ConnectionReceiptHeader is the response header that carries a connection
+// receipt.
+const ConnectionReceiptHeader = "Silo-Connection-Receipt"
+
+// Connection classes a receipt names.
+const (
+	ConnectionClassRegular = "regular"
+	ConnectionClassDirect  = "direct"
+)
+
+// ConnectionReceiptHostAPI is the receipt host of the API server. A media proxy
+// is "node:<id>".
+const ConnectionReceiptHostAPI = "api"
 
 // Claims holds everything a stateless proxy or transcode node needs
 // to serve a streaming session without database access.
@@ -189,6 +207,21 @@ type Claims struct {
 	// delivery feature, so the relay and a reconstruct keep the playlist form
 	// the client negotiated. Absent in older tokens: the literal form.
 	HLSVariableSubstitution bool `json:"hvs,omitempty"`
+
+	// ProbeDevice is the device whose bandwidth probe a probe token authorizes,
+	// taken from the probe request's X-Silo-Device-Id. The serving proxy puts it
+	// in the receipt it sends. It is internal to Silo's token.
+	ProbeDevice string `json:"pdev,omitempty"`
+
+	// Connection receipt fields (PlayMethodConnectionReceipt; the account is
+	// UserID). DeviceID is the device, Host the serving host, ConnectionClass
+	// the class that carried the bytes. ConnectionKey and PathGeneration are
+	// set only for the direct class.
+	DeviceID        string `json:"did,omitempty"`
+	Host            string `json:"host,omitempty"`
+	ConnectionClass string `json:"class,omitempty"`
+	ConnectionKey   string `json:"key,omitempty"`
+	PathGeneration  uint64 `json:"gen,omitempty"`
 
 	// Recipe staleness hint, bumped on each re-mint after a recipe mutation
 	// (audio/quality/seek switch). An optional client-side hint only.

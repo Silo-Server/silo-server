@@ -215,6 +215,12 @@
       "value": "Acest element este deja asociat cu acest cont."
     }
   ],
+  "error.app_code_invalid": [
+    {
+      "type": 0,
+      "value": "Acest cod este necunoscut, folosit deja sau expirat. Obțineți unul nou de pe pagina serverului."
+    }
+  ],
   "error.authentication_required": [
     {
       "type": 0,
@@ -333,6 +339,12 @@
     {
       "type": 0,
       "value": "Această valoare are un tip greșit."
+    }
+  ],
+  "error.field.key_enrolled": [
+    {
+      "type": 0,
+      "value": "Această cheie este deja folosită pe acest server."
     }
   ],
   "error.field.malformed_form": [
@@ -2554,6 +2566,30 @@
     {
       "type": 0,
       "value": "Automată"
+    }
+  ],
+  "settingsManifest.playback.connection_path.description": [
+    {
+      "type": 0,
+      "value": "Opțiunea Doar directă folosește în continuare conexiunea la rețeaua locală atunci când aceasta este disponibilă."
+    }
+  ],
+  "settingsManifest.playback.connection_path.label": [
+    {
+      "type": 0,
+      "value": "Calea conexiunii"
+    }
+  ],
+  "settingsManifest.playback.connection_path.option.automatic": [
+    {
+      "type": 0,
+      "value": "Automată"
+    }
+  ],
+  "settingsManifest.playback.connection_path.option.direct_only": [
+    {
+      "type": 0,
+      "value": "Doar directă"
     }
   ],
   "settingsManifest.playback.intro_skip_mode.description": [
@@ -25822,6 +25858,87 @@
       }
     }
   ],
+  "web.admin.common.adminUserSignIn.unlinkConfirm.text": [
+    {
+      "type": 5,
+      "value": "last_way",
+      "options": {
+        "yes": {
+          "value": [
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " nu se mai poate conecta cu acest cont de la furnizor. "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " nu se va putea conecta până când nu setați o parolă sau nu conectați din nou un furnizor."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " nu se mai poate conecta cu acest cont de la furnizor."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 5,
+      "value": "keys",
+      "options": {
+        "yes": {
+          "value": [
+            {
+              "type": 0,
+              "value": " Cheile aplicației Silo ale utilizatorului "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " asociate cu acest cont de la furnizor sunt eliminate, iar dispozitivele respective sunt deconectate."
+            }
+          ]
+        },
+        "unknown": {
+          "value": [
+            {
+              "type": 0,
+              "value": " Eventualele chei ale aplicației Silo ale utilizatorului "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " asociate cu acest cont de la furnizor sunt eliminate, iar dispozitivele respective sunt deconectate."
+            }
+          ]
+        },
+        "other": {
+          "value": []
+        }
+      }
+    }
+  ],
   "web.admin.common.adminUserSignIn.unlinkConfirm.title": [
     {
       "type": 0,
@@ -28298,6 +28415,18 @@
     {
       "type": 0,
       "value": "Creează miniaturile afișate de playere în timpul derulării, în spațiul de stocare public configurat pentru resurse. Fișierele sunt procesate în fundal, cu prioritate scăzută. Dezactivarea opțiunii șterge previzualizările bibliotecii."
+    }
+  ],
+  "web.admin.common.libraryEditor.advanced.trickplayGenerate": [
+    {
+      "type": 0,
+      "value": "Generarea previzualizărilor lipsă cu FFmpeg"
+    }
+  ],
+  "web.admin.common.libraryEditor.advanced.trickplayGenerateDescription": [
+    {
+      "type": 0,
+      "value": "Fișierele însoțitoare .trickplay și .bif existente lângă fișierele media sunt folosite mai întâi. Dezactivați această opțiune pentru a importa doar fișierele însoțitoare și a omite generarea cu FFmpeg."
     }
   ],
   "web.admin.common.libraryEditor.advanced.trickplayUnavailable": [
@@ -32844,6 +32973,52 @@
       "value": "Administrare: utilizatori"
     }
   ],
+  "web.admin.common.trickplay.badge.awaitingSidecarCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " fișier media așteaptă fișierul însoțitor"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " fișiere media așteaptă fișierul însoțitor"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " de fișiere media așteaptă fișierul însoțitor"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.common.trickplay.badge.detail": [
     {
       "type": 0,
@@ -33010,6 +33185,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.common.trickplay.badge.sidecarsOnly": [
+    {
+      "type": 0,
+      "value": "doar fișiere însoțitoare"
     }
   ],
   "web.admin.common.trickplay.badge.srDetail": [
@@ -33198,6 +33379,42 @@
     {
       "type": 0,
       "value": "Playerele păstrează previzualizările actuale până când cele noi sunt gata."
+    }
+  ],
+  "web.admin.common.trickplay.sidecarStatus.awaiting_sidecar": [
+    {
+      "type": 0,
+      "value": "În așteptarea fișierului însoțitor"
+    }
+  ],
+  "web.admin.common.trickplay.sidecarStatus.sidecar_invalid": [
+    {
+      "type": 0,
+      "value": "Fișier însoțitor nevalid"
+    }
+  ],
+  "web.admin.common.trickplay.sidecarStatus.sidecar_stale": [
+    {
+      "type": 0,
+      "value": "Fișier însoțitor învechit"
+    }
+  ],
+  "web.admin.common.trickplay.source.generated": [
+    {
+      "type": 0,
+      "value": "Generate"
+    }
+  ],
+  "web.admin.common.trickplay.source.sidecar_bif": [
+    {
+      "type": 0,
+      "value": "Fișier însoțitor (.bif)"
+    }
+  ],
+  "web.admin.common.trickplay.source.sidecar_trickplay": [
+    {
+      "type": 0,
+      "value": "Fișier însoțitor (.trickplay)"
     }
   ],
   "web.admin.common.trickplay.state.off": [
@@ -35250,7 +35467,7 @@
   "web.admin.dashboard.widgets.apiClients.confirmDescription": [
     {
       "type": 0,
-      "value": "Se va încheia o sesiune de conectare pentru "
+      "value": "Se va încheia o sesiune de conectare a utilizatorului "
     },
     {
       "type": 1,
@@ -35258,7 +35475,7 @@
     },
     {
       "type": 0,
-      "value": ". Celelalte dispozitive ale sale rămân conectate. Clientul se poate conecta din nou cu parola contului."
+      "value": ". Celelalte dispozitive ale sale rămân conectate. Clientul se poate conecta din nou."
     }
   ],
   "web.admin.dashboard.widgets.apiClients.confirmLabel": [
@@ -49020,6 +49237,12 @@
       "value": "Profil"
     }
   ],
+  "web.admin.history.column.progress": [
+    {
+      "type": 0,
+      "value": "Progres"
+    }
+  ],
   "web.admin.history.column.status": [
     {
       "type": 0,
@@ -49054,6 +49277,12 @@
     {
       "type": 0,
       "value": "Jurnalele sesiunii"
+    }
+  ],
+  "web.admin.history.detail.backToPlay": [
+    {
+      "type": 0,
+      "value": "Înapoi la redarea combinată"
     }
   ],
   "web.admin.history.detail.column.delivered": [
@@ -49164,6 +49393,12 @@
       "value": "Timp de vizionare"
     }
   ],
+  "web.admin.history.detail.inspectSitting": [
+    {
+      "type": 0,
+      "value": "Inspectați"
+    }
+  ],
   "web.admin.history.detail.keyboardHint": [
     {
       "type": 0,
@@ -49248,6 +49483,12 @@
       "value": "De ce nu s-a folosit redarea directă"
     }
   ],
+  "web.admin.history.detail.section.sessions": [
+    {
+      "type": 0,
+      "value": "Sesiunile din această redare"
+    }
+  ],
   "web.admin.history.detail.section.streams": [
     {
       "type": 0,
@@ -49258,6 +49499,110 @@
     {
       "type": 0,
       "value": "Cronologie și progresul vizionării"
+    }
+  ],
+  "web.admin.history.detail.sessionsCapped": [
+    {
+      "type": 0,
+      "value": "Sesiunile din această redare: se afișează primele "
+    },
+    {
+      "type": 1,
+      "value": "shown"
+    },
+    {
+      "type": 0,
+      "value": " din "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.history.detail.sessionsNotice": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Această redare are "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " sesiune. Detaliile despre stream, dispozitiv și rută de mai jos se referă la ea."
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Această redare cuprinde "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " sesiuni. Detaliile despre stream, dispozitiv și rută de mai jos se referă la sesiunea sa principală; alegeți orice sesiune de mai jos pentru a o inspecta separat."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Această redare cuprinde "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " de sesiuni. Detaliile despre stream, dispozitiv și rută de mai jos se referă la sesiunea sa principală; alegeți orice sesiune de mai jos pentru a o inspecta separat."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.ended": [
+    {
+      "type": 0,
+      "value": "Încheiere"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.method": [
+    {
+      "type": 0,
+      "value": "Metodă"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.started": [
+    {
+      "type": 0,
+      "value": "Început"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.watched": [
+    {
+      "type": 0,
+      "value": "Timp vizionat"
     }
   ],
   "web.admin.history.detail.subtitlesBurnIn": [
@@ -49486,6 +49831,12 @@
       "value": "Toate rețelele"
     }
   ],
+  "web.admin.history.filter.allMediaTypes": [
+    {
+      "type": 0,
+      "value": "Toate tipurile media"
+    }
+  ],
   "web.admin.history.filter.allMethods": [
     {
       "type": 0,
@@ -49522,6 +49873,24 @@
       "value": "Finalizate"
     }
   ],
+  "web.admin.history.filter.episodes": [
+    {
+      "type": 0,
+      "value": "Episoade"
+    }
+  ],
+  "web.admin.history.filter.hideShort": [
+    {
+      "type": 0,
+      "value": "Ascundeți <30 s"
+    }
+  ],
+  "web.admin.history.filter.hideShortTitle": [
+    {
+      "type": 0,
+      "value": "Ascundeți sesiunile nefinalizate sub 30 de secunde"
+    }
+  ],
   "web.admin.history.filter.locationLocal": [
     {
       "type": 0,
@@ -49532,6 +49901,12 @@
     {
       "type": 0,
       "value": "La distanță"
+    }
+  ],
+  "web.admin.history.filter.movies": [
+    {
+      "type": 0,
+      "value": "Filme"
     }
   ],
   "web.admin.history.filter.partial": [
@@ -49755,6 +50130,12 @@
       "value": "Redări recente"
     }
   ],
+  "web.admin.history.row.burnInBadgeTitle": [
+    {
+      "type": 0,
+      "value": "Subtitrări încorporate în imagine"
+    }
+  ],
   "web.admin.history.row.completed": [
     {
       "type": 0,
@@ -49775,6 +50156,64 @@
     {
       "type": 0,
       "value": "Estimat (înregistrat înainte de măsurarea exactă a timpului de vizionare)"
+    }
+  ],
+  "web.admin.history.row.groupedSessionsTitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Combină "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " sesiune"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Combină "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " sesiuni"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Combină "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " de sesiuni"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.history.row.meta": [
@@ -49807,6 +50246,12 @@
       "value": "Parțială"
     }
   ],
+  "web.admin.history.row.progressLabel": [
+    {
+      "type": 0,
+      "value": "Progresul redării"
+    }
+  ],
   "web.admin.history.row.started": [
     {
       "type": 0,
@@ -49817,16 +50262,104 @@
       "value": "time"
     }
   ],
+  "web.admin.history.stats.accountsCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " cont"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " conturi"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " de conturi"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.history.stats.completed": [
     {
       "type": 0,
       "value": "Finalizate"
     }
   ],
+  "web.admin.history.stats.completionBreakdown": [
+    {
+      "type": 0,
+      "value": "Finalizate: "
+    },
+    {
+      "type": 1,
+      "value": "completed"
+    },
+    {
+      "type": 0,
+      "value": " · Parțiale: "
+    },
+    {
+      "type": 1,
+      "value": "partial"
+    }
+  ],
   "web.admin.history.stats.partial": [
     {
       "type": 0,
       "value": "Parțiale"
+    }
+  ],
+  "web.admin.history.stats.totalPlays": [
+    {
+      "type": 0,
+      "value": "Total redări"
+    }
+  ],
+  "web.admin.history.stats.totalSessions": [
+    {
+      "type": 0,
+      "value": "Total sesiuni"
+    }
+  ],
+  "web.admin.history.stats.uniqueProfiles": [
+    {
+      "type": 0,
+      "value": "Profiluri unice"
+    }
+  ],
+  "web.admin.history.stats.uniqueTitles": [
+    {
+      "type": 0,
+      "value": "Titluri unice"
     }
   ],
   "web.admin.history.stats.visibleRows": [
@@ -49845,6 +50378,24 @@
     {
       "type": 0,
       "value": "Istoric de redare"
+    }
+  ],
+  "web.admin.history.view.label": [
+    {
+      "type": 0,
+      "value": "Vizualizare istoric"
+    }
+  ],
+  "web.admin.history.view.plays": [
+    {
+      "type": 0,
+      "value": "Redări"
+    }
+  ],
+  "web.admin.history.view.sessions": [
+    {
+      "type": 0,
+      "value": "Toate sesiunile"
     }
   ],
   "web.admin.historyImport.conflict.message": [
@@ -94397,6 +94948,234 @@
       "value": ")"
     }
   ],
+  "web.admin.users.detail.appKeys.confirm.denyDescription": [
+    {
+      "type": 0,
+      "value": "Dispozitivul "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " nu se va putea conecta la contul utilizatorului "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": ". Dacă dispozitivul îi aparținea, îl poate adăuga din nou în aplicația Silo."
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKey": [
+    {
+      "type": 0,
+      "value": "Eliminați cheia"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKeyDescription": [
+    {
+      "type": 0,
+      "value": "Dispozitivele deja conectate continuă să funcționeze până când le eliminați. Nu se mai poate adăuga niciun dispozitiv nou cu această cheie, iar dispozitivele adăugate de ea care sunt încă în așteptare sunt respinse. Aplicația Silo a utilizatorului "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " configurează o cheie nouă data viitoare când utilizatorul adaugă un dispozitiv dintr-o sesiune activă."
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKeyTitle": [
+    {
+      "type": 0,
+      "value": "Eliminați cheia de cont a utilizatorului "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.removeDescription": [
+    {
+      "type": 0,
+      "value": "Eliminarea dispozitivului "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " îl deconectează imediat de la contul utilizatorului "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " și îi oprește cheia: nu se mai poate conecta cu ea. Pentru a-l folosi din nou, "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " îl adaugă din nou în aplicația Silo."
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.withdrawDescription": [
+    {
+      "type": 0,
+      "value": "Dispozitivul "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " nu va putea folosi această aprobare pentru a se conecta la contul utilizatorului "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.detail.appKeys.description": [
+    {
+      "type": 0,
+      "value": "Dispozitive și aplicații care se conectează la contul utilizatorului "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " cu aplicația Silo, fără parolă."
+    }
+  ],
+  "web.admin.users.detail.appKeys.empty": [
+    {
+      "type": 0,
+      "value": "Niciun dispozitiv nu folosește aplicația Silo pe acest cont."
+    }
+  ],
+  "web.admin.users.detail.appKeys.loadFailed": [
+    {
+      "type": 0,
+      "value": "Nu s-au putut încărca dispozitivele."
+    }
+  ],
+  "web.admin.users.detail.appKeys.off": [
+    {
+      "type": 0,
+      "value": "Conectarea cu aplicația Silo este dezactivată pe acest server, deci aceste dispozitive nu se pot conecta. Le puteți elimina în continuare."
+    }
+  ],
+  "web.admin.users.detail.appKeys.ownerOnly": [
+    {
+      "type": 0,
+      "value": "Doar proprietarul serverului poate modifica dispozitivele altui administrator sau ale proprietarului."
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.description": [
+    {
+      "type": 0,
+      "value": "Aplicația Silo folosește această cheie pentru a adăuga dispozitivele noi ale utilizatorului "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": ". Configurată: "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.none": [
+    {
+      "type": 0,
+      "value": "Nicio cheie de cont. Aplicația Silo a utilizatorului "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " configurează una data viitoare când utilizatorul adaugă un dispozitiv dintr-o sesiune activă."
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.remove": [
+    {
+      "type": 0,
+      "value": "Eliminați cheia de cont"
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKeyRemoved": [
+    {
+      "type": 0,
+      "value": "Cheia de cont a fost eliminată"
+    }
+  ],
+  "web.admin.users.detail.appKeys.preapprovals.description": [
+    {
+      "type": 0,
+      "value": "Conectări aprobate de "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " pentru un dispozitiv care nu s-a conectat încă."
+    }
+  ],
+  "web.admin.users.detail.appKeys.waiting.description": [
+    {
+      "type": 0,
+      "value": "Un dispozitiv nou al unui cont de administrator așteaptă până când "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " îl aprobă de pe un dispozitiv pe care s-a conectat. Îl puteți respinge aici."
+    }
+  ],
+  "web.admin.users.detail.appKeys.waiting.title": [
+    {
+      "type": 0,
+      "value": "În așteptarea aprobării"
+    }
+  ],
   "web.admin.users.detail.common.allProfiles": [
     {
       "type": 0,
@@ -98233,6 +99012,12 @@
       "value": "Contul a atins limita de profiluri"
     }
   ],
+  "web.admin.users.detail.profiles.badge.changedHere": [
+    {
+      "type": 0,
+      "value": "Modificat aici"
+    }
+  ],
   "web.admin.users.detail.profiles.badge.kids": [
     {
       "type": 0,
@@ -98430,6 +99215,660 @@
     {
       "type": 0,
       "value": "Salvați codul PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowAgain": [
+    {
+      "type": 0,
+      "value": "Permiteți din nou"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowAgainAria": [
+    {
+      "type": 0,
+      "value": "Permiteți revenirea profilului "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " pe acest server"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowDescription": [
+    {
+      "type": 0,
+      "value": "Aplicația utilizatorului poate adăuga din nou profilul "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " la următoarea sincronizare, ca profil nou, fără istoricul său de pe acest server, dacă profilurile aplicației includ încă profilul "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " și acest cont mai are loc pentru un profil."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowTitle": [
+    {
+      "type": 0,
+      "value": "Permiteți din nou profilul "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.alreadyCleared": [
+    {
+      "type": 0,
+      "value": "Modificarea a fost deja ștearsă sau "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " a modificat-o din nou. Lista este actualizată."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedBy": [
+    {
+      "type": 0,
+      "value": "Modificat de "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " pe "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedSinceOpened": [
+    {
+      "type": 0,
+      "value": "Această modificare a fost actualizată după ce ați deschis-o, deci nu s-a șters nimic. Recitiți-o în listă, apoi ștergeți-o dacă încă doriți."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedWhileRunning": [
+    {
+      "type": 0,
+      "value": "Profilurile s-au modificat în timpul operațiunii, deci nu s-a modificat nimic. Lista este actualizată; încercați din nou dacă încă doriți."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clear": [
+    {
+      "type": 0,
+      "value": "Ștergeți"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearAndRemovePin": [
+    {
+      "type": 0,
+      "value": "Ștergeți și eliminați codul PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearAria": [
+    {
+      "type": 0,
+      "value": "Ștergeți modificarea câmpului "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " din profilul "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearFailed": [
+    {
+      "type": 0,
+      "value": "Nu s-a putut șterge modificarea."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearInherit": [
+    {
+      "type": 0,
+      "value": "Setarea "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " din profilul "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " revine la valoarea pe care profilul "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " o moștenește acum, așa cum solicită aplicația utilizatorului. Modificările din aplicația utilizatorului se aplică din nou setării."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearLater": [
+    {
+      "type": 0,
+      "value": "Câmpul "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " rămâne neschimbat până când aplicația utilizatorului îl trimite din nou. După aceea, modificările din aplicația utilizatorului i se aplică din nou."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearNow": [
+    {
+      "type": 0,
+      "value": "Profilul "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " revine acum la valoarea din aplicația utilizatorului, iar modificările din aplicația utilizatorului i se aplică din nou."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearNowValue": [
+    {
+      "type": 0,
+      "value": "Câmpul "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " din profilul "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " revine acum la "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": ", valoarea din aplicația utilizatorului. Modificările din aplicația utilizatorului i se aplică din nou."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearPin": [
+    {
+      "type": 0,
+      "value": "Profilul "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " păstrează codul PIN setat de dvs. până când aplicația utilizatorului trimite unul. După aceea, modificările din aplicația utilizatorului i se aplică din nou."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearPinRemoves": [
+    {
+      "type": 0,
+      "value": "Aplicația utilizatorului trimite profilul "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " fără cod PIN, deci ștergerea elimină acum codul PIN setat de dvs. Oricine folosește acest cont va putea apoi deschide profilul "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " fără cod PIN."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearTitle": [
+    {
+      "type": 0,
+      "value": "Ștergeți modificarea câmpului "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " din profilul "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.deletedAccount": [
+    {
+      "type": 0,
+      "value": "un cont șters"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.description": [
+    {
+      "type": 0,
+      "value": "Aceste profiluri provin din aplicația utilizatorului "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ". O modificare făcută aici rămâne pe acest server până când o ștergeți. Nu este o blocare: "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " poate modifica același lucru și aici."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismiss": [
+    {
+      "type": 0,
+      "value": "Închideți"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismissAria": [
+    {
+      "type": 0,
+      "value": "Închideți nota despre câmpul "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " din profilul "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismissFailed": [
+    {
+      "type": 0,
+      "value": "Nu s-a putut închide nota."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.isChild": [
+    {
+      "type": 0,
+      "value": "Profil pentru copii"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.maxAdvisoryAge": [
+    {
+      "type": 0,
+      "value": "Limită de vârstă"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.maxContentRating": [
+    {
+      "type": 0,
+      "value": "Limită de clasificare a conținutului"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.name": [
+    {
+      "type": 0,
+      "value": "Nume"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.picture": [
+    {
+      "type": 0,
+      "value": "Imagine"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.pin": [
+    {
+      "type": 0,
+      "value": "Cod PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.requests": [
+    {
+      "type": 0,
+      "value": "Cereri"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.requireAdvisoryAge": [
+    {
+      "type": 0,
+      "value": "Clasificare de vârstă obligatorie"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.fieldValue": [
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.hidden": [
+    {
+      "type": 0,
+      "value": "Eliminat pe acest server de "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " pe "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": ". Aplicația utilizatorului nu îl va adăuga din nou până când nu permiteți acest lucru."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.loadFailed": [
+    {
+      "type": 0,
+      "value": "Nu s-au putut încărca modificările făcute pe acest server."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.nameTaken": [
+    {
+      "type": 0,
+      "value": "Profilul "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " nu poate reveni la numele "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " din aplicația utilizatorului, deoarece alt profil de aici are deja acest nume. Redenumiți mai întâi profilul respectiv, apoi ștergeți din nou modificarea."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeHiddenNextSync": [
+    {
+      "type": 0,
+      "value": "Profilul "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " poate reveni la următoarea sincronizare a aplicației utilizatorului "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", dacă profilurile aplicației îl includ încă."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeHiddenWoken": [
+    {
+      "type": 0,
+      "value": "Profilul "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " poate reveni la următoarea sincronizare a aplicației utilizatorului, dacă profilurile aplicației îl includ încă. S-a trimis telefonului utilizatorului "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " o cerere de sincronizare."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeNextSync": [
+    {
+      "type": 0,
+      "value": "Modificarea a fost ștearsă. Va ajunge în aplicația utilizatorului "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " la următoarea sincronizare."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeWoken": [
+    {
+      "type": 0,
+      "value": "Modificarea a fost ștearsă. S-a trimis telefonului utilizatorului "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " o cerere de sincronizare."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.removedBy": [
+    {
+      "type": 0,
+      "value": "Eliminat de "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " pe "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.replacedOwner": [
+    {
+      "type": 0,
+      "value": "Această modificare a înlocuit valoarea setată de dvs."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.setBy": [
+    {
+      "type": 0,
+      "value": "Setat de "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " pe "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.settled": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " a modificat acest câmp pe "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "; valoarea setată de dvs. nu se mai aplică."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.title": [
+    {
+      "type": 0,
+      "value": "Modificări pe acest server"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.inherited": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (valoare moștenită)"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.noPicture": [
+    {
+      "type": 0,
+      "value": "Nicio imagine"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.none": [
+    {
+      "type": 0,
+      "value": "Niciuna"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.off": [
+    {
+      "type": 0,
+      "value": "Dezactivat"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.on": [
+    {
+      "type": 0,
+      "value": "Activat"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.picture": [
+    {
+      "type": 0,
+      "value": "Imagine personalizată"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.pinNone": [
+    {
+      "type": 0,
+      "value": "Fără cod PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.pinSet": [
+    {
+      "type": 0,
+      "value": "Cod PIN setat"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.requestsAllowed": [
+    {
+      "type": 0,
+      "value": "Permise"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.requestsBlocked": [
+    {
+      "type": 0,
+      "value": "Blocate"
     }
   ],
   "web.admin.users.detail.profiles.setPin": [
@@ -99715,6 +101154,144 @@
     {
       "type": 0,
       "value": "Setați o parolă"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.action": [
+    {
+      "type": 0,
+      "value": "Creați un link de conectare"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.actionHint": [
+    {
+      "type": 0,
+      "value": "A pierdut toate dispozitivele"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.description": [
+    {
+      "type": 0,
+      "value": "Un link de unică folosință pentru "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": ", dacă a pierdut toate dispozitivele. Deschide o pagină care îi oferă un cod pentru aplicația Silo sau îi permite să aleagă o parolă. Funcționează 24 de ore, iar un link nou îl înlocuiește pe cel anterior."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailAction": [
+    {
+      "type": 0,
+      "value": "Trimiteți-l prin e-mail"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHint": [
+    {
+      "type": 0,
+      "value": "Creați linkul pentru a-l copia și a-l trimite personal sau trimiteți-l prin e-mail la adresa "
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHintNoAddress": [
+    {
+      "type": 0,
+      "value": "Creați linkul, apoi copiați-l și trimiteți-l personal. Acest cont nu are o adresă de e-mail la care să fie trimis."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHintNoMail": [
+    {
+      "type": 0,
+      "value": "Creați linkul, apoi copiați-l și trimiteți-l personal. Configurați e-mailul în Setări pentru a-l trimite de aici."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailSent": [
+    {
+      "type": 0,
+      "value": "Linkul a fost trimis la adresa "
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": ". Data expirării: "
+    },
+    {
+      "type": 1,
+      "value": "expires"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Serverul de e-mail nu a confirmat livrarea. Linkul de mai jos funcționează în continuare: copiați-l și trimiteți-l în alt mod."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.failed": [
+    {
+      "type": 0,
+      "value": "Nu s-a putut crea un link de conectare."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.linkShare": [
+    {
+      "type": 0,
+      "value": "Trimiteți acest link doar utilizatorului "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": ". Oricine îl are se poate conecta la acest cont până când linkul este folosit sau până la expirarea sa ("
+    },
+    {
+      "type": 1,
+      "value": "expires"
+    },
+    {
+      "type": 0,
+      "value": ")."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.providerRequired": [
+    {
+      "type": 0,
+      "value": "Conectarea cu parolă locală este dezactivată pe acest server, deci un link de conectare ar ocoli furnizorul de conectare al serverului. Cereți-i utilizatorului "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " să se conecteze cu furnizorul pe site-ul acestui server, apoi să folosească „Deschideți în Silo” din setările contului."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.title": [
+    {
+      "type": 0,
+      "value": "Link de conectare pentru "
+    },
+    {
+      "type": 1,
+      "value": "username"
     }
   ],
   "web.audiobooks.chapter.fallbackTitle": [
@@ -101774,6 +103351,120 @@
       "value": "Aprobați conectarea"
     }
   ],
+  "web.auth.appCode.code": [
+    {
+      "type": 0,
+      "value": "Cod"
+    }
+  ],
+  "web.auth.appCode.codeCopied": [
+    {
+      "type": 0,
+      "value": "Codul a fost copiat"
+    }
+  ],
+  "web.auth.appCode.copyCode": [
+    {
+      "type": 0,
+      "value": "Copiați codul"
+    }
+  ],
+  "web.auth.appCode.copyFailed": [
+    {
+      "type": 0,
+      "value": "Nu s-a putut copia codul. Selectați-l și copiați-l manual."
+    }
+  ],
+  "web.auth.appCode.expired": [
+    {
+      "type": 0,
+      "value": "Acest cod a expirat."
+    }
+  ],
+  "web.auth.appCode.failed": [
+    {
+      "type": 0,
+      "value": "Silo nu a putut genera un cod. Încercați din nou."
+    }
+  ],
+  "web.auth.appCode.instructions": [
+    {
+      "type": 0,
+      "value": "Apăsați „Deschideți Silo” pentru a continua în aplicația Silo pe acest dispozitiv. Dacă aplicația nu este instalată, instalați-o, reveniți la această filă și apăsați din nou „Deschideți Silo”."
+    }
+  ],
+  "web.auth.appCode.noScanCode": [
+    {
+      "type": 0,
+      "value": "Adresa acestui server este prea lungă pentru un cod de scanare. Introduceți adresa serverului și codul în aplicația Silo sau copiați codul și lipiți-l acolo."
+    }
+  ],
+  "web.auth.appCode.open": [
+    {
+      "type": 0,
+      "value": "Deschideți Silo"
+    }
+  ],
+  "web.auth.appCode.renew": [
+    {
+      "type": 0,
+      "value": "Obțineți un cod nou"
+    }
+  ],
+  "web.auth.appCode.scanCodeLabel": [
+    {
+      "type": 0,
+      "value": "Cod de scanare pentru aplicația Silo"
+    }
+  ],
+  "web.auth.appCode.scanCodeUnavailable": [
+    {
+      "type": 0,
+      "value": "Nu se poate afișa un cod de scanare pentru acest server. Introduceți adresa serverului și codul în aplicația Silo sau copiați codul și lipiți-l acolo."
+    }
+  ],
+  "web.auth.appCode.scanHint": [
+    {
+      "type": 0,
+      "value": "Scanați acest cod cu scanerul din aplicația Silo sau introduceți ori copiați adresa serverului și codul de mai jos."
+    }
+  ],
+  "web.auth.appCode.serverAddress": [
+    {
+      "type": 0,
+      "value": "Adresa serverului"
+    }
+  ],
+  "web.auth.appCode.singleUse": [
+    {
+      "type": 0,
+      "value": "Acest cod funcționează o singură dată și expiră după câteva minute."
+    }
+  ],
+  "web.auth.appCode.title": [
+    {
+      "type": 0,
+      "value": "Deschideți Silo"
+    }
+  ],
+  "web.auth.appCode.typeInstructions": [
+    {
+      "type": 0,
+      "value": "În aplicația Silo de pe telefon sau tabletă, adăugați acest server după adresă și introduceți acest cod pentru a vă crea contul. Oricine are codul se poate alătura în locul dvs., așa că nu îl distribuiți."
+    }
+  ],
+  "web.auth.appCode.typeTitle": [
+    {
+      "type": 0,
+      "value": "Alăturați-vă cu acest cod"
+    }
+  ],
+  "web.auth.appCode.webLink": [
+    {
+      "type": 0,
+      "value": "Deschideți în schimb prin linkul siloserver.org"
+    }
+  ],
   "web.auth.card.rememberedIt": [
     {
       "type": 0,
@@ -101976,10 +103667,50 @@
       ]
     }
   ],
+  "web.auth.invite.appAccountEmail": [
+    {
+      "type": 0,
+      "value": "Contul dvs. va folosi adresa "
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.auth.invite.appContinue": [
+    {
+      "type": 0,
+      "value": "Continuați"
+    }
+  ],
+  "web.auth.invite.appEmailHint": [
+    {
+      "type": 0,
+      "value": "Cu o adresă de e-mail, acest server vă poate trimite un link de conectare dacă vă pierdeți dispozitivele."
+    }
+  ],
   "web.auth.invite.appMissing": [
     {
       "type": 0,
       "value": "Nu se întâmplă nimic? Aplicația nu este instalată — continuați mai jos."
+    }
+  ],
+  "web.auth.invite.appProviderOnly": [
+    {
+      "type": 0,
+      "value": "Serverul "
+    },
+    {
+      "type": 1,
+      "value": "server"
+    },
+    {
+      "type": 0,
+      "value": " adaugă persoane prin furnizorul său de conectare. Conectați-vă prin acesta pe acest site, apoi deschideți Silo din setările contului."
     }
   ],
   "web.auth.invite.created": [
@@ -102008,6 +103739,18 @@
       "value": "Introduceți adresa de e-mail și alegeți o parolă. Vă veți conecta cu adresa de e-mail."
     }
   ],
+  "web.auth.invite.descriptionWithApp": [
+    {
+      "type": 0,
+      "value": "Alăturați-vă cu aplicația Silo de pe telefon sau tabletă ori alegeți o parolă pentru a vă conecta."
+    }
+  ],
+  "web.auth.invite.emailOptional": [
+    {
+      "type": 0,
+      "value": "E-mail (opțional)"
+    }
+  ],
   "web.auth.invite.emailPlaceholder": [
     {
       "type": 0,
@@ -102028,6 +103771,18 @@
     {
       "type": 1,
       "value": "inviter"
+    }
+  ],
+  "web.auth.invite.joinWithApp": [
+    {
+      "type": 0,
+      "value": "Alăturați-vă cu aplicația Silo"
+    }
+  ],
+  "web.auth.invite.joinWithAppInstead": [
+    {
+      "type": 0,
+      "value": "Alăturați-vă în schimb cu aplicația Silo"
     }
   ],
   "web.auth.invite.loadFailed": [
@@ -102128,6 +103883,30 @@
     {
       "type": 0,
       "value": "Invitație indisponibilă"
+    }
+  ],
+  "web.auth.invite.usePassword": [
+    {
+      "type": 0,
+      "value": "Folosiți în schimb o parolă"
+    }
+  ],
+  "web.auth.invite.usernameIsAddress": [
+    {
+      "type": 0,
+      "value": "Un nume de utilizator cu @ trebuie să fie adresa de e-mail pe care o introduceți mai jos."
+    }
+  ],
+  "web.auth.invite.usernameRequired": [
+    {
+      "type": 0,
+      "value": "Alegeți un nume de utilizator."
+    }
+  ],
+  "web.auth.invite.usernameTaken": [
+    {
+      "type": 0,
+      "value": "Acest nume de utilizator este deja folosit. Alegeți altul."
     }
   ],
   "web.auth.languagePicker.label": [
@@ -103134,6 +104913,126 @@
     {
       "type": 0,
       "value": "Conectați-vă"
+    }
+  ],
+  "web.auth.signInLink.backToCode": [
+    {
+      "type": 0,
+      "value": "Înapoi la cod"
+    }
+  ],
+  "web.auth.signInLink.codeExpired": [
+    {
+      "type": 0,
+      "value": "Cereți unui administrator al acestui server un link nou pentru a obține alt cod."
+    }
+  ],
+  "web.auth.signInLink.documentTitle": [
+    {
+      "type": 0,
+      "value": "Link de conectare"
+    }
+  ],
+  "web.auth.signInLink.failed": [
+    {
+      "type": 0,
+      "value": "Silo nu a putut deschide acest link. Încercați din nou."
+    }
+  ],
+  "web.auth.signInLink.installFirst": [
+    {
+      "type": 0,
+      "value": "Linkul funcționează o singură dată, iar codul este valabil câteva minute. Instalați mai întâi aplicația Silo pe telefon sau tabletă, apoi apăsați „Continuați”."
+    }
+  ],
+  "web.auth.signInLink.intro": [
+    {
+      "type": 0,
+      "value": "Un administrator v-a trimis acest link ca să vă puteți conecta din nou. Continuați pentru a obține un cod pentru aplicația Silo sau pentru a alege o parolă."
+    }
+  ],
+  "web.auth.signInLink.keepOpen": [
+    {
+      "type": 0,
+      "value": "Păstrați această pagină deschisă până terminați. Linkul a fost folosit, așa că, dacă reîncărcați sau părăsiți pagina, pierdeți ce v-a oferit."
+    }
+  ],
+  "web.auth.signInLink.leaveAction": [
+    {
+      "type": 0,
+      "value": "Părăsiți"
+    }
+  ],
+  "web.auth.signInLink.leaveDescription": [
+    {
+      "type": 0,
+      "value": "Linkul a fost folosit. Dacă părăsiți pagina, codul pentru aplicația Silo și posibilitatea de a seta o parolă se pierd și veți avea nevoie de un link nou."
+    }
+  ],
+  "web.auth.signInLink.leaveTitle": [
+    {
+      "type": 0,
+      "value": "Părăsiți această pagină?"
+    }
+  ],
+  "web.auth.signInLink.noCodeAdministrator": [
+    {
+      "type": 0,
+      "value": "Acesta este contul unui administrator, așa că acest link doar setează o parolă. Setați una, conectați-vă pe site-ul acestui server, apoi deschideți aplicația Silo din setările contului de acolo."
+    }
+  ],
+  "web.auth.signInLink.noCodeAppKeysOff": [
+    {
+      "type": 0,
+      "value": "Aplicația Silo nu se poate conecta momentan pe acest server, așa că acest link doar setează o parolă."
+    }
+  ],
+  "web.auth.signInLink.passwordDescription": [
+    {
+      "type": 0,
+      "value": "Salvarea deconectează acest cont de pe toate dispozitivele. Dispozitivele conectate cu aplicația Silo se reconectează singure."
+    }
+  ],
+  "web.auth.signInLink.passwordSet": [
+    {
+      "type": 0,
+      "value": "Parola a fost salvată. Conectați-vă cu ea."
+    }
+  ],
+  "web.auth.signInLink.passwordSetLostDevices": [
+    {
+      "type": 0,
+      "value": "Dispozitivele pierdute care foloseau aplicația Silo se pot conecta în continuare până când le eliminați. După ce vă conectați, eliminați-le din lista de dispozitive din setările contului."
+    }
+  ],
+  "web.auth.signInLink.passwordTitle": [
+    {
+      "type": 0,
+      "value": "Alegeți o parolă"
+    }
+  ],
+  "web.auth.signInLink.providerRequired": [
+    {
+      "type": 0,
+      "value": "Acest server conectează utilizatorii prin furnizorul său de conectare, așa că acest link nu funcționează. Conectați-vă în schimb prin furnizor."
+    }
+  ],
+  "web.auth.signInLink.setPasswordInstead": [
+    {
+      "type": 0,
+      "value": "Setați în schimb o parolă"
+    }
+  ],
+  "web.auth.signInLink.title": [
+    {
+      "type": 0,
+      "value": "Recăpătați accesul la cont"
+    }
+  ],
+  "web.auth.signInLink.unavailable": [
+    {
+      "type": 0,
+      "value": "Acest link a fost deja folosit, a fost înlocuit de unul mai nou sau a expirat. Cereți unui administrator al acestui server unul nou."
     }
   ],
   "web.auth.signup.closed": [
@@ -145836,7 +147735,7 @@
   "web.settings.account.password.signOutOthersDescription": [
     {
       "type": 0,
-      "value": "Celelalte browsere și aplicații vor trebui să se conecteze din nou cu parola nouă. Acest browser rămâne conectat, iar cheile API continuă să funcționeze."
+      "value": "Celelalte browsere și aplicații sunt deconectate. Acest browser rămâne conectat, iar cheile API continuă să funcționeze."
     }
   ],
   "web.settings.account.password.title": [
@@ -146713,6 +148612,512 @@
     {
       "type": 0,
       "value": "Cum se folosește această cheie"
+    }
+  ],
+  "web.settings.appKeys.actionFailed": [
+    {
+      "type": 0,
+      "value": "Nu s-a putut face această modificare. Încercați din nou."
+    }
+  ],
+  "web.settings.appKeys.approveMainOnly": [
+    {
+      "type": 0,
+      "value": "Doar profilul principal al gospodăriei poate aproba un dispozitiv. Comutați la acesta pentru a aproba."
+    }
+  ],
+  "web.settings.appKeys.approved": [
+    {
+      "type": 0,
+      "value": "Dispozitivul "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " a fost aprobat"
+    }
+  ],
+  "web.settings.appKeys.confirm.approve": [
+    {
+      "type": 0,
+      "value": "Aprobați dispozitivul"
+    }
+  ],
+  "web.settings.appKeys.confirm.approveDescription": [
+    {
+      "type": 0,
+      "value": "Dispozitivul "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " se va putea conecta la contul dvs. cu aplicația Silo până când îl eliminați. Aprobați-l doar dacă tocmai l-ați configurat."
+    }
+  ],
+  "web.settings.appKeys.confirm.approveTitle": [
+    {
+      "type": 0,
+      "value": "Aprobați dispozitivul "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.settings.appKeys.confirm.deny": [
+    {
+      "type": 0,
+      "value": "Respingeți dispozitivul"
+    }
+  ],
+  "web.settings.appKeys.confirm.denyDescription": [
+    {
+      "type": 0,
+      "value": "Dispozitivul "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " nu se va putea conecta la contul dvs. Dacă era al dvs., adăugați-l din nou în aplicația Silo."
+    }
+  ],
+  "web.settings.appKeys.confirm.denyTitle": [
+    {
+      "type": 0,
+      "value": "Respingeți dispozitivul "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.settings.appKeys.confirm.remove": [
+    {
+      "type": 0,
+      "value": "Eliminați dispozitivul"
+    }
+  ],
+  "web.settings.appKeys.confirm.removeDescription": [
+    {
+      "type": 0,
+      "value": "Eliminarea dispozitivului "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " îl deconectează imediat și îi dezactivează cheia: nu se mai poate conecta cu ea. Pentru a-l folosi din nou, adăugați-l din nou în aplicația Silo."
+    }
+  ],
+  "web.settings.appKeys.confirm.removeTitle": [
+    {
+      "type": 0,
+      "value": "Eliminați dispozitivul "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.settings.appKeys.confirm.withdraw": [
+    {
+      "type": 0,
+      "value": "Retrageți aprobarea"
+    }
+  ],
+  "web.settings.appKeys.confirm.withdrawDescription": [
+    {
+      "type": 0,
+      "value": "Dispozitivul "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " nu va putea folosi această aprobare pentru a se conecta la contul dvs."
+    }
+  ],
+  "web.settings.appKeys.confirm.withdrawTitle": [
+    {
+      "type": 0,
+      "value": "Retrageți aprobarea pentru dispozitivul "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.settings.appKeys.confirm.working": [
+    {
+      "type": 0,
+      "value": "Se salvează…"
+    }
+  ],
+  "web.settings.appKeys.denied": [
+    {
+      "type": 0,
+      "value": "Dispozitivul "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " a fost respins"
+    }
+  ],
+  "web.settings.appKeys.description": [
+    {
+      "type": 0,
+      "value": "Dispozitive și aplicații care se conectează la contul dvs. cu aplicația Silo, fără parolă."
+    }
+  ],
+  "web.settings.appKeys.devices.title": [
+    {
+      "type": 0,
+      "value": "Dispozitive"
+    }
+  ],
+  "web.settings.appKeys.empty": [
+    {
+      "type": 0,
+      "value": "Niciun dispozitiv nu folosește aplicația Silo în contul dvs."
+    }
+  ],
+  "web.settings.appKeys.footnote": [
+    {
+      "type": 0,
+      "value": "Eliminarea unui dispozitiv îl deconectează și îi dezactivează cheia. Deconectarea unei sesiuni nu elimină dispozitivul: acesta se conectează din nou cu cheia sa."
+    }
+  ],
+  "web.settings.appKeys.loadFailed": [
+    {
+      "type": 0,
+      "value": "Nu s-au putut încărca dispozitivele dvs."
+    }
+  ],
+  "web.settings.appKeys.loading": [
+    {
+      "type": 0,
+      "value": "Se încarcă dispozitivele…"
+    }
+  ],
+  "web.settings.appKeys.off": [
+    {
+      "type": 0,
+      "value": "Conectarea prin aplicația Silo este dezactivată pe acest server, așa că aceste dispozitive nu se pot conecta, iar dispozitivele în așteptare nu pot fi aprobate. Le puteți elimina în continuare."
+    }
+  ],
+  "web.settings.appKeys.personKey.description": [
+    {
+      "type": 0,
+      "value": "Aplicația Silo folosește această cheie pentru a adăuga dispozitivele dvs. noi. Configurare: "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.settings.appKeys.personKey.none": [
+    {
+      "type": 0,
+      "value": "Nu există o cheie de cont. Aplicația Silo configurează una data viitoare când adăugați un dispozitiv după ce v-ați conectat."
+    }
+  ],
+  "web.settings.appKeys.personKey.title": [
+    {
+      "type": 0,
+      "value": "Cheie de cont"
+    }
+  ],
+  "web.settings.appKeys.pinDescription": [
+    {
+      "type": 0,
+      "value": "Introduceți codul PIN al profilului principal pentru a aproba acest dispozitiv."
+    }
+  ],
+  "web.settings.appKeys.preapprovals.description": [
+    {
+      "type": 0,
+      "value": "Conectări pe care le-ați aprobat pentru un dispozitiv care nu s-a conectat încă."
+    }
+  ],
+  "web.settings.appKeys.preapprovals.loadFailed": [
+    {
+      "type": 0,
+      "value": "Nu s-au putut încărca conectările aprobate în avans."
+    }
+  ],
+  "web.settings.appKeys.preapprovals.title": [
+    {
+      "type": 0,
+      "value": "Aprobate în avans"
+    }
+  ],
+  "web.settings.appKeys.refreshLabel": [
+    {
+      "type": 0,
+      "value": "Reîmprospătați dispozitivele cu aplicația Silo"
+    }
+  ],
+  "web.settings.appKeys.removed": [
+    {
+      "type": 0,
+      "value": "Dispozitivul "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " a fost eliminat"
+    }
+  ],
+  "web.settings.appKeys.row.allowedBy": [
+    {
+      "type": 0,
+      "value": "Permisiune acordată de utilizatorul "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "web.settings.appKeys.row.approve": [
+    {
+      "type": 0,
+      "value": "Aprobați"
+    }
+  ],
+  "web.settings.appKeys.row.approveLabel": [
+    {
+      "type": 0,
+      "value": "Aprobați dispozitivul "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.row.deny": [
+    {
+      "type": 0,
+      "value": "Respingeți"
+    }
+  ],
+  "web.settings.appKeys.row.denyLabel": [
+    {
+      "type": 0,
+      "value": "Respingeți dispozitivul "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.row.enrolledFrom": [
+    {
+      "type": 0,
+      "value": "De la adresa "
+    },
+    {
+      "type": 1,
+      "value": "address"
+    }
+  ],
+  "web.settings.appKeys.row.identityGone": [
+    {
+      "type": 0,
+      "value": "Nu se poate conecta: contul său de la furnizorul de conectare nu mai este asociat"
+    }
+  ],
+  "web.settings.appKeys.row.kindApp": [
+    {
+      "type": 0,
+      "value": "Altă aplicație"
+    }
+  ],
+  "web.settings.appKeys.row.kindDevice": [
+    {
+      "type": 0,
+      "value": "Aplicația Silo"
+    }
+  ],
+  "web.settings.appKeys.row.lastUsed": [
+    {
+      "type": 0,
+      "value": "Ultima conectare: "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.settings.appKeys.row.notUsed": [
+    {
+      "type": 0,
+      "value": "Nu s-a conectat încă cu cheia sa"
+    }
+  ],
+  "web.settings.appKeys.row.preapproval": [
+    {
+      "type": 0,
+      "value": "Aprobare în avans · expiră "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.settings.appKeys.row.provider": [
+    {
+      "type": 0,
+      "value": "Verificare prin furnizorul de conectare"
+    }
+  ],
+  "web.settings.appKeys.row.remove": [
+    {
+      "type": 0,
+      "value": "Eliminați"
+    }
+  ],
+  "web.settings.appKeys.row.removeLabel": [
+    {
+      "type": 0,
+      "value": "Eliminați dispozitivul "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.row.viaAppCode": [
+    {
+      "type": 0,
+      "value": "S-a adăugat cu un cod de unică folosință de pe pagina web a serverului"
+    }
+  ],
+  "web.settings.appKeys.row.viaPersonKey": [
+    {
+      "type": 0,
+      "value": "S-a adăugat din aplicația Silo de pe alt dispozitiv"
+    }
+  ],
+  "web.settings.appKeys.row.viaSession": [
+    {
+      "type": 0,
+      "value": "S-a adăugat dintr-o sesiune conectată"
+    }
+  ],
+  "web.settings.appKeys.row.waitingUntil": [
+    {
+      "type": 0,
+      "value": "În așteptarea aprobării până la "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.settings.appKeys.row.withdraw": [
+    {
+      "type": 0,
+      "value": "Retrageți"
+    }
+  ],
+  "web.settings.appKeys.row.withdrawLabel": [
+    {
+      "type": 0,
+      "value": "Retrageți aprobarea pentru dispozitivul "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.signsBackIn": [
+    {
+      "type": 0,
+      "value": "Dispozitivele conectate cu aplicația Silo se reconectează singure. "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Eliminați un dispozitiv"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " pentru a-l opri."
+    }
+  ],
+  "web.settings.appKeys.title": [
+    {
+      "type": 0,
+      "value": "Dispozitive cu aplicația Silo"
+    }
+  ],
+  "web.settings.appKeys.unavailable": [
+    {
+      "type": 0,
+      "value": "Conectarea prin aplicația Silo nu este disponibilă pe acest server, așa că aceste dispozitive nu se pot conecta. Le puteți elimina în continuare."
+    }
+  ],
+  "web.settings.appKeys.waiting.description": [
+    {
+      "type": 0,
+      "value": "Un dispozitiv nou a solicitat să se conecteze la contul dvs. cu aplicația Silo. Aprobați-l doar dacă tocmai l-ați configurat."
+    }
+  ],
+  "web.settings.appKeys.waiting.title": [
+    {
+      "type": 0,
+      "value": "În așteptarea aprobării dvs."
+    }
+  ],
+  "web.settings.appKeys.withdrawn": [
+    {
+      "type": 0,
+      "value": "Aprobarea a fost retrasă"
     }
   ],
   "web.settings.cardOverlay.adjust": [
@@ -152025,6 +154430,54 @@
       "value": "Sunteți offline, așa că această modificare nu a fost salvată"
     }
   ],
+  "web.settings.openInSilo.action": [
+    {
+      "type": 0,
+      "value": "Obțineți un cod pentru aplicația Silo"
+    }
+  ],
+  "web.settings.openInSilo.codeInstructions": [
+    {
+      "type": 0,
+      "value": "În aplicația Silo de pe telefon sau tabletă, adăugați acest server după adresă și introduceți acest cod. Oricine are codul se poate conecta la acest cont, așa că nu îl partajați."
+    }
+  ],
+  "web.settings.openInSilo.codeTitle": [
+    {
+      "type": 0,
+      "value": "Cod pentru aplicația Silo"
+    }
+  ],
+  "web.settings.openInSilo.description": [
+    {
+      "type": 0,
+      "value": "Conectați aplicația Silo de pe telefon sau tabletă la acest cont, fără parolă."
+    }
+  ],
+  "web.settings.openInSilo.loadFailed": [
+    {
+      "type": 0,
+      "value": "Nu s-a putut verifica dacă acest browser poate obține un cod pentru aplicația Silo."
+    }
+  ],
+  "web.settings.openInSilo.mainProfileOnly": [
+    {
+      "type": 0,
+      "value": "Doar profilul principal al gospodăriei poate obține un cod pentru aplicația Silo. Comutați la acesta și încercați din nou."
+    }
+  ],
+  "web.settings.openInSilo.pinDescription": [
+    {
+      "type": 0,
+      "value": "Introduceți codul PIN al profilului principal pentru a obține un cod pentru aplicația Silo."
+    }
+  ],
+  "web.settings.openInSilo.title": [
+    {
+      "type": 0,
+      "value": "Aplicația Silo"
+    }
+  ],
   "web.settings.overlays.accent.amber": [
     {
       "type": 0,
@@ -155140,6 +157593,12 @@
       "value": "Conectare"
     }
   ],
+  "web.settings.sessions.row.signsBackIn": [
+    {
+      "type": 0,
+      "value": "Acest dispozitiv se reconectează singur"
+    }
+  ],
   "web.settings.sessions.row.summary": [
     {
       "type": 8,
@@ -155226,6 +157685,24 @@
     {
       "type": 0,
       "value": "Setări"
+    }
+  ],
+  "web.settings.signInAgain.action": [
+    {
+      "type": 0,
+      "value": "Conectați-vă din nou"
+    }
+  ],
+  "web.settings.signInAgain.manageDevices": [
+    {
+      "type": 0,
+      "value": "Conectați-vă din nou pentru a vă gestiona dispozitivele"
+    }
+  ],
+  "web.settings.signInAgain.useApp": [
+    {
+      "type": 0,
+      "value": "Gestionați-vă dispozitivele în aplicația Silo."
     }
   ],
   "web.settings.signedInSessions.loadFailed": [

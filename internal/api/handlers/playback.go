@@ -23,6 +23,7 @@ import (
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/directconn"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/keptsub"
@@ -173,6 +174,9 @@ type copySeekAnchorResolver func(
 // PlaybackHandler handles playback session HTTP endpoints.
 type PlaybackHandler struct {
 	Connections *connectionstore.Store
+	// DirectState answers one device's direct-connection questions. Nil means
+	// no direct state: every request plans as a regular one.
+	DirectState directconn.DirectState
 	// SourceBitrates sets the connection speed test's target; nil sends none.
 	SourceBitrates         SourceBitratePercentiler
 	probeTargets           probeTargetCache
@@ -941,6 +945,8 @@ func identityRecipeCard(s *playback.Session) playback.RecipeCard {
 	card.RoutingExecutionNodeID = s.RoutingExecutionNodeID
 	card.RoutingEgress = s.RoutingEgress
 	card.RoutingEgressNodeID = s.RoutingEgressNodeID
+	card.MediaTransport = s.MediaTransport
+	card.PathGeneration = s.PathGeneration
 	card.TranscodeNodeURL = s.TranscodeNodeURL
 	card.TranscodeTransportID = s.TranscodeTransportID
 	return card
@@ -2643,9 +2649,9 @@ func (h *PlaybackHandler) HandleGetTranscodeSegment(w http.ResponseWriter, r *ht
 //
 // path is the client's access path. A proxy with no origin on it is the same
 // as no proxy: the manifest stays API-local and this server relays the node.
-func (h *PlaybackHandler) buildProxyManifestURL(card playback.RecipeCard, proxyNode *nodepool.Node, requireMediaAuth bool, path netaccess.Path) string {
+func (h *PlaybackHandler) buildProxyManifestURL(card playback.RecipeCard, proxyNode *nodepool.Node, requireMediaAuth bool, path netaccess.Path, direct nodepool.DirectMedia) string {
 	localURL := fmt.Sprintf("/playback/transcode/%s/master.m3u8", card.SessionID)
-	base := proxyNode.ClientURLFor(path)
+	base := proxyNode.MediaURLFor(path, direct)
 	if base == "" {
 		return appendStreamToken(localURL, h.signSessionToken(card, requireMediaAuth))
 	}

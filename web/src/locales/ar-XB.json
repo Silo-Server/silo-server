@@ -215,6 +215,12 @@
       "value": "\u200F\u202EThat’s already linked to this account.\u202C"
     }
   ],
+  "error.app_code_invalid": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThis code is unknown, used or expired. Get a new one from the server’s page.\u202C"
+    }
+  ],
   "error.authentication_required": [
     {
       "type": 0,
@@ -333,6 +339,12 @@
     {
       "type": 0,
       "value": "\u200F\u202EThis value has the wrong type.\u202C"
+    }
+  ],
+  "error.field.key_enrolled": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThis key is already in use on this server.\u202C"
     }
   ],
   "error.field.malformed_form": [
@@ -2545,6 +2557,30 @@
     {
       "type": 0,
       "value": "\u200F\u202EAuto\u202C"
+    }
+  ],
+  "settingsManifest.playback.connection_path.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDirect only still uses the local network connection when one is available.\u202C"
+    }
+  ],
+  "settingsManifest.playback.connection_path.label": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EConnection path\u202C"
+    }
+  ],
+  "settingsManifest.playback.connection_path.option.automatic": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAutomatic\u202C"
+    }
+  ],
+  "settingsManifest.playback.connection_path.option.direct_only": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDirect only\u202C"
     }
   ],
   "settingsManifest.playback.intro_skip_mode.description": [
@@ -25029,6 +25065,91 @@
       }
     }
   ],
+  "web.admin.common.adminUserSignIn.unlinkConfirm.text": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 5,
+      "value": "last_way",
+      "options": {
+        "yes": {
+          "value": [
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": "\u202E can no longer sign in with this provider account. \u202C"
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": "\u202E won’t be able to sign in until you set a password or connect a provider again.\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": "\u202E can no longer sign in with this provider account.\u202C"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 5,
+      "value": "keys",
+      "options": {
+        "yes": {
+          "value": [
+            {
+              "type": 0,
+              "value": " "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": "\u202E’s Silo app keys tied to this provider account are removed, and those devices are signed out.\u202C"
+            }
+          ]
+        },
+        "unknown": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u202E Any of \u202C"
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": "\u202E’s Silo app keys tied to this provider account are removed, and those devices are signed out.\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": []
+        }
+      }
+    }
+  ],
   "web.admin.common.adminUserSignIn.unlinkConfirm.title": [
     {
       "type": 0,
@@ -27423,6 +27544,18 @@
     {
       "type": 0,
       "value": "\u200F\u202EMakes the thumbnails players show while seeking, in the configured public asset storage. Files are processed in the background at low priority. Turning this off deletes the library's previews.\u202C"
+    }
+  ],
+  "web.admin.common.libraryEditor.advanced.trickplayGenerate": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EGenerate missing previews with FFmpeg\u202C"
+    }
+  ],
+  "web.admin.common.libraryEditor.advanced.trickplayGenerateDescription": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EExisting .trickplay and .bif sidecars next to media files are used first. Turn this off to ingest sidecars only and skip FFmpeg generation.\u202C"
     }
   ],
   "web.admin.common.libraryEditor.advanced.trickplayUnavailable": [
@@ -31651,6 +31784,48 @@
       "value": "\u200F\u202EAdmin Users\u202C"
     }
   ],
+  "web.admin.common.trickplay.badge.awaitingSidecarCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E awaiting sidecar\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E awaiting sidecar\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.common.trickplay.badge.detail": [
     {
       "type": 0,
@@ -31805,6 +31980,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.common.trickplay.badge.sidecarsOnly": [
+    {
+      "type": 0,
+      "value": "\u200F\u202Esidecars only\u202C"
     }
   ],
   "web.admin.common.trickplay.badge.srDetail": [
@@ -31989,6 +32170,42 @@
     {
       "type": 0,
       "value": "\u200F\u202EPlayers keep the current previews until the new ones are ready.\u202C"
+    }
+  ],
+  "web.admin.common.trickplay.sidecarStatus.awaiting_sidecar": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAwaiting sidecar\u202C"
+    }
+  ],
+  "web.admin.common.trickplay.sidecarStatus.sidecar_invalid": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EInvalid sidecar\u202C"
+    }
+  ],
+  "web.admin.common.trickplay.sidecarStatus.sidecar_stale": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESidecar stale\u202C"
+    }
+  ],
+  "web.admin.common.trickplay.source.generated": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EGenerated\u202C"
+    }
+  ],
+  "web.admin.common.trickplay.source.sidecar_bif": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESidecar (.bif)\u202C"
+    }
+  ],
+  "web.admin.common.trickplay.source.sidecar_trickplay": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESidecar (.trickplay)\u202C"
     }
   ],
   "web.admin.common.trickplay.state.off": [
@@ -33968,7 +34185,7 @@
     },
     {
       "type": 0,
-      "value": "\u202E. Their other devices stay signed in. The client can sign in again with the account's password.\u202C"
+      "value": "\u202E. Their other devices stay signed in. The client can sign in again.\u202C"
     }
   ],
   "web.admin.dashboard.widgets.apiClients.confirmLabel": [
@@ -46530,6 +46747,12 @@
       "value": "\u200F\u202EProfile\u202C"
     }
   ],
+  "web.admin.history.column.progress": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EProgress\u202C"
+    }
+  ],
   "web.admin.history.column.status": [
     {
       "type": 0,
@@ -46564,6 +46787,12 @@
     {
       "type": 0,
       "value": "\u200F\u202ESession logs\u202C"
+    }
+  ],
+  "web.admin.history.detail.backToPlay": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EBack to combined play\u202C"
     }
   ],
   "web.admin.history.detail.column.delivered": [
@@ -46674,6 +46903,12 @@
       "value": "\u200F\u202EWatch time\u202C"
     }
   ],
+  "web.admin.history.detail.inspectSitting": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EInspect\u202C"
+    }
+  ],
   "web.admin.history.detail.keyboardHint": [
     {
       "type": 0,
@@ -46758,6 +46993,12 @@
       "value": "\u200F\u202EWhy it didn’t direct play\u202C"
     }
   ],
+  "web.admin.history.detail.section.sessions": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESessions in this play\u202C"
+    }
+  ],
   "web.admin.history.detail.section.streams": [
     {
       "type": 0,
@@ -46768,6 +47009,94 @@
     {
       "type": 0,
       "value": "\u200F\u202ETiming & watch progress\u202C"
+    }
+  ],
+  "web.admin.history.detail.sessionsCapped": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EShowing the first \u202C"
+    },
+    {
+      "type": 1,
+      "value": "shown"
+    },
+    {
+      "type": 0,
+      "value": "\u202E of \u202C"
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "\u202E sessions in this play.\u202C"
+    }
+  ],
+  "web.admin.history.detail.sessionsNotice": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F\u202EThis play has \u202C"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E session. Stream, device, and route details below reflect it.\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F\u202EThis play spans \u202C"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E sessions. Stream, device, and route details below reflect its primary session; pick any session below to inspect it individually.\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.ended": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EEnded\u202C"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.method": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EMethod\u202C"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.started": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EStarted\u202C"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.watched": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EWatched\u202C"
     }
   ],
   "web.admin.history.detail.subtitlesBurnIn": [
@@ -47008,6 +47337,12 @@
       "value": "\u200F\u202EAll networks\u202C"
     }
   ],
+  "web.admin.history.filter.allMediaTypes": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAll media\u202C"
+    }
+  ],
   "web.admin.history.filter.allMethods": [
     {
       "type": 0,
@@ -47044,6 +47379,24 @@
       "value": "\u200F\u202ECompleted\u202C"
     }
   ],
+  "web.admin.history.filter.episodes": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EEpisodes\u202C"
+    }
+  ],
+  "web.admin.history.filter.hideShort": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EHide <30s\u202C"
+    }
+  ],
+  "web.admin.history.filter.hideShortTitle": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EHide unfinished sessions under 30 seconds\u202C"
+    }
+  ],
   "web.admin.history.filter.locationLocal": [
     {
       "type": 0,
@@ -47054,6 +47407,12 @@
     {
       "type": 0,
       "value": "\u200F\u202ERemote\u202C"
+    }
+  ],
+  "web.admin.history.filter.movies": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EMovies\u202C"
     }
   ],
   "web.admin.history.filter.partial": [
@@ -47262,6 +47621,12 @@
       "value": "\u200F\u202ERecent Playback\u202C"
     }
   ],
+  "web.admin.history.row.burnInBadgeTitle": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESubtitles burned into video\u202C"
+    }
+  ],
   "web.admin.history.row.completed": [
     {
       "type": 0,
@@ -47282,6 +47647,48 @@
     {
       "type": 0,
       "value": "\u200F\u202EEstimated (recorded before exact watch time was tracked)\u202C"
+    }
+  ],
+  "web.admin.history.row.groupedSessionsTitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F\u202ECombined from \u202C"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E session\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F\u202ECombined from \u202C"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E sessions\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.history.row.meta": [
@@ -47318,6 +47725,12 @@
       "value": "\u200F\u202EPartial\u202C"
     }
   ],
+  "web.admin.history.row.progressLabel": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPlayback progress\u202C"
+    }
+  ],
   "web.admin.history.row.started": [
     {
       "type": 0,
@@ -47328,16 +47741,104 @@
       "value": "time"
     }
   ],
+  "web.admin.history.stats.accountsCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E account\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E accounts\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.history.stats.completed": [
     {
       "type": 0,
       "value": "\u200F\u202ECompleted\u202C"
     }
   ],
+  "web.admin.history.stats.completionBreakdown": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "completed"
+    },
+    {
+      "type": 0,
+      "value": "\u202E completed · \u202C"
+    },
+    {
+      "type": 1,
+      "value": "partial"
+    },
+    {
+      "type": 0,
+      "value": "\u202E partial\u202C"
+    }
+  ],
   "web.admin.history.stats.partial": [
     {
       "type": 0,
       "value": "\u200F\u202EPartial\u202C"
+    }
+  ],
+  "web.admin.history.stats.totalPlays": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ETotal plays\u202C"
+    }
+  ],
+  "web.admin.history.stats.totalSessions": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ETotal sessions\u202C"
+    }
+  ],
+  "web.admin.history.stats.uniqueProfiles": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EUnique profiles\u202C"
+    }
+  ],
+  "web.admin.history.stats.uniqueTitles": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EUnique titles\u202C"
     }
   ],
   "web.admin.history.stats.visibleRows": [
@@ -47356,6 +47857,24 @@
     {
       "type": 0,
       "value": "\u200F\u202EPlayback History\u202C"
+    }
+  ],
+  "web.admin.history.view.label": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EHistory view\u202C"
+    }
+  ],
+  "web.admin.history.view.plays": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPlays\u202C"
+    }
+  ],
+  "web.admin.history.view.sessions": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAll sessions\u202C"
     }
   ],
   "web.admin.historyImport.conflict.message": [
@@ -71411,6 +71930,12 @@
       "value": "\u200F\u202ENo device is connected directly.\u202C"
     }
   ],
+  "web.admin.settings.network.direct.connected.emptyOnThisServer": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo device is connected directly to this server.\u202C"
+    }
+  ],
   "web.admin.settings.network.direct.connected.peerEndpoint": [
     {
       "type": 0,
@@ -71581,6 +72106,12 @@
     {
       "type": 0,
       "value": "\u200F\u202EListeners\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.loadError": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECould not load the direct connection settings. Retry before editing.\u202C"
     }
   ],
   "web.admin.settings.network.direct.observedAddress": [
@@ -90875,6 +91406,234 @@
       "value": "count"
     }
   ],
+  "web.admin.users.detail.appKeys.confirm.denyDescription": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "\u202E won’t be able to sign in to \u202C"
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "\u202E’s account. If it was theirs, they add it again in the Silo app.\u202C"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKey": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERemove key\u202C"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKeyDescription": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDevices already signed in keep working until you remove them. No new device can be added with this key, and devices it added that are still waiting are denied. \u202C"
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "\u202E’s Silo app sets up a new key the next time they add a device while signed in.\u202C"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKeyTitle": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERemove \u202C"
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "\u202E’s account key?\u202C"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.removeDescription": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERemoving \u202C"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "\u202E signs it out of \u202C"
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "\u202E’s account now and stops its key: it can’t sign in with it again. To use it again, \u202C"
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "\u202E adds it again in the Silo app.\u202C"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.withdrawDescription": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "\u202E won’t be able to use this approval to sign in to \u202C"
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "\u202E’s account.\u202C"
+    }
+  ],
+  "web.admin.users.detail.appKeys.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDevices and apps that sign in to \u202C"
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "\u202E’s account with the Silo app, without a password.\u202C"
+    }
+  ],
+  "web.admin.users.detail.appKeys.empty": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo devices use the Silo app on this account.\u202C"
+    }
+  ],
+  "web.admin.users.detail.appKeys.loadFailed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECouldn’t load devices.\u202C"
+    }
+  ],
+  "web.admin.users.detail.appKeys.off": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESilo app sign-in is off on this server, so these devices can’t sign in. You can still remove them.\u202C"
+    }
+  ],
+  "web.admin.users.detail.appKeys.ownerOnly": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EOnly the server owner can change another admin’s or the owner’s devices.\u202C"
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThe Silo app uses this key to add \u202C"
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "\u202E’s new devices. Set up \u202C"
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "\u202E.\u202C"
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.none": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo account key. \u202C"
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "\u202E’s Silo app sets one up the next time they add a device while signed in.\u202C"
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.remove": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERemove account key\u202C"
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKeyRemoved": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAccount key removed\u202C"
+    }
+  ],
+  "web.admin.users.detail.appKeys.preapprovals.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESign-ins \u202C"
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "\u202E approved for a device that hasn’t connected yet.\u202C"
+    }
+  ],
+  "web.admin.users.detail.appKeys.waiting.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EA new device on an admin account waits until \u202C"
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "\u202E approves it from a device they’re signed in on. You can deny it here.\u202C"
+    }
+  ],
+  "web.admin.users.detail.appKeys.waiting.title": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EWaiting for approval\u202C"
+    }
+  ],
   "web.admin.users.detail.common.allProfiles": [
     {
       "type": 0,
@@ -94659,6 +95418,12 @@
       "value": "\u200F\u202EThe account is at its profile limit\u202C"
     }
   ],
+  "web.admin.users.detail.profiles.badge.changedHere": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EChanged here\u202C"
+    }
+  ],
   "web.admin.users.detail.profiles.badge.kids": [
     {
       "type": 0,
@@ -94860,6 +95625,672 @@
     {
       "type": 0,
       "value": "\u200F\u202ESave PIN\u202C"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowAgain": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAllow again\u202C"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowAgainAria": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELet \u202C"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "\u202E come back on this server\u202C"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowDescription": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ETheir app can add \u202C"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "\u202E back the next time it syncs, as a new profile without its history on this server, if its profiles still include \u202C"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "\u202E and this account has room for another profile.\u202C"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowTitle": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAllow \u202C"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "\u202E again?\u202C"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.alreadyCleared": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThat change was already cleared, or \u202C"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "\u202E changed it again. The list is up to date.\u202C"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedBy": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EChanged by \u202C"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "\u202E on \u202C"
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedSinceOpened": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThis change was updated after you opened it, so nothing was cleared. Read it again in the list, then clear it if you still want to.\u202C"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedWhileRunning": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThe profiles changed while this ran, so nothing was changed. The list is up to date; try again if you still want to.\u202C"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clear": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EClear\u202C"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearAndRemovePin": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EClear and remove PIN\u202C"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearAria": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EClear the change to \u202C"
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": "\u202E on \u202C"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearFailed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECouldn’t clear the change.\u202C"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearInherit": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": "\u202E on \u202C"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "\u202E goes back to what \u202C"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "\u202E inherits now, as their app asks. Changes from their app apply to it again.\u202C"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearLater": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": "\u202E stays as it is until their app next sends it. After that, changes from their app apply to it again.\u202C"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearNow": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "\u202E goes back to the value from their app now, and changes from their app apply to it again.\u202C"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearNowValue": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": "\u202E on \u202C"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "\u202E goes back to \u202C"
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": "\u202E, the value from their app, now. Changes from their app apply to it again.\u202C"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearPin": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "\u202E keeps the PIN you set until their app next sends one. After that, changes from their app apply to it again.\u202C"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearPinRemoves": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ETheir app sends \u202C"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "\u202E without a PIN, so clearing removes the PIN you set, now. Anyone using this account can then open \u202C"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "\u202E without a PIN.\u202C"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearTitle": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EClear the change to \u202C"
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": "\u202E on \u202C"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "\u202E?\u202C"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.deletedAccount": [
+    {
+      "type": 0,
+      "value": "\u200F\u202Ea deleted account\u202C"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThese profiles come from \u202C"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "\u202E’s app. A change you make here stays on this server until you clear it. It isn’t a lock: \u202C"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "\u202E can change the same thing here too.\u202C"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismiss": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDismiss\u202C"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismissAria": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDismiss the note about \u202C"
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": "\u202E on \u202C"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismissFailed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECouldn’t dismiss the note.\u202C"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.isChild": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EKids profile\u202C"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.maxAdvisoryAge": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAge limit\u202C"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.maxContentRating": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EContent rating limit\u202C"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.name": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EName\u202C"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.picture": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPicture\u202C"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.pin": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPIN\u202C"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.requests": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERequests\u202C"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.requireAdvisoryAge": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERequire an age rating\u202C"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.fieldValue": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": "\u202E: \u202C"
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.hidden": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERemoved on this server by \u202C"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "\u202E on \u202C"
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "\u202E. Their app won’t add it back until you allow it.\u202C"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.loadFailed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECouldn’t load the changes made on this server.\u202C"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.nameTaken": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "\u202E can’t go back to the name \u202C"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "\u202E from their app, because another profile here has that name. Rename that profile first, then clear this again.\u202C"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeHiddenNextSync": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "\u202E can come back the next time \u202C"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "\u202E’s app syncs, if its profiles still include it.\u202C"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeHiddenWoken": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "\u202E can come back when their app next syncs, if its profiles still include it. \u202C"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "\u202E’s phone has been asked to sync.\u202C"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeNextSync": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECleared. It reaches \u202C"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "\u202E’s app the next time it syncs.\u202C"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeWoken": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECleared. \u202C"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "\u202E’s phone has been asked to sync.\u202C"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.removedBy": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERemoved by \u202C"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "\u202E on \u202C"
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.replacedOwner": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThis replaced the value you set.\u202C"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.setBy": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESet by \u202C"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "\u202E on \u202C"
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.settled": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "\u202E changed this on \u202C"
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "\u202E; the value you set no longer applies.\u202C"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.title": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EChanged on this server\u202C"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.inherited": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": "\u202E (inherited)\u202C"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.noPicture": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo picture\u202C"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.none": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENone\u202C"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.off": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EOff\u202C"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.on": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EOn\u202C"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.picture": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECustom picture\u202C"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.pinNone": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo PIN\u202C"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.pinSet": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPIN set\u202C"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.requestsAllowed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAllowed\u202C"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.requestsBlocked": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EBlocked\u202C"
     }
   ],
   "web.admin.users.detail.profiles.setPin": [
@@ -96143,6 +97574,144 @@
     {
       "type": 0,
       "value": "\u200F\u202ESet a password\u202C"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.action": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECreate sign-in link\u202C"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.actionHint": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELost every device\u202C"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EA single-use link for \u202C"
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "\u202E if they lost every device. It opens a page that gives them a code for the Silo app, or lets them choose a password. It works for 24 hours, and a new link replaces the last one.\u202C"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailAction": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EEmail it\u202C"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHint": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECreate the link to copy and send it yourself, or email it to \u202C"
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": "\u202E.\u202C"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHintNoAddress": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECreate the link, then copy it and send it yourself. This account has no email address to send it to.\u202C"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHintNoMail": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECreate the link, then copy it and send it yourself. Set up email in Settings to send it from here.\u202C"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailSent": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESent the link to \u202C"
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": "\u202E. It expires \u202C"
+    },
+    {
+      "type": 1,
+      "value": "expires"
+    },
+    {
+      "type": 0,
+      "value": "\u202E.\u202C"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailUnconfirmed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThe mail server did not confirm delivery. The link below still works: copy it and send it another way.\u202C"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.failed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECould not create a sign-in link.\u202C"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.linkShare": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESend this link only to \u202C"
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "\u202E. Anyone who has it can sign in to this account until it is used or expires \u202C"
+    },
+    {
+      "type": 1,
+      "value": "expires"
+    },
+    {
+      "type": 0,
+      "value": "\u202E.\u202C"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.providerRequired": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELocal password sign-in is off on this server, so a sign-in link would skip its sign-in provider. Ask \u202C"
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "\u202E to sign in with the provider on this server's site, then use Open in Silo in their account settings.\u202C"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.title": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESign-in link for \u202C"
+    },
+    {
+      "type": 1,
+      "value": "username"
     }
   ],
   "web.audiobooks.chapter.fallbackTitle": [
@@ -98059,6 +99628,120 @@
       "value": "\u200F\u202EApprove sign-in\u202C"
     }
   ],
+  "web.auth.appCode.code": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECode\u202C"
+    }
+  ],
+  "web.auth.appCode.codeCopied": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECode copied\u202C"
+    }
+  ],
+  "web.auth.appCode.copyCode": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECopy code\u202C"
+    }
+  ],
+  "web.auth.appCode.copyFailed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECouldn’t copy the code. Select it and copy it by hand.\u202C"
+    }
+  ],
+  "web.auth.appCode.expired": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThis code has expired.\u202C"
+    }
+  ],
+  "web.auth.appCode.failed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESilo couldn’t make a code. Try again.\u202C"
+    }
+  ],
+  "web.auth.appCode.instructions": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPress Open Silo to continue in the Silo app on this device. If the app isn’t installed, install it, come back to this tab and press Open Silo again.\u202C"
+    }
+  ],
+  "web.auth.appCode.noScanCode": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThis server’s address is too long for a scan code. Type the server address and code in the Silo app, or copy the code and paste it there.\u202C"
+    }
+  ],
+  "web.auth.appCode.open": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EOpen Silo\u202C"
+    }
+  ],
+  "web.auth.appCode.renew": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EGet a new code\u202C"
+    }
+  ],
+  "web.auth.appCode.scanCodeLabel": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EScan code for the Silo app\u202C"
+    }
+  ],
+  "web.auth.appCode.scanCodeUnavailable": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EA scan code can’t be shown for this server. Type the server address and code in the Silo app, or copy the code and paste it there.\u202C"
+    }
+  ],
+  "web.auth.appCode.scanHint": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EScan this with the scanner in the Silo app, or type or copy the server address and code below.\u202C"
+    }
+  ],
+  "web.auth.appCode.serverAddress": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EServer address\u202C"
+    }
+  ],
+  "web.auth.appCode.singleUse": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThis code works once and expires after a few minutes.\u202C"
+    }
+  ],
+  "web.auth.appCode.title": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EOpen Silo\u202C"
+    }
+  ],
+  "web.auth.appCode.typeInstructions": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EIn the Silo app on your phone or tablet, add this server by its address and type this code to create your account. Anyone with the code can join in your place, so don’t share it.\u202C"
+    }
+  ],
+  "web.auth.appCode.typeTitle": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EJoin with this code\u202C"
+    }
+  ],
+  "web.auth.appCode.webLink": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EOpen with the siloserver.org link instead\u202C"
+    }
+  ],
   "web.auth.card.rememberedIt": [
     {
       "type": 0,
@@ -98261,10 +99944,50 @@
       ]
     }
   ],
+  "web.auth.invite.appAccountEmail": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EYour account will use \u202C"
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": "\u202E.\u202C"
+    }
+  ],
+  "web.auth.invite.appContinue": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EContinue\u202C"
+    }
+  ],
+  "web.auth.invite.appEmailHint": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EWith an email address, this server can send you a sign-in link if you lose your devices.\u202C"
+    }
+  ],
   "web.auth.invite.appMissing": [
     {
       "type": 0,
       "value": "\u200F\u202ENothing happens? The app isn't installed — just continue below.\u202C"
+    }
+  ],
+  "web.auth.invite.appProviderOnly": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "server"
+    },
+    {
+      "type": 0,
+      "value": "\u202E adds people through its sign-in provider. Sign in with it on this site, then open Silo from your account settings.\u202C"
     }
   ],
   "web.auth.invite.created": [
@@ -98293,6 +100016,18 @@
       "value": "\u200F\u202EEnter your email address and choose a password. You'll sign in with your email address.\u202C"
     }
   ],
+  "web.auth.invite.descriptionWithApp": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EJoin with the Silo app on your phone or tablet, or choose a password to sign in.\u202C"
+    }
+  ],
+  "web.auth.invite.emailOptional": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EEmail (optional)\u202C"
+    }
+  ],
   "web.auth.invite.emailPlaceholder": [
     {
       "type": 0,
@@ -98313,6 +100048,18 @@
     {
       "type": 1,
       "value": "inviter"
+    }
+  ],
+  "web.auth.invite.joinWithApp": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EJoin with the Silo app\u202C"
+    }
+  ],
+  "web.auth.invite.joinWithAppInstead": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EJoin with the Silo app instead\u202C"
     }
   ],
   "web.auth.invite.loadFailed": [
@@ -98413,6 +100160,30 @@
     {
       "type": 0,
       "value": "\u200F\u202EInvitation unavailable\u202C"
+    }
+  ],
+  "web.auth.invite.usePassword": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EUse a password instead\u202C"
+    }
+  ],
+  "web.auth.invite.usernameIsAddress": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EA username with @ must be the email address you enter below.\u202C"
+    }
+  ],
+  "web.auth.invite.usernameRequired": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EChoose a username.\u202C"
+    }
+  ],
+  "web.auth.invite.usernameTaken": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThat username is already in use. Choose another.\u202C"
     }
   ],
   "web.auth.languagePicker.label": [
@@ -99369,6 +101140,126 @@
     {
       "type": 0,
       "value": "\u200F\u202ESign in\u202C"
+    }
+  ],
+  "web.auth.signInLink.backToCode": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EBack to the code\u202C"
+    }
+  ],
+  "web.auth.signInLink.codeExpired": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAsk an administrator of this server for a new link to get another code.\u202C"
+    }
+  ],
+  "web.auth.signInLink.documentTitle": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESign-in link\u202C"
+    }
+  ],
+  "web.auth.signInLink.failed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESilo couldn’t open this link. Try again.\u202C"
+    }
+  ],
+  "web.auth.signInLink.installFirst": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThe link works once, and the code lasts a few minutes. Install the Silo app on your phone or tablet first, then press Continue.\u202C"
+    }
+  ],
+  "web.auth.signInLink.intro": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAn admin sent you this link so you can sign in again. Continue to get a code for the Silo app, or to choose a password.\u202C"
+    }
+  ],
+  "web.auth.signInLink.keepOpen": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EKeep this page open until you’re done. The link is used up, so reloading or leaving loses what it gave you.\u202C"
+    }
+  ],
+  "web.auth.signInLink.leaveAction": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELeave\u202C"
+    }
+  ],
+  "web.auth.signInLink.leaveDescription": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThe link is used up. If you leave, the code for the Silo app and the chance to set a password are gone, and you’ll need a new link.\u202C"
+    }
+  ],
+  "web.auth.signInLink.leaveTitle": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELeave this page?\u202C"
+    }
+  ],
+  "web.auth.signInLink.noCodeAdministrator": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThis is an administrator’s account, so this link only sets a password. Set one, sign in on this server’s site, then open the Silo app from your account settings there.\u202C"
+    }
+  ],
+  "web.auth.signInLink.noCodeAppKeysOff": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThe Silo app can’t sign in on this server right now, so this link only sets a password.\u202C"
+    }
+  ],
+  "web.auth.signInLink.passwordDescription": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESaving signs this account out on every device. Devices signed in with the Silo app sign back in by themselves.\u202C"
+    }
+  ],
+  "web.auth.signInLink.passwordSet": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EYour password is saved. Sign in with it.\u202C"
+    }
+  ],
+  "web.auth.signInLink.passwordSetLostDevices": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELost devices that used the Silo app can still sign in until you remove them. After you sign in, remove them from your devices in your account settings.\u202C"
+    }
+  ],
+  "web.auth.signInLink.passwordTitle": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EChoose a password\u202C"
+    }
+  ],
+  "web.auth.signInLink.providerRequired": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThis server signs people in through its sign-in provider, so this link doesn’t work. Sign in with the provider instead.\u202C"
+    }
+  ],
+  "web.auth.signInLink.setPasswordInstead": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESet a password instead\u202C"
+    }
+  ],
+  "web.auth.signInLink.title": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EGet back into your account\u202C"
+    }
+  ],
+  "web.auth.signInLink.unavailable": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThis link was already used, replaced by a newer one, or expired. Ask an administrator of this server for a new one.\u202C"
     }
   ],
   "web.auth.signup.closed": [
@@ -140536,7 +142427,7 @@
   "web.settings.account.password.signOutOthersDescription": [
     {
       "type": 0,
-      "value": "\u200F\u202EOther browsers and apps must sign in again with the new password. This browser stays signed in, and API keys keep working.\u202C"
+      "value": "\u200F\u202EOther browsers and apps are signed out. This browser stays signed in, and API keys keep working.\u202C"
     }
   ],
   "web.settings.account.password.title": [
@@ -141413,6 +143304,512 @@
     {
       "type": 0,
       "value": "\u200F\u202EHow to use this key\u202C"
+    }
+  ],
+  "web.settings.appKeys.actionFailed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECouldn’t make that change. Try again.\u202C"
+    }
+  ],
+  "web.settings.appKeys.approveMainOnly": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EOnly the household’s main profile can approve a device. Switch to it to approve.\u202C"
+    }
+  ],
+  "web.settings.appKeys.approved": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "\u202E approved\u202C"
+    }
+  ],
+  "web.settings.appKeys.confirm.approve": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EApprove device\u202C"
+    }
+  ],
+  "web.settings.appKeys.confirm.approveDescription": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "\u202E will be able to sign in to your account with the Silo app until you remove it. Approve it only if you just set it up.\u202C"
+    }
+  ],
+  "web.settings.appKeys.confirm.approveTitle": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EApprove \u202C"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "\u202E?\u202C"
+    }
+  ],
+  "web.settings.appKeys.confirm.deny": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDeny device\u202C"
+    }
+  ],
+  "web.settings.appKeys.confirm.denyDescription": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "\u202E won’t be able to sign in to your account. If it was yours, add it again in the Silo app.\u202C"
+    }
+  ],
+  "web.settings.appKeys.confirm.denyTitle": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDeny \u202C"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "\u202E?\u202C"
+    }
+  ],
+  "web.settings.appKeys.confirm.remove": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERemove device\u202C"
+    }
+  ],
+  "web.settings.appKeys.confirm.removeDescription": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERemoving \u202C"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "\u202E signs it out now and stops its key: it can’t sign in with it again. To use it again, add it again in the Silo app.\u202C"
+    }
+  ],
+  "web.settings.appKeys.confirm.removeTitle": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERemove \u202C"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "\u202E?\u202C"
+    }
+  ],
+  "web.settings.appKeys.confirm.withdraw": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EWithdraw approval\u202C"
+    }
+  ],
+  "web.settings.appKeys.confirm.withdrawDescription": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "\u202E won’t be able to use this approval to sign in to your account.\u202C"
+    }
+  ],
+  "web.settings.appKeys.confirm.withdrawTitle": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EWithdraw the approval for \u202C"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "\u202E?\u202C"
+    }
+  ],
+  "web.settings.appKeys.confirm.working": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESaving…\u202C"
+    }
+  ],
+  "web.settings.appKeys.denied": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "\u202E denied\u202C"
+    }
+  ],
+  "web.settings.appKeys.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDevices and apps that sign in to your account with the Silo app, without a password.\u202C"
+    }
+  ],
+  "web.settings.appKeys.devices.title": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDevices\u202C"
+    }
+  ],
+  "web.settings.appKeys.empty": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo devices use the Silo app on your account.\u202C"
+    }
+  ],
+  "web.settings.appKeys.footnote": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERemoving a device signs it out and stops its key working. Signing out a session doesn’t remove the device: it signs back in with its key.\u202C"
+    }
+  ],
+  "web.settings.appKeys.loadFailed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECouldn’t load your devices.\u202C"
+    }
+  ],
+  "web.settings.appKeys.loading": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELoading devices…\u202C"
+    }
+  ],
+  "web.settings.appKeys.off": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESilo app sign-in is off on this server, so these devices can’t sign in and waiting devices can’t be approved. You can still remove them.\u202C"
+    }
+  ],
+  "web.settings.appKeys.personKey.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EYour Silo app uses this key to add your new devices. Set up \u202C"
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "\u202E.\u202C"
+    }
+  ],
+  "web.settings.appKeys.personKey.none": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo account key. Your Silo app sets one up the next time you add a device while signed in.\u202C"
+    }
+  ],
+  "web.settings.appKeys.personKey.title": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAccount key\u202C"
+    }
+  ],
+  "web.settings.appKeys.pinDescription": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EEnter the main profile’s PIN to approve this device.\u202C"
+    }
+  ],
+  "web.settings.appKeys.preapprovals.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESign-ins you approved for a device that hasn’t connected yet.\u202C"
+    }
+  ],
+  "web.settings.appKeys.preapprovals.loadFailed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECouldn’t load the sign-ins approved in advance.\u202C"
+    }
+  ],
+  "web.settings.appKeys.preapprovals.title": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EApproved in advance\u202C"
+    }
+  ],
+  "web.settings.appKeys.refreshLabel": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERefresh Silo app devices\u202C"
+    }
+  ],
+  "web.settings.appKeys.removed": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "\u202E removed\u202C"
+    }
+  ],
+  "web.settings.appKeys.row.allowedBy": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAllowed by \u202C"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "web.settings.appKeys.row.approve": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EApprove\u202C"
+    }
+  ],
+  "web.settings.appKeys.row.approveLabel": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EApprove \u202C"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.row.deny": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDeny\u202C"
+    }
+  ],
+  "web.settings.appKeys.row.denyLabel": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDeny \u202C"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.row.enrolledFrom": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EFrom \u202C"
+    },
+    {
+      "type": 1,
+      "value": "address"
+    }
+  ],
+  "web.settings.appKeys.row.identityGone": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECan’t sign in: its sign-in provider account is no longer linked\u202C"
+    }
+  ],
+  "web.settings.appKeys.row.kindApp": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EOther app\u202C"
+    }
+  ],
+  "web.settings.appKeys.row.kindDevice": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESilo app\u202C"
+    }
+  ],
+  "web.settings.appKeys.row.lastUsed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELast signed in \u202C"
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.settings.appKeys.row.notUsed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENot signed in with its key yet\u202C"
+    }
+  ],
+  "web.settings.appKeys.row.preapproval": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EApproved in advance · expires \u202C"
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.settings.appKeys.row.provider": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EChecked with the sign-in provider\u202C"
+    }
+  ],
+  "web.settings.appKeys.row.remove": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERemove\u202C"
+    }
+  ],
+  "web.settings.appKeys.row.removeLabel": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERemove \u202C"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.row.viaAppCode": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAdded with a one-time code from the server’s web page\u202C"
+    }
+  ],
+  "web.settings.appKeys.row.viaPersonKey": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAdded by the Silo app on another device\u202C"
+    }
+  ],
+  "web.settings.appKeys.row.viaSession": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAdded while signed in\u202C"
+    }
+  ],
+  "web.settings.appKeys.row.waitingUntil": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EWaiting for approval until \u202C"
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.settings.appKeys.row.withdraw": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EWithdraw\u202C"
+    }
+  ],
+  "web.settings.appKeys.row.withdrawLabel": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EWithdraw the approval for \u202C"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.signsBackIn": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDevices signed in with the Silo app sign back in by themselves. \u202C"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "\u202ERemove a device\u202C"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "\u202E to stop it.\u202C"
+    }
+  ],
+  "web.settings.appKeys.title": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESilo app devices\u202C"
+    }
+  ],
+  "web.settings.appKeys.unavailable": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESilo app sign-in isn’t available on this server, so these devices can’t sign in. You can still remove them.\u202C"
+    }
+  ],
+  "web.settings.appKeys.waiting.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EA new device asked to sign in to your account with the Silo app. Approve it only if you just set it up.\u202C"
+    }
+  ],
+  "web.settings.appKeys.waiting.title": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EWaiting for your approval\u202C"
+    }
+  ],
+  "web.settings.appKeys.withdrawn": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EApproval withdrawn\u202C"
     }
   ],
   "web.settings.cardOverlay.adjust": [
@@ -146639,6 +149036,54 @@
       "value": "\u200F\u202EYou're offline, so this change wasn't saved\u202C"
     }
   ],
+  "web.settings.openInSilo.action": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EGet a code for the Silo app\u202C"
+    }
+  ],
+  "web.settings.openInSilo.codeInstructions": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EIn the Silo app on your phone or tablet, add this server by its address and type this code. Anyone with the code can sign in to this account, so don’t share it.\u202C"
+    }
+  ],
+  "web.settings.openInSilo.codeTitle": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECode for the Silo app\u202C"
+    }
+  ],
+  "web.settings.openInSilo.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESign the Silo app on your phone or tablet in to this account, without a password.\u202C"
+    }
+  ],
+  "web.settings.openInSilo.loadFailed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECouldn’t check whether this browser can get a code for the Silo app.\u202C"
+    }
+  ],
+  "web.settings.openInSilo.mainProfileOnly": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EOnly the household’s main profile can get a code for the Silo app. Switch to it and try again.\u202C"
+    }
+  ],
+  "web.settings.openInSilo.pinDescription": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EEnter the main profile’s PIN to get a code for the Silo app.\u202C"
+    }
+  ],
+  "web.settings.openInSilo.title": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESilo app\u202C"
+    }
+  ],
   "web.settings.overlays.accent.amber": [
     {
       "type": 0,
@@ -149655,6 +152100,12 @@
       "value": "\u200F\u202ESigned in\u202C"
     }
   ],
+  "web.settings.sessions.row.signsBackIn": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThis device signs back in by itself\u202C"
+    }
+  ],
   "web.settings.sessions.row.summary": [
     {
       "type": 0,
@@ -149745,6 +152196,24 @@
     {
       "type": 0,
       "value": "\u200F\u202ESettings\u202C"
+    }
+  ],
+  "web.settings.signInAgain.action": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESign in again\u202C"
+    }
+  ],
+  "web.settings.signInAgain.manageDevices": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESign in again to manage your devices\u202C"
+    }
+  ],
+  "web.settings.signInAgain.useApp": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EManage your devices in the Silo app.\u202C"
     }
   ],
   "web.settings.signedInSessions.loadFailed": [

@@ -9,7 +9,7 @@
 package settingskeys
 
 // Revision is the manifest revision these bindings were generated from.
-const Revision = 30
+const Revision = 31
 
 // Setting keys, one constant per definition.
 const (
@@ -55,6 +55,8 @@ const (
 	PlaybackCellularMaxBitrateKbps = "playback.cellular_max_bitrate_kbps"
 	// Cellular quality
 	PlaybackCellularPreferredQuality = "playback.cellular_preferred_quality"
+	// Connection path
+	PlaybackConnectionPath = "playback.connection_path"
 	// Skip intros
 	PlaybackIntroSkipMode = "playback.intro_skip_mode"
 	// Maximum bitrate
@@ -248,6 +250,7 @@ var ClientLocal = []string{
 	DownloadsKeepWatched,
 	DownloadsWifiOnly,
 	NavShowAudiobooks,
+	PlaybackConnectionPath,
 	PlayerPassoutThreshold,
 	PlayerPictureInPictureEnabled,
 	PlayerResumeRewindSeconds,

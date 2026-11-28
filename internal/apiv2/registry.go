@@ -62,6 +62,7 @@ const (
 	metaRetrySafety     = "silo.retry_safety"
 	metaDeprecation     = "silo.deprecation"
 	metaBlankBodyAbsent = "silo.blank_body_absent"
+	metaBodyNoMediaType = "silo.body_no_media_type"
 	// metaIdentityOnly marks an operation whose output declares an ETag: its
 	// responses are served identity-encoded (IdentityEncoded), so a request
 	// that forbids identity is refused up front (encodingGuard).
@@ -230,6 +231,10 @@ type Operation struct {
 	// details"). Every /admin operation records them already; any other
 	// operation, and every v1 route, records request rows only.
 	Audited bool
+	// BodyMayLackMediaType accepts a body sent with no Content-Type header, for
+	// a client whose HTTP stack sends none. The operation must read and decode
+	// the body itself; a Content-Type that is present is still checked.
+	BodyMayLackMediaType bool
 }
 
 type routeKey struct {
@@ -315,6 +320,7 @@ func Register[I, O any](reg *Registry, op Operation, handler func(context.Contex
 	op.Metadata[metaCreateOnly] = op.CreateOnly
 	op.Metadata[metaRetrySafety] = string(op.RetrySafety)
 	op.Metadata[metaBlankBodyAbsent] = op.BlankBodyIsAbsent
+	op.Metadata[metaBodyNoMediaType] = op.BodyMayLackMediaType
 	if op.Deprecation != nil {
 		op.Metadata[metaDeprecation] = op.Deprecation
 	}

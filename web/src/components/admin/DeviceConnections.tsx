@@ -30,6 +30,7 @@ const BUFFERING_ACTION_LABELS: Record<string, MessageKey> = {
 function connectionLabel(t: Translate, connection: string) {
   if (connection === "local") return t("web.admin.common.deviceConnections.local");
   if (connection === "remote") return t("web.admin.common.deviceConnections.remote");
+  if (connection === "direct") return t("web.admin.common.deviceConnections.direct");
   if (connection.startsWith("provider:")) {
     return t("web.admin.common.deviceConnections.provider", { provider: connection.slice(9) });
   }

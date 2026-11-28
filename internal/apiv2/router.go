@@ -173,6 +173,7 @@ type Dependencies struct {
 	EventsCapability               EventsCapabilityService
 	NetworkAccess                  NetworkAccessService
 	DirectConnections              DirectConnectionsService
+	DirectCoordination             DirectCoordinationService
 	ServerIdentity                 ServerIdentityService
 	ServerConnections              ServerConnections
 	NotificationDestinationCreate  NotificationDestinationCreateService

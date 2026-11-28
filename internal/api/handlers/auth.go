@@ -25,6 +25,22 @@ type AuthHandler struct {
 	oauthRoutesAvailable bool
 	accessGroups         access.GroupPolicyProvider
 	checkPrimaryProfile  apimw.PrimaryProfileChecker
+	directRevoker        DirectRevoker
+}
+
+// DirectRevoker withdraws the direct-connection enrollments that a sign-out, a
+// device removal or a profile delete ends. It reports no error: a store failure is its own to log,
+// and the enrollment then lapses at its lease end.
+type DirectRevoker interface {
+	// RevokeSession withdraws every entry of the account that the login session
+	// last enrolled or renewed, whatever device ID the entry names.
+	RevokeSession(ctx context.Context, userID int, sessionID string)
+	// RevokeProfileDevice withdraws the account's entry for one device ID when
+	// it belongs to the profile.
+	RevokeProfileDevice(ctx context.Context, userID int, deviceID, profileID string)
+	// RevokeProfile withdraws every entry of the account that records the
+	// profile, whichever device holds it.
+	RevokeProfile(ctx context.Context, userID int, profileID string)
 }
 
 type accountPasswordService interface {
@@ -258,7 +274,19 @@ func (h *AuthHandler) Logout(ctx context.Context, claims *auth.Claims) error {
 	if err := h.service.Logout(ctx, claims.SessionID); err != nil {
 		return apiError(http.StatusInternalServerError, "internal_error", "An unexpected error occurred")
 	}
+	h.revokeDirect(ctx, claims.UserID, claims.SessionID)
 	return nil
+}
+
+// SetDirectRevoker wires the direct-connection enrollments that sign-out ends.
+func (h *AuthHandler) SetDirectRevoker(r DirectRevoker) { h.directRevoker = r }
+
+// revokeDirect runs after the session change has committed. It withdraws the
+// entries the ended session issued, and no others.
+func (h *AuthHandler) revokeDirect(ctx context.Context, userID int, sessionID string) {
+	if h.directRevoker != nil {
+		h.directRevoker.RevokeSession(ctx, userID, sessionID)
+	}
 }
 
 // EndImpersonation returns an impersonating session to the administrator.
@@ -276,6 +304,8 @@ func (h *AuthHandler) EndImpersonation(ctx context.Context, claims *auth.Claims)
 		}
 		return apiError(http.StatusInternalServerError, "internal_error", "An unexpected error occurred")
 	}
+	// Guard for entries enrolled before enrollment refused a View as user; they name the viewed account, claims.UserID.
+	h.revokeDirect(ctx, claims.UserID, claims.SessionID)
 	return nil
 }
 

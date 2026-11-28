@@ -215,6 +215,12 @@
       "value": "Mục đó đã được liên kết với tài khoản này."
     }
   ],
+  "error.app_code_invalid": [
+    {
+      "type": 0,
+      "value": "Mã này không tồn tại, đã được dùng hoặc đã hết hạn. Lấy mã mới từ trang của máy chủ."
+    }
+  ],
   "error.authentication_required": [
     {
       "type": 0,
@@ -333,6 +339,12 @@
     {
       "type": 0,
       "value": "Giá trị này sai kiểu."
+    }
+  ],
+  "error.field.key_enrolled": [
+    {
+      "type": 0,
+      "value": "Khóa này đã được dùng trên máy chủ này."
     }
   ],
   "error.field.malformed_form": [
@@ -2521,6 +2533,30 @@
     {
       "type": 0,
       "value": "Tự động"
+    }
+  ],
+  "settingsManifest.playback.connection_path.description": [
+    {
+      "type": 0,
+      "value": "Tùy chọn Chỉ trực tiếp vẫn dùng kết nối mạng cục bộ khi có."
+    }
+  ],
+  "settingsManifest.playback.connection_path.label": [
+    {
+      "type": 0,
+      "value": "Đường kết nối"
+    }
+  ],
+  "settingsManifest.playback.connection_path.option.automatic": [
+    {
+      "type": 0,
+      "value": "Tự động"
+    }
+  ],
+  "settingsManifest.playback.connection_path.option.direct_only": [
+    {
+      "type": 0,
+      "value": "Chỉ trực tiếp"
     }
   ],
   "settingsManifest.playback.intro_skip_mode.description": [
@@ -23641,6 +23677,87 @@
       }
     }
   ],
+  "web.admin.common.adminUserSignIn.unlinkConfirm.text": [
+    {
+      "type": 5,
+      "value": "last_way",
+      "options": {
+        "yes": {
+          "value": [
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " sẽ không thể đăng nhập bằng tài khoản này của nhà cung cấp nữa. "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " sẽ không thể đăng nhập cho đến khi bạn đặt mật khẩu hoặc kết nối lại nhà cung cấp."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " sẽ không thể đăng nhập bằng tài khoản này của nhà cung cấp nữa."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 5,
+      "value": "keys",
+      "options": {
+        "yes": {
+          "value": [
+            {
+              "type": 0,
+              "value": " Các khóa ứng dụng Silo của "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " gắn với tài khoản này của nhà cung cấp sẽ bị xóa, và các thiết bị đó sẽ bị đăng xuất."
+            }
+          ]
+        },
+        "unknown": {
+          "value": [
+            {
+              "type": 0,
+              "value": " Mọi khóa ứng dụng Silo của "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " gắn với tài khoản này của nhà cung cấp, nếu có, sẽ bị xóa, và các thiết bị đó sẽ bị đăng xuất."
+            }
+          ]
+        },
+        "other": {
+          "value": []
+        }
+      }
+    }
+  ],
   "web.admin.common.adminUserSignIn.unlinkConfirm.title": [
     {
       "type": 0,
@@ -25935,6 +26052,18 @@
     {
       "type": 0,
       "value": "Tạo hình thu nhỏ mà trình phát hiển thị khi tua, trong bộ nhớ tài nguyên công khai đã cấu hình. Tệp được xử lý trong nền với mức ưu tiên thấp. Tắt tùy chọn này sẽ xóa bản xem trước của thư viện."
+    }
+  ],
+  "web.admin.common.libraryEditor.advanced.trickplayGenerate": [
+    {
+      "type": 0,
+      "value": "Tạo bản xem trước còn thiếu bằng FFmpeg"
+    }
+  ],
+  "web.admin.common.libraryEditor.advanced.trickplayGenerateDescription": [
+    {
+      "type": 0,
+      "value": "Các tệp đi kèm .trickplay và .bif có sẵn bên cạnh tệp đa phương tiện sẽ được dùng trước. Tắt tùy chọn này để chỉ nhập tệp đi kèm và bỏ qua việc tạo bằng FFmpeg."
     }
   ],
   "web.admin.common.libraryEditor.advanced.trickplayUnavailable": [
@@ -29999,6 +30128,40 @@
       "value": "Quản trị người dùng"
     }
   ],
+  "web.admin.common.trickplay.badge.awaitingSidecarCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " đang chờ tệp đi kèm"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " đang chờ tệp đi kèm"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.common.trickplay.badge.detail": [
     {
       "type": 0,
@@ -30129,6 +30292,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.common.trickplay.badge.sidecarsOnly": [
+    {
+      "type": 0,
+      "value": "chỉ tệp đi kèm"
     }
   ],
   "web.admin.common.trickplay.badge.srDetail": [
@@ -30293,6 +30462,42 @@
     {
       "type": 0,
       "value": "Trình phát vẫn dùng bản xem trước hiện tại cho đến khi bản mới sẵn sàng."
+    }
+  ],
+  "web.admin.common.trickplay.sidecarStatus.awaiting_sidecar": [
+    {
+      "type": 0,
+      "value": "Đang chờ tệp đi kèm"
+    }
+  ],
+  "web.admin.common.trickplay.sidecarStatus.sidecar_invalid": [
+    {
+      "type": 0,
+      "value": "Tệp đi kèm không hợp lệ"
+    }
+  ],
+  "web.admin.common.trickplay.sidecarStatus.sidecar_stale": [
+    {
+      "type": 0,
+      "value": "Tệp đi kèm đã cũ"
+    }
+  ],
+  "web.admin.common.trickplay.source.generated": [
+    {
+      "type": 0,
+      "value": "Đã tạo"
+    }
+  ],
+  "web.admin.common.trickplay.source.sidecar_bif": [
+    {
+      "type": 0,
+      "value": "Tệp đi kèm (.bif)"
+    }
+  ],
+  "web.admin.common.trickplay.source.sidecar_trickplay": [
+    {
+      "type": 0,
+      "value": "Tệp đi kèm (.trickplay)"
     }
   ],
   "web.admin.common.trickplay.state.off": [
@@ -32160,7 +32365,7 @@
     },
     {
       "type": 0,
-      "value": ". Các thiết bị khác của họ vẫn được đăng nhập. Ứng dụng khách có thể đăng nhập lại bằng mật khẩu của tài khoản."
+      "value": ". Các thiết bị khác của họ vẫn được đăng nhập. Ứng dụng khách có thể đăng nhập lại."
     }
   ],
   "web.admin.dashboard.widgets.apiClients.confirmLabel": [
@@ -43978,6 +44183,12 @@
       "value": "Hồ sơ"
     }
   ],
+  "web.admin.history.column.progress": [
+    {
+      "type": 0,
+      "value": "Tiến độ"
+    }
+  ],
   "web.admin.history.column.status": [
     {
       "type": 0,
@@ -44012,6 +44223,12 @@
     {
       "type": 0,
       "value": "Nhật ký phiên"
+    }
+  ],
+  "web.admin.history.detail.backToPlay": [
+    {
+      "type": 0,
+      "value": "Quay lại lượt phát gộp"
     }
   ],
   "web.admin.history.detail.column.delivered": [
@@ -44122,6 +44339,12 @@
       "value": "Thời gian xem"
     }
   ],
+  "web.admin.history.detail.inspectSitting": [
+    {
+      "type": 0,
+      "value": "Xem chi tiết"
+    }
+  ],
   "web.admin.history.detail.keyboardHint": [
     {
       "type": 0,
@@ -44206,6 +44429,12 @@
       "value": "Lý do không phát trực tiếp"
     }
   ],
+  "web.admin.history.detail.section.sessions": [
+    {
+      "type": 0,
+      "value": "Các phiên trong lượt phát này"
+    }
+  ],
   "web.admin.history.detail.section.streams": [
     {
       "type": 0,
@@ -44216,6 +44445,94 @@
     {
       "type": 0,
       "value": "Thời gian và tiến độ xem"
+    }
+  ],
+  "web.admin.history.detail.sessionsCapped": [
+    {
+      "type": 0,
+      "value": "Đang hiển thị "
+    },
+    {
+      "type": 1,
+      "value": "shown"
+    },
+    {
+      "type": 0,
+      "value": " phiên đầu tiên trong tổng số "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": " phiên của lượt phát này."
+    }
+  ],
+  "web.admin.history.detail.sessionsNotice": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Lượt phát này có "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " phiên. Chi tiết luồng, thiết bị và tuyến bên dưới phản ánh phiên đó."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Lượt phát này gồm "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " phiên. Chi tiết luồng, thiết bị và tuyến bên dưới phản ánh phiên chính; chọn một phiên bất kỳ bên dưới để xem riêng phiên đó."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.ended": [
+    {
+      "type": 0,
+      "value": "Kết thúc"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.method": [
+    {
+      "type": 0,
+      "value": "Phương thức"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.started": [
+    {
+      "type": 0,
+      "value": "Bắt đầu"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.watched": [
+    {
+      "type": 0,
+      "value": "Đã xem"
     }
   ],
   "web.admin.history.detail.subtitlesBurnIn": [
@@ -44444,6 +44761,12 @@
       "value": "Tất cả mạng"
     }
   ],
+  "web.admin.history.filter.allMediaTypes": [
+    {
+      "type": 0,
+      "value": "Tất cả nội dung"
+    }
+  ],
   "web.admin.history.filter.allMethods": [
     {
       "type": 0,
@@ -44480,6 +44803,24 @@
       "value": "Hoàn tất"
     }
   ],
+  "web.admin.history.filter.episodes": [
+    {
+      "type": 0,
+      "value": "Tập"
+    }
+  ],
+  "web.admin.history.filter.hideShort": [
+    {
+      "type": 0,
+      "value": "Ẩn <30 giây"
+    }
+  ],
+  "web.admin.history.filter.hideShortTitle": [
+    {
+      "type": 0,
+      "value": "Ẩn phiên chưa hoàn tất dưới 30 giây"
+    }
+  ],
   "web.admin.history.filter.locationLocal": [
     {
       "type": 0,
@@ -44490,6 +44831,12 @@
     {
       "type": 0,
       "value": "Từ xa"
+    }
+  ],
+  "web.admin.history.filter.movies": [
+    {
+      "type": 0,
+      "value": "Phim"
     }
   ],
   "web.admin.history.filter.partial": [
@@ -44686,6 +45033,12 @@
       "value": "Lượt phát gần đây"
     }
   ],
+  "web.admin.history.row.burnInBadgeTitle": [
+    {
+      "type": 0,
+      "value": "Phụ đề đã ghi vào video"
+    }
+  ],
   "web.admin.history.row.completed": [
     {
       "type": 0,
@@ -44706,6 +45059,48 @@
     {
       "type": 0,
       "value": "Ước tính (ghi lại trước khi theo dõi thời gian xem chính xác)"
+    }
+  ],
+  "web.admin.history.row.groupedSessionsTitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Gộp từ "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " phiên"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Gộp từ "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " phiên"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.history.row.meta": [
@@ -44738,6 +45133,12 @@
       "value": "Một phần"
     }
   ],
+  "web.admin.history.row.progressLabel": [
+    {
+      "type": 0,
+      "value": "Tiến độ phát"
+    }
+  ],
   "web.admin.history.row.started": [
     {
       "type": 0,
@@ -44748,16 +45149,92 @@
       "value": "time"
     }
   ],
+  "web.admin.history.stats.accountsCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " tài khoản"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " tài khoản"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.history.stats.completed": [
     {
       "type": 0,
       "value": "Hoàn tất"
     }
   ],
+  "web.admin.history.stats.completionBreakdown": [
+    {
+      "type": 1,
+      "value": "completed"
+    },
+    {
+      "type": 0,
+      "value": " hoàn tất · "
+    },
+    {
+      "type": 1,
+      "value": "partial"
+    },
+    {
+      "type": 0,
+      "value": " một phần"
+    }
+  ],
   "web.admin.history.stats.partial": [
     {
       "type": 0,
       "value": "Một phần"
+    }
+  ],
+  "web.admin.history.stats.totalPlays": [
+    {
+      "type": 0,
+      "value": "Tổng lượt phát"
+    }
+  ],
+  "web.admin.history.stats.totalSessions": [
+    {
+      "type": 0,
+      "value": "Tổng số phiên"
+    }
+  ],
+  "web.admin.history.stats.uniqueProfiles": [
+    {
+      "type": 0,
+      "value": "Số hồ sơ riêng biệt"
+    }
+  ],
+  "web.admin.history.stats.uniqueTitles": [
+    {
+      "type": 0,
+      "value": "Số tiêu đề riêng biệt"
     }
   ],
   "web.admin.history.stats.visibleRows": [
@@ -44776,6 +45253,24 @@
     {
       "type": 0,
       "value": "Lịch sử phát"
+    }
+  ],
+  "web.admin.history.view.label": [
+    {
+      "type": 0,
+      "value": "Chế độ xem lịch sử"
+    }
+  ],
+  "web.admin.history.view.plays": [
+    {
+      "type": 0,
+      "value": "Lượt phát"
+    }
+  ],
+  "web.admin.history.view.sessions": [
+    {
+      "type": 0,
+      "value": "Tất cả phiên"
     }
   ],
   "web.admin.historyImport.conflict.message": [
@@ -86799,6 +87294,226 @@
       "value": "count"
     }
   ],
+  "web.admin.users.detail.appKeys.confirm.denyDescription": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " sẽ không thể đăng nhập vào tài khoản của "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": ". Nếu đó là thiết bị của họ, họ cần thêm lại thiết bị trong ứng dụng Silo."
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKey": [
+    {
+      "type": 0,
+      "value": "Xóa khóa"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKeyDescription": [
+    {
+      "type": 0,
+      "value": "Các thiết bị đã đăng nhập vẫn hoạt động cho đến khi bạn gỡ chúng. Không thể thêm thiết bị mới bằng khóa này, và các thiết bị do khóa này thêm mà vẫn đang chờ sẽ bị từ chối. Ứng dụng Silo của "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " sẽ thiết lập khóa mới vào lần tới họ thêm thiết bị trong khi đang đăng nhập."
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKeyTitle": [
+    {
+      "type": 0,
+      "value": "Xóa khóa tài khoản của "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.removeDescription": [
+    {
+      "type": 0,
+      "value": "Gỡ "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " sẽ đăng xuất thiết bị khỏi tài khoản của "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " ngay lập tức và vô hiệu hóa khóa của thiết bị: thiết bị không thể đăng nhập lại bằng khóa đó. Để dùng lại thiết bị, "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " cần thêm lại thiết bị trong ứng dụng Silo."
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.withdrawDescription": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " sẽ không thể dùng phê duyệt này để đăng nhập vào tài khoản của "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.detail.appKeys.description": [
+    {
+      "type": 0,
+      "value": "Các thiết bị và ứng dụng đăng nhập vào tài khoản của "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " bằng ứng dụng Silo, không cần mật khẩu."
+    }
+  ],
+  "web.admin.users.detail.appKeys.empty": [
+    {
+      "type": 0,
+      "value": "Không có thiết bị nào dùng ứng dụng Silo trên tài khoản này."
+    }
+  ],
+  "web.admin.users.detail.appKeys.loadFailed": [
+    {
+      "type": 0,
+      "value": "Không thể tải thiết bị."
+    }
+  ],
+  "web.admin.users.detail.appKeys.off": [
+    {
+      "type": 0,
+      "value": "Đăng nhập bằng ứng dụng Silo đang tắt trên máy chủ này, nên các thiết bị này không thể đăng nhập. Bạn vẫn có thể gỡ chúng."
+    }
+  ],
+  "web.admin.users.detail.appKeys.ownerOnly": [
+    {
+      "type": 0,
+      "value": "Chỉ chủ sở hữu máy chủ mới có thể thay đổi thiết bị của quản trị viên khác hoặc của chủ sở hữu."
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.description": [
+    {
+      "type": 0,
+      "value": "Ứng dụng Silo dùng khóa này để thêm thiết bị mới của "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": ". Thiết lập lúc "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.none": [
+    {
+      "type": 0,
+      "value": "Không có khóa tài khoản. Ứng dụng Silo của "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " sẽ thiết lập khóa vào lần tới họ thêm thiết bị trong khi đang đăng nhập."
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.remove": [
+    {
+      "type": 0,
+      "value": "Xóa khóa tài khoản"
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKeyRemoved": [
+    {
+      "type": 0,
+      "value": "Đã xóa khóa tài khoản"
+    }
+  ],
+  "web.admin.users.detail.appKeys.preapprovals.description": [
+    {
+      "type": 0,
+      "value": "Các lượt đăng nhập mà "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " đã phê duyệt cho một thiết bị chưa kết nối."
+    }
+  ],
+  "web.admin.users.detail.appKeys.waiting.description": [
+    {
+      "type": 0,
+      "value": "Thiết bị mới trên tài khoản quản trị viên sẽ chờ cho đến khi "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " phê duyệt từ một thiết bị mà họ đang đăng nhập. Bạn có thể từ chối thiết bị tại đây."
+    }
+  ],
+  "web.admin.users.detail.appKeys.waiting.title": [
+    {
+      "type": 0,
+      "value": "Đang chờ phê duyệt"
+    }
+  ],
   "web.admin.users.detail.common.allProfiles": [
     {
       "type": 0,
@@ -90323,6 +91038,12 @@
       "value": "Tài khoản đã đạt giới hạn hồ sơ"
     }
   ],
+  "web.admin.users.detail.profiles.badge.changedHere": [
+    {
+      "type": 0,
+      "value": "Đã thay đổi tại đây"
+    }
+  ],
   "web.admin.users.detail.profiles.badge.kids": [
     {
       "type": 0,
@@ -90520,6 +91241,612 @@
     {
       "type": 0,
       "value": "Lưu PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowAgain": [
+    {
+      "type": 0,
+      "value": "Cho phép lại"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowAgainAria": [
+    {
+      "type": 0,
+      "value": "Cho phép hồ sơ "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " quay lại máy chủ này"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowDescription": [
+    {
+      "type": 0,
+      "value": "Ứng dụng của họ có thể thêm lại "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " vào lần đồng bộ tiếp theo, dưới dạng hồ sơ mới không có lịch sử trên máy chủ này, nếu danh sách hồ sơ của ứng dụng vẫn có "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " và tài khoản này còn chỗ cho thêm một hồ sơ."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowTitle": [
+    {
+      "type": 0,
+      "value": "Cho phép lại "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.alreadyCleared": [
+    {
+      "type": 0,
+      "value": "Thay đổi đó đã được xóa, hoặc "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " đã thay đổi lại. Danh sách đã được cập nhật."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedBy": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " đã thay đổi vào "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedSinceOpened": [
+    {
+      "type": 0,
+      "value": "Thay đổi này đã được cập nhật sau khi bạn mở, nên chưa có gì được xóa. Đọc lại thay đổi trong danh sách, rồi xóa nếu bạn vẫn muốn."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedWhileRunning": [
+    {
+      "type": 0,
+      "value": "Các hồ sơ đã thay đổi trong khi thao tác này chạy, nên không có gì được thay đổi. Danh sách đã được cập nhật; hãy thử lại nếu bạn vẫn muốn."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clear": [
+    {
+      "type": 0,
+      "value": "Xóa"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearAndRemovePin": [
+    {
+      "type": 0,
+      "value": "Xóa và gỡ PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearAria": [
+    {
+      "type": 0,
+      "value": "Xóa thay đổi đối với "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " trên hồ sơ "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearFailed": [
+    {
+      "type": 0,
+      "value": "Không thể xóa thay đổi."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearInherit": [
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " trên "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " sẽ trở về giá trị mà "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " hiện thừa hưởng, theo yêu cầu của ứng dụng của họ. Thay đổi từ ứng dụng của họ sẽ lại áp dụng cho mục này."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearLater": [
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " giữ nguyên cho đến khi ứng dụng của họ gửi lại giá trị này. Sau đó, thay đổi từ ứng dụng của họ sẽ lại áp dụng cho mục này."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearNow": [
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " sẽ trở về giá trị từ ứng dụng của họ ngay bây giờ, và thay đổi từ ứng dụng của họ sẽ lại áp dụng cho hồ sơ này."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearNowValue": [
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " trên "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " sẽ trở về "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": ", giá trị từ ứng dụng của họ, ngay bây giờ. Thay đổi từ ứng dụng của họ sẽ lại áp dụng cho mục này."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearPin": [
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " giữ mã PIN bạn đã đặt cho đến khi ứng dụng của họ gửi mã PIN vào lần tới. Sau đó, thay đổi từ ứng dụng của họ sẽ lại áp dụng cho mã này."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearPinRemoves": [
+    {
+      "type": 0,
+      "value": "Ứng dụng của họ gửi "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " mà không có PIN, nên khi xóa thay đổi, mã PIN bạn đã đặt sẽ bị gỡ ngay bây giờ. Sau đó, bất kỳ ai dùng tài khoản này đều có thể mở "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " mà không cần PIN."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearTitle": [
+    {
+      "type": 0,
+      "value": "Xóa thay đổi đối với "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " trên "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.deletedAccount": [
+    {
+      "type": 0,
+      "value": "một tài khoản đã bị xóa"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.description": [
+    {
+      "type": 0,
+      "value": "Các hồ sơ này đến từ ứng dụng của "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ". Thay đổi bạn thực hiện tại đây sẽ được giữ trên máy chủ này cho đến khi bạn xóa. Thay đổi này không khóa mục đó: "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " cũng có thể thay đổi chính mục đó tại đây."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismiss": [
+    {
+      "type": 0,
+      "value": "Bỏ qua"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismissAria": [
+    {
+      "type": 0,
+      "value": "Bỏ qua ghi chú về "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " trên "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismissFailed": [
+    {
+      "type": 0,
+      "value": "Không thể bỏ qua ghi chú."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.isChild": [
+    {
+      "type": 0,
+      "value": "Hồ sơ trẻ em"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.maxAdvisoryAge": [
+    {
+      "type": 0,
+      "value": "Giới hạn độ tuổi"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.maxContentRating": [
+    {
+      "type": 0,
+      "value": "Giới hạn phân loại nội dung"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.name": [
+    {
+      "type": 0,
+      "value": "Tên"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.picture": [
+    {
+      "type": 0,
+      "value": "Ảnh"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.pin": [
+    {
+      "type": 0,
+      "value": "PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.requests": [
+    {
+      "type": 0,
+      "value": "Yêu cầu"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.requireAdvisoryAge": [
+    {
+      "type": 0,
+      "value": "Bắt buộc có phân loại độ tuổi"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.fieldValue": [
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.hidden": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " đã xóa khỏi máy chủ này vào "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": ". Ứng dụng của họ sẽ không thêm lại cho đến khi bạn cho phép."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.loadFailed": [
+    {
+      "type": 0,
+      "value": "Không thể tải các thay đổi đã thực hiện trên máy chủ này."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.nameTaken": [
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " không thể trở về tên "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " từ ứng dụng của họ vì một hồ sơ khác tại đây đã dùng tên đó. Đổi tên hồ sơ đó trước, rồi xóa lại thay đổi này."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeHiddenNextSync": [
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " có thể quay lại vào lần tới ứng dụng của "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " đồng bộ, nếu danh sách hồ sơ của ứng dụng vẫn có hồ sơ này."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeHiddenWoken": [
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " có thể quay lại vào lần đồng bộ tiếp theo của ứng dụng của họ, nếu danh sách hồ sơ của ứng dụng vẫn có hồ sơ này. Đã yêu cầu điện thoại của "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " đồng bộ."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeNextSync": [
+    {
+      "type": 0,
+      "value": "Đã xóa. Thay đổi sẽ đến ứng dụng của "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " vào lần đồng bộ tiếp theo."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeWoken": [
+    {
+      "type": 0,
+      "value": "Đã xóa. Đã yêu cầu điện thoại của "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " đồng bộ."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.removedBy": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " đã xóa vào "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.replacedOwner": [
+    {
+      "type": 0,
+      "value": "Thay đổi này đã thay thế giá trị bạn đặt."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.setBy": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " đã đặt vào "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.settled": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " đã thay đổi mục này vào "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "; giá trị bạn đặt không còn áp dụng."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.title": [
+    {
+      "type": 0,
+      "value": "Đã thay đổi trên máy chủ này"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.inherited": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (thừa hưởng)"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.noPicture": [
+    {
+      "type": 0,
+      "value": "Không có ảnh"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.none": [
+    {
+      "type": 0,
+      "value": "Không có"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.off": [
+    {
+      "type": 0,
+      "value": "Tắt"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.on": [
+    {
+      "type": 0,
+      "value": "Bật"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.picture": [
+    {
+      "type": 0,
+      "value": "Ảnh tùy chỉnh"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.pinNone": [
+    {
+      "type": 0,
+      "value": "Không có PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.pinSet": [
+    {
+      "type": 0,
+      "value": "Đã đặt PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.requestsAllowed": [
+    {
+      "type": 0,
+      "value": "Được phép"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.requestsBlocked": [
+    {
+      "type": 0,
+      "value": "Bị chặn"
     }
   ],
   "web.admin.users.detail.profiles.setPin": [
@@ -91759,6 +93086,144 @@
     {
       "type": 0,
       "value": "Đặt mật khẩu"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.action": [
+    {
+      "type": 0,
+      "value": "Tạo liên kết đăng nhập"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.actionHint": [
+    {
+      "type": 0,
+      "value": "Đã mất mọi thiết bị"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.description": [
+    {
+      "type": 0,
+      "value": "Liên kết dùng một lần cho "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " nếu họ đã mất mọi thiết bị. Liên kết mở một trang cung cấp mã cho ứng dụng Silo, hoặc cho phép họ chọn mật khẩu. Liên kết có hiệu lực trong 24 giờ, và liên kết mới sẽ thay thế liên kết trước đó."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailAction": [
+    {
+      "type": 0,
+      "value": "Gửi qua email"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHint": [
+    {
+      "type": 0,
+      "value": "Tạo liên kết để tự sao chép và gửi, hoặc gửi qua email đến "
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHintNoAddress": [
+    {
+      "type": 0,
+      "value": "Tạo liên kết, rồi tự sao chép và gửi đi. Tài khoản này không có địa chỉ email để gửi."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHintNoMail": [
+    {
+      "type": 0,
+      "value": "Tạo liên kết, rồi tự sao chép và gửi đi. Thiết lập email trong Cài đặt để gửi từ đây."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailSent": [
+    {
+      "type": 0,
+      "value": "Đã gửi liên kết đến "
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": ". Liên kết hết hạn lúc "
+    },
+    {
+      "type": 1,
+      "value": "expires"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Máy chủ thư không xác nhận đã gửi. Liên kết bên dưới vẫn dùng được: sao chép và gửi theo cách khác."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.failed": [
+    {
+      "type": 0,
+      "value": "Không thể tạo liên kết đăng nhập."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.linkShare": [
+    {
+      "type": 0,
+      "value": "Chỉ gửi liên kết này cho "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": ". Bất kỳ ai có liên kết đều có thể đăng nhập vào tài khoản này cho đến khi liên kết được dùng hoặc hết hạn lúc "
+    },
+    {
+      "type": 1,
+      "value": "expires"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.providerRequired": [
+    {
+      "type": 0,
+      "value": "Đăng nhập bằng mật khẩu cục bộ đang tắt trên máy chủ này, nên liên kết đăng nhập sẽ bỏ qua nhà cung cấp đăng nhập của máy chủ. Đề nghị "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " đăng nhập bằng nhà cung cấp trên trang web của máy chủ này, rồi dùng Mở trong Silo trong cài đặt tài khoản của họ."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.title": [
+    {
+      "type": 0,
+      "value": "Liên kết đăng nhập cho "
+    },
+    {
+      "type": 1,
+      "value": "username"
     }
   ],
   "web.audiobooks.chapter.fallbackTitle": [
@@ -93575,6 +95040,120 @@
       "value": "Phê duyệt đăng nhập"
     }
   ],
+  "web.auth.appCode.code": [
+    {
+      "type": 0,
+      "value": "Mã"
+    }
+  ],
+  "web.auth.appCode.codeCopied": [
+    {
+      "type": 0,
+      "value": "Đã sao chép mã"
+    }
+  ],
+  "web.auth.appCode.copyCode": [
+    {
+      "type": 0,
+      "value": "Sao chép mã"
+    }
+  ],
+  "web.auth.appCode.copyFailed": [
+    {
+      "type": 0,
+      "value": "Không thể sao chép mã. Chọn mã và tự sao chép."
+    }
+  ],
+  "web.auth.appCode.expired": [
+    {
+      "type": 0,
+      "value": "Mã này đã hết hạn."
+    }
+  ],
+  "web.auth.appCode.failed": [
+    {
+      "type": 0,
+      "value": "Silo không thể tạo mã. Vui lòng thử lại."
+    }
+  ],
+  "web.auth.appCode.instructions": [
+    {
+      "type": 0,
+      "value": "Nhấn Mở Silo để tiếp tục trong ứng dụng Silo trên thiết bị này. Nếu chưa cài ứng dụng, cài ứng dụng, quay lại thẻ này rồi nhấn Mở Silo lần nữa."
+    }
+  ],
+  "web.auth.appCode.noScanCode": [
+    {
+      "type": 0,
+      "value": "Địa chỉ của máy chủ này quá dài để tạo mã quét. Nhập địa chỉ máy chủ và mã trong ứng dụng Silo, hoặc sao chép mã rồi dán vào đó."
+    }
+  ],
+  "web.auth.appCode.open": [
+    {
+      "type": 0,
+      "value": "Mở Silo"
+    }
+  ],
+  "web.auth.appCode.renew": [
+    {
+      "type": 0,
+      "value": "Lấy mã mới"
+    }
+  ],
+  "web.auth.appCode.scanCodeLabel": [
+    {
+      "type": 0,
+      "value": "Mã quét cho ứng dụng Silo"
+    }
+  ],
+  "web.auth.appCode.scanCodeUnavailable": [
+    {
+      "type": 0,
+      "value": "Không thể hiển thị mã quét cho máy chủ này. Nhập địa chỉ máy chủ và mã trong ứng dụng Silo, hoặc sao chép mã rồi dán vào đó."
+    }
+  ],
+  "web.auth.appCode.scanHint": [
+    {
+      "type": 0,
+      "value": "Quét mã này bằng trình quét trong ứng dụng Silo, hoặc nhập hay sao chép địa chỉ máy chủ và mã bên dưới."
+    }
+  ],
+  "web.auth.appCode.serverAddress": [
+    {
+      "type": 0,
+      "value": "Địa chỉ máy chủ"
+    }
+  ],
+  "web.auth.appCode.singleUse": [
+    {
+      "type": 0,
+      "value": "Mã này chỉ dùng được một lần và hết hạn sau vài phút."
+    }
+  ],
+  "web.auth.appCode.title": [
+    {
+      "type": 0,
+      "value": "Mở Silo"
+    }
+  ],
+  "web.auth.appCode.typeInstructions": [
+    {
+      "type": 0,
+      "value": "Trong ứng dụng Silo trên điện thoại hoặc máy tính bảng, thêm máy chủ này bằng địa chỉ của máy chủ và nhập mã này để tạo tài khoản. Bất kỳ ai có mã đều có thể tham gia thay bạn, vì vậy đừng chia sẻ mã."
+    }
+  ],
+  "web.auth.appCode.typeTitle": [
+    {
+      "type": 0,
+      "value": "Tham gia bằng mã này"
+    }
+  ],
+  "web.auth.appCode.webLink": [
+    {
+      "type": 0,
+      "value": "Thay vào đó, mở bằng liên kết siloserver.org"
+    }
+  ],
   "web.auth.card.rememberedIt": [
     {
       "type": 0,
@@ -93777,10 +95356,46 @@
       ]
     }
   ],
+  "web.auth.invite.appAccountEmail": [
+    {
+      "type": 0,
+      "value": "Tài khoản của bạn sẽ dùng "
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.auth.invite.appContinue": [
+    {
+      "type": 0,
+      "value": "Tiếp tục"
+    }
+  ],
+  "web.auth.invite.appEmailHint": [
+    {
+      "type": 0,
+      "value": "Khi có địa chỉ email, máy chủ này có thể gửi cho bạn liên kết đăng nhập nếu bạn mất thiết bị."
+    }
+  ],
   "web.auth.invite.appMissing": [
     {
       "type": 0,
       "value": "Không có gì xảy ra? Ứng dụng chưa được cài đặt — chỉ cần tiếp tục bên dưới."
+    }
+  ],
+  "web.auth.invite.appProviderOnly": [
+    {
+      "type": 1,
+      "value": "server"
+    },
+    {
+      "type": 0,
+      "value": " thêm người dùng qua nhà cung cấp đăng nhập của máy chủ. Đăng nhập bằng nhà cung cấp đó trên trang này, rồi mở Silo từ cài đặt tài khoản của bạn."
     }
   ],
   "web.auth.invite.created": [
@@ -93809,6 +95424,18 @@
       "value": "Nhập địa chỉ email và chọn mật khẩu. Bạn sẽ đăng nhập bằng địa chỉ email của mình."
     }
   ],
+  "web.auth.invite.descriptionWithApp": [
+    {
+      "type": 0,
+      "value": "Tham gia bằng ứng dụng Silo trên điện thoại hoặc máy tính bảng, hoặc chọn mật khẩu để đăng nhập."
+    }
+  ],
+  "web.auth.invite.emailOptional": [
+    {
+      "type": 0,
+      "value": "Email (không bắt buộc)"
+    }
+  ],
   "web.auth.invite.emailPlaceholder": [
     {
       "type": 0,
@@ -93829,6 +95456,18 @@
     {
       "type": 1,
       "value": "inviter"
+    }
+  ],
+  "web.auth.invite.joinWithApp": [
+    {
+      "type": 0,
+      "value": "Tham gia bằng ứng dụng Silo"
+    }
+  ],
+  "web.auth.invite.joinWithAppInstead": [
+    {
+      "type": 0,
+      "value": "Thay vào đó, tham gia bằng ứng dụng Silo"
     }
   ],
   "web.auth.invite.loadFailed": [
@@ -93929,6 +95568,30 @@
     {
       "type": 0,
       "value": "Lời mời không khả dụng"
+    }
+  ],
+  "web.auth.invite.usePassword": [
+    {
+      "type": 0,
+      "value": "Thay vào đó, dùng mật khẩu"
+    }
+  ],
+  "web.auth.invite.usernameIsAddress": [
+    {
+      "type": 0,
+      "value": "Tên người dùng có @ phải là địa chỉ email bạn nhập bên dưới."
+    }
+  ],
+  "web.auth.invite.usernameRequired": [
+    {
+      "type": 0,
+      "value": "Chọn tên người dùng."
+    }
+  ],
+  "web.auth.invite.usernameTaken": [
+    {
+      "type": 0,
+      "value": "Tên người dùng đó đã được dùng. Chọn tên khác."
     }
   ],
   "web.auth.languagePicker.label": [
@@ -94873,6 +96536,126 @@
     {
       "type": 0,
       "value": "Đăng nhập"
+    }
+  ],
+  "web.auth.signInLink.backToCode": [
+    {
+      "type": 0,
+      "value": "Quay lại mã"
+    }
+  ],
+  "web.auth.signInLink.codeExpired": [
+    {
+      "type": 0,
+      "value": "Yêu cầu quản trị viên của máy chủ này gửi liên kết mới để nhận mã khác."
+    }
+  ],
+  "web.auth.signInLink.documentTitle": [
+    {
+      "type": 0,
+      "value": "Liên kết đăng nhập"
+    }
+  ],
+  "web.auth.signInLink.failed": [
+    {
+      "type": 0,
+      "value": "Silo không thể mở liên kết này. Vui lòng thử lại."
+    }
+  ],
+  "web.auth.signInLink.installFirst": [
+    {
+      "type": 0,
+      "value": "Liên kết chỉ dùng được một lần và mã có hiệu lực trong vài phút. Cài ứng dụng Silo trên điện thoại hoặc máy tính bảng trước, rồi nhấn Tiếp tục."
+    }
+  ],
+  "web.auth.signInLink.intro": [
+    {
+      "type": 0,
+      "value": "Quản trị viên đã gửi cho bạn liên kết này để bạn có thể đăng nhập lại. Tiếp tục để nhận mã cho ứng dụng Silo hoặc để chọn mật khẩu."
+    }
+  ],
+  "web.auth.signInLink.keepOpen": [
+    {
+      "type": 0,
+      "value": "Giữ trang này mở cho đến khi hoàn tất. Liên kết đã được dùng, nên nếu tải lại hoặc rời trang, bạn sẽ mất những gì liên kết đã cung cấp."
+    }
+  ],
+  "web.auth.signInLink.leaveAction": [
+    {
+      "type": 0,
+      "value": "Rời đi"
+    }
+  ],
+  "web.auth.signInLink.leaveDescription": [
+    {
+      "type": 0,
+      "value": "Liên kết đã được dùng. Nếu rời đi, bạn sẽ mất mã cho ứng dụng Silo và cơ hội đặt mật khẩu, và sẽ cần liên kết mới."
+    }
+  ],
+  "web.auth.signInLink.leaveTitle": [
+    {
+      "type": 0,
+      "value": "Rời trang này?"
+    }
+  ],
+  "web.auth.signInLink.noCodeAdministrator": [
+    {
+      "type": 0,
+      "value": "Đây là tài khoản quản trị viên, nên liên kết này chỉ đặt mật khẩu. Đặt mật khẩu, đăng nhập trên trang web của máy chủ này, rồi mở ứng dụng Silo từ cài đặt tài khoản tại đó."
+    }
+  ],
+  "web.auth.signInLink.noCodeAppKeysOff": [
+    {
+      "type": 0,
+      "value": "Hiện ứng dụng Silo không thể đăng nhập trên máy chủ này, nên liên kết này chỉ đặt mật khẩu."
+    }
+  ],
+  "web.auth.signInLink.passwordDescription": [
+    {
+      "type": 0,
+      "value": "Khi lưu, tài khoản này sẽ được đăng xuất trên mọi thiết bị. Các thiết bị đăng nhập bằng ứng dụng Silo sẽ tự đăng nhập lại."
+    }
+  ],
+  "web.auth.signInLink.passwordSet": [
+    {
+      "type": 0,
+      "value": "Đã lưu mật khẩu. Đăng nhập bằng mật khẩu đó."
+    }
+  ],
+  "web.auth.signInLink.passwordSetLostDevices": [
+    {
+      "type": 0,
+      "value": "Các thiết bị bị mất từng dùng ứng dụng Silo vẫn có thể đăng nhập cho đến khi bạn gỡ chúng. Sau khi đăng nhập, gỡ chúng khỏi danh sách thiết bị trong cài đặt tài khoản."
+    }
+  ],
+  "web.auth.signInLink.passwordTitle": [
+    {
+      "type": 0,
+      "value": "Chọn mật khẩu"
+    }
+  ],
+  "web.auth.signInLink.providerRequired": [
+    {
+      "type": 0,
+      "value": "Máy chủ này cho người dùng đăng nhập qua nhà cung cấp đăng nhập của máy chủ, nên liên kết này không hoạt động. Thay vào đó, đăng nhập bằng nhà cung cấp."
+    }
+  ],
+  "web.auth.signInLink.setPasswordInstead": [
+    {
+      "type": 0,
+      "value": "Thay vào đó, đặt mật khẩu"
+    }
+  ],
+  "web.auth.signInLink.title": [
+    {
+      "type": 0,
+      "value": "Truy cập lại tài khoản"
+    }
+  ],
+  "web.auth.signInLink.unavailable": [
+    {
+      "type": 0,
+      "value": "Liên kết này đã được dùng, đã được thay bằng liên kết mới hơn hoặc đã hết hạn. Yêu cầu quản trị viên của máy chủ này gửi liên kết mới."
     }
   ],
   "web.auth.signup.closed": [
@@ -134198,7 +135981,7 @@
   "web.settings.account.password.signOutOthersDescription": [
     {
       "type": 0,
-      "value": "Các trình duyệt và ứng dụng khác phải đăng nhập lại bằng mật khẩu mới. Trình duyệt này vẫn giữ đăng nhập và các khóa API vẫn hoạt động."
+      "value": "Các trình duyệt và ứng dụng khác sẽ được đăng xuất. Trình duyệt này vẫn giữ đăng nhập và các khóa API vẫn hoạt động."
     }
   ],
   "web.settings.account.password.title": [
@@ -135055,6 +136838,492 @@
     {
       "type": 0,
       "value": "Cách dùng khóa này"
+    }
+  ],
+  "web.settings.appKeys.actionFailed": [
+    {
+      "type": 0,
+      "value": "Không thể thực hiện thay đổi đó. Vui lòng thử lại."
+    }
+  ],
+  "web.settings.appKeys.approveMainOnly": [
+    {
+      "type": 0,
+      "value": "Chỉ hồ sơ chính của hộ gia đình mới có thể phê duyệt thiết bị. Chuyển sang hồ sơ đó để phê duyệt."
+    }
+  ],
+  "web.settings.appKeys.approved": [
+    {
+      "type": 0,
+      "value": "Đã phê duyệt "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.confirm.approve": [
+    {
+      "type": 0,
+      "value": "Phê duyệt thiết bị"
+    }
+  ],
+  "web.settings.appKeys.confirm.approveDescription": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " sẽ có thể đăng nhập vào tài khoản của bạn bằng ứng dụng Silo cho đến khi bạn gỡ thiết bị. Chỉ phê duyệt nếu bạn vừa thiết lập thiết bị này."
+    }
+  ],
+  "web.settings.appKeys.confirm.approveTitle": [
+    {
+      "type": 0,
+      "value": "Phê duyệt "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.settings.appKeys.confirm.deny": [
+    {
+      "type": 0,
+      "value": "Từ chối thiết bị"
+    }
+  ],
+  "web.settings.appKeys.confirm.denyDescription": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " sẽ không thể đăng nhập vào tài khoản của bạn. Nếu đó là thiết bị của bạn, thêm lại thiết bị trong ứng dụng Silo."
+    }
+  ],
+  "web.settings.appKeys.confirm.denyTitle": [
+    {
+      "type": 0,
+      "value": "Từ chối "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.settings.appKeys.confirm.remove": [
+    {
+      "type": 0,
+      "value": "Gỡ thiết bị"
+    }
+  ],
+  "web.settings.appKeys.confirm.removeDescription": [
+    {
+      "type": 0,
+      "value": "Gỡ "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " sẽ đăng xuất thiết bị ngay và vô hiệu hóa khóa của thiết bị: thiết bị không thể đăng nhập lại bằng khóa đó. Để dùng lại, thêm lại thiết bị trong ứng dụng Silo."
+    }
+  ],
+  "web.settings.appKeys.confirm.removeTitle": [
+    {
+      "type": 0,
+      "value": "Gỡ "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.settings.appKeys.confirm.withdraw": [
+    {
+      "type": 0,
+      "value": "Rút lại phê duyệt"
+    }
+  ],
+  "web.settings.appKeys.confirm.withdrawDescription": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " sẽ không thể dùng phê duyệt này để đăng nhập vào tài khoản của bạn."
+    }
+  ],
+  "web.settings.appKeys.confirm.withdrawTitle": [
+    {
+      "type": 0,
+      "value": "Rút lại phê duyệt cho "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.settings.appKeys.confirm.working": [
+    {
+      "type": 0,
+      "value": "Đang lưu…"
+    }
+  ],
+  "web.settings.appKeys.denied": [
+    {
+      "type": 0,
+      "value": "Đã từ chối "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.description": [
+    {
+      "type": 0,
+      "value": "Các thiết bị và ứng dụng đăng nhập vào tài khoản của bạn bằng ứng dụng Silo, không cần mật khẩu."
+    }
+  ],
+  "web.settings.appKeys.devices.title": [
+    {
+      "type": 0,
+      "value": "Thiết bị"
+    }
+  ],
+  "web.settings.appKeys.empty": [
+    {
+      "type": 0,
+      "value": "Không có thiết bị nào dùng ứng dụng Silo trên tài khoản của bạn."
+    }
+  ],
+  "web.settings.appKeys.footnote": [
+    {
+      "type": 0,
+      "value": "Gỡ thiết bị sẽ đăng xuất thiết bị đó và vô hiệu hóa khóa của thiết bị. Đăng xuất một phiên không gỡ thiết bị: thiết bị sẽ đăng nhập lại bằng khóa của mình."
+    }
+  ],
+  "web.settings.appKeys.loadFailed": [
+    {
+      "type": 0,
+      "value": "Không thể tải các thiết bị của bạn."
+    }
+  ],
+  "web.settings.appKeys.loading": [
+    {
+      "type": 0,
+      "value": "Đang tải thiết bị…"
+    }
+  ],
+  "web.settings.appKeys.off": [
+    {
+      "type": 0,
+      "value": "Tính năng đăng nhập bằng ứng dụng Silo đang tắt trên máy chủ này, nên các thiết bị này không thể đăng nhập và không thể phê duyệt thiết bị đang chờ. Bạn vẫn có thể gỡ các thiết bị này."
+    }
+  ],
+  "web.settings.appKeys.personKey.description": [
+    {
+      "type": 0,
+      "value": "Ứng dụng Silo của bạn dùng khóa này để thêm thiết bị mới của bạn. Đã thiết lập lúc "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.settings.appKeys.personKey.none": [
+    {
+      "type": 0,
+      "value": "Chưa có khóa tài khoản. Ứng dụng Silo của bạn sẽ thiết lập khóa vào lần tới bạn thêm thiết bị khi đang đăng nhập."
+    }
+  ],
+  "web.settings.appKeys.personKey.title": [
+    {
+      "type": 0,
+      "value": "Khóa tài khoản"
+    }
+  ],
+  "web.settings.appKeys.pinDescription": [
+    {
+      "type": 0,
+      "value": "Nhập mã PIN của hồ sơ chính để phê duyệt thiết bị này."
+    }
+  ],
+  "web.settings.appKeys.preapprovals.description": [
+    {
+      "type": 0,
+      "value": "Các lượt đăng nhập bạn đã phê duyệt cho thiết bị chưa kết nối."
+    }
+  ],
+  "web.settings.appKeys.preapprovals.loadFailed": [
+    {
+      "type": 0,
+      "value": "Không thể tải các lượt đăng nhập đã phê duyệt trước."
+    }
+  ],
+  "web.settings.appKeys.preapprovals.title": [
+    {
+      "type": 0,
+      "value": "Đã phê duyệt trước"
+    }
+  ],
+  "web.settings.appKeys.refreshLabel": [
+    {
+      "type": 0,
+      "value": "Làm mới danh sách thiết bị dùng ứng dụng Silo"
+    }
+  ],
+  "web.settings.appKeys.removed": [
+    {
+      "type": 0,
+      "value": "Đã gỡ "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.row.allowedBy": [
+    {
+      "type": 0,
+      "value": "Được "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " cho phép"
+    }
+  ],
+  "web.settings.appKeys.row.approve": [
+    {
+      "type": 0,
+      "value": "Phê duyệt"
+    }
+  ],
+  "web.settings.appKeys.row.approveLabel": [
+    {
+      "type": 0,
+      "value": "Phê duyệt "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.row.deny": [
+    {
+      "type": 0,
+      "value": "Từ chối"
+    }
+  ],
+  "web.settings.appKeys.row.denyLabel": [
+    {
+      "type": 0,
+      "value": "Từ chối "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.row.enrolledFrom": [
+    {
+      "type": 0,
+      "value": "Từ "
+    },
+    {
+      "type": 1,
+      "value": "address"
+    }
+  ],
+  "web.settings.appKeys.row.identityGone": [
+    {
+      "type": 0,
+      "value": "Không thể đăng nhập: tài khoản nhà cung cấp đăng nhập của thiết bị không còn được liên kết"
+    }
+  ],
+  "web.settings.appKeys.row.kindApp": [
+    {
+      "type": 0,
+      "value": "Ứng dụng khác"
+    }
+  ],
+  "web.settings.appKeys.row.kindDevice": [
+    {
+      "type": 0,
+      "value": "Ứng dụng Silo"
+    }
+  ],
+  "web.settings.appKeys.row.lastUsed": [
+    {
+      "type": 0,
+      "value": "Đăng nhập lần cuối lúc "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.settings.appKeys.row.notUsed": [
+    {
+      "type": 0,
+      "value": "Chưa đăng nhập bằng khóa của thiết bị"
+    }
+  ],
+  "web.settings.appKeys.row.preapproval": [
+    {
+      "type": 0,
+      "value": "Đã phê duyệt trước · hết hạn lúc "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.settings.appKeys.row.provider": [
+    {
+      "type": 0,
+      "value": "Được xác minh qua nhà cung cấp đăng nhập"
+    }
+  ],
+  "web.settings.appKeys.row.remove": [
+    {
+      "type": 0,
+      "value": "Gỡ"
+    }
+  ],
+  "web.settings.appKeys.row.removeLabel": [
+    {
+      "type": 0,
+      "value": "Gỡ "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.row.viaAppCode": [
+    {
+      "type": 0,
+      "value": "Được thêm bằng mã dùng một lần từ trang web của máy chủ"
+    }
+  ],
+  "web.settings.appKeys.row.viaPersonKey": [
+    {
+      "type": 0,
+      "value": "Được ứng dụng Silo trên thiết bị khác thêm"
+    }
+  ],
+  "web.settings.appKeys.row.viaSession": [
+    {
+      "type": 0,
+      "value": "Được thêm khi đang đăng nhập"
+    }
+  ],
+  "web.settings.appKeys.row.waitingUntil": [
+    {
+      "type": 0,
+      "value": "Đang chờ phê duyệt đến "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.settings.appKeys.row.withdraw": [
+    {
+      "type": 0,
+      "value": "Rút lại"
+    }
+  ],
+  "web.settings.appKeys.row.withdrawLabel": [
+    {
+      "type": 0,
+      "value": "Rút lại phê duyệt cho "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.signsBackIn": [
+    {
+      "type": 0,
+      "value": "Các thiết bị đăng nhập bằng ứng dụng Silo sẽ tự đăng nhập lại. "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Gỡ thiết bị"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " để ngăn việc này."
+    }
+  ],
+  "web.settings.appKeys.title": [
+    {
+      "type": 0,
+      "value": "Thiết bị dùng ứng dụng Silo"
+    }
+  ],
+  "web.settings.appKeys.unavailable": [
+    {
+      "type": 0,
+      "value": "Tính năng đăng nhập bằng ứng dụng Silo không khả dụng trên máy chủ này, nên các thiết bị này không thể đăng nhập. Bạn vẫn có thể gỡ các thiết bị này."
+    }
+  ],
+  "web.settings.appKeys.waiting.description": [
+    {
+      "type": 0,
+      "value": "Một thiết bị mới đã yêu cầu đăng nhập vào tài khoản của bạn bằng ứng dụng Silo. Chỉ phê duyệt nếu bạn vừa thiết lập thiết bị này."
+    }
+  ],
+  "web.settings.appKeys.waiting.title": [
+    {
+      "type": 0,
+      "value": "Đang chờ bạn phê duyệt"
+    }
+  ],
+  "web.settings.appKeys.withdrawn": [
+    {
+      "type": 0,
+      "value": "Đã rút lại phê duyệt"
     }
   ],
   "web.settings.cardOverlay.adjust": [
@@ -140089,6 +142358,54 @@
       "value": "Bạn đang ngoại tuyến nên thay đổi này chưa được lưu"
     }
   ],
+  "web.settings.openInSilo.action": [
+    {
+      "type": 0,
+      "value": "Lấy mã cho ứng dụng Silo"
+    }
+  ],
+  "web.settings.openInSilo.codeInstructions": [
+    {
+      "type": 0,
+      "value": "Trong ứng dụng Silo trên điện thoại hoặc máy tính bảng, thêm máy chủ này bằng địa chỉ của máy chủ rồi nhập mã này. Bất kỳ ai có mã đều có thể đăng nhập vào tài khoản này, vì vậy đừng chia sẻ mã."
+    }
+  ],
+  "web.settings.openInSilo.codeTitle": [
+    {
+      "type": 0,
+      "value": "Mã cho ứng dụng Silo"
+    }
+  ],
+  "web.settings.openInSilo.description": [
+    {
+      "type": 0,
+      "value": "Đăng nhập ứng dụng Silo trên điện thoại hoặc máy tính bảng vào tài khoản này, không cần mật khẩu."
+    }
+  ],
+  "web.settings.openInSilo.loadFailed": [
+    {
+      "type": 0,
+      "value": "Không thể kiểm tra liệu trình duyệt này có thể lấy mã cho ứng dụng Silo hay không."
+    }
+  ],
+  "web.settings.openInSilo.mainProfileOnly": [
+    {
+      "type": 0,
+      "value": "Chỉ hồ sơ chính của hộ gia đình mới có thể lấy mã cho ứng dụng Silo. Chuyển sang hồ sơ đó rồi thử lại."
+    }
+  ],
+  "web.settings.openInSilo.pinDescription": [
+    {
+      "type": 0,
+      "value": "Nhập mã PIN của hồ sơ chính để lấy mã cho ứng dụng Silo."
+    }
+  ],
+  "web.settings.openInSilo.title": [
+    {
+      "type": 0,
+      "value": "Ứng dụng Silo"
+    }
+  ],
   "web.settings.overlays.accent.amber": [
     {
       "type": 0,
@@ -143045,6 +145362,12 @@
       "value": "Đã đăng nhập"
     }
   ],
+  "web.settings.sessions.row.signsBackIn": [
+    {
+      "type": 0,
+      "value": "Thiết bị này tự đăng nhập lại"
+    }
+  ],
   "web.settings.sessions.row.summary": [
     {
       "type": 8,
@@ -143131,6 +145454,24 @@
     {
       "type": 0,
       "value": "Cài đặt"
+    }
+  ],
+  "web.settings.signInAgain.action": [
+    {
+      "type": 0,
+      "value": "Đăng nhập lại"
+    }
+  ],
+  "web.settings.signInAgain.manageDevices": [
+    {
+      "type": 0,
+      "value": "Đăng nhập lại để quản lý thiết bị của bạn"
+    }
+  ],
+  "web.settings.signInAgain.useApp": [
+    {
+      "type": 0,
+      "value": "Quản lý thiết bị của bạn trong ứng dụng Silo."
     }
   ],
   "web.settings.signedInSessions.loadFailed": [

@@ -10,6 +10,8 @@ import (
 // DirectConnectionsService reports the API host and optionally refreshes it.
 type DirectConnectionsService interface {
 	Status(context.Context, bool) (directconn.Status, error)
+	// Peers lists the devices with a direct path to the API host now.
+	Peers(context.Context) []directconn.Peer
 }
 
 // DirectConnectionsStatus is the administrator-only readiness report.
@@ -70,13 +72,15 @@ type DirectConnectionsCapabilitiesOutput struct {
 }
 
 func registerDirectConnections(reg *Registry) {
-	Register(reg, Operation{Operation: humaOp(http.MethodGet, Prefix+"/admin/direct-connections/capabilities", "getAdminDirectConnectionsCapabilities", "direct-connections", "Discover direct-connection readiness operations and service configuration, independently of probe health and the hidden setting."), Class: ClassActingAdmin, ServiceBacked: true}, func(context.Context, *CapabilityInput) (*DirectConnectionsCapabilitiesOutput, error) {
+	registerDirectConnectionsCoordination(reg)
+	registerDirectConnectionPeers(reg)
+	Register(reg, Operation{Operation: humaOp(http.MethodGet, Prefix+"/admin/direct-connections/capabilities", "getAdminDirectConnectionsCapabilities", "direct-connections", "Discover direct-connection readiness operations and service configuration, independently of probe health and the direct_connections.enabled setting."), Class: ClassActingAdmin, ServiceBacked: true}, func(context.Context, *CapabilityInput) (*DirectConnectionsCapabilitiesOutput, error) {
 		return &DirectConnectionsCapabilitiesOutput{Body: DirectConnectionsCapabilities{
 			Capability: Capability{State: configuredCapabilityState(reg.deps.DirectConnections != nil)},
 			Status:     true, Refresh: true,
 		}}, nil
 	})
-	op := Operation{Operation: humaOp(http.MethodGet, Prefix+"/admin/direct-connections/status", "getAdminDirectConnectionsStatus", "direct-connections", "Read the API host's direct-connection readiness. Network probes run only when the hidden setting is enabled. Refresh joins an in-flight check or starts a new one. The settings read and the check have separate fifteen-second bounds, so a request can take about thirty seconds."), Class: ClassActingAdmin, ServiceBacked: true}
+	op := Operation{Operation: humaOp(http.MethodGet, Prefix+"/admin/direct-connections/status", "getAdminDirectConnectionsStatus", "direct-connections", "Read the API host's direct-connection readiness. Network probes run only when the direct_connections.enabled setting is on. Refresh joins an in-flight check or starts a new one. The settings read and the check have separate fifteen-second bounds, so a request can take about thirty seconds."), Class: ClassActingAdmin, ServiceBacked: true}
 	Register(reg, op, func(ctx context.Context, in *DirectConnectionsStatusInput) (*DirectConnectionsStatusOutput, error) {
 		if reg.deps.DirectConnections == nil {
 			return nil, unavailable("direct connections")

@@ -58,3 +58,31 @@ func TestUpdateAdminAccountSignsOutOnlyForCredentialEnabledAndPromotionChanges(t
 		})
 	}
 }
+
+// Deleting an account ends its sessions the way a disable does, so the hook
+// that withdraws its direct-connection entries runs for it too, and not for a
+// delete the owner rules refuse.
+func TestDeleteAdminAccountNotifiesSessionRevocation(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		current models.User
+		wantErr bool
+	}{
+		{name: "deleted", current: userAccount()},
+		{name: "refused", current: adminAccount(), wantErr: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var notified []int
+			h := &AdminHandler{userRepo: &mutatingUserRepo{current: tt.current}}
+			h.OnUserSessionsRevoked = func(_ context.Context, userID int) { notified = append(notified, userID) }
+
+			err := h.DeleteAdminAccount(claimsCtx(7), testAdminID, -1, 0)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("DeleteAdminAccount() error = %v, want error %v", err, tt.wantErr)
+			}
+			if got := len(notified) == 1 && notified[0] == testAdminID; got == tt.wantErr {
+				t.Fatalf("notified = %v with error %v, want notice only for a delete", notified, err)
+			}
+		})
+	}
+}

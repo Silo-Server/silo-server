@@ -283,6 +283,7 @@ const (
 	ActionProfileCreated           = "profile.created"
 	ActionProfileUpdated           = "profile.updated"
 	ActionProfileDeleted           = "profile.deleted"
+	ActionDirectConnectionEnrolled = "direct_connection.enrolled"
 )
 
 // Target types of domain actions.
@@ -290,6 +291,9 @@ const (
 	TargetUser    = "user"
 	TargetAPIKey  = "api_key"
 	TargetProfile = "profile"
+	// TargetDirectConnection is a device enrolled for direct connections; its
+	// target ID is the device ID.
+	TargetDirectConnection = "direct_connection"
 )
 
 // FieldPassword marks a password replacement. It never carries a value.
@@ -318,5 +322,6 @@ func Actions() []string {
 		ActionPasswordResetLinkCreated, ActionPasswordResetCompleted, ActionPasswordChanged,
 		ActionLoginSessionRevoked, ActionLoginSessionsRevoked,
 		ActionAPIKeyCreated, ActionAPIKeyUpdated, ActionAPIKeyDeleted,
-		ActionProfileCreated, ActionProfileUpdated, ActionProfileDeleted}
+		ActionProfileCreated, ActionProfileUpdated, ActionProfileDeleted,
+		ActionDirectConnectionEnrolled}
 }

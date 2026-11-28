@@ -220,6 +220,9 @@ type AdminHandler struct {
 	// RecWorker is told when an account update changes its profiles' access
 	// scope, so their recommendations are rebuilt. Optional.
 	RecWorker AccountsScopeNotifier
+	// DirectRevoker, when set, withdraws the direct-connection entry of a login
+	// session that an administrator ends on its own.
+	DirectRevoker DirectRevoker
 	// ProfileAvatars resolves the avatar on admin profile listings the way
 	// the profile endpoints do. Nil leaves uploaded avatars without a URL.
 	ProfileAvatars interface {

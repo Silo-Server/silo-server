@@ -215,6 +215,12 @@
       "value": "Αυτό έχει ήδη συσχετιστεί με αυτόν τον λογαριασμό."
     }
   ],
+  "error.app_code_invalid": [
+    {
+      "type": 0,
+      "value": "Αυτός ο κωδικός είναι άγνωστος, έχει ήδη χρησιμοποιηθεί ή έχει λήξει. Λάβετε νέο κωδικό από τη σελίδα του διακομιστή."
+    }
+  ],
   "error.authentication_required": [
     {
       "type": 0,
@@ -333,6 +339,12 @@
     {
       "type": 0,
       "value": "Αυτή η τιμή έχει λάθος τύπο."
+    }
+  ],
+  "error.field.key_enrolled": [
+    {
+      "type": 0,
+      "value": "Αυτό το κλειδί χρησιμοποιείται ήδη σε αυτόν τον διακομιστή."
     }
   ],
   "error.field.malformed_form": [
@@ -2521,6 +2533,30 @@
     {
       "type": 0,
       "value": "Αυτόματα"
+    }
+  ],
+  "settingsManifest.playback.connection_path.description": [
+    {
+      "type": 0,
+      "value": "Η επιλογή «Μόνο απευθείας» εξακολουθεί να χρησιμοποιεί τη σύνδεση τοπικού δικτύου όταν είναι διαθέσιμη."
+    }
+  ],
+  "settingsManifest.playback.connection_path.label": [
+    {
+      "type": 0,
+      "value": "Διαδρομή σύνδεσης"
+    }
+  ],
+  "settingsManifest.playback.connection_path.option.automatic": [
+    {
+      "type": 0,
+      "value": "Αυτόματα"
+    }
+  ],
+  "settingsManifest.playback.connection_path.option.direct_only": [
+    {
+      "type": 0,
+      "value": "Μόνο απευθείας"
     }
   ],
   "settingsManifest.playback.intro_skip_mode.description": [
@@ -23649,6 +23685,95 @@
       }
     }
   ],
+  "web.admin.common.adminUserSignIn.unlinkConfirm.text": [
+    {
+      "type": 5,
+      "value": "last_way",
+      "options": {
+        "yes": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ο χρήστης "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " δεν θα μπορεί πλέον να συνδέεται με αυτόν τον λογαριασμό του παρόχου. Ο χρήστης "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " δεν θα μπορεί να συνδεθεί μέχρι να ορίσετε κωδικό πρόσβασης ή να συνδέσετε ξανά έναν πάροχο."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ο χρήστης "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " δεν θα μπορεί πλέον να συνδέεται με αυτόν τον λογαριασμό του παρόχου."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 5,
+      "value": "keys",
+      "options": {
+        "yes": {
+          "value": [
+            {
+              "type": 0,
+              "value": " Τα κλειδιά της εφαρμογής Silo του χρήστη "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " που συνδέονται με αυτόν τον λογαριασμό του παρόχου θα αφαιρεθούν και οι αντίστοιχες συσκευές θα αποσυνδεθούν."
+            }
+          ]
+        },
+        "unknown": {
+          "value": [
+            {
+              "type": 0,
+              "value": " Τυχόν κλειδιά της εφαρμογής Silo του χρήστη "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " που συνδέονται με αυτόν τον λογαριασμό του παρόχου θα αφαιρεθούν και οι αντίστοιχες συσκευές θα αποσυνδεθούν."
+            }
+          ]
+        },
+        "other": {
+          "value": []
+        }
+      }
+    }
+  ],
   "web.admin.common.adminUserSignIn.unlinkConfirm.title": [
     {
       "type": 0,
@@ -25935,6 +26060,18 @@
     {
       "type": 0,
       "value": "Δημιουργεί τις μικρογραφίες που εμφανίζουν οι εφαρμογές αναπαραγωγής κατά τη μετάβαση, στον ρυθμισμένο δημόσιο χώρο αποθήκευσης στοιχείων. Τα αρχεία επεξεργάζονται στο παρασκήνιο με χαμηλή προτεραιότητα. Η απενεργοποίηση διαγράφει τις προεπισκοπήσεις της βιβλιοθήκης."
+    }
+  ],
+  "web.admin.common.libraryEditor.advanced.trickplayGenerate": [
+    {
+      "type": 0,
+      "value": "Δημιουργία προεπισκοπήσεων που λείπουν με το FFmpeg"
+    }
+  ],
+  "web.admin.common.libraryEditor.advanced.trickplayGenerateDescription": [
+    {
+      "type": 0,
+      "value": "Χρησιμοποιούνται πρώτα τα υπάρχοντα συνοδευτικά αρχεία .trickplay και .bif δίπλα στα αρχεία πολυμέσων. Απενεργοποιήστε αυτή την επιλογή για να εισάγονται μόνο συνοδευτικά αρχεία, χωρίς δημιουργία με το FFmpeg."
     }
   ],
   "web.admin.common.libraryEditor.advanced.trickplayUnavailable": [
@@ -29999,6 +30136,40 @@
       "value": "Διαχείριση: Χρήστες"
     }
   ],
+  "web.admin.common.trickplay.badge.awaitingSidecarCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " σε αναμονή συνοδευτικού αρχείου"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " σε αναμονή συνοδευτικού αρχείου"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.common.trickplay.badge.detail": [
     {
       "type": 0,
@@ -30129,6 +30300,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.common.trickplay.badge.sidecarsOnly": [
+    {
+      "type": 0,
+      "value": "μόνο συνοδευτικά αρχεία"
     }
   ],
   "web.admin.common.trickplay.badge.srDetail": [
@@ -30293,6 +30470,42 @@
     {
       "type": 0,
       "value": "Οι εφαρμογές αναπαραγωγής διατηρούν τις τρέχουσες προεπισκοπήσεις μέχρι να είναι έτοιμες οι νέες."
+    }
+  ],
+  "web.admin.common.trickplay.sidecarStatus.awaiting_sidecar": [
+    {
+      "type": 0,
+      "value": "Σε αναμονή συνοδευτικού αρχείου"
+    }
+  ],
+  "web.admin.common.trickplay.sidecarStatus.sidecar_invalid": [
+    {
+      "type": 0,
+      "value": "Μη έγκυρο συνοδευτικό αρχείο"
+    }
+  ],
+  "web.admin.common.trickplay.sidecarStatus.sidecar_stale": [
+    {
+      "type": 0,
+      "value": "Παρωχημένο συνοδευτικό αρχείο"
+    }
+  ],
+  "web.admin.common.trickplay.source.generated": [
+    {
+      "type": 0,
+      "value": "Δημιουργήθηκε"
+    }
+  ],
+  "web.admin.common.trickplay.source.sidecar_bif": [
+    {
+      "type": 0,
+      "value": "Συνοδευτικό αρχείο (.bif)"
+    }
+  ],
+  "web.admin.common.trickplay.source.sidecar_trickplay": [
+    {
+      "type": 0,
+      "value": "Συνοδευτικό αρχείο (.trickplay)"
     }
   ],
   "web.admin.common.trickplay.state.off": [
@@ -32160,7 +32373,7 @@
     },
     {
       "type": 0,
-      "value": ". Οι υπόλοιπες συσκευές του λογαριασμού παραμένουν συνδεδεμένες. Το πρόγραμμα-πελάτης μπορεί να συνδεθεί ξανά με τον κωδικό πρόσβασης του λογαριασμού."
+      "value": ". Οι υπόλοιπες συσκευές του λογαριασμού παραμένουν συνδεδεμένες. Το πρόγραμμα-πελάτης μπορεί να συνδεθεί ξανά."
     }
   ],
   "web.admin.dashboard.widgets.apiClients.confirmLabel": [
@@ -44014,6 +44227,12 @@
       "value": "Προφίλ"
     }
   ],
+  "web.admin.history.column.progress": [
+    {
+      "type": 0,
+      "value": "Πρόοδος"
+    }
+  ],
   "web.admin.history.column.status": [
     {
       "type": 0,
@@ -44048,6 +44267,12 @@
     {
       "type": 0,
       "value": "Αρχεία καταγραφής συνεδρίας"
+    }
+  ],
+  "web.admin.history.detail.backToPlay": [
+    {
+      "type": 0,
+      "value": "Επιστροφή στη συνδυασμένη αναπαραγωγή"
     }
   ],
   "web.admin.history.detail.column.delivered": [
@@ -44158,6 +44383,12 @@
       "value": "Χρόνος παρακολούθησης"
     }
   ],
+  "web.admin.history.detail.inspectSitting": [
+    {
+      "type": 0,
+      "value": "Επιθεώρηση"
+    }
+  ],
   "web.admin.history.detail.keyboardHint": [
     {
       "type": 0,
@@ -44242,6 +44473,12 @@
       "value": "Γιατί δεν έγινε άμεση αναπαραγωγή"
     }
   ],
+  "web.admin.history.detail.section.sessions": [
+    {
+      "type": 0,
+      "value": "Συνεδρίες αυτής της αναπαραγωγής"
+    }
+  ],
   "web.admin.history.detail.section.streams": [
     {
       "type": 0,
@@ -44252,6 +44489,94 @@
     {
       "type": 0,
       "value": "Χρονισμός και πρόοδος παρακολούθησης"
+    }
+  ],
+  "web.admin.history.detail.sessionsCapped": [
+    {
+      "type": 0,
+      "value": "Εμφανίζονται οι πρώτες "
+    },
+    {
+      "type": 1,
+      "value": "shown"
+    },
+    {
+      "type": 0,
+      "value": " από "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": " συνεδρίες αυτής της αναπαραγωγής."
+    }
+  ],
+  "web.admin.history.detail.sessionsNotice": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Αυτή η αναπαραγωγή περιλαμβάνει "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " συνεδρία. Οι λεπτομέρειες ροής, συσκευής και διαδρομής παρακάτω αφορούν αυτή τη συνεδρία."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Αυτή η αναπαραγωγή εκτείνεται σε "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " συνεδρίες. Οι λεπτομέρειες ροής, συσκευής και διαδρομής παρακάτω αφορούν την κύρια συνεδρία της. Επιλέξτε οποιαδήποτε συνεδρία παρακάτω για να την επιθεωρήσετε ξεχωριστά."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.ended": [
+    {
+      "type": 0,
+      "value": "Λήξη"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.method": [
+    {
+      "type": 0,
+      "value": "Μέθοδος"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.started": [
+    {
+      "type": 0,
+      "value": "Έναρξη"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.watched": [
+    {
+      "type": 0,
+      "value": "Χρόνος παρακολούθησης"
     }
   ],
   "web.admin.history.detail.subtitlesBurnIn": [
@@ -44480,6 +44805,12 @@
       "value": "Όλα τα δίκτυα"
     }
   ],
+  "web.admin.history.filter.allMediaTypes": [
+    {
+      "type": 0,
+      "value": "Όλα τα πολυμέσα"
+    }
+  ],
   "web.admin.history.filter.allMethods": [
     {
       "type": 0,
@@ -44516,6 +44847,24 @@
       "value": "Ολοκληρώθηκε"
     }
   ],
+  "web.admin.history.filter.episodes": [
+    {
+      "type": 0,
+      "value": "Επεισόδια"
+    }
+  ],
+  "web.admin.history.filter.hideShort": [
+    {
+      "type": 0,
+      "value": "Απόκρυψη <30 δευτ."
+    }
+  ],
+  "web.admin.history.filter.hideShortTitle": [
+    {
+      "type": 0,
+      "value": "Απόκρυψη μη ολοκληρωμένων συνεδριών κάτω των 30 δευτερολέπτων"
+    }
+  ],
   "web.admin.history.filter.locationLocal": [
     {
       "type": 0,
@@ -44526,6 +44875,12 @@
     {
       "type": 0,
       "value": "Απομακρυσμένο"
+    }
+  ],
+  "web.admin.history.filter.movies": [
+    {
+      "type": 0,
+      "value": "Ταινίες"
     }
   ],
   "web.admin.history.filter.partial": [
@@ -44722,6 +45077,12 @@
       "value": "Πρόσφατες αναπαραγωγές"
     }
   ],
+  "web.admin.history.row.burnInBadgeTitle": [
+    {
+      "type": 0,
+      "value": "Υπότιτλοι μόνιμα ενσωματωμένοι στην εικόνα"
+    }
+  ],
   "web.admin.history.row.completed": [
     {
       "type": 0,
@@ -44742,6 +45103,48 @@
     {
       "type": 0,
       "value": "Εκτίμηση (καταγράφηκε πριν αρχίσει η μέτρηση του ακριβούς χρόνου παρακολούθησης)"
+    }
+  ],
+  "web.admin.history.row.groupedSessionsTitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Συνδυάστηκε από "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " συνεδρία"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Συνδυάστηκε από "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " συνεδρίες"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.history.row.meta": [
@@ -44774,6 +45177,12 @@
       "value": "Μερική"
     }
   ],
+  "web.admin.history.row.progressLabel": [
+    {
+      "type": 0,
+      "value": "Πρόοδος αναπαραγωγής"
+    }
+  ],
   "web.admin.history.row.started": [
     {
       "type": 0,
@@ -44784,16 +45193,92 @@
       "value": "time"
     }
   ],
+  "web.admin.history.stats.accountsCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " λογαριασμός"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " λογαριασμοί"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.history.stats.completed": [
     {
       "type": 0,
       "value": "Ολοκληρώθηκαν"
     }
   ],
+  "web.admin.history.stats.completionBreakdown": [
+    {
+      "type": 0,
+      "value": "Ολοκληρωμένες: "
+    },
+    {
+      "type": 1,
+      "value": "completed"
+    },
+    {
+      "type": 0,
+      "value": " · Μερικές: "
+    },
+    {
+      "type": 1,
+      "value": "partial"
+    }
+  ],
   "web.admin.history.stats.partial": [
     {
       "type": 0,
       "value": "Μερικές"
+    }
+  ],
+  "web.admin.history.stats.totalPlays": [
+    {
+      "type": 0,
+      "value": "Σύνολο αναπαραγωγών"
+    }
+  ],
+  "web.admin.history.stats.totalSessions": [
+    {
+      "type": 0,
+      "value": "Σύνολο συνεδριών"
+    }
+  ],
+  "web.admin.history.stats.uniqueProfiles": [
+    {
+      "type": 0,
+      "value": "Μοναδικά προφίλ"
+    }
+  ],
+  "web.admin.history.stats.uniqueTitles": [
+    {
+      "type": 0,
+      "value": "Μοναδικοί τίτλοι"
     }
   ],
   "web.admin.history.stats.visibleRows": [
@@ -44812,6 +45297,24 @@
     {
       "type": 0,
       "value": "Ιστορικό αναπαραγωγής"
+    }
+  ],
+  "web.admin.history.view.label": [
+    {
+      "type": 0,
+      "value": "Προβολή ιστορικού"
+    }
+  ],
+  "web.admin.history.view.plays": [
+    {
+      "type": 0,
+      "value": "Αναπαραγωγές"
+    }
+  ],
+  "web.admin.history.view.sessions": [
+    {
+      "type": 0,
+      "value": "Όλες οι συνεδρίες"
     }
   ],
   "web.admin.historyImport.conflict.message": [
@@ -86795,6 +87298,234 @@
       "value": ")"
     }
   ],
+  "web.admin.users.detail.appKeys.confirm.denyDescription": [
+    {
+      "type": 0,
+      "value": "Η συσκευή "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " δεν θα μπορεί να συνδεθεί στον λογαριασμό του χρήστη "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": ". Αν η συσκευή ανήκε στον χρήστη, μπορεί να την προσθέσει ξανά στην εφαρμογή Silo."
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKey": [
+    {
+      "type": 0,
+      "value": "Αφαίρεση κλειδιού"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKeyDescription": [
+    {
+      "type": 0,
+      "value": "Οι συσκευές που έχουν ήδη συνδεθεί συνεχίζουν να λειτουργούν μέχρι να τις αφαιρέσετε. Δεν μπορεί να προστεθεί νέα συσκευή με αυτό το κλειδί και οι συσκευές που πρόσθεσε και βρίσκονται ακόμη σε αναμονή απορρίπτονται. Η εφαρμογή Silo του χρήστη "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " ρυθμίζει νέο κλειδί την επόμενη φορά που ο χρήστης θα προσθέσει μια συσκευή ενώ έχει συνδεθεί."
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKeyTitle": [
+    {
+      "type": 0,
+      "value": "Αφαίρεση του κλειδιού λογαριασμού του χρήστη "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": ";"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.removeDescription": [
+    {
+      "type": 0,
+      "value": "Η αφαίρεση της συσκευής "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " την αποσυνδέει αμέσως από τον λογαριασμό του χρήστη "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " και ακυρώνει το κλειδί της: δεν θα μπορεί να συνδεθεί ξανά με αυτό. Για να τη χρησιμοποιήσει ξανά, ο χρήστης "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " πρέπει να την προσθέσει ξανά στην εφαρμογή Silo."
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.withdrawDescription": [
+    {
+      "type": 0,
+      "value": "Η συσκευή "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " δεν θα μπορεί να χρησιμοποιήσει αυτή την έγκριση για να συνδεθεί στον λογαριασμό του χρήστη "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.detail.appKeys.description": [
+    {
+      "type": 0,
+      "value": "Συσκευές και εφαρμογές που συνδέονται στον λογαριασμό του χρήστη "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " μέσω της εφαρμογής Silo, χωρίς κωδικό πρόσβασης."
+    }
+  ],
+  "web.admin.users.detail.appKeys.empty": [
+    {
+      "type": 0,
+      "value": "Καμία συσκευή δεν χρησιμοποιεί την εφαρμογή Silo σε αυτόν τον λογαριασμό."
+    }
+  ],
+  "web.admin.users.detail.appKeys.loadFailed": [
+    {
+      "type": 0,
+      "value": "Δεν ήταν δυνατή η φόρτωση των συσκευών."
+    }
+  ],
+  "web.admin.users.detail.appKeys.off": [
+    {
+      "type": 0,
+      "value": "Η σύνδεση μέσω της εφαρμογής Silo είναι απενεργοποιημένη σε αυτόν τον διακομιστή, οπότε αυτές οι συσκευές δεν μπορούν να συνδεθούν. Μπορείτε ακόμη να τις αφαιρέσετε."
+    }
+  ],
+  "web.admin.users.detail.appKeys.ownerOnly": [
+    {
+      "type": 0,
+      "value": "Μόνο ο κάτοχος του διακομιστή μπορεί να αλλάξει τις συσκευές άλλου διαχειριστή ή του κατόχου."
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.description": [
+    {
+      "type": 0,
+      "value": "Η εφαρμογή Silo χρησιμοποιεί αυτό το κλειδί για να προσθέτει νέες συσκευές του χρήστη "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": ". Ρυθμίστηκε: "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.none": [
+    {
+      "type": 0,
+      "value": "Δεν υπάρχει κλειδί λογαριασμού. Η εφαρμογή Silo του χρήστη "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " θα ρυθμίσει ένα την επόμενη φορά που ο χρήστης θα προσθέσει μια συσκευή ενώ έχει συνδεθεί."
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.remove": [
+    {
+      "type": 0,
+      "value": "Αφαίρεση κλειδιού λογαριασμού"
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKeyRemoved": [
+    {
+      "type": 0,
+      "value": "Το κλειδί λογαριασμού αφαιρέθηκε"
+    }
+  ],
+  "web.admin.users.detail.appKeys.preapprovals.description": [
+    {
+      "type": 0,
+      "value": "Συνδέσεις που ενέκρινε ο χρήστης "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " για συσκευή που δεν έχει συνδεθεί ακόμη."
+    }
+  ],
+  "web.admin.users.detail.appKeys.waiting.description": [
+    {
+      "type": 0,
+      "value": "Μια νέα συσκευή σε λογαριασμό διαχειριστή περιμένει μέχρι ο χρήστης "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " να την εγκρίνει από μια συσκευή στην οποία έχει συνδεθεί. Μπορείτε να την απορρίψετε εδώ."
+    }
+  ],
+  "web.admin.users.detail.appKeys.waiting.title": [
+    {
+      "type": 0,
+      "value": "Σε αναμονή έγκρισης"
+    }
+  ],
   "web.admin.users.detail.common.allProfiles": [
     {
       "type": 0,
@@ -90339,6 +91070,12 @@
       "value": "Ο λογαριασμός έχει φτάσει το όριο προφίλ"
     }
   ],
+  "web.admin.users.detail.profiles.badge.changedHere": [
+    {
+      "type": 0,
+      "value": "Άλλαξε εδώ"
+    }
+  ],
   "web.admin.users.detail.profiles.badge.kids": [
     {
       "type": 0,
@@ -90536,6 +91273,656 @@
     {
       "type": 0,
       "value": "Αποθήκευση PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowAgain": [
+    {
+      "type": 0,
+      "value": "Να επιτρέπεται ξανά"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowAgainAria": [
+    {
+      "type": 0,
+      "value": "Να επιτρέπεται η επιστροφή του προφίλ "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " σε αυτόν τον διακομιστή"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowDescription": [
+    {
+      "type": 0,
+      "value": "Η εφαρμογή του χρήστη μπορεί να προσθέσει ξανά το προφίλ "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " στον επόμενο συγχρονισμό, ως νέο προφίλ χωρίς το ιστορικό του σε αυτόν τον διακομιστή, αν τα προφίλ της εξακολουθούν να περιλαμβάνουν το προφίλ "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " και αυτός ο λογαριασμός έχει χώρο για ακόμη ένα προφίλ."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowTitle": [
+    {
+      "type": 0,
+      "value": "Να επιτρέπεται ξανά το προφίλ "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": ";"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.alreadyCleared": [
+    {
+      "type": 0,
+      "value": "Αυτή η αλλαγή έχει ήδη εκκαθαριστεί ή ο χρήστης "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " την άλλαξε ξανά. Η λίστα είναι ενημερωμένη."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedBy": [
+    {
+      "type": 0,
+      "value": "Άλλαξε από τον χρήστη "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " στις "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedSinceOpened": [
+    {
+      "type": 0,
+      "value": "Αυτή η αλλαγή ενημερώθηκε αφού την ανοίξατε, οπότε δεν έγινε εκκαθάριση. Διαβάστε την ξανά στη λίστα και, αν το θέλετε ακόμη, κάντε εκκαθάριση."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedWhileRunning": [
+    {
+      "type": 0,
+      "value": "Τα προφίλ άλλαξαν κατά την εκτέλεση, οπότε δεν άλλαξε τίποτα. Η λίστα είναι ενημερωμένη. Δοκιμάστε ξανά αν το θέλετε ακόμη."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clear": [
+    {
+      "type": 0,
+      "value": "Εκκαθάριση"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearAndRemovePin": [
+    {
+      "type": 0,
+      "value": "Εκκαθάριση και αφαίρεση PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearAria": [
+    {
+      "type": 0,
+      "value": "Εκκαθάριση της αλλαγής στο πεδίο "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " του προφίλ "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearFailed": [
+    {
+      "type": 0,
+      "value": "Δεν ήταν δυνατή η εκκαθάριση της αλλαγής."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearInherit": [
+    {
+      "type": 0,
+      "value": "Η ρύθμιση "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " του προφίλ "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " επανέρχεται στην τιμή που κληρονομεί τώρα το προφίλ, όπως ζητά η εφαρμογή του χρήστη. Οι αλλαγές από την εφαρμογή του χρήστη εφαρμόζονται ξανά σε αυτή."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearLater": [
+    {
+      "type": 0,
+      "value": "Το πεδίο "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " παραμένει ως έχει μέχρι να το στείλει ξανά η εφαρμογή του χρήστη. Μετά από αυτό, οι αλλαγές από την εφαρμογή του χρήστη εφαρμόζονται ξανά σε αυτό."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearNow": [
+    {
+      "type": 0,
+      "value": "Το προφίλ "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " επανέρχεται τώρα στην τιμή από την εφαρμογή του χρήστη και οι αλλαγές από την εφαρμογή του χρήστη εφαρμόζονται ξανά σε αυτό."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearNowValue": [
+    {
+      "type": 0,
+      "value": "Το πεδίο "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " του προφίλ "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " επανέρχεται τώρα στην τιμή "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": ", την τιμή από την εφαρμογή του χρήστη. Οι αλλαγές από την εφαρμογή του χρήστη εφαρμόζονται ξανά σε αυτό."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearPin": [
+    {
+      "type": 0,
+      "value": "Το προφίλ "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " διατηρεί το PIN που ορίσατε μέχρι η εφαρμογή του χρήστη να στείλει ένα νέο. Μετά από αυτό, οι αλλαγές από την εφαρμογή του χρήστη εφαρμόζονται ξανά σε αυτό."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearPinRemoves": [
+    {
+      "type": 0,
+      "value": "Η εφαρμογή του χρήστη στέλνει το προφίλ "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " χωρίς PIN, οπότε η εκκαθάριση αφαιρεί τώρα το PIN που ορίσατε. Στη συνέχεια, όποιος χρησιμοποιεί αυτόν τον λογαριασμό μπορεί να ανοίξει το προφίλ "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " χωρίς PIN."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearTitle": [
+    {
+      "type": 0,
+      "value": "Εκκαθάριση της αλλαγής στο πεδίο "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " του προφίλ "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": ";"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.deletedAccount": [
+    {
+      "type": 0,
+      "value": "(διαγραμμένος λογαριασμός)"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.description": [
+    {
+      "type": 0,
+      "value": "Αυτά τα προφίλ προέρχονται από την εφαρμογή του χρήστη "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ". Μια αλλαγή που κάνετε εδώ παραμένει σε αυτόν τον διακομιστή μέχρι να την εκκαθαρίσετε. Δεν πρόκειται για κλείδωμα: ο χρήστης "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " μπορεί επίσης να αλλάξει το ίδιο στοιχείο εδώ."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismiss": [
+    {
+      "type": 0,
+      "value": "Απόρριψη"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismissAria": [
+    {
+      "type": 0,
+      "value": "Απόρριψη της σημείωσης για το πεδίο "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " του προφίλ "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismissFailed": [
+    {
+      "type": 0,
+      "value": "Δεν ήταν δυνατή η απόρριψη της σημείωσης."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.isChild": [
+    {
+      "type": 0,
+      "value": "Παιδικό προφίλ"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.maxAdvisoryAge": [
+    {
+      "type": 0,
+      "value": "Όριο ηλικίας"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.maxContentRating": [
+    {
+      "type": 0,
+      "value": "Όριο καταλληλότητας περιεχομένου"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.name": [
+    {
+      "type": 0,
+      "value": "Όνομα"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.picture": [
+    {
+      "type": 0,
+      "value": "Εικόνα"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.pin": [
+    {
+      "type": 0,
+      "value": "PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.requests": [
+    {
+      "type": 0,
+      "value": "Αιτήματα"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.requireAdvisoryAge": [
+    {
+      "type": 0,
+      "value": "Απαίτηση ένδειξης καταλληλότητας ηλικίας"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.fieldValue": [
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.hidden": [
+    {
+      "type": 0,
+      "value": "Αφαιρέθηκε σε αυτόν τον διακομιστή από τον διαχειριστή "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " στις "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": ". Η εφαρμογή του χρήστη δεν θα το προσθέσει ξανά μέχρι να το επιτρέψετε."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.loadFailed": [
+    {
+      "type": 0,
+      "value": "Δεν ήταν δυνατή η φόρτωση των αλλαγών που έγιναν σε αυτόν τον διακομιστή."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.nameTaken": [
+    {
+      "type": 0,
+      "value": "Το προφίλ "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " δεν μπορεί να επανέλθει στο όνομα «"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "» από την εφαρμογή του χρήστη, επειδή ένα άλλο προφίλ εδώ έχει αυτό το όνομα. Μετονομάστε πρώτα εκείνο το προφίλ και, στη συνέχεια, κάντε ξανά εκκαθάριση."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeHiddenNextSync": [
+    {
+      "type": 0,
+      "value": "Το προφίλ "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " μπορεί να επιστρέψει στον επόμενο συγχρονισμό της εφαρμογής του χρήστη "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", αν τα προφίλ της εξακολουθούν να το περιλαμβάνουν."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeHiddenWoken": [
+    {
+      "type": 0,
+      "value": "Το προφίλ "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " μπορεί να επιστρέψει στον επόμενο συγχρονισμό της εφαρμογής του χρήστη, αν τα προφίλ της εξακολουθούν να το περιλαμβάνουν. Ζητήθηκε από το τηλέφωνο του χρήστη "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " να συγχρονιστεί."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeNextSync": [
+    {
+      "type": 0,
+      "value": "Η εκκαθάριση ολοκληρώθηκε. Θα φτάσει στην εφαρμογή του χρήστη "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " στον επόμενο συγχρονισμό της."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeWoken": [
+    {
+      "type": 0,
+      "value": "Η εκκαθάριση ολοκληρώθηκε. Ζητήθηκε από το τηλέφωνο του χρήστη "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " να συγχρονιστεί."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.removedBy": [
+    {
+      "type": 0,
+      "value": "Αφαιρέθηκε από τον χρήστη "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " στις "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.replacedOwner": [
+    {
+      "type": 0,
+      "value": "Αυτή η αλλαγή αντικατέστησε την τιμή που ορίσατε."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.setBy": [
+    {
+      "type": 0,
+      "value": "Ορίστηκε από τον διαχειριστή "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " στις "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.settled": [
+    {
+      "type": 0,
+      "value": "Ο χρήστης "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " το άλλαξε στις "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": ". Η τιμή που ορίσατε δεν ισχύει πλέον."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.title": [
+    {
+      "type": 0,
+      "value": "Αλλαγές σε αυτόν τον διακομιστή"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.inherited": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (κληρονομείται)"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.noPicture": [
+    {
+      "type": 0,
+      "value": "Χωρίς εικόνα"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.none": [
+    {
+      "type": 0,
+      "value": "Κανένα"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.off": [
+    {
+      "type": 0,
+      "value": "Ανενεργό"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.on": [
+    {
+      "type": 0,
+      "value": "Ενεργό"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.picture": [
+    {
+      "type": 0,
+      "value": "Προσαρμοσμένη εικόνα"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.pinNone": [
+    {
+      "type": 0,
+      "value": "Χωρίς PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.pinSet": [
+    {
+      "type": 0,
+      "value": "Ορίστηκε PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.requestsAllowed": [
+    {
+      "type": 0,
+      "value": "Επιτρέπονται"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.requestsBlocked": [
+    {
+      "type": 0,
+      "value": "Αποκλείονται"
     }
   ],
   "web.admin.users.detail.profiles.setPin": [
@@ -91799,6 +93186,144 @@
     {
       "type": 0,
       "value": "Ορισμός κωδικού πρόσβασης"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.action": [
+    {
+      "type": 0,
+      "value": "Δημιουργία συνδέσμου σύνδεσης"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.actionHint": [
+    {
+      "type": 0,
+      "value": "Απώλεια όλων των συσκευών"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.description": [
+    {
+      "type": 0,
+      "value": "Ένας σύνδεσμος μίας χρήσης για τον χρήστη "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": ", αν έχει χάσει όλες τις συσκευές του. Ανοίγει μια σελίδα που του δίνει έναν κωδικό για την εφαρμογή Silo ή του επιτρέπει να επιλέξει κωδικό πρόσβασης. Ισχύει για 24 ώρες και ένας νέος σύνδεσμος αντικαθιστά τον προηγούμενο."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailAction": [
+    {
+      "type": 0,
+      "value": "Αποστολή με email"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHint": [
+    {
+      "type": 0,
+      "value": "Δημιουργήστε τον σύνδεσμο για να τον αντιγράψετε και να τον στείλετε εσείς ή στείλτε τον με email στη διεύθυνση "
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHintNoAddress": [
+    {
+      "type": 0,
+      "value": "Δημιουργήστε τον σύνδεσμο, αντιγράψτε τον και στείλτε τον εσείς. Αυτός ο λογαριασμός δεν έχει διεύθυνση email για αποστολή."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHintNoMail": [
+    {
+      "type": 0,
+      "value": "Δημιουργήστε τον σύνδεσμο, αντιγράψτε τον και στείλτε τον εσείς. Ρυθμίστε το email στις Ρυθμίσεις για να τον στέλνετε από εδώ."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailSent": [
+    {
+      "type": 0,
+      "value": "Ο σύνδεσμος στάλθηκε στη διεύθυνση "
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": ". Λήγει: "
+    },
+    {
+      "type": 1,
+      "value": "expires"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Ο διακομιστής αλληλογραφίας δεν επιβεβαίωσε την παράδοση. Ο παρακάτω σύνδεσμος εξακολουθεί να λειτουργεί: αντιγράψτε τον και στείλτε τον με άλλον τρόπο."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.failed": [
+    {
+      "type": 0,
+      "value": "Δεν ήταν δυνατή η δημιουργία συνδέσμου σύνδεσης."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.linkShare": [
+    {
+      "type": 0,
+      "value": "Στείλτε αυτόν τον σύνδεσμο μόνο στον χρήστη "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": ". Όποιος τον έχει μπορεί να συνδεθεί σε αυτόν τον λογαριασμό μέχρι να χρησιμοποιηθεί ή να λήξει ("
+    },
+    {
+      "type": 1,
+      "value": "expires"
+    },
+    {
+      "type": 0,
+      "value": ")."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.providerRequired": [
+    {
+      "type": 0,
+      "value": "Η τοπική σύνδεση με κωδικό πρόσβασης είναι απενεργοποιημένη σε αυτόν τον διακομιστή, οπότε ένας σύνδεσμος σύνδεσης θα παρέκαμπτε τον πάροχο σύνδεσης. Ζητήστε από τον χρήστη "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " να συνδεθεί με τον πάροχο στον ιστότοπο αυτού του διακομιστή και, στη συνέχεια, να χρησιμοποιήσει την επιλογή «Άνοιγμα στο Silo» στις ρυθμίσεις του λογαριασμού του."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.title": [
+    {
+      "type": 0,
+      "value": "Σύνδεσμος σύνδεσης για τον χρήστη "
+    },
+    {
+      "type": 1,
+      "value": "username"
     }
   ],
   "web.audiobooks.chapter.fallbackTitle": [
@@ -93619,6 +95144,120 @@
       "value": "Έγκριση σύνδεσης"
     }
   ],
+  "web.auth.appCode.code": [
+    {
+      "type": 0,
+      "value": "Κωδικός"
+    }
+  ],
+  "web.auth.appCode.codeCopied": [
+    {
+      "type": 0,
+      "value": "Ο κωδικός αντιγράφηκε"
+    }
+  ],
+  "web.auth.appCode.copyCode": [
+    {
+      "type": 0,
+      "value": "Αντιγραφή κωδικού"
+    }
+  ],
+  "web.auth.appCode.copyFailed": [
+    {
+      "type": 0,
+      "value": "Δεν ήταν δυνατή η αντιγραφή του κωδικού. Επιλέξτε τον και αντιγράψτε τον με μη αυτόματο τρόπο."
+    }
+  ],
+  "web.auth.appCode.expired": [
+    {
+      "type": 0,
+      "value": "Αυτός ο κωδικός έληξε."
+    }
+  ],
+  "web.auth.appCode.failed": [
+    {
+      "type": 0,
+      "value": "Το Silo δεν μπόρεσε να δημιουργήσει κωδικό. Δοκιμάστε ξανά."
+    }
+  ],
+  "web.auth.appCode.instructions": [
+    {
+      "type": 0,
+      "value": "Πατήστε «Άνοιγμα του Silo» για να συνεχίσετε στην εφαρμογή Silo σε αυτή τη συσκευή. Αν η εφαρμογή δεν είναι εγκατεστημένη, εγκαταστήστε την, επιστρέψτε σε αυτή την καρτέλα και πατήστε ξανά «Άνοιγμα του Silo»."
+    }
+  ],
+  "web.auth.appCode.noScanCode": [
+    {
+      "type": 0,
+      "value": "Η διεύθυνση αυτού του διακομιστή είναι πολύ μεγάλη για κωδικό QR. Πληκτρολογήστε τη διεύθυνση του διακομιστή και τον κωδικό στην εφαρμογή Silo ή αντιγράψτε τον κωδικό και επικολλήστε τον εκεί."
+    }
+  ],
+  "web.auth.appCode.open": [
+    {
+      "type": 0,
+      "value": "Άνοιγμα του Silo"
+    }
+  ],
+  "web.auth.appCode.renew": [
+    {
+      "type": 0,
+      "value": "Δημιουργία νέου κωδικού"
+    }
+  ],
+  "web.auth.appCode.scanCodeLabel": [
+    {
+      "type": 0,
+      "value": "Κωδικός QR για την εφαρμογή Silo"
+    }
+  ],
+  "web.auth.appCode.scanCodeUnavailable": [
+    {
+      "type": 0,
+      "value": "Δεν είναι δυνατή η εμφάνιση κωδικού QR για αυτόν τον διακομιστή. Πληκτρολογήστε τη διεύθυνση του διακομιστή και τον κωδικό στην εφαρμογή Silo ή αντιγράψτε τον κωδικό και επικολλήστε τον εκεί."
+    }
+  ],
+  "web.auth.appCode.scanHint": [
+    {
+      "type": 0,
+      "value": "Σαρώστε τον με τη λειτουργία σάρωσης της εφαρμογής Silo ή πληκτρολογήστε ή αντιγράψτε τη διεύθυνση του διακομιστή και τον κωδικό παρακάτω."
+    }
+  ],
+  "web.auth.appCode.serverAddress": [
+    {
+      "type": 0,
+      "value": "Διεύθυνση διακομιστή"
+    }
+  ],
+  "web.auth.appCode.singleUse": [
+    {
+      "type": 0,
+      "value": "Αυτός ο κωδικός λειτουργεί μία φορά και λήγει μετά από λίγα λεπτά."
+    }
+  ],
+  "web.auth.appCode.title": [
+    {
+      "type": 0,
+      "value": "Άνοιγμα του Silo"
+    }
+  ],
+  "web.auth.appCode.typeInstructions": [
+    {
+      "type": 0,
+      "value": "Στην εφαρμογή Silo στο τηλέφωνο ή στο tablet σας, προσθέστε αυτόν τον διακομιστή με τη διεύθυνσή του και πληκτρολογήστε αυτόν τον κωδικό για να δημιουργήσετε τον λογαριασμό σας. Όποιος έχει τον κωδικό μπορεί να συμμετάσχει στη θέση σας, οπότε μην τον κοινοποιήσετε."
+    }
+  ],
+  "web.auth.appCode.typeTitle": [
+    {
+      "type": 0,
+      "value": "Συμμετοχή με αυτόν τον κωδικό"
+    }
+  ],
+  "web.auth.appCode.webLink": [
+    {
+      "type": 0,
+      "value": "Εναλλακτικά, άνοιγμα με τον σύνδεσμο siloserver.org"
+    }
+  ],
   "web.auth.card.rememberedIt": [
     {
       "type": 0,
@@ -93821,10 +95460,50 @@
       ]
     }
   ],
+  "web.auth.invite.appAccountEmail": [
+    {
+      "type": 0,
+      "value": "Ο λογαριασμός σας θα χρησιμοποιεί τη διεύθυνση "
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.auth.invite.appContinue": [
+    {
+      "type": 0,
+      "value": "Συνέχεια"
+    }
+  ],
+  "web.auth.invite.appEmailHint": [
+    {
+      "type": 0,
+      "value": "Με μια διεύθυνση email, αυτός ο διακομιστής μπορεί να σας στείλει σύνδεσμο σύνδεσης αν χάσετε τις συσκευές σας."
+    }
+  ],
   "web.auth.invite.appMissing": [
     {
       "type": 0,
       "value": "Δεν συμβαίνει τίποτα; Η εφαρμογή δεν είναι εγκατεστημένη – απλώς συνεχίστε παρακάτω."
+    }
+  ],
+  "web.auth.invite.appProviderOnly": [
+    {
+      "type": 0,
+      "value": "Ο διακομιστής "
+    },
+    {
+      "type": 1,
+      "value": "server"
+    },
+    {
+      "type": 0,
+      "value": " προσθέτει χρήστες μέσω του παρόχου σύνδεσής του. Συνδεθείτε μέσω αυτού σε αυτόν τον ιστότοπο και, στη συνέχεια, ανοίξτε το Silo από τις ρυθμίσεις του λογαριασμού σας."
     }
   ],
   "web.auth.invite.created": [
@@ -93853,6 +95532,18 @@
       "value": "Εισαγάγετε τη διεύθυνση email σας και επιλέξτε κωδικό πρόσβασης. Θα συνδέεστε με τη διεύθυνση email σας."
     }
   ],
+  "web.auth.invite.descriptionWithApp": [
+    {
+      "type": 0,
+      "value": "Συμμετάσχετε με την εφαρμογή Silo στο τηλέφωνο ή στο tablet σας ή επιλέξτε κωδικό πρόσβασης για σύνδεση."
+    }
+  ],
+  "web.auth.invite.emailOptional": [
+    {
+      "type": 0,
+      "value": "Email (προαιρετικό)"
+    }
+  ],
   "web.auth.invite.emailPlaceholder": [
     {
       "type": 0,
@@ -93873,6 +95564,18 @@
     {
       "type": 1,
       "value": "inviter"
+    }
+  ],
+  "web.auth.invite.joinWithApp": [
+    {
+      "type": 0,
+      "value": "Συμμετοχή με την εφαρμογή Silo"
+    }
+  ],
+  "web.auth.invite.joinWithAppInstead": [
+    {
+      "type": 0,
+      "value": "Εναλλακτικά, συμμετοχή με την εφαρμογή Silo"
     }
   ],
   "web.auth.invite.loadFailed": [
@@ -93973,6 +95676,30 @@
     {
       "type": 0,
       "value": "Μη διαθέσιμη πρόσκληση"
+    }
+  ],
+  "web.auth.invite.usePassword": [
+    {
+      "type": 0,
+      "value": "Εναλλακτικά, χρήση κωδικού πρόσβασης"
+    }
+  ],
+  "web.auth.invite.usernameIsAddress": [
+    {
+      "type": 0,
+      "value": "Ένα όνομα χρήστη με @ πρέπει να είναι η διεύθυνση email που εισαγάγετε παρακάτω."
+    }
+  ],
+  "web.auth.invite.usernameRequired": [
+    {
+      "type": 0,
+      "value": "Επιλέξτε όνομα χρήστη."
+    }
+  ],
+  "web.auth.invite.usernameTaken": [
+    {
+      "type": 0,
+      "value": "Αυτό το όνομα χρήστη χρησιμοποιείται ήδη. Επιλέξτε άλλο."
     }
   ],
   "web.auth.languagePicker.label": [
@@ -94921,6 +96648,126 @@
     {
       "type": 0,
       "value": "Σύνδεση"
+    }
+  ],
+  "web.auth.signInLink.backToCode": [
+    {
+      "type": 0,
+      "value": "Επιστροφή στον κωδικό"
+    }
+  ],
+  "web.auth.signInLink.codeExpired": [
+    {
+      "type": 0,
+      "value": "Ζητήστε από έναν διαχειριστή αυτού του διακομιστή νέο σύνδεσμο για να λάβετε άλλο κωδικό."
+    }
+  ],
+  "web.auth.signInLink.documentTitle": [
+    {
+      "type": 0,
+      "value": "Σύνδεσμος σύνδεσης"
+    }
+  ],
+  "web.auth.signInLink.failed": [
+    {
+      "type": 0,
+      "value": "Το Silo δεν μπόρεσε να ανοίξει αυτόν τον σύνδεσμο. Δοκιμάστε ξανά."
+    }
+  ],
+  "web.auth.signInLink.installFirst": [
+    {
+      "type": 0,
+      "value": "Ο σύνδεσμος λειτουργεί μία φορά και ο κωδικός ισχύει για λίγα λεπτά. Εγκαταστήστε πρώτα την εφαρμογή Silo στο τηλέφωνο ή στο tablet σας και, στη συνέχεια, πατήστε «Συνέχεια»."
+    }
+  ],
+  "web.auth.signInLink.intro": [
+    {
+      "type": 0,
+      "value": "Ένας διαχειριστής σάς έστειλε αυτόν τον σύνδεσμο για να συνδεθείτε ξανά. Συνεχίστε για να λάβετε κωδικό για την εφαρμογή Silo ή για να επιλέξετε κωδικό πρόσβασης."
+    }
+  ],
+  "web.auth.signInLink.keepOpen": [
+    {
+      "type": 0,
+      "value": "Κρατήστε αυτή τη σελίδα ανοιχτή μέχρι να ολοκληρώσετε. Ο σύνδεσμος έχει ήδη χρησιμοποιηθεί, οπότε αν ανανεώσετε τη σελίδα ή φύγετε από αυτήν, θα χάσετε ό,τι σας έδωσε."
+    }
+  ],
+  "web.auth.signInLink.leaveAction": [
+    {
+      "type": 0,
+      "value": "Έξοδος"
+    }
+  ],
+  "web.auth.signInLink.leaveDescription": [
+    {
+      "type": 0,
+      "value": "Ο σύνδεσμος έχει ήδη χρησιμοποιηθεί. Αν φύγετε, ο κωδικός για την εφαρμογή Silo και η δυνατότητα ορισμού κωδικού πρόσβασης θα χαθούν και θα χρειαστείτε νέο σύνδεσμο."
+    }
+  ],
+  "web.auth.signInLink.leaveTitle": [
+    {
+      "type": 0,
+      "value": "Έξοδος από αυτή τη σελίδα;"
+    }
+  ],
+  "web.auth.signInLink.noCodeAdministrator": [
+    {
+      "type": 0,
+      "value": "Αυτός είναι λογαριασμός διαχειριστή, οπότε αυτός ο σύνδεσμος ορίζει μόνο κωδικό πρόσβασης. Ορίστε έναν, συνδεθείτε στον ιστότοπο αυτού του διακομιστή και, στη συνέχεια, ανοίξτε την εφαρμογή Silo από τις ρυθμίσεις του λογαριασμού σας εκεί."
+    }
+  ],
+  "web.auth.signInLink.noCodeAppKeysOff": [
+    {
+      "type": 0,
+      "value": "Η εφαρμογή Silo δεν μπορεί να συνδεθεί σε αυτόν τον διακομιστή αυτή τη στιγμή, οπότε αυτός ο σύνδεσμος ορίζει μόνο κωδικό πρόσβασης."
+    }
+  ],
+  "web.auth.signInLink.passwordDescription": [
+    {
+      "type": 0,
+      "value": "Με την αποθήκευση, αυτός ο λογαριασμός αποσυνδέεται από κάθε συσκευή. Οι συσκευές που έχουν συνδεθεί με την εφαρμογή Silo συνδέονται ξανά αυτόματα."
+    }
+  ],
+  "web.auth.signInLink.passwordSet": [
+    {
+      "type": 0,
+      "value": "Ο κωδικός πρόσβασής σας αποθηκεύτηκε. Συνδεθείτε με αυτόν."
+    }
+  ],
+  "web.auth.signInLink.passwordSetLostDevices": [
+    {
+      "type": 0,
+      "value": "Οι χαμένες συσκευές που χρησιμοποιούσαν την εφαρμογή Silo μπορούν ακόμη να συνδεθούν μέχρι να τις αφαιρέσετε. Αφού συνδεθείτε, αφαιρέστε τις από τις συσκευές σας στις ρυθμίσεις του λογαριασμού σας."
+    }
+  ],
+  "web.auth.signInLink.passwordTitle": [
+    {
+      "type": 0,
+      "value": "Επιλογή κωδικού πρόσβασης"
+    }
+  ],
+  "web.auth.signInLink.providerRequired": [
+    {
+      "type": 0,
+      "value": "Αυτός ο διακομιστής συνδέει τους χρήστες μέσω του παρόχου σύνδεσής του, οπότε αυτός ο σύνδεσμος δεν λειτουργεί. Συνδεθείτε μέσω του παρόχου."
+    }
+  ],
+  "web.auth.signInLink.setPasswordInstead": [
+    {
+      "type": 0,
+      "value": "Εναλλακτικά, ορισμός κωδικού πρόσβασης"
+    }
+  ],
+  "web.auth.signInLink.title": [
+    {
+      "type": 0,
+      "value": "Ανάκτηση πρόσβασης στον λογαριασμό σας"
+    }
+  ],
+  "web.auth.signInLink.unavailable": [
+    {
+      "type": 0,
+      "value": "Αυτός ο σύνδεσμος έχει ήδη χρησιμοποιηθεί, έχει αντικατασταθεί από νεότερο ή έχει λήξει. Ζητήστε νέο από έναν διαχειριστή αυτού του διακομιστή."
     }
   ],
   "web.auth.signup.closed": [
@@ -134380,7 +136227,7 @@
   "web.settings.account.password.signOutOthersDescription": [
     {
       "type": 0,
-      "value": "Τα άλλα προγράμματα περιήγησης και οι εφαρμογές πρέπει να συνδεθούν ξανά με τον νέο κωδικό πρόσβασης. Αυτό το πρόγραμμα περιήγησης παραμένει συνδεδεμένο και τα κλειδιά API συνεχίζουν να λειτουργούν."
+      "value": "Τα άλλα προγράμματα περιήγησης και οι εφαρμογές αποσυνδέονται. Αυτό το πρόγραμμα περιήγησης παραμένει συνδεδεμένο και τα κλειδιά API συνεχίζουν να λειτουργούν."
     }
   ],
   "web.settings.account.password.title": [
@@ -135249,6 +137096,512 @@
     {
       "type": 0,
       "value": "Πώς να χρησιμοποιήσετε αυτό το κλειδί"
+    }
+  ],
+  "web.settings.appKeys.actionFailed": [
+    {
+      "type": 0,
+      "value": "Δεν ήταν δυνατή η πραγματοποίηση αυτής της αλλαγής. Δοκιμάστε ξανά."
+    }
+  ],
+  "web.settings.appKeys.approveMainOnly": [
+    {
+      "type": 0,
+      "value": "Μόνο το κύριο προφίλ του νοικοκυριού μπορεί να εγκρίνει μια συσκευή. Μεταβείτε σε αυτό για να την εγκρίνετε."
+    }
+  ],
+  "web.settings.appKeys.approved": [
+    {
+      "type": 0,
+      "value": "Η συσκευή "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " εγκρίθηκε"
+    }
+  ],
+  "web.settings.appKeys.confirm.approve": [
+    {
+      "type": 0,
+      "value": "Έγκριση συσκευής"
+    }
+  ],
+  "web.settings.appKeys.confirm.approveDescription": [
+    {
+      "type": 0,
+      "value": "Η συσκευή "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " θα μπορεί να συνδέεται στον λογαριασμό σας με την εφαρμογή Silo μέχρι να την αφαιρέσετε. Εγκρίνετέ την μόνο αν μόλις τη ρυθμίσατε."
+    }
+  ],
+  "web.settings.appKeys.confirm.approveTitle": [
+    {
+      "type": 0,
+      "value": "Έγκριση της συσκευής "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": ";"
+    }
+  ],
+  "web.settings.appKeys.confirm.deny": [
+    {
+      "type": 0,
+      "value": "Απόρριψη συσκευής"
+    }
+  ],
+  "web.settings.appKeys.confirm.denyDescription": [
+    {
+      "type": 0,
+      "value": "Η συσκευή "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " δεν θα μπορεί να συνδεθεί στον λογαριασμό σας. Αν ήταν δική σας, προσθέστε την ξανά στην εφαρμογή Silo."
+    }
+  ],
+  "web.settings.appKeys.confirm.denyTitle": [
+    {
+      "type": 0,
+      "value": "Απόρριψη της συσκευής "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": ";"
+    }
+  ],
+  "web.settings.appKeys.confirm.remove": [
+    {
+      "type": 0,
+      "value": "Αφαίρεση συσκευής"
+    }
+  ],
+  "web.settings.appKeys.confirm.removeDescription": [
+    {
+      "type": 0,
+      "value": "Η αφαίρεση της συσκευής "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " την αποσυνδέει αμέσως και απενεργοποιεί το κλειδί της: δεν θα μπορεί να συνδεθεί ξανά με αυτό. Για να τη χρησιμοποιήσετε ξανά, προσθέστε την ξανά στην εφαρμογή Silo."
+    }
+  ],
+  "web.settings.appKeys.confirm.removeTitle": [
+    {
+      "type": 0,
+      "value": "Αφαίρεση της συσκευής "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": ";"
+    }
+  ],
+  "web.settings.appKeys.confirm.withdraw": [
+    {
+      "type": 0,
+      "value": "Ανάκληση έγκρισης"
+    }
+  ],
+  "web.settings.appKeys.confirm.withdrawDescription": [
+    {
+      "type": 0,
+      "value": "Η συσκευή "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " δεν θα μπορεί να χρησιμοποιήσει αυτή την έγκριση για να συνδεθεί στον λογαριασμό σας."
+    }
+  ],
+  "web.settings.appKeys.confirm.withdrawTitle": [
+    {
+      "type": 0,
+      "value": "Ανάκληση της έγκρισης για τη συσκευή "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": ";"
+    }
+  ],
+  "web.settings.appKeys.confirm.working": [
+    {
+      "type": 0,
+      "value": "Αποθήκευση…"
+    }
+  ],
+  "web.settings.appKeys.denied": [
+    {
+      "type": 0,
+      "value": "Η συσκευή "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " απορρίφθηκε"
+    }
+  ],
+  "web.settings.appKeys.description": [
+    {
+      "type": 0,
+      "value": "Συσκευές και εφαρμογές που συνδέονται στον λογαριασμό σας με την εφαρμογή Silo, χωρίς κωδικό πρόσβασης."
+    }
+  ],
+  "web.settings.appKeys.devices.title": [
+    {
+      "type": 0,
+      "value": "Συσκευές"
+    }
+  ],
+  "web.settings.appKeys.empty": [
+    {
+      "type": 0,
+      "value": "Καμία συσκευή δεν χρησιμοποιεί την εφαρμογή Silo στον λογαριασμό σας."
+    }
+  ],
+  "web.settings.appKeys.footnote": [
+    {
+      "type": 0,
+      "value": "Η αφαίρεση μιας συσκευής την αποσυνδέει και απενεργοποιεί το κλειδί της. Η αποσύνδεση μιας περιόδου σύνδεσης δεν αφαιρεί τη συσκευή: συνδέεται ξανά με το κλειδί της."
+    }
+  ],
+  "web.settings.appKeys.loadFailed": [
+    {
+      "type": 0,
+      "value": "Δεν ήταν δυνατή η φόρτωση των συσκευών σας."
+    }
+  ],
+  "web.settings.appKeys.loading": [
+    {
+      "type": 0,
+      "value": "Φόρτωση συσκευών…"
+    }
+  ],
+  "web.settings.appKeys.off": [
+    {
+      "type": 0,
+      "value": "Η σύνδεση με την εφαρμογή Silo είναι απενεργοποιημένη σε αυτόν τον διακομιστή, οπότε αυτές οι συσκευές δεν μπορούν να συνδεθούν και οι συσκευές σε αναμονή δεν μπορούν να εγκριθούν. Μπορείτε ακόμη να τις αφαιρέσετε."
+    }
+  ],
+  "web.settings.appKeys.personKey.description": [
+    {
+      "type": 0,
+      "value": "Η εφαρμογή Silo σας χρησιμοποιεί αυτό το κλειδί για να προσθέτει τις νέες συσκευές σας. Ρύθμιση: "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.settings.appKeys.personKey.none": [
+    {
+      "type": 0,
+      "value": "Δεν υπάρχει κλειδί λογαριασμού. Η εφαρμογή Silo σας θα δημιουργήσει ένα την επόμενη φορά που θα προσθέσετε μια συσκευή ενώ έχετε συνδεθεί."
+    }
+  ],
+  "web.settings.appKeys.personKey.title": [
+    {
+      "type": 0,
+      "value": "Κλειδί λογαριασμού"
+    }
+  ],
+  "web.settings.appKeys.pinDescription": [
+    {
+      "type": 0,
+      "value": "Εισαγάγετε το PIN του κύριου προφίλ για να εγκρίνετε αυτή τη συσκευή."
+    }
+  ],
+  "web.settings.appKeys.preapprovals.description": [
+    {
+      "type": 0,
+      "value": "Συνδέσεις που εγκρίνατε για μια συσκευή που δεν έχει συνδεθεί ακόμη."
+    }
+  ],
+  "web.settings.appKeys.preapprovals.loadFailed": [
+    {
+      "type": 0,
+      "value": "Δεν ήταν δυνατή η φόρτωση των συνδέσεων που εγκρίθηκαν εκ των προτέρων."
+    }
+  ],
+  "web.settings.appKeys.preapprovals.title": [
+    {
+      "type": 0,
+      "value": "Εγκεκριμένες εκ των προτέρων"
+    }
+  ],
+  "web.settings.appKeys.refreshLabel": [
+    {
+      "type": 0,
+      "value": "Ανανέωση συσκευών εφαρμογής Silo"
+    }
+  ],
+  "web.settings.appKeys.removed": [
+    {
+      "type": 0,
+      "value": "Η συσκευή "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " αφαιρέθηκε"
+    }
+  ],
+  "web.settings.appKeys.row.allowedBy": [
+    {
+      "type": 0,
+      "value": "Επιτράπηκε από τον χρήστη "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "web.settings.appKeys.row.approve": [
+    {
+      "type": 0,
+      "value": "Έγκριση"
+    }
+  ],
+  "web.settings.appKeys.row.approveLabel": [
+    {
+      "type": 0,
+      "value": "Έγκριση της συσκευής "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.row.deny": [
+    {
+      "type": 0,
+      "value": "Απόρριψη"
+    }
+  ],
+  "web.settings.appKeys.row.denyLabel": [
+    {
+      "type": 0,
+      "value": "Απόρριψη της συσκευής "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.row.enrolledFrom": [
+    {
+      "type": 0,
+      "value": "Από τη διεύθυνση "
+    },
+    {
+      "type": 1,
+      "value": "address"
+    }
+  ],
+  "web.settings.appKeys.row.identityGone": [
+    {
+      "type": 0,
+      "value": "Δεν μπορεί να συνδεθεί: ο λογαριασμός του παρόχου σύνδεσης δεν είναι πλέον συσχετισμένος"
+    }
+  ],
+  "web.settings.appKeys.row.kindApp": [
+    {
+      "type": 0,
+      "value": "Άλλη εφαρμογή"
+    }
+  ],
+  "web.settings.appKeys.row.kindDevice": [
+    {
+      "type": 0,
+      "value": "Εφαρμογή Silo"
+    }
+  ],
+  "web.settings.appKeys.row.lastUsed": [
+    {
+      "type": 0,
+      "value": "Τελευταία σύνδεση: "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.settings.appKeys.row.notUsed": [
+    {
+      "type": 0,
+      "value": "Δεν έχει συνδεθεί ακόμη με το κλειδί της"
+    }
+  ],
+  "web.settings.appKeys.row.preapproval": [
+    {
+      "type": 0,
+      "value": "Εγκρίθηκε εκ των προτέρων · λήγει "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.settings.appKeys.row.provider": [
+    {
+      "type": 0,
+      "value": "Επαληθεύεται μέσω του παρόχου σύνδεσης"
+    }
+  ],
+  "web.settings.appKeys.row.remove": [
+    {
+      "type": 0,
+      "value": "Αφαίρεση"
+    }
+  ],
+  "web.settings.appKeys.row.removeLabel": [
+    {
+      "type": 0,
+      "value": "Αφαίρεση της συσκευής "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.row.viaAppCode": [
+    {
+      "type": 0,
+      "value": "Προστέθηκε με κωδικό μίας χρήσης από την ιστοσελίδα του διακομιστή"
+    }
+  ],
+  "web.settings.appKeys.row.viaPersonKey": [
+    {
+      "type": 0,
+      "value": "Προστέθηκε από την εφαρμογή Silo σε άλλη συσκευή"
+    }
+  ],
+  "web.settings.appKeys.row.viaSession": [
+    {
+      "type": 0,
+      "value": "Προστέθηκε από ενεργή περίοδο σύνδεσης"
+    }
+  ],
+  "web.settings.appKeys.row.waitingUntil": [
+    {
+      "type": 0,
+      "value": "Σε αναμονή έγκρισης έως "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.settings.appKeys.row.withdraw": [
+    {
+      "type": 0,
+      "value": "Ανάκληση"
+    }
+  ],
+  "web.settings.appKeys.row.withdrawLabel": [
+    {
+      "type": 0,
+      "value": "Ανάκληση της έγκρισης για τη συσκευή "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.signsBackIn": [
+    {
+      "type": 0,
+      "value": "Οι συσκευές που έχουν συνδεθεί με την εφαρμογή Silo συνδέονται ξανά αυτόματα. "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Αφαιρέστε μια συσκευή"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " για να το σταματήσετε."
+    }
+  ],
+  "web.settings.appKeys.title": [
+    {
+      "type": 0,
+      "value": "Συσκευές εφαρμογής Silo"
+    }
+  ],
+  "web.settings.appKeys.unavailable": [
+    {
+      "type": 0,
+      "value": "Η σύνδεση με την εφαρμογή Silo δεν είναι διαθέσιμη σε αυτόν τον διακομιστή, οπότε αυτές οι συσκευές δεν μπορούν να συνδεθούν. Μπορείτε ακόμη να τις αφαιρέσετε."
+    }
+  ],
+  "web.settings.appKeys.waiting.description": [
+    {
+      "type": 0,
+      "value": "Μια νέα συσκευή ζήτησε να συνδεθεί στον λογαριασμό σας με την εφαρμογή Silo. Εγκρίνετέ την μόνο αν μόλις τη ρυθμίσατε."
+    }
+  ],
+  "web.settings.appKeys.waiting.title": [
+    {
+      "type": 0,
+      "value": "Σε αναμονή της έγκρισής σας"
+    }
+  ],
+  "web.settings.appKeys.withdrawn": [
+    {
+      "type": 0,
+      "value": "Η έγκριση ανακλήθηκε"
     }
   ],
   "web.settings.cardOverlay.adjust": [
@@ -140315,6 +142668,54 @@
       "value": "Είστε εκτός σύνδεσης, οπότε αυτή η αλλαγή δεν αποθηκεύτηκε"
     }
   ],
+  "web.settings.openInSilo.action": [
+    {
+      "type": 0,
+      "value": "Δημιουργία κωδικού για την εφαρμογή Silo"
+    }
+  ],
+  "web.settings.openInSilo.codeInstructions": [
+    {
+      "type": 0,
+      "value": "Στην εφαρμογή Silo στο τηλέφωνο ή το tablet σας, προσθέστε αυτόν τον διακομιστή με τη διεύθυνσή του και πληκτρολογήστε αυτόν τον κωδικό. Όποιος έχει τον κωδικό μπορεί να συνδεθεί σε αυτόν τον λογαριασμό, γι’ αυτό μην τον κοινοποιήσετε."
+    }
+  ],
+  "web.settings.openInSilo.codeTitle": [
+    {
+      "type": 0,
+      "value": "Κωδικός για την εφαρμογή Silo"
+    }
+  ],
+  "web.settings.openInSilo.description": [
+    {
+      "type": 0,
+      "value": "Συνδέστε την εφαρμογή Silo στο τηλέφωνο ή το tablet σας σε αυτόν τον λογαριασμό, χωρίς κωδικό πρόσβασης."
+    }
+  ],
+  "web.settings.openInSilo.loadFailed": [
+    {
+      "type": 0,
+      "value": "Δεν ήταν δυνατός ο έλεγχος για το αν αυτό το πρόγραμμα περιήγησης μπορεί να λάβει κωδικό για την εφαρμογή Silo."
+    }
+  ],
+  "web.settings.openInSilo.mainProfileOnly": [
+    {
+      "type": 0,
+      "value": "Μόνο το κύριο προφίλ του νοικοκυριού μπορεί να λάβει κωδικό για την εφαρμογή Silo. Μεταβείτε σε αυτό και δοκιμάστε ξανά."
+    }
+  ],
+  "web.settings.openInSilo.pinDescription": [
+    {
+      "type": 0,
+      "value": "Εισαγάγετε το PIN του κύριου προφίλ για να λάβετε κωδικό για την εφαρμογή Silo."
+    }
+  ],
+  "web.settings.openInSilo.title": [
+    {
+      "type": 0,
+      "value": "Εφαρμογή Silo"
+    }
+  ],
   "web.settings.overlays.accent.amber": [
     {
       "type": 0,
@@ -143275,6 +145676,12 @@
       "value": "Σύνδεση"
     }
   ],
+  "web.settings.sessions.row.signsBackIn": [
+    {
+      "type": 0,
+      "value": "Αυτή η συσκευή συνδέεται ξανά αυτόματα"
+    }
+  ],
   "web.settings.sessions.row.summary": [
     {
       "type": 8,
@@ -143357,6 +145764,24 @@
     {
       "type": 0,
       "value": "Ρυθμίσεις"
+    }
+  ],
+  "web.settings.signInAgain.action": [
+    {
+      "type": 0,
+      "value": "Επανασύνδεση"
+    }
+  ],
+  "web.settings.signInAgain.manageDevices": [
+    {
+      "type": 0,
+      "value": "Συνδεθείτε ξανά για να διαχειριστείτε τις συσκευές σας"
+    }
+  ],
+  "web.settings.signInAgain.useApp": [
+    {
+      "type": 0,
+      "value": "Διαχειριστείτε τις συσκευές σας στην εφαρμογή Silo."
     }
   ],
   "web.settings.signedInSessions.loadFailed": [

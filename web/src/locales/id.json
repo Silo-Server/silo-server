@@ -215,6 +215,12 @@
       "value": "Itu sudah ditautkan ke akun ini."
     }
   ],
+  "error.app_code_invalid": [
+    {
+      "type": 0,
+      "value": "Kode ini tidak dikenal, sudah digunakan, atau sudah kedaluwarsa. Dapatkan kode baru dari halaman server."
+    }
+  ],
   "error.authentication_required": [
     {
       "type": 0,
@@ -333,6 +339,12 @@
     {
       "type": 0,
       "value": "Jenis nilai ini salah."
+    }
+  ],
+  "error.field.key_enrolled": [
+    {
+      "type": 0,
+      "value": "Kunci ini sudah digunakan di server ini."
     }
   ],
   "error.field.malformed_form": [
@@ -2488,6 +2500,30 @@
     {
       "type": 0,
       "value": "Otomatis"
+    }
+  ],
+  "settingsManifest.playback.connection_path.description": [
+    {
+      "type": 0,
+      "value": "Opsi Hanya langsung tetap menggunakan koneksi jaringan lokal jika tersedia."
+    }
+  ],
+  "settingsManifest.playback.connection_path.label": [
+    {
+      "type": 0,
+      "value": "Jalur koneksi"
+    }
+  ],
+  "settingsManifest.playback.connection_path.option.automatic": [
+    {
+      "type": 0,
+      "value": "Otomatis"
+    }
+  ],
+  "settingsManifest.playback.connection_path.option.direct_only": [
+    {
+      "type": 0,
+      "value": "Hanya langsung"
     }
   ],
   "settingsManifest.playback.intro_skip_mode.description": [
@@ -21308,6 +21344,87 @@
       }
     }
   ],
+  "web.admin.common.adminUserSignIn.unlinkConfirm.text": [
+    {
+      "type": 5,
+      "value": "last_way",
+      "options": {
+        "yes": {
+          "value": [
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " tidak dapat lagi masuk dengan akun penyedia ini. "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " tidak akan dapat masuk sampai Anda menetapkan kata sandi atau menghubungkan penyedia lagi."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " tidak dapat lagi masuk dengan akun penyedia ini."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 5,
+      "value": "keys",
+      "options": {
+        "yes": {
+          "value": [
+            {
+              "type": 0,
+              "value": " Kunci aplikasi Silo milik "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " yang terkait dengan akun penyedia ini akan dihapus, dan perangkat tersebut akan dikeluarkan."
+            }
+          ]
+        },
+        "unknown": {
+          "value": [
+            {
+              "type": 0,
+              "value": " Kunci aplikasi Silo milik "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " yang terkait dengan akun penyedia ini, jika ada, akan dihapus, dan perangkat tersebut akan dikeluarkan."
+            }
+          ]
+        },
+        "other": {
+          "value": []
+        }
+      }
+    }
+  ],
   "web.admin.common.adminUserSignIn.unlinkConfirm.title": [
     {
       "type": 0,
@@ -23412,6 +23529,18 @@
     {
       "type": 0,
       "value": "Membuat thumbnail yang ditampilkan pemutar saat menggeser posisi pemutaran, di penyimpanan aset publik yang dikonfigurasi. File diproses di latar belakang dengan prioritas rendah. Menonaktifkan opsi ini akan menghapus pratinjau perpustakaan ini."
+    }
+  ],
+  "web.admin.common.libraryEditor.advanced.trickplayGenerate": [
+    {
+      "type": 0,
+      "value": "Buat pratinjau yang belum ada dengan FFmpeg"
+    }
+  ],
+  "web.admin.common.libraryEditor.advanced.trickplayGenerateDescription": [
+    {
+      "type": 0,
+      "value": "File sidecar .trickplay dan .bif yang sudah ada di samping file media digunakan terlebih dahulu. Nonaktifkan ini untuk hanya mengimpor file sidecar dan melewati pembuatan dengan FFmpeg."
     }
   ],
   "web.admin.common.libraryEditor.advanced.trickplayUnavailable": [
@@ -27010,6 +27139,28 @@
       "value": "Pengguna admin"
     }
   ],
+  "web.admin.common.trickplay.badge.awaitingSidecarCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " menunggu file sidecar"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.common.trickplay.badge.detail": [
     {
       "type": 0,
@@ -27104,6 +27255,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.common.trickplay.badge.sidecarsOnly": [
+    {
+      "type": 0,
+      "value": "hanya file sidecar"
     }
   ],
   "web.admin.common.trickplay.badge.srDetail": [
@@ -27244,6 +27401,42 @@
     {
       "type": 0,
       "value": "Pemutar tetap memakai pratinjau saat ini sampai pratinjau baru siap."
+    }
+  ],
+  "web.admin.common.trickplay.sidecarStatus.awaiting_sidecar": [
+    {
+      "type": 0,
+      "value": "Menunggu file sidecar"
+    }
+  ],
+  "web.admin.common.trickplay.sidecarStatus.sidecar_invalid": [
+    {
+      "type": 0,
+      "value": "File sidecar tidak valid"
+    }
+  ],
+  "web.admin.common.trickplay.sidecarStatus.sidecar_stale": [
+    {
+      "type": 0,
+      "value": "File sidecar usang"
+    }
+  ],
+  "web.admin.common.trickplay.source.generated": [
+    {
+      "type": 0,
+      "value": "Dibuat"
+    }
+  ],
+  "web.admin.common.trickplay.source.sidecar_bif": [
+    {
+      "type": 0,
+      "value": "File sidecar (.bif)"
+    }
+  ],
+  "web.admin.common.trickplay.source.sidecar_trickplay": [
+    {
+      "type": 0,
+      "value": "File sidecar (.trickplay)"
     }
   ],
   "web.admin.common.trickplay.state.off": [
@@ -28886,7 +29079,7 @@
     },
     {
       "type": 0,
-      "value": ". Perangkat lain milik pengguna ini tetap masuk. Klien dapat masuk lagi dengan kata sandi akun."
+      "value": ". Perangkat lain milik pengguna ini tetap masuk. Klien dapat masuk lagi."
     }
   ],
   "web.admin.dashboard.widgets.apiClients.confirmLabel": [
@@ -38779,6 +38972,12 @@
       "value": "Profil"
     }
   ],
+  "web.admin.history.column.progress": [
+    {
+      "type": 0,
+      "value": "Progres"
+    }
+  ],
   "web.admin.history.column.status": [
     {
       "type": 0,
@@ -38813,6 +39012,12 @@
     {
       "type": 0,
       "value": "Log sesi"
+    }
+  ],
+  "web.admin.history.detail.backToPlay": [
+    {
+      "type": 0,
+      "value": "Kembali ke pemutaran gabungan"
     }
   ],
   "web.admin.history.detail.column.delivered": [
@@ -38923,6 +39128,12 @@
       "value": "Waktu menonton"
     }
   ],
+  "web.admin.history.detail.inspectSitting": [
+    {
+      "type": 0,
+      "value": "Periksa"
+    }
+  ],
   "web.admin.history.detail.keyboardHint": [
     {
       "type": 0,
@@ -39007,6 +39218,12 @@
       "value": "Alasan tidak diputar langsung"
     }
   ],
+  "web.admin.history.detail.section.sessions": [
+    {
+      "type": 0,
+      "value": "Sesi dalam pemutaran ini"
+    }
+  ],
   "web.admin.history.detail.section.streams": [
     {
       "type": 0,
@@ -39017,6 +39234,78 @@
     {
       "type": 0,
       "value": "Waktu & progres menonton"
+    }
+  ],
+  "web.admin.history.detail.sessionsCapped": [
+    {
+      "type": 0,
+      "value": "Menampilkan "
+    },
+    {
+      "type": 1,
+      "value": "shown"
+    },
+    {
+      "type": 0,
+      "value": " sesi pertama dari "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": " sesi dalam pemutaran ini."
+    }
+  ],
+  "web.admin.history.detail.sessionsNotice": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Pemutaran ini mencakup "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " sesi. Detail stream, perangkat, dan rute di bawah berasal dari sesi utamanya; pilih sesi mana pun di bawah untuk memeriksanya satu per satu."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.ended": [
+    {
+      "type": 0,
+      "value": "Berakhir"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.method": [
+    {
+      "type": 0,
+      "value": "Metode"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.started": [
+    {
+      "type": 0,
+      "value": "Dimulai"
+    }
+  ],
+  "web.admin.history.detail.sittingColumn.watched": [
+    {
+      "type": 0,
+      "value": "Ditonton"
     }
   ],
   "web.admin.history.detail.subtitlesBurnIn": [
@@ -39245,6 +39534,12 @@
       "value": "Semua jaringan"
     }
   ],
+  "web.admin.history.filter.allMediaTypes": [
+    {
+      "type": 0,
+      "value": "Semua media"
+    }
+  ],
   "web.admin.history.filter.allMethods": [
     {
       "type": 0,
@@ -39281,6 +39576,24 @@
       "value": "Selesai"
     }
   ],
+  "web.admin.history.filter.episodes": [
+    {
+      "type": 0,
+      "value": "Episode"
+    }
+  ],
+  "web.admin.history.filter.hideShort": [
+    {
+      "type": 0,
+      "value": "Sembunyikan <30 dtk"
+    }
+  ],
+  "web.admin.history.filter.hideShortTitle": [
+    {
+      "type": 0,
+      "value": "Sembunyikan sesi yang belum selesai di bawah 30 detik"
+    }
+  ],
   "web.admin.history.filter.locationLocal": [
     {
       "type": 0,
@@ -39291,6 +39604,12 @@
     {
       "type": 0,
       "value": "Jarak jauh"
+    }
+  ],
+  "web.admin.history.filter.movies": [
+    {
+      "type": 0,
+      "value": "Film"
     }
   ],
   "web.admin.history.filter.partial": [
@@ -39460,6 +39779,12 @@
       "value": "Pemutaran terbaru"
     }
   ],
+  "web.admin.history.row.burnInBadgeTitle": [
+    {
+      "type": 0,
+      "value": "Subtitel ditanamkan ke video"
+    }
+  ],
   "web.admin.history.row.completed": [
     {
       "type": 0,
@@ -39480,6 +39805,32 @@
     {
       "type": 0,
       "value": "Perkiraan (direkam sebelum waktu tonton yang tepat dicatat)"
+    }
+  ],
+  "web.admin.history.row.groupedSessionsTitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Gabungan dari "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " sesi"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.history.row.meta": [
@@ -39512,6 +39863,12 @@
       "value": "Sebagian"
     }
   ],
+  "web.admin.history.row.progressLabel": [
+    {
+      "type": 0,
+      "value": "Progres pemutaran"
+    }
+  ],
   "web.admin.history.row.started": [
     {
       "type": 0,
@@ -39522,16 +39879,80 @@
       "value": "time"
     }
   ],
+  "web.admin.history.stats.accountsCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " akun"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.history.stats.completed": [
     {
       "type": 0,
       "value": "Selesai"
     }
   ],
+  "web.admin.history.stats.completionBreakdown": [
+    {
+      "type": 1,
+      "value": "completed"
+    },
+    {
+      "type": 0,
+      "value": " selesai · "
+    },
+    {
+      "type": 1,
+      "value": "partial"
+    },
+    {
+      "type": 0,
+      "value": " sebagian"
+    }
+  ],
   "web.admin.history.stats.partial": [
     {
       "type": 0,
       "value": "Sebagian"
+    }
+  ],
+  "web.admin.history.stats.totalPlays": [
+    {
+      "type": 0,
+      "value": "Total pemutaran"
+    }
+  ],
+  "web.admin.history.stats.totalSessions": [
+    {
+      "type": 0,
+      "value": "Total sesi"
+    }
+  ],
+  "web.admin.history.stats.uniqueProfiles": [
+    {
+      "type": 0,
+      "value": "Profil unik"
+    }
+  ],
+  "web.admin.history.stats.uniqueTitles": [
+    {
+      "type": 0,
+      "value": "Judul unik"
     }
   ],
   "web.admin.history.stats.visibleRows": [
@@ -39550,6 +39971,24 @@
     {
       "type": 0,
       "value": "Riwayat pemutaran"
+    }
+  ],
+  "web.admin.history.view.label": [
+    {
+      "type": 0,
+      "value": "Tampilan riwayat"
+    }
+  ],
+  "web.admin.history.view.plays": [
+    {
+      "type": 0,
+      "value": "Pemutaran"
+    }
+  ],
+  "web.admin.history.view.sessions": [
+    {
+      "type": 0,
+      "value": "Semua sesi"
     }
   ],
   "web.admin.historyImport.conflict.message": [
@@ -78752,6 +79191,226 @@
       "value": ")"
     }
   ],
+  "web.admin.users.detail.appKeys.confirm.denyDescription": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " tidak akan dapat masuk ke akun "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": ". Jika perangkat itu miliknya, dia dapat menambahkannya lagi di aplikasi Silo."
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKey": [
+    {
+      "type": 0,
+      "value": "Hapus kunci"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKeyDescription": [
+    {
+      "type": 0,
+      "value": "Perangkat yang sudah masuk tetap berfungsi sampai Anda menghapusnya. Tidak ada perangkat baru yang dapat ditambahkan dengan kunci ini, dan perangkat yang ditambahkan dengan kunci ini yang masih menunggu akan ditolak. Aplikasi Silo milik "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " akan menyiapkan kunci baru saat dia menambahkan perangkat berikutnya selagi masuk."
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKeyTitle": [
+    {
+      "type": 0,
+      "value": "Hapus kunci akun "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.removeDescription": [
+    {
+      "type": 0,
+      "value": "Menghapus "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " akan mengeluarkannya dari akun "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " sekarang dan menghentikan kuncinya: perangkat itu tidak dapat masuk lagi dengan kunci tersebut. Untuk menggunakannya lagi, "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " perlu menambahkannya lagi di aplikasi Silo."
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.withdrawDescription": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " tidak akan dapat menggunakan persetujuan ini untuk masuk ke akun "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.detail.appKeys.description": [
+    {
+      "type": 0,
+      "value": "Perangkat dan aplikasi yang masuk ke akun "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " dengan aplikasi Silo, tanpa kata sandi."
+    }
+  ],
+  "web.admin.users.detail.appKeys.empty": [
+    {
+      "type": 0,
+      "value": "Tidak ada perangkat yang menggunakan aplikasi Silo di akun ini."
+    }
+  ],
+  "web.admin.users.detail.appKeys.loadFailed": [
+    {
+      "type": 0,
+      "value": "Tidak dapat memuat perangkat."
+    }
+  ],
+  "web.admin.users.detail.appKeys.off": [
+    {
+      "type": 0,
+      "value": "Masuk dengan aplikasi Silo dinonaktifkan di server ini, sehingga perangkat ini tidak dapat masuk. Anda tetap dapat menghapusnya."
+    }
+  ],
+  "web.admin.users.detail.appKeys.ownerOnly": [
+    {
+      "type": 0,
+      "value": "Hanya pemilik server yang dapat mengubah perangkat milik admin lain atau milik pemilik."
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.description": [
+    {
+      "type": 0,
+      "value": "Aplikasi Silo menggunakan kunci ini untuk menambahkan perangkat baru milik "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": ". Disiapkan "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.none": [
+    {
+      "type": 0,
+      "value": "Tidak ada kunci akun. Aplikasi Silo milik "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " akan menyiapkannya saat dia menambahkan perangkat berikutnya selagi masuk."
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.remove": [
+    {
+      "type": 0,
+      "value": "Hapus kunci akun"
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKeyRemoved": [
+    {
+      "type": 0,
+      "value": "Kunci akun dihapus"
+    }
+  ],
+  "web.admin.users.detail.appKeys.preapprovals.description": [
+    {
+      "type": 0,
+      "value": "Proses masuk yang disetujui "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " untuk perangkat yang belum terhubung."
+    }
+  ],
+  "web.admin.users.detail.appKeys.waiting.description": [
+    {
+      "type": 0,
+      "value": "Perangkat baru di akun admin menunggu sampai "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " menyetujuinya dari perangkat tempat dia masuk. Anda dapat menolaknya di sini."
+    }
+  ],
+  "web.admin.users.detail.appKeys.waiting.title": [
+    {
+      "type": 0,
+      "value": "Menunggu persetujuan"
+    }
+  ],
   "web.admin.users.detail.common.allProfiles": [
     {
       "type": 0,
@@ -81980,6 +82639,12 @@
       "value": "Akun ini sudah mencapai batas profil"
     }
   ],
+  "web.admin.users.detail.profiles.badge.changedHere": [
+    {
+      "type": 0,
+      "value": "Diubah di sini"
+    }
+  ],
   "web.admin.users.detail.profiles.badge.kids": [
     {
       "type": 0,
@@ -82177,6 +82842,648 @@
     {
       "type": 0,
       "value": "Simpan PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowAgain": [
+    {
+      "type": 0,
+      "value": "Izinkan lagi"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowAgainAria": [
+    {
+      "type": 0,
+      "value": "Izinkan "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " kembali di server ini"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowDescription": [
+    {
+      "type": 0,
+      "value": "Aplikasi pengguna dapat menambahkan "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " kembali saat sinkronisasi berikutnya, sebagai profil baru tanpa riwayat di server ini, jika profil di aplikasi itu masih mencakup "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " dan akun ini masih memiliki ruang untuk profil lain."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowTitle": [
+    {
+      "type": 0,
+      "value": "Izinkan "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " lagi?"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.alreadyCleared": [
+    {
+      "type": 0,
+      "value": "Perubahan itu sudah dihapus, atau "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " mengubahnya lagi. Daftar sudah diperbarui."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedBy": [
+    {
+      "type": 0,
+      "value": "Diubah oleh "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " pada "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedSinceOpened": [
+    {
+      "type": 0,
+      "value": "Perubahan ini diperbarui setelah Anda membukanya, jadi tidak ada yang dihapus. Baca lagi di daftar, lalu hapus jika Anda masih menginginkannya."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedWhileRunning": [
+    {
+      "type": 0,
+      "value": "Profil berubah saat proses ini berjalan, jadi tidak ada yang diubah. Daftar sudah diperbarui; coba lagi jika Anda masih menginginkannya."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clear": [
+    {
+      "type": 0,
+      "value": "Hapus"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearAndRemovePin": [
+    {
+      "type": 0,
+      "value": "Hapus perubahan dan PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearAria": [
+    {
+      "type": 0,
+      "value": "Hapus perubahan pada "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " di profil "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearFailed": [
+    {
+      "type": 0,
+      "value": "Tidak dapat menghapus perubahan."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearInherit": [
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " di profil "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " kembali ke nilai yang diwarisi profil "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " saat ini, sesuai permintaan aplikasi pengguna. Perubahan dari aplikasi itu berlaku lagi untuk opsi ini."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearLater": [
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " tetap seperti sekarang sampai aplikasi pengguna mengirimkannya lagi. Setelah itu, perubahan dari aplikasi itu berlaku lagi."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearNow": [
+    {
+      "type": 0,
+      "value": "Profil "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " kembali ke nilai dari aplikasi pengguna sekarang, dan perubahan dari aplikasi itu berlaku lagi."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearNowValue": [
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " di profil "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " kembali ke "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": ", nilai dari aplikasi pengguna, sekarang. Perubahan dari aplikasi itu berlaku lagi."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearPin": [
+    {
+      "type": 0,
+      "value": "Profil "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " tetap memakai PIN yang Anda tetapkan sampai aplikasi pengguna mengirimkan PIN berikutnya. Setelah itu, perubahan dari aplikasi itu berlaku lagi."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearPinRemoves": [
+    {
+      "type": 0,
+      "value": "Aplikasi pengguna mengirimkan profil "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " tanpa PIN, sehingga menghapus perubahan ini akan menghapus PIN yang Anda tetapkan, sekarang. Siapa pun yang menggunakan akun ini kemudian dapat membuka profil "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " tanpa PIN."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearTitle": [
+    {
+      "type": 0,
+      "value": "Hapus perubahan pada "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " di profil "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.deletedAccount": [
+    {
+      "type": 0,
+      "value": "akun yang dihapus"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.description": [
+    {
+      "type": 0,
+      "value": "Profil ini berasal dari aplikasi milik "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ". Perubahan yang Anda buat di sini tetap berlaku di server ini sampai Anda menghapusnya. Ini bukan kunci: "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " juga dapat mengubah hal yang sama di sini."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismiss": [
+    {
+      "type": 0,
+      "value": "Tutup"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismissAria": [
+    {
+      "type": 0,
+      "value": "Tutup catatan tentang "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " di profil "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismissFailed": [
+    {
+      "type": 0,
+      "value": "Tidak dapat menutup catatan."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.isChild": [
+    {
+      "type": 0,
+      "value": "Profil anak"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.maxAdvisoryAge": [
+    {
+      "type": 0,
+      "value": "Batas usia"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.maxContentRating": [
+    {
+      "type": 0,
+      "value": "Batas rating konten"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.name": [
+    {
+      "type": 0,
+      "value": "Nama"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.picture": [
+    {
+      "type": 0,
+      "value": "Gambar"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.pin": [
+    {
+      "type": 0,
+      "value": "PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.requests": [
+    {
+      "type": 0,
+      "value": "Permintaan"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.requireAdvisoryAge": [
+    {
+      "type": 0,
+      "value": "Wajibkan rating usia"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.fieldValue": [
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.hidden": [
+    {
+      "type": 0,
+      "value": "Dihapus di server ini oleh "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " pada "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": ". Aplikasi pengguna tidak akan menambahkannya kembali sampai Anda mengizinkannya."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.loadFailed": [
+    {
+      "type": 0,
+      "value": "Tidak dapat memuat perubahan yang dibuat di server ini."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.nameTaken": [
+    {
+      "type": 0,
+      "value": "Profil "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " tidak dapat kembali ke nama "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " dari aplikasi pengguna, karena profil lain di sini sudah memakai nama itu. Ganti nama profil itu terlebih dahulu, lalu hapus perubahan ini lagi."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeHiddenNextSync": [
+    {
+      "type": 0,
+      "value": "Profil "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " dapat kembali saat aplikasi milik "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " disinkronkan berikutnya, jika profil di aplikasi itu masih mencakupnya."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeHiddenWoken": [
+    {
+      "type": 0,
+      "value": "Profil "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " dapat kembali saat aplikasi pengguna disinkronkan berikutnya, jika profil di aplikasi itu masih mencakupnya. Ponsel milik "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " telah diminta untuk menyinkronkan."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeNextSync": [
+    {
+      "type": 0,
+      "value": "Dihapus. Perubahan ini sampai ke aplikasi milik "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " saat sinkronisasi berikutnya."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeWoken": [
+    {
+      "type": 0,
+      "value": "Dihapus. Ponsel milik "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " telah diminta untuk menyinkronkan."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.removedBy": [
+    {
+      "type": 0,
+      "value": "Dihapus oleh "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " pada "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.replacedOwner": [
+    {
+      "type": 0,
+      "value": "Ini menggantikan nilai yang Anda tetapkan."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.setBy": [
+    {
+      "type": 0,
+      "value": "Ditetapkan oleh "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " pada "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.settled": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " mengubah ini pada "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "; nilai yang Anda tetapkan tidak berlaku lagi."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.title": [
+    {
+      "type": 0,
+      "value": "Diubah di server ini"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.inherited": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (diwarisi)"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.noPicture": [
+    {
+      "type": 0,
+      "value": "Tanpa gambar"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.none": [
+    {
+      "type": 0,
+      "value": "Tidak ada"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.off": [
+    {
+      "type": 0,
+      "value": "Nonaktif"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.on": [
+    {
+      "type": 0,
+      "value": "Aktif"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.picture": [
+    {
+      "type": 0,
+      "value": "Gambar kustom"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.pinNone": [
+    {
+      "type": 0,
+      "value": "Tanpa PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.pinSet": [
+    {
+      "type": 0,
+      "value": "PIN ditetapkan"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.requestsAllowed": [
+    {
+      "type": 0,
+      "value": "Diizinkan"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.requestsBlocked": [
+    {
+      "type": 0,
+      "value": "Diblokir"
     }
   ],
   "web.admin.users.detail.profiles.setPin": [
@@ -83386,6 +84693,144 @@
     {
       "type": 0,
       "value": "Atur kata sandi"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.action": [
+    {
+      "type": 0,
+      "value": "Buat tautan masuk"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.actionHint": [
+    {
+      "type": 0,
+      "value": "Kehilangan semua perangkat"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.description": [
+    {
+      "type": 0,
+      "value": "Tautan sekali pakai untuk "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " jika dia kehilangan semua perangkat. Tautan ini membuka halaman yang memberinya kode untuk aplikasi Silo, atau memungkinkannya memilih kata sandi. Tautan berlaku selama 24 jam, dan tautan baru menggantikan tautan sebelumnya."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailAction": [
+    {
+      "type": 0,
+      "value": "Kirim lewat email"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHint": [
+    {
+      "type": 0,
+      "value": "Buat tautan untuk disalin dan dikirim sendiri, atau kirim lewat email ke "
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHintNoAddress": [
+    {
+      "type": 0,
+      "value": "Buat tautan, lalu salin dan kirim sendiri. Akun ini tidak memiliki alamat email untuk tujuan pengiriman."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHintNoMail": [
+    {
+      "type": 0,
+      "value": "Buat tautan, lalu salin dan kirim sendiri. Siapkan email di Pengaturan agar dapat mengirimnya dari sini."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailSent": [
+    {
+      "type": 0,
+      "value": "Tautan dikirim ke "
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": ". Tautan ini kedaluwarsa "
+    },
+    {
+      "type": 1,
+      "value": "expires"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Server email tidak mengonfirmasi pengiriman. Tautan di bawah tetap berfungsi: salin dan kirim dengan cara lain."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.failed": [
+    {
+      "type": 0,
+      "value": "Tidak dapat membuat tautan masuk."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.linkShare": [
+    {
+      "type": 0,
+      "value": "Kirim tautan ini hanya ke "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": ". Siapa pun yang memilikinya dapat masuk ke akun ini sampai tautan digunakan atau kedaluwarsa "
+    },
+    {
+      "type": 1,
+      "value": "expires"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.providerRequired": [
+    {
+      "type": 0,
+      "value": "Masuk dengan kata sandi lokal dinonaktifkan di server ini, sehingga tautan masuk akan melewati penyedia masuk server. Minta "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " masuk dengan penyedia di situs server ini, lalu gunakan Buka di Silo di pengaturan akunnya."
+    }
+  ],
+  "web.admin.users.signInLinkDialog.title": [
+    {
+      "type": 0,
+      "value": "Tautan masuk untuk "
+    },
+    {
+      "type": 1,
+      "value": "username"
     }
   ],
   "web.audiobooks.chapter.fallbackTitle": [
@@ -84963,6 +86408,120 @@
       "value": "Setujui proses masuk"
     }
   ],
+  "web.auth.appCode.code": [
+    {
+      "type": 0,
+      "value": "Kode"
+    }
+  ],
+  "web.auth.appCode.codeCopied": [
+    {
+      "type": 0,
+      "value": "Kode disalin"
+    }
+  ],
+  "web.auth.appCode.copyCode": [
+    {
+      "type": 0,
+      "value": "Salin kode"
+    }
+  ],
+  "web.auth.appCode.copyFailed": [
+    {
+      "type": 0,
+      "value": "Tidak dapat menyalin kode. Pilih kode, lalu salin secara manual."
+    }
+  ],
+  "web.auth.appCode.expired": [
+    {
+      "type": 0,
+      "value": "Kode ini sudah kedaluwarsa."
+    }
+  ],
+  "web.auth.appCode.failed": [
+    {
+      "type": 0,
+      "value": "Silo tidak dapat membuat kode. Coba lagi."
+    }
+  ],
+  "web.auth.appCode.instructions": [
+    {
+      "type": 0,
+      "value": "Tekan Buka Silo untuk melanjutkan di aplikasi Silo di perangkat ini. Jika aplikasi belum terpasang, pasang aplikasi, kembali ke tab ini, lalu tekan Buka Silo lagi."
+    }
+  ],
+  "web.auth.appCode.noScanCode": [
+    {
+      "type": 0,
+      "value": "Alamat server ini terlalu panjang untuk kode pindai. Ketik alamat server dan kode di aplikasi Silo, atau salin kode lalu tempelkan di sana."
+    }
+  ],
+  "web.auth.appCode.open": [
+    {
+      "type": 0,
+      "value": "Buka Silo"
+    }
+  ],
+  "web.auth.appCode.renew": [
+    {
+      "type": 0,
+      "value": "Dapatkan kode baru"
+    }
+  ],
+  "web.auth.appCode.scanCodeLabel": [
+    {
+      "type": 0,
+      "value": "Kode pindai untuk aplikasi Silo"
+    }
+  ],
+  "web.auth.appCode.scanCodeUnavailable": [
+    {
+      "type": 0,
+      "value": "Kode pindai tidak dapat ditampilkan untuk server ini. Ketik alamat server dan kode di aplikasi Silo, atau salin kode lalu tempelkan di sana."
+    }
+  ],
+  "web.auth.appCode.scanHint": [
+    {
+      "type": 0,
+      "value": "Pindai kode ini dengan pemindai di aplikasi Silo, atau ketik atau salin alamat server dan kode di bawah."
+    }
+  ],
+  "web.auth.appCode.serverAddress": [
+    {
+      "type": 0,
+      "value": "Alamat server"
+    }
+  ],
+  "web.auth.appCode.singleUse": [
+    {
+      "type": 0,
+      "value": "Kode ini hanya berlaku sekali dan kedaluwarsa setelah beberapa menit."
+    }
+  ],
+  "web.auth.appCode.title": [
+    {
+      "type": 0,
+      "value": "Buka Silo"
+    }
+  ],
+  "web.auth.appCode.typeInstructions": [
+    {
+      "type": 0,
+      "value": "Di aplikasi Silo di ponsel atau tablet Anda, tambahkan server ini dengan alamatnya dan ketik kode ini untuk membuat akun Anda. Siapa pun yang memiliki kode ini dapat bergabung menggantikan Anda, jadi jangan bagikan kode ini."
+    }
+  ],
+  "web.auth.appCode.typeTitle": [
+    {
+      "type": 0,
+      "value": "Bergabung dengan kode ini"
+    }
+  ],
+  "web.auth.appCode.webLink": [
+    {
+      "type": 0,
+      "value": "Buka dengan tautan siloserver.org sebagai gantinya"
+    }
+  ],
   "web.auth.card.rememberedIt": [
     {
       "type": 0,
@@ -85165,10 +86724,46 @@
       ]
     }
   ],
+  "web.auth.invite.appAccountEmail": [
+    {
+      "type": 0,
+      "value": "Akun Anda akan menggunakan "
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.auth.invite.appContinue": [
+    {
+      "type": 0,
+      "value": "Lanjutkan"
+    }
+  ],
+  "web.auth.invite.appEmailHint": [
+    {
+      "type": 0,
+      "value": "Dengan alamat email, server ini dapat mengirimkan tautan masuk kepada Anda jika Anda kehilangan perangkat Anda."
+    }
+  ],
   "web.auth.invite.appMissing": [
     {
       "type": 0,
       "value": "Tidak terjadi apa-apa? Aplikasi belum terpasang — lanjutkan saja di bawah."
+    }
+  ],
+  "web.auth.invite.appProviderOnly": [
+    {
+      "type": 1,
+      "value": "server"
+    },
+    {
+      "type": 0,
+      "value": " menambahkan pengguna melalui penyedia masuk server. Masuk dengan penyedia itu di situs ini, lalu buka Silo dari pengaturan akun Anda."
     }
   ],
   "web.auth.invite.created": [
@@ -85197,6 +86792,18 @@
       "value": "Masukkan alamat email Anda dan pilih kata sandi. Anda akan masuk dengan alamat email Anda."
     }
   ],
+  "web.auth.invite.descriptionWithApp": [
+    {
+      "type": 0,
+      "value": "Bergabung dengan aplikasi Silo di ponsel atau tablet Anda, atau pilih kata sandi untuk masuk."
+    }
+  ],
+  "web.auth.invite.emailOptional": [
+    {
+      "type": 0,
+      "value": "Email (opsional)"
+    }
+  ],
   "web.auth.invite.emailPlaceholder": [
     {
       "type": 0,
@@ -85217,6 +86824,18 @@
     {
       "type": 1,
       "value": "inviter"
+    }
+  ],
+  "web.auth.invite.joinWithApp": [
+    {
+      "type": 0,
+      "value": "Bergabung dengan aplikasi Silo"
+    }
+  ],
+  "web.auth.invite.joinWithAppInstead": [
+    {
+      "type": 0,
+      "value": "Bergabung dengan aplikasi Silo sebagai gantinya"
     }
   ],
   "web.auth.invite.loadFailed": [
@@ -85317,6 +86936,30 @@
     {
       "type": 0,
       "value": "Undangan tidak tersedia"
+    }
+  ],
+  "web.auth.invite.usePassword": [
+    {
+      "type": 0,
+      "value": "Gunakan kata sandi sebagai gantinya"
+    }
+  ],
+  "web.auth.invite.usernameIsAddress": [
+    {
+      "type": 0,
+      "value": "Nama pengguna dengan @ harus berupa alamat email yang Anda masukkan di bawah."
+    }
+  ],
+  "web.auth.invite.usernameRequired": [
+    {
+      "type": 0,
+      "value": "Pilih nama pengguna."
+    }
+  ],
+  "web.auth.invite.usernameTaken": [
+    {
+      "type": 0,
+      "value": "Nama pengguna itu sudah digunakan. Pilih yang lain."
     }
   ],
   "web.auth.languagePicker.label": [
@@ -86199,6 +87842,126 @@
     {
       "type": 0,
       "value": "Masuk"
+    }
+  ],
+  "web.auth.signInLink.backToCode": [
+    {
+      "type": 0,
+      "value": "Kembali ke kode"
+    }
+  ],
+  "web.auth.signInLink.codeExpired": [
+    {
+      "type": 0,
+      "value": "Minta tautan baru kepada administrator server ini untuk mendapatkan kode lain."
+    }
+  ],
+  "web.auth.signInLink.documentTitle": [
+    {
+      "type": 0,
+      "value": "Tautan masuk"
+    }
+  ],
+  "web.auth.signInLink.failed": [
+    {
+      "type": 0,
+      "value": "Silo tidak dapat membuka tautan ini. Coba lagi."
+    }
+  ],
+  "web.auth.signInLink.installFirst": [
+    {
+      "type": 0,
+      "value": "Tautan ini hanya berlaku sekali, dan kodenya berlaku beberapa menit. Pasang aplikasi Silo di ponsel atau tablet Anda terlebih dahulu, lalu tekan Lanjutkan."
+    }
+  ],
+  "web.auth.signInLink.intro": [
+    {
+      "type": 0,
+      "value": "Admin mengirimkan tautan ini agar Anda dapat masuk lagi. Lanjutkan untuk mendapatkan kode untuk aplikasi Silo, atau untuk memilih kata sandi."
+    }
+  ],
+  "web.auth.signInLink.keepOpen": [
+    {
+      "type": 0,
+      "value": "Biarkan halaman ini terbuka sampai Anda selesai. Tautan ini sudah terpakai, jadi memuat ulang atau meninggalkan halaman akan menghilangkan apa yang diberikan tautan ini."
+    }
+  ],
+  "web.auth.signInLink.leaveAction": [
+    {
+      "type": 0,
+      "value": "Tinggalkan"
+    }
+  ],
+  "web.auth.signInLink.leaveDescription": [
+    {
+      "type": 0,
+      "value": "Tautan ini sudah terpakai. Jika Anda meninggalkan halaman ini, kode untuk aplikasi Silo dan kesempatan untuk menetapkan kata sandi akan hilang, dan Anda akan memerlukan tautan baru."
+    }
+  ],
+  "web.auth.signInLink.leaveTitle": [
+    {
+      "type": 0,
+      "value": "Tinggalkan halaman ini?"
+    }
+  ],
+  "web.auth.signInLink.noCodeAdministrator": [
+    {
+      "type": 0,
+      "value": "Ini adalah akun administrator, jadi tautan ini hanya menetapkan kata sandi. Tetapkan kata sandi, masuk di situs server ini, lalu buka aplikasi Silo dari pengaturan akun Anda di sana."
+    }
+  ],
+  "web.auth.signInLink.noCodeAppKeysOff": [
+    {
+      "type": 0,
+      "value": "Aplikasi Silo tidak dapat masuk di server ini saat ini, jadi tautan ini hanya menetapkan kata sandi."
+    }
+  ],
+  "web.auth.signInLink.passwordDescription": [
+    {
+      "type": 0,
+      "value": "Menyimpan akan mengeluarkan akun ini dari semua perangkat. Perangkat yang masuk dengan aplikasi Silo akan masuk kembali dengan sendirinya."
+    }
+  ],
+  "web.auth.signInLink.passwordSet": [
+    {
+      "type": 0,
+      "value": "Kata sandi Anda disimpan. Masuk dengan kata sandi itu."
+    }
+  ],
+  "web.auth.signInLink.passwordSetLostDevices": [
+    {
+      "type": 0,
+      "value": "Perangkat hilang yang menggunakan aplikasi Silo masih dapat masuk sampai Anda menghapusnya. Setelah masuk, hapus perangkat itu dari daftar perangkat di pengaturan akun Anda."
+    }
+  ],
+  "web.auth.signInLink.passwordTitle": [
+    {
+      "type": 0,
+      "value": "Pilih kata sandi"
+    }
+  ],
+  "web.auth.signInLink.providerRequired": [
+    {
+      "type": 0,
+      "value": "Pengguna server ini masuk melalui penyedia masuk server, jadi tautan ini tidak berfungsi. Masuk dengan penyedia itu sebagai gantinya."
+    }
+  ],
+  "web.auth.signInLink.setPasswordInstead": [
+    {
+      "type": 0,
+      "value": "Tetapkan kata sandi sebagai gantinya"
+    }
+  ],
+  "web.auth.signInLink.title": [
+    {
+      "type": 0,
+      "value": "Masuk kembali ke akun Anda"
+    }
+  ],
+  "web.auth.signInLink.unavailable": [
+    {
+      "type": 0,
+      "value": "Tautan ini sudah digunakan, diganti dengan tautan yang lebih baru, atau kedaluwarsa. Minta tautan baru kepada administrator server ini."
     }
   ],
   "web.auth.signup.closed": [
@@ -122140,7 +123903,7 @@
   "web.settings.account.password.signOutOthersDescription": [
     {
       "type": 0,
-      "value": "Browser dan aplikasi lain harus masuk lagi dengan kata sandi baru. Browser ini tetap masuk, dan kunci API tetap berfungsi."
+      "value": "Browser dan aplikasi lain dikeluarkan. Browser ini tetap masuk, dan kunci API tetap berfungsi."
     }
   ],
   "web.settings.account.password.title": [
@@ -122981,6 +124744,488 @@
     {
       "type": 0,
       "value": "Cara menggunakan kunci ini"
+    }
+  ],
+  "web.settings.appKeys.actionFailed": [
+    {
+      "type": 0,
+      "value": "Tidak dapat membuat perubahan itu. Coba lagi."
+    }
+  ],
+  "web.settings.appKeys.approveMainOnly": [
+    {
+      "type": 0,
+      "value": "Hanya profil utama rumah tangga yang dapat menyetujui perangkat. Beralih ke profil itu untuk menyetujui."
+    }
+  ],
+  "web.settings.appKeys.approved": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " disetujui"
+    }
+  ],
+  "web.settings.appKeys.confirm.approve": [
+    {
+      "type": 0,
+      "value": "Setujui perangkat"
+    }
+  ],
+  "web.settings.appKeys.confirm.approveDescription": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " akan dapat masuk ke akun Anda dengan aplikasi Silo hingga Anda menghapusnya. Setujui hanya jika Anda baru saja menyiapkannya."
+    }
+  ],
+  "web.settings.appKeys.confirm.approveTitle": [
+    {
+      "type": 0,
+      "value": "Setujui "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.settings.appKeys.confirm.deny": [
+    {
+      "type": 0,
+      "value": "Tolak perangkat"
+    }
+  ],
+  "web.settings.appKeys.confirm.denyDescription": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " tidak akan dapat masuk ke akun Anda. Jika perangkat itu milik Anda, tambahkan lagi di aplikasi Silo."
+    }
+  ],
+  "web.settings.appKeys.confirm.denyTitle": [
+    {
+      "type": 0,
+      "value": "Tolak "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.settings.appKeys.confirm.remove": [
+    {
+      "type": 0,
+      "value": "Hapus perangkat"
+    }
+  ],
+  "web.settings.appKeys.confirm.removeDescription": [
+    {
+      "type": 0,
+      "value": "Menghapus "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " akan mengeluarkannya sekarang dan menghentikan kuncinya: perangkat itu tidak dapat masuk lagi dengan kunci tersebut. Untuk menggunakannya lagi, tambahkan lagi di aplikasi Silo."
+    }
+  ],
+  "web.settings.appKeys.confirm.removeTitle": [
+    {
+      "type": 0,
+      "value": "Hapus "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.settings.appKeys.confirm.withdraw": [
+    {
+      "type": 0,
+      "value": "Tarik persetujuan"
+    }
+  ],
+  "web.settings.appKeys.confirm.withdrawDescription": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " tidak akan dapat menggunakan persetujuan ini untuk masuk ke akun Anda."
+    }
+  ],
+  "web.settings.appKeys.confirm.withdrawTitle": [
+    {
+      "type": 0,
+      "value": "Tarik persetujuan untuk "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.settings.appKeys.confirm.working": [
+    {
+      "type": 0,
+      "value": "Menyimpan…"
+    }
+  ],
+  "web.settings.appKeys.denied": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " ditolak"
+    }
+  ],
+  "web.settings.appKeys.description": [
+    {
+      "type": 0,
+      "value": "Perangkat dan aplikasi yang masuk ke akun Anda dengan aplikasi Silo, tanpa kata sandi."
+    }
+  ],
+  "web.settings.appKeys.devices.title": [
+    {
+      "type": 0,
+      "value": "Perangkat"
+    }
+  ],
+  "web.settings.appKeys.empty": [
+    {
+      "type": 0,
+      "value": "Tidak ada perangkat yang menggunakan aplikasi Silo di akun Anda."
+    }
+  ],
+  "web.settings.appKeys.footnote": [
+    {
+      "type": 0,
+      "value": "Menghapus perangkat akan mengeluarkannya dan membuat kuncinya berhenti berfungsi. Mengeluarkan sesi tidak menghapus perangkat: perangkat itu masuk kembali dengan kuncinya."
+    }
+  ],
+  "web.settings.appKeys.loadFailed": [
+    {
+      "type": 0,
+      "value": "Tidak dapat memuat perangkat Anda."
+    }
+  ],
+  "web.settings.appKeys.loading": [
+    {
+      "type": 0,
+      "value": "Memuat perangkat…"
+    }
+  ],
+  "web.settings.appKeys.off": [
+    {
+      "type": 0,
+      "value": "Masuk dengan aplikasi Silo nonaktif di server ini, sehingga perangkat ini tidak dapat masuk dan perangkat yang menunggu tidak dapat disetujui. Anda tetap dapat menghapusnya."
+    }
+  ],
+  "web.settings.appKeys.personKey.description": [
+    {
+      "type": 0,
+      "value": "Aplikasi Silo Anda menggunakan kunci ini untuk menambahkan perangkat baru Anda. Disiapkan "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.settings.appKeys.personKey.none": [
+    {
+      "type": 0,
+      "value": "Tidak ada kunci akun. Aplikasi Silo Anda akan menyiapkannya saat berikutnya Anda menambahkan perangkat sambil masuk."
+    }
+  ],
+  "web.settings.appKeys.personKey.title": [
+    {
+      "type": 0,
+      "value": "Kunci akun"
+    }
+  ],
+  "web.settings.appKeys.pinDescription": [
+    {
+      "type": 0,
+      "value": "Masukkan PIN profil utama untuk menyetujui perangkat ini."
+    }
+  ],
+  "web.settings.appKeys.preapprovals.description": [
+    {
+      "type": 0,
+      "value": "Sesi masuk yang Anda setujui untuk perangkat yang belum terhubung."
+    }
+  ],
+  "web.settings.appKeys.preapprovals.loadFailed": [
+    {
+      "type": 0,
+      "value": "Tidak dapat memuat sesi masuk yang disetujui sebelumnya."
+    }
+  ],
+  "web.settings.appKeys.preapprovals.title": [
+    {
+      "type": 0,
+      "value": "Disetujui sebelumnya"
+    }
+  ],
+  "web.settings.appKeys.refreshLabel": [
+    {
+      "type": 0,
+      "value": "Muat ulang perangkat aplikasi Silo"
+    }
+  ],
+  "web.settings.appKeys.removed": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " dihapus"
+    }
+  ],
+  "web.settings.appKeys.row.allowedBy": [
+    {
+      "type": 0,
+      "value": "Diizinkan oleh "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "web.settings.appKeys.row.approve": [
+    {
+      "type": 0,
+      "value": "Setujui"
+    }
+  ],
+  "web.settings.appKeys.row.approveLabel": [
+    {
+      "type": 0,
+      "value": "Setujui "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.row.deny": [
+    {
+      "type": 0,
+      "value": "Tolak"
+    }
+  ],
+  "web.settings.appKeys.row.denyLabel": [
+    {
+      "type": 0,
+      "value": "Tolak "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.row.enrolledFrom": [
+    {
+      "type": 0,
+      "value": "Dari "
+    },
+    {
+      "type": 1,
+      "value": "address"
+    }
+  ],
+  "web.settings.appKeys.row.identityGone": [
+    {
+      "type": 0,
+      "value": "Tidak dapat masuk: akun penyedia masuk perangkat ini tidak lagi ditautkan"
+    }
+  ],
+  "web.settings.appKeys.row.kindApp": [
+    {
+      "type": 0,
+      "value": "Aplikasi lain"
+    }
+  ],
+  "web.settings.appKeys.row.kindDevice": [
+    {
+      "type": 0,
+      "value": "Aplikasi Silo"
+    }
+  ],
+  "web.settings.appKeys.row.lastUsed": [
+    {
+      "type": 0,
+      "value": "Terakhir masuk "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.settings.appKeys.row.notUsed": [
+    {
+      "type": 0,
+      "value": "Belum masuk dengan kuncinya"
+    }
+  ],
+  "web.settings.appKeys.row.preapproval": [
+    {
+      "type": 0,
+      "value": "Disetujui sebelumnya · kedaluwarsa "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.settings.appKeys.row.provider": [
+    {
+      "type": 0,
+      "value": "Diperiksa dengan penyedia masuk"
+    }
+  ],
+  "web.settings.appKeys.row.remove": [
+    {
+      "type": 0,
+      "value": "Hapus"
+    }
+  ],
+  "web.settings.appKeys.row.removeLabel": [
+    {
+      "type": 0,
+      "value": "Hapus "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.row.viaAppCode": [
+    {
+      "type": 0,
+      "value": "Ditambahkan dengan kode sekali pakai dari halaman web server"
+    }
+  ],
+  "web.settings.appKeys.row.viaPersonKey": [
+    {
+      "type": 0,
+      "value": "Ditambahkan oleh aplikasi Silo di perangkat lain"
+    }
+  ],
+  "web.settings.appKeys.row.viaSession": [
+    {
+      "type": 0,
+      "value": "Ditambahkan saat masuk"
+    }
+  ],
+  "web.settings.appKeys.row.waitingUntil": [
+    {
+      "type": 0,
+      "value": "Menunggu persetujuan hingga "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.settings.appKeys.row.withdraw": [
+    {
+      "type": 0,
+      "value": "Tarik"
+    }
+  ],
+  "web.settings.appKeys.row.withdrawLabel": [
+    {
+      "type": 0,
+      "value": "Tarik persetujuan untuk "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.signsBackIn": [
+    {
+      "type": 0,
+      "value": "Perangkat yang masuk dengan aplikasi Silo akan masuk kembali dengan sendirinya. "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Hapus perangkat"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " untuk menghentikannya."
+    }
+  ],
+  "web.settings.appKeys.title": [
+    {
+      "type": 0,
+      "value": "Perangkat aplikasi Silo"
+    }
+  ],
+  "web.settings.appKeys.unavailable": [
+    {
+      "type": 0,
+      "value": "Masuk dengan aplikasi Silo tidak tersedia di server ini, sehingga perangkat ini tidak dapat masuk. Anda tetap dapat menghapusnya."
+    }
+  ],
+  "web.settings.appKeys.waiting.description": [
+    {
+      "type": 0,
+      "value": "Perangkat baru meminta untuk masuk ke akun Anda dengan aplikasi Silo. Setujui hanya jika Anda baru saja menyiapkannya."
+    }
+  ],
+  "web.settings.appKeys.waiting.title": [
+    {
+      "type": 0,
+      "value": "Menunggu persetujuan Anda"
+    }
+  ],
+  "web.settings.appKeys.withdrawn": [
+    {
+      "type": 0,
+      "value": "Persetujuan ditarik"
     }
   ],
   "web.settings.cardOverlay.adjust": [
@@ -127785,6 +130030,54 @@
       "value": "Anda sedang offline, jadi perubahan ini tidak disimpan"
     }
   ],
+  "web.settings.openInSilo.action": [
+    {
+      "type": 0,
+      "value": "Dapatkan kode untuk aplikasi Silo"
+    }
+  ],
+  "web.settings.openInSilo.codeInstructions": [
+    {
+      "type": 0,
+      "value": "Di aplikasi Silo pada ponsel atau tablet Anda, tambahkan server ini menggunakan alamatnya, lalu ketik kode ini. Siapa pun yang memiliki kode ini dapat masuk ke akun ini, jadi jangan bagikan."
+    }
+  ],
+  "web.settings.openInSilo.codeTitle": [
+    {
+      "type": 0,
+      "value": "Kode untuk aplikasi Silo"
+    }
+  ],
+  "web.settings.openInSilo.description": [
+    {
+      "type": 0,
+      "value": "Masuk ke akun ini di aplikasi Silo pada ponsel atau tablet Anda, tanpa kata sandi."
+    }
+  ],
+  "web.settings.openInSilo.loadFailed": [
+    {
+      "type": 0,
+      "value": "Tidak dapat memeriksa apakah browser ini dapat memperoleh kode untuk aplikasi Silo."
+    }
+  ],
+  "web.settings.openInSilo.mainProfileOnly": [
+    {
+      "type": 0,
+      "value": "Hanya profil utama rumah tangga yang dapat memperoleh kode untuk aplikasi Silo. Beralih ke profil itu, lalu coba lagi."
+    }
+  ],
+  "web.settings.openInSilo.pinDescription": [
+    {
+      "type": 0,
+      "value": "Masukkan PIN profil utama untuk mendapatkan kode aplikasi Silo."
+    }
+  ],
+  "web.settings.openInSilo.title": [
+    {
+      "type": 0,
+      "value": "Aplikasi Silo"
+    }
+  ],
   "web.settings.overlays.accent.amber": [
     {
       "type": 0,
@@ -130586,6 +132879,12 @@
       "value": "Masuk"
     }
   ],
+  "web.settings.sessions.row.signsBackIn": [
+    {
+      "type": 0,
+      "value": "Perangkat ini masuk kembali dengan sendirinya"
+    }
+  ],
   "web.settings.sessions.row.summary": [
     {
       "type": 8,
@@ -130668,6 +132967,24 @@
     {
       "type": 0,
       "value": "Pengaturan"
+    }
+  ],
+  "web.settings.signInAgain.action": [
+    {
+      "type": 0,
+      "value": "Masuk lagi"
+    }
+  ],
+  "web.settings.signInAgain.manageDevices": [
+    {
+      "type": 0,
+      "value": "Masuk lagi untuk mengelola perangkat Anda"
+    }
+  ],
+  "web.settings.signInAgain.useApp": [
+    {
+      "type": 0,
+      "value": "Kelola perangkat Anda di aplikasi Silo."
     }
   ],
   "web.settings.signedInSessions.loadFailed": [

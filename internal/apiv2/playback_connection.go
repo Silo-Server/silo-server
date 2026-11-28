@@ -3,11 +3,13 @@ package apiv2
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"reflect"
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/playback/connectionstore"
 )
 
@@ -91,7 +93,7 @@ func registerPlaybackConnection(reg *Registry) {
 }
 
 type playbackProbeResultService interface {
-	ReportPlaybackProbe(context.Context, string, connectionstore.ProbeResult) error
+	ReportPlaybackProbe(ctx context.Context, device string, result connectionstore.ProbeResult, receipt string) error
 }
 type PlaybackProbeResultsInput struct {
 	DeviceID string `header:"X-Silo-Device-Id" maxLength:"128"`
@@ -102,8 +104,14 @@ type PlaybackProbeResultsInput struct {
 		Transport  string `json:"transport" enum:"wifi,ethernet,cellular,other"`
 		LowerBound bool   `json:"lower_bound,omitempty" doc:"The test proved only that the link carries at least kbps: a quick test that reached its target, or a rate above the bound."`
 		Manual     bool   `json:"manual,omitempty" doc:"The viewer started this test with Test speed; never set for the automatic test. A manual result clears the connection's playback sample, so the reading becomes this result, and one above the device's learned limit on this connection also clears the limit, as a reset does."`
+		// ConnectionReceipt is the Silo-Connection-Receipt response header of the probe bytes this result measured.
+		ConnectionReceipt string `json:"connection_receipt,omitempty" maxLength:"2048" doc:"The Silo-Connection-Receipt header value of the probe response this result measured. A device enrolled for direct connections must send it: without it the result is refused with 422 (code missing), and a receipt that is not the host's for this account and device is refused with 422 (code invalid). An expired receipt, or a direct receipt of a path that has since been replaced, is accepted and the result is not kept."`
 	}
 }
+
+// codeReceiptMissing is the error code of a probe result that lacks the
+// connection receipt its device must send.
+const codeReceiptMissing = "missing"
 
 func registerPlaybackProbeResults(reg *Registry) {
 	Register(reg, Operation{Operation: humaOp(http.MethodPost, Prefix+"/playback/bandwidth-probe/results", "reportPlaybackBandwidthProbe", playbackTag, "Store the calling device's latest measured connection speed."), Class: ClassProfileScoped, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable}, func(ctx context.Context, in *PlaybackProbeResultsInput) (*PlaybackConnectionResetOutput, error) {
@@ -111,8 +119,13 @@ func registerPlaybackProbeResults(reg *Registry) {
 		if !ok {
 			return nil, unavailable("connection observations")
 		}
-		err := service.ReportPlaybackProbe(ctx, in.DeviceID, connectionstore.ProbeResult{Kbps: in.Body.Kbps, Bytes: in.Body.Bytes, DurationMS: in.Body.DurationMS, Transport: in.Body.Transport, LowerBound: in.Body.LowerBound, Manual: in.Body.Manual})
-		if err != nil {
+		err := service.ReportPlaybackProbe(ctx, in.DeviceID, connectionstore.ProbeResult{Kbps: in.Body.Kbps, Bytes: in.Body.Bytes, DurationMS: in.Body.DurationMS, Transport: in.Body.Transport, LowerBound: in.Body.LowerBound, Manual: in.Body.Manual}, in.Body.ConnectionReceipt)
+		switch {
+		case errors.Is(err, handlers.ErrProbeReceiptMissing):
+			return nil, validationProblem(locationBody+".connection_receipt", codeReceiptMissing, "An enrolled device sends the receipt of the probe it measured.")
+		case errors.Is(err, handlers.ErrProbeReceiptInvalid):
+			return nil, validationProblem(locationBody+".connection_receipt", codeInvalid, "The receipt is not the probe host's for this account and device.")
+		case err != nil:
 			return nil, playbackProblem(err)
 		}
 		return &PlaybackConnectionResetOutput{Status: http.StatusNoContent}, nil
