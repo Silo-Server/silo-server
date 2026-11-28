@@ -1,6 +1,9 @@
 package adminjob
 
-import "context"
+import (
+	"context"
+	"log/slog"
+)
 
 // The item types whose complete refresh rebuilds a series root.
 const (
@@ -27,13 +30,25 @@ func (e *ItemRefreshExecutor) SetSeriesRootWaker(waker itemRefreshSeriesRootWake
 // off keeps its later available_at, so its match would not run before the
 // refresh gives up. A hand-matched folder that no provider finds on its own
 // then left both the library and Unmatched Items until the back-off ended
-// (#5337). It runs before the scope's links are cleared, so a failed wake
-// leaves the scope as it was.
-func (e *ItemRefreshExecutor) wakeSeriesRoots(ctx context.Context, req ItemRefreshRequest) error {
+// (#5337).
+//
+// It runs after the scope's links are cleared. Woken earlier, an unmatched
+// root's row would be due while its files were still linked, and a worker
+// claiming it then would match the old links and back the root off again. A
+// failed wake is logged and the refresh goes on, as it did before the wake
+// existed, so the scan still relinks what it can.
+func (e *ItemRefreshExecutor) wakeSeriesRoots(ctx context.Context, req ItemRefreshRequest) {
 	if !isSeriesTarget(req.RequestedType) || e.seriesRoots == nil {
-		return nil
+		return
 	}
-	return e.seriesRoots.WakeInScope(ctx, req.ScanFolderID, req.ScanPath)
+	if err := e.seriesRoots.WakeInScope(ctx, req.ScanFolderID, req.ScanPath); err != nil {
+		slog.WarnContext(ctx, "item refresh: could not wake the scope's series roots",
+			"component", "adminjob",
+			"folder_id", req.ScanFolderID,
+			"scope", req.ScanPath,
+			"error", err,
+		)
+	}
 }
 
 // isSeriesTarget reports whether a refresh of requestedType rebuilds a series

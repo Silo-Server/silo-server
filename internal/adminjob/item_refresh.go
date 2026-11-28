@@ -632,12 +632,10 @@ func (e *ItemRefreshExecutor) Execute(ctx context.Context, req ItemRefreshReques
 		if e.fileRepo == nil || e.rootClaimRepo == nil || e.groupClaimRepo == nil {
 			return nil, fmt.Errorf("resolve scan scope: complete item refresh requires file, root claim, and group claim repositories")
 		}
-		if err := e.wakeSeriesRoots(ctx, req); err != nil {
-			return nil, fmt.Errorf("prepare complete refresh: %w", err)
-		}
 		if err := e.prepareCompleteRefresh(ctx, folder, req); err != nil {
 			return nil, fmt.Errorf("prepare complete refresh: %w", err)
 		}
+		e.wakeSeriesRoots(ctx, req)
 	}
 
 	if progress != nil {
