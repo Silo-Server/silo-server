@@ -156,6 +156,11 @@ it("shows a field problem and keeps the link usable", async () => {
   send();
   await screen.findByText("Use at most 72 bytes.");
   expect(screen.getByRole("button", { name: "Save password" })).not.toBeDisabled();
+  // The server named the password, so that field is marked.
+  expect(screen.getByLabelText("New password")).toHaveAttribute("aria-invalid", "true");
+  expect(screen.getByLabelText("New password")).toHaveAccessibleDescription(
+    "Use at most 72 bytes.",
+  );
 });
 
 it("explains an unusable link", async () => {
@@ -174,4 +179,28 @@ it("asks a signed-in visitor to sign out before using the link", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
   expect(auth.logout).toHaveBeenCalled();
   expect(fetchMock).not.toHaveBeenCalled();
+});
+
+it("ties a refused password to the field it is about until that field changes", async () => {
+  mount();
+  await fill("short");
+  send();
+  const password = await screen.findByLabelText("New password");
+  await screen.findByText("Use at least 8 characters.");
+  expect(password).toHaveAttribute("aria-invalid", "true");
+  expect(password).toHaveAccessibleDescription("Use at least 8 characters.");
+
+  fireEvent.change(password, { target: { value: "shorter" } });
+  expect(password).not.toHaveAttribute("aria-invalid");
+
+  await fill("new-password", "different-password");
+  send();
+  await screen.findByText("Passwords do not match.");
+  const confirmation = screen.getByLabelText("Confirm new password");
+  expect(confirmation).toHaveAttribute("aria-invalid", "true");
+  expect(confirmation).toHaveAccessibleDescription("Passwords do not match.");
+  expect(password).not.toHaveAttribute("aria-invalid");
+  // Correcting the mismatch from the new password clears it too.
+  fireEvent.change(password, { target: { value: "different-password" } });
+  expect(confirmation).not.toHaveAttribute("aria-invalid");
 });

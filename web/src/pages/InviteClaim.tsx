@@ -37,6 +37,8 @@ function ClaimForm({ token }: { token: string }) {
   const [emailError, setEmailError] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  // The policy rule a password broke on submit, shown under the field until it changes.
+  const [passwordError, setPasswordError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   // Set alongside completeLogin: the moment auth state lands, this
   // component re-renders with a user — without the flag, the signed-in
@@ -144,6 +146,8 @@ function ClaimForm({ token }: { token: string }) {
   }
 
   const invitation = lookup.data;
+  // Shown under the confirmation field while the two differ.
+  const mismatched = confirmPassword !== "" && password !== confirmPassword;
 
   // On Android, offer to continue in the native app — the app registers
   // silo://invite and has the full claim flow. A user-tapped custom-scheme
@@ -208,7 +212,7 @@ function ClaimForm({ token }: { token: string }) {
     }
     const passwordProblem = newPasswordPolicyProblem(password, passwordPolicy);
     if (passwordProblem) {
-      toast.error(passwordProblem);
+      setPasswordError(passwordProblem);
       return;
     }
     const controller = lifetime.current;
@@ -391,7 +395,12 @@ function ClaimForm({ token }: { token: string }) {
                   <PasswordInput
                     id="invite-password"
                     value={password}
-                    onChange={(e) => setPassword(e.target.value)}
+                    onChange={(e) => {
+                      setPassword(e.target.value);
+                      if (passwordError) setPasswordError("");
+                    }}
+                    aria-invalid={passwordError ? true : undefined}
+                    aria-describedby={passwordError ? "invite-password-error" : undefined}
                     disabled={submitting}
                     autoComplete="new-password"
                     // On mobile, focusing here pops the keyboard over the
@@ -400,6 +409,11 @@ function ClaimForm({ token }: { token: string }) {
                     autoFocus={!appLink && !invitation.email_required}
                     required
                   />
+                  {passwordError && (
+                    <p id="invite-password-error" role="alert" className="text-destructive text-xs">
+                      {passwordError}
+                    </p>
+                  )}
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="invite-confirm-password">{t("web.auth.confirmPassword")}</Label>
@@ -409,10 +423,12 @@ function ClaimForm({ token }: { token: string }) {
                     onChange={(e) => setConfirmPassword(e.target.value)}
                     disabled={submitting}
                     autoComplete="new-password"
+                    aria-invalid={mismatched ? true : undefined}
+                    aria-describedby={mismatched ? "invite-confirm-password-error" : undefined}
                     required
                   />
-                  {confirmPassword && password !== confirmPassword && (
-                    <p className="text-destructive text-xs">
+                  {mismatched && (
+                    <p id="invite-confirm-password-error" className="text-destructive text-xs">
                       {t("web.auth.passwordRules.mismatch")}
                     </p>
                   )}

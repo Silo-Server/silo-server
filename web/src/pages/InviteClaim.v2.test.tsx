@@ -297,3 +297,24 @@ it("still treats a server error as an unconfirmed result", async () => {
   await screen.findByText(/We could not confirm the result/);
   expect(screen.getByRole("button", { name: "Create account" })).toBeDisabled();
 });
+
+it("shows a password the policy refuses under its field and ties the field to it", async () => {
+  mount();
+  await screen.findByLabelText("Email");
+  const password = screen.getByLabelText("Password", { exact: true });
+  fireEvent.change(password, { target: { value: "short" } });
+  fireEvent.change(screen.getByLabelText("Confirm password"), { target: { value: "short" } });
+  send();
+  expect(await screen.findByText("Use at least 8 characters.")).toBeInTheDocument();
+  expect(password).toHaveAttribute("aria-invalid", "true");
+  expect(password).toHaveAccessibleDescription("Use at least 8 characters.");
+  expect(posts()).toHaveLength(0);
+
+  fireEvent.change(password, { target: { value: "shorter" } });
+  expect(password).not.toHaveAttribute("aria-invalid");
+  expect(screen.queryByText("Use at least 8 characters.")).not.toBeInTheDocument();
+  // The confirmation now differs, and its own error names that.
+  const confirmation = screen.getByLabelText("Confirm password");
+  expect(confirmation).toHaveAttribute("aria-invalid", "true");
+  expect(confirmation).toHaveAccessibleDescription("Passwords do not match");
+});

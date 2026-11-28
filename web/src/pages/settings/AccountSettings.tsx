@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { toast } from "sonner";
 
 import { V2ProblemError, v2ErrorText } from "@/api/v2/request";
@@ -19,6 +19,7 @@ import {
   newPasswordPolicyProblem,
   newPasswordRuleHint,
   passwordErrorMessage,
+  refusedPasswordMember,
 } from "@/lib/newPassword";
 import { AccountSignInSection } from "./AccountSignInSection";
 
@@ -33,10 +34,16 @@ export default function AccountSettings() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [signOutOtherSessions, setSignOutOtherSessions] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  // The field a refusal before sending is about, until that field changes.
+  const [invalidField, setInvalidField] = useState<"new" | "confirm" | null>(null);
+  // The new password as typed now. The fields stay editable while a change is
+  // pending, so a refusal marks the field only if it still holds what was sent.
+  const typedNewPassword = useRef("");
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setFormError(null);
+    setInvalidField(null);
 
     const limits = capability.data;
     if (!limits?.allowed) {
@@ -45,11 +52,13 @@ export default function AccountSettings() {
     }
     if (newPassword !== confirmPassword) {
       setFormError(t("web.settings.account.password.error.mismatch"));
+      setInvalidField("confirm");
       return;
     }
     const ruleProblem = newPasswordPolicyProblem(newPassword, passwordPolicy);
     if (ruleProblem) {
       setFormError(ruleProblem);
+      setInvalidField("new");
       return;
     }
 
@@ -64,6 +73,7 @@ export default function AccountSettings() {
       });
       setCurrentPassword("");
       setNewPassword("");
+      typedNewPassword.current = "";
       setConfirmPassword("");
       setSignOutOtherSessions(false);
       toast.success(
@@ -79,6 +89,12 @@ export default function AccountSettings() {
           ? passwordErrorMessage(error, failed)
           : v2ErrorText(error, failed),
       );
+      if (
+        refusedPasswordMember(error, "new_password") &&
+        typedNewPassword.current === newPassword
+      ) {
+        setInvalidField("new");
+      }
     }
   }
 
@@ -137,8 +153,18 @@ export default function AccountSettings() {
                 type="password"
                 autoComplete="new-password"
                 value={newPassword}
-                onChange={(event) => setNewPassword(event.target.value)}
-                aria-describedby="account-password-requirements"
+                onChange={(event) => {
+                  setNewPassword(event.target.value);
+                  typedNewPassword.current = event.target.value;
+                  // A mismatch can be corrected here too.
+                  setInvalidField(null);
+                }}
+                aria-invalid={invalidField === "new" ? true : undefined}
+                aria-describedby={
+                  invalidField === "new"
+                    ? "account-password-requirements account-password-error"
+                    : "account-password-requirements"
+                }
                 required
               />
               <p id="account-password-requirements" className="text-muted-foreground text-xs">
@@ -160,7 +186,12 @@ export default function AccountSettings() {
                 type="password"
                 autoComplete="new-password"
                 value={confirmPassword}
-                onChange={(event) => setConfirmPassword(event.target.value)}
+                onChange={(event) => {
+                  setConfirmPassword(event.target.value);
+                  if (invalidField === "confirm") setInvalidField(null);
+                }}
+                aria-invalid={invalidField === "confirm" ? true : undefined}
+                aria-describedby={invalidField === "confirm" ? "account-password-error" : undefined}
                 required
               />
             </div>
@@ -189,7 +220,7 @@ export default function AccountSettings() {
             ) : null}
 
             {formError ? (
-              <p className="text-destructive text-sm" role="alert">
+              <p id="account-password-error" className="text-destructive text-sm" role="alert">
                 {formError}
               </p>
             ) : null}

@@ -15,7 +15,13 @@ import { useLinkToken } from "@/hooks/useLinkToken";
 import { usePostSignInNavigation } from "@/hooks/usePostSignInNavigation";
 import { usePasswordResetAvailable } from "@/hooks/queries/passwordReset";
 import { formatDateTime } from "@/lib/datetime";
-import { newPasswordProblem, passwordErrorMessage, newPasswordHint } from "@/lib/newPassword";
+import {
+  newPasswordFieldProblem,
+  passwordErrorMessage,
+  newPasswordHint,
+  refusedPasswordMember,
+  type NewPasswordField,
+} from "@/lib/newPassword";
 import { Button } from "@/components/ui/button";
 import { PasswordInput } from "@/components/PasswordInput";
 import { Label } from "@/components/ui/label";
@@ -39,6 +45,8 @@ function ResetForm({ token }: { token: string }) {
   const [password, setPassword] = useState("");
   const [confirmation, setConfirmation] = useState("");
   const [error, setError] = useState("");
+  // The field a refusal before sending is about, until that field changes.
+  const [invalidField, setInvalidField] = useState<NewPasswordField | null>(null);
   const [submitting, setSubmitting] = useState(false);
   // Set alongside completeLogin: the signed-in notice below must not replace
   // this screen while it navigates on.
@@ -159,9 +167,10 @@ function ResetForm({ token }: { token: string }) {
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (busy.current || recovery || getAccessToken()) return;
-    const problem = newPasswordProblem(password, confirmation, passwordPolicy);
+    const problem = newPasswordFieldProblem(password, confirmation, passwordPolicy);
     if (problem) {
-      setError(problem);
+      setError(problem.message);
+      setInvalidField(problem.field);
       return;
     }
     const controller = lifetime.current;
@@ -170,6 +179,7 @@ function ResetForm({ token }: { token: string }) {
     busy.current = true;
     setSubmitting(true);
     setError("");
+    setInvalidField(null);
     try {
       const result = await completePasswordReset(token, password, controller.signal);
       if (controller.signal.aborted || !isSessionIdentityCurrent(identity)) return;
@@ -189,6 +199,7 @@ function ResetForm({ token }: { token: string }) {
       // committed, so the link is reloaded before another attempt.
       if (err instanceof V2ProblemError && err.problemType === "validation_failed") {
         setError(passwordErrorMessage(err, t("web.auth.passwordReset.setFailed")));
+        if (refusedPasswordMember(err, "password")) setInvalidField("password");
       } else if (err instanceof V2ProblemError && err.status === 404) {
         setLookup({ pending: false, unavailable: true });
       } else {
@@ -210,7 +221,7 @@ function ResetForm({ token }: { token: string }) {
       })}
     >
       {error && (
-        <p role="alert" className="text-destructive mb-4 text-sm">
+        <p id="reset-password-error" role="alert" className="text-destructive mb-4 text-sm">
           {error}
         </p>
       )}
@@ -229,7 +240,13 @@ function ResetForm({ token }: { token: string }) {
           <PasswordInput
             id="reset-password"
             value={password}
-            onChange={(e) => setPassword(e.target.value)}
+            onChange={(e) => {
+              setPassword(e.target.value);
+              // A mismatch can be corrected here too.
+              setInvalidField(null);
+            }}
+            aria-invalid={invalidField === "password" ? true : undefined}
+            aria-describedby={invalidField === "password" ? "reset-password-error" : undefined}
             disabled={submitting}
             autoComplete="new-password"
             autoFocus
@@ -243,7 +260,12 @@ function ResetForm({ token }: { token: string }) {
           <PasswordInput
             id="reset-confirm-password"
             value={confirmation}
-            onChange={(e) => setConfirmation(e.target.value)}
+            onChange={(e) => {
+              setConfirmation(e.target.value);
+              if (invalidField === "confirmation") setInvalidField(null);
+            }}
+            aria-invalid={invalidField === "confirmation" ? true : undefined}
+            aria-describedby={invalidField === "confirmation" ? "reset-password-error" : undefined}
             disabled={submitting}
             autoComplete="new-password"
             required

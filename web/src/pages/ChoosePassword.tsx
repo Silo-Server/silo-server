@@ -6,7 +6,13 @@ import { useAuth } from "@/hooks/useAuth";
 import { usePostSignInNavigation } from "@/hooks/usePostSignInNavigation";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { sanitizeAuthRedirect } from "@/lib/authRedirect";
-import { newPasswordProblem, passwordErrorMessage, newPasswordHint } from "@/lib/newPassword";
+import {
+  newPasswordFieldProblem,
+  passwordErrorMessage,
+  newPasswordHint,
+  refusedPasswordMember,
+  type NewPasswordField,
+} from "@/lib/newPassword";
 import { Button } from "@/components/ui/button";
 import { PasswordInput } from "@/components/PasswordInput";
 import { Label } from "@/components/ui/label";
@@ -28,6 +34,8 @@ export default function ChoosePassword() {
   const [password, setPassword] = useState("");
   const [confirmation, setConfirmation] = useState("");
   const [error, setError] = useState("");
+  // The field a refusal before sending is about, until that field changes.
+  const [invalidField, setInvalidField] = useState<NewPasswordField | null>(null);
   // Set once the password changed, so the settled account does not trip the
   // redirect below before this screen navigates on.
   const [changed, setChanged] = useState(false);
@@ -68,17 +76,20 @@ export default function ChoosePassword() {
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (busy.current) return;
-    const problem = newPasswordProblem(password, confirmation, passwordPolicy);
+    const problem = newPasswordFieldProblem(password, confirmation, passwordPolicy);
     if (problem) {
-      setError(problem);
+      setError(problem.message);
+      setInvalidField(problem.field);
       return;
     }
     busy.current = true;
     setError("");
+    setInvalidField(null);
     try {
       await changePassword.mutateAsync({ current_password: current, new_password: password });
     } catch (err) {
       setError(passwordErrorMessage(err, t("web.auth.choosePassword.changeFailed")));
+      if (refusedPasswordMember(err, "new_password")) setInvalidField("password");
       busy.current = false;
       return;
     }
@@ -128,7 +139,7 @@ export default function ChoosePassword() {
         </CardHeader>
         <CardContent>
           {error && (
-            <p role="alert" className="text-destructive mb-4 text-sm">
+            <p id="choose-password-error" role="alert" className="text-destructive mb-4 text-sm">
               {error}
             </p>
           )}
@@ -153,7 +164,13 @@ export default function ChoosePassword() {
               <PasswordInput
                 id="new-password"
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                onChange={(e) => {
+                  setPassword(e.target.value);
+                  // A mismatch can be corrected here too.
+                  setInvalidField(null);
+                }}
+                aria-invalid={invalidField === "password" ? true : undefined}
+                aria-describedby={invalidField === "password" ? "choose-password-error" : undefined}
                 disabled={submitting}
                 autoComplete="new-password"
                 required
@@ -166,7 +183,14 @@ export default function ChoosePassword() {
               <PasswordInput
                 id="confirm-new-password"
                 value={confirmation}
-                onChange={(e) => setConfirmation(e.target.value)}
+                onChange={(e) => {
+                  setConfirmation(e.target.value);
+                  if (invalidField === "confirmation") setInvalidField(null);
+                }}
+                aria-invalid={invalidField === "confirmation" ? true : undefined}
+                aria-describedby={
+                  invalidField === "confirmation" ? "choose-password-error" : undefined
+                }
                 disabled={submitting}
                 autoComplete="new-password"
                 required

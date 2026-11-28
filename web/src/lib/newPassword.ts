@@ -20,8 +20,24 @@ export function newPasswordProblem(
   confirmation: string,
   policy: PasswordPolicy = DEFAULT_PASSWORD_POLICY,
 ): string | null {
-  if (password !== confirmation) return t("web.auth.newPassword.mismatch");
-  return newPasswordPolicyProblem(password, policy);
+  return newPasswordFieldProblem(password, confirmation, policy)?.message ?? null;
+}
+
+/** Which new-password field a refused password is about. */
+export type NewPasswordField = "password" | "confirmation";
+
+/** newPasswordProblem, with the field the reason belongs to, so a form can
+ * mark that field invalid and point it at the reason. */
+export function newPasswordFieldProblem(
+  password: string,
+  confirmation: string,
+  policy: PasswordPolicy = DEFAULT_PASSWORD_POLICY,
+): { field: NewPasswordField; message: string } | null {
+  if (password !== confirmation) {
+    return { field: "confirmation", message: t("web.auth.newPassword.mismatch") };
+  }
+  const message = newPasswordPolicyProblem(password, policy);
+  return message ? { field: "password", message } : null;
 }
 
 /** The first rule of the server's password policy a password breaks, or null. */
@@ -63,6 +79,13 @@ export function newPasswordHint(policy: PasswordPolicy): string {
   const length = t("web.auth.newPassword.minLengthHint", { minimum, minimum_text: minimum });
   const rules = newPasswordRuleHint(policy);
   return rules ? `${length} ${rules}` : length;
+}
+
+/** Whether a refused password write names this request body member, as
+ * the server names the new password it refused, so a form can mark that
+ * field. Reads the same first field error passwordErrorMessage shows. */
+export function refusedPasswordMember(err: unknown, member: string): boolean {
+  return err instanceof V2ProblemError && err.problem.errors?.[0]?.location === `body.${member}`;
 }
 
 /** A readable message for a failed password write: a validation problem's
