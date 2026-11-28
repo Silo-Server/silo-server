@@ -31,8 +31,9 @@ func (s *mixedBrowseMovies) BrowseItems(_ context.Context, _ *Session, params ur
 	all := []upstreamListItem{{ContentID: "movie-1", Type: "movie", Title: "Movie 1"}, {ContentID: "movie-2", Type: "movie", Title: "Movie 2"}}
 	// movie-1 is the favorite; content_ids is an Ids allowlist.
 	all = slices.DeleteFunc(all, func(item upstreamListItem) bool {
-		ids := params.Get("content_ids")
-		return (params.Get("is_favorite") == "true" && item.ContentID != "movie-1") || (ids != "" && !slices.Contains(strings.Split(ids, ","), item.ContentID))
+		ids, types := params.Get("content_ids"), params.Get("type")
+		return (params.Get("is_favorite") == "true" && item.ContentID != "movie-1") || (ids != "" && !slices.Contains(strings.Split(ids, ","), item.ContentID)) ||
+			(types != "" && !slices.Contains(strings.Split(types, ","), item.Type))
 	})
 	offset, _ := strconv.Atoi(params.Get("offset"))
 	limit, _ := strconv.Atoi(params.Get("limit"))
@@ -43,6 +44,10 @@ func (s *mixedBrowseMovies) BrowseItems(_ context.Context, _ *Session, params ur
 	total := 0
 	if params.Get("include_total") == "true" {
 		total = len(all)
+	}
+	// Limit=0 counts without rows, as the catalog's BrowseCount does.
+	if params.Get("count_only") == "true" {
+		return &upstreamBrowseResponse{Items: []upstreamListItem{}, Total: len(all)}, nil
 	}
 	return &upstreamBrowseResponse{Items: page, Total: total, HasMore: offset+len(page) < len(all)}, nil
 }
@@ -236,6 +241,75 @@ func TestFavoritesAndIdsWithEpisodeAndOtherTypesIncludeEpisodes(t *testing.T) {
 			}
 		})
 	}
+}
+
+// An Ids list that names a collection beside episodes matches the named items
+// against the filters before adding the collection, and the episodes, which
+// the media_items browse holds none of, match through the episode browse
+// (#5342). Paging and TotalRecordCount cover the whole list.
+func TestIdsNamingCollectionAndEpisodesIncludeEpisodes(t *testing.T) {
+	for _, tc := range []struct {
+		params  string
+		ids     []string
+		wantIDs []string
+	}{
+		{"IncludeItemTypes=BoxSet,Episode", []string{"collection-1", "ep-1"}, []string{"ep-1", "collection-1"}},
+		{"IncludeItemTypes=BoxSet,Episode,Movie", []string{"collection-1", "ep-2", "movie-1"}, []string{"ep-2", "movie-1", "collection-1"}},
+		{"IncludeItemTypes=BoxSet,Movie", []string{"collection-1", "ep-1", "movie-1"}, []string{"movie-1", "collection-1"}},
+		{"IncludeItemTypes=Episode", []string{"collection-1", "ep-1", "movie-1"}, []string{"ep-1"}},
+		{"Filters=IsFavorite", []string{"collection-1", "ep-1", "ep-2", "movie-1", "movie-2"}, []string{"ep-1", "movie-1"}},
+		{"IncludeItemTypes=BoxSet,Episode&StartIndex=1&Limit=1", []string{"ep-1", "collection-1", "ep-2"}, []string{"ep-2"}},
+		// Limit=0 counts every named match, the movie included, and lists none.
+		{"IncludeItemTypes=BoxSet,Episode,Movie&Limit=0", []string{"collection-1", "ep-1", "movie-1"}, nil},
+	} {
+		t.Run(tc.params+"/Ids="+strings.Join(tc.ids, ","), func(t *testing.T) {
+			movies := &mixedBrowseMovies{}
+			h, _ := newMixedBrowseHandler(movies)
+			h.userData = &favoriteMoviesUserData{}
+			h.content = &mixedBrowseMoviesWithLibraries{mixedBrowseMovies: movies}
+			h.collections = &fakeCollectionSource{collections: []*models.LibraryCollection{
+				{ID: "collection-1", LibraryID: 1, Title: "Collection", Visibility: "visible"},
+			}}
+			encoded := make([]string, len(tc.ids))
+			for i, id := range tc.ids {
+				kind := EncodedIDItem
+				if strings.HasPrefix(id, "collection") {
+					kind = EncodedIDCollection
+				}
+				encoded[i] = h.codec.EncodeStringID(kind, id)
+			}
+
+			result := performItemsRequest(t, h, "/Items?"+tc.params+"&Ids="+strings.Join(encoded, ","))
+
+			var gotIDs []string
+			for _, item := range result.Items {
+				kind := EncodedIDItem
+				if item.Type == itemTypeBoxSet {
+					kind = EncodedIDCollection
+				}
+				id, err := h.codec.DecodeStringID(kind, item.ID)
+				if err != nil {
+					t.Fatalf("item id %q: %v", item.ID, err)
+				}
+				gotIDs = append(gotIDs, id)
+			}
+			wantTotal := len(tc.wantIDs)
+			if strings.Contains(tc.params, "StartIndex=1") || strings.Contains(tc.params, "Limit=0") {
+				wantTotal = 3
+			}
+			if !slices.Equal(gotIDs, tc.wantIDs) || result.TotalRecordCount != wantTotal {
+				t.Fatalf("items = %v total = %d, want %v total %d", gotIDs, result.TotalRecordCount, tc.wantIDs, wantTotal)
+			}
+		})
+	}
+}
+
+// mixedBrowseMoviesWithLibraries also lists library 1, which holds the
+// collection.
+type mixedBrowseMoviesWithLibraries struct{ *mixedBrowseMovies }
+
+func (*mixedBrowseMoviesWithLibraries) ListUserLibraries(context.Context, *Session) ([]upstreamUserLibrary, error) {
+	return []upstreamUserLibrary{{ID: 1, Name: "Movies", Type: "movies"}}, nil
 }
 
 // Jellyfin's /Shows/{id}/Episodes has no Ids filter, so an Ids parameter
