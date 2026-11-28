@@ -79,6 +79,7 @@
 ./internal/scanner TestMatchLinkRefusedAfterRetitleDB
 ./internal/metadata TestSkeletonUndoFollowsTheLinkDB
 ./internal/metadata TestEpisodeLinkFollowsSameTitleMoveDB
+./internal/metadata TestUnseasonedEpisodeLinksProviderOnlyEpisodeDB
 ./internal/scanner TestScanIndexesFileWithNonUTF8Name
 ./migrations TestScanRunForeignKeysHaveLeadingIndexesDB
 

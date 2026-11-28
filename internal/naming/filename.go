@@ -134,6 +134,7 @@ func resolvePathContext(filePath string, libraryType string, libraryRoots ...str
 				ctx.SeasonNum, ctx.SeasonKnown = rootSeason, true
 			}
 			applyFilenameSeriesIdentity(normalized, episode.seriesTitle, libraryRoot, ctx)
+			ctx.EpisodeShowTitle = episodeShowTitle(episode.seriesTitle, normalized, libraryRoot, ctx)
 		} else if seasonNum, ok := firstSeasonNumber(directories, nameNoExt, allowNumericSeasonDirs, libraryRoot != ""); ok {
 			ctx.SeasonNum = seasonNum
 			ctx.SeasonKnown = true
@@ -168,14 +169,31 @@ func ParseFilename(filePath string, folderType string, libraryRoots ...string) *
 	}
 
 	return &FilenameHints{
-		Title:       ctx.Title,
-		Year:        ctx.Year,
-		Type:        ctx.Type,
-		SeasonNum:   ctx.SeasonNum,
-		SeasonKnown: ctx.SeasonKnown,
-		EpisodeNum:  ctx.EpisodeNum,
-		AirDate:     ctx.AirDate,
+		Title:            ctx.Title,
+		Year:             ctx.Year,
+		Type:             ctx.Type,
+		SeasonNum:        ctx.SeasonNum,
+		SeasonKnown:      ctx.SeasonKnown,
+		EpisodeNum:       ctx.EpisodeNum,
+		AirDate:          ctx.AirDate,
+		EpisodeShowTitle: ctx.EpisodeShowTitle,
 	}
+}
+
+// episodeShowTitle is PathContext.EpisodeShowTitle: the file's own show title
+// unless a show folder root already carries it. A file at the library root,
+// or rooted at itself, takes its title from its own name, so nothing else
+// vouches for it.
+func episodeShowTitle(fileSeriesTitle, filePath, libraryRoot string, ctx *PathContext) string {
+	title, _ := parseTitleYearCandidate(fileSeriesTitle)
+	if title == "" {
+		return ""
+	}
+	folderRoot := ctx.RootPath != "" && ctx.RootPath != filePath && filepath.Clean(ctx.RootPath) != libraryRoot
+	if folderRoot && normalizeInferComparable(title) == normalizeInferComparable(ctx.Title) {
+		return ""
+	}
+	return title
 }
 
 // applyFilenameSeriesIdentity lets named episodes identify loose series files.

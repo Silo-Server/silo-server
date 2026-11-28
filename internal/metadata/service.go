@@ -200,6 +200,7 @@ type metadataEpisodeRepo interface {
 	ListBySeriesAndAirDates(ctx context.Context, seriesID string, airDates []string) (map[string][]*models.Episode, error)
 	ListBySeriesAndNumbers(ctx context.Context, seriesID string, seasonNumbers, episodeNumbers []int32) ([]*models.Episode, error)
 	ListBySeries(ctx context.Context, seriesID string) ([]*models.Episode, error)
+	ListAllBySeries(ctx context.Context, seriesID string) ([]*models.Episode, error)
 	ListBySeasonID(ctx context.Context, seasonID string) ([]*models.Episode, error)
 	Upsert(ctx context.Context, ep *models.Episode) error
 	BulkUpsert(ctx context.Context, seriesID string, episodes []*models.Episode) error
@@ -7076,7 +7077,9 @@ func (s *MetadataService) linkSeriesFilesToEpisodesWithOptions(ctx context.Conte
 
 	var unseasonedEpisodes unseasonedEpisodeIndex
 	if needsUnseasonedLookup {
-		seriesEpisodes, err := s.episodeRepo.ListBySeries(ctx, seriesID)
+		// Every provider episode, not just those already holding a file: the
+		// file being linked is what will make its episode available.
+		seriesEpisodes, err := s.episodeRepo.ListAllBySeries(ctx, seriesID)
 		if err != nil {
 			return fmt.Errorf("loading episodes for unseasoned file matching: %w", err)
 		}
@@ -7084,7 +7087,6 @@ func (s *MetadataService) linkSeriesFilesToEpisodesWithOptions(ctx context.Conte
 	}
 
 	episodesByAirDate := map[string][]*models.Episode{}
-	var seriesItem *models.MediaItem
 	if len(airDateSet) > 0 {
 		airDates := make([]string, 0, len(airDateSet))
 		for airDate := range airDateSet {
@@ -7096,14 +7098,17 @@ func (s *MetadataService) linkSeriesFilesToEpisodesWithOptions(ctx context.Conte
 		if lookupErr != nil {
 			return fmt.Errorf("loading episodes by air date: %w", lookupErr)
 		}
-		if s.itemRepo != nil {
-			if item, itemErr := s.itemRepo.GetByID(ctx, seriesID); itemErr == nil {
-				seriesItem = item
-			} else if !errors.Is(itemErr, catalog.ErrItemNotFound) {
-				slog.WarnContext(ctx, "metadata: failed to load series item for air-date episode preference", "component", "metadata",
-					"series_id", seriesID,
-					"error", itemErr)
-			}
+	}
+	// The series item narrows same-day air-date candidates and says which
+	// show titles an unseasoned filename may give.
+	var seriesItem *models.MediaItem
+	if (len(airDateSet) > 0 || needsUnseasonedLookup) && s.itemRepo != nil {
+		if item, itemErr := s.itemRepo.GetByID(ctx, seriesID); itemErr == nil {
+			seriesItem = item
+		} else if !errors.Is(itemErr, catalog.ErrItemNotFound) {
+			slog.WarnContext(ctx, "metadata: failed to load series item for episode linking", "component", "metadata",
+				"series_id", seriesID,
+				"error", itemErr)
 		}
 	}
 
@@ -7145,7 +7150,7 @@ func (s *MetadataService) linkSeriesFilesToEpisodesWithOptions(ctx context.Conte
 			seasonNum = episode.SeasonNumber
 			episodeNum = episode.EpisodeNumber
 		} else if !hint.seasonKnown {
-			selected, ok := unseasonedEpisodes.resolve(hint.episodeNum, extractEpisodeMatchTitle(file.FilePath, rootsByFolder[file.MediaFolderID]...))
+			selected, ok := unseasonedEpisodes.resolve(hint.episodeNum, extractEpisodeMatchTitle(file.FilePath, rootsByFolder[file.MediaFolderID]...), namesOnlySeries(hint.showTitle, seriesItem))
 			if !ok {
 				continue
 			}
@@ -7355,7 +7360,10 @@ type episodeLinkHint struct {
 	airDate     string
 	// title is the episode title a by-date filename carries after its date.
 	title string
-	ok    bool
+	// showTitle is the show title an unseasoned filename gives that its show
+	// folder doesn't (naming's EpisodeShowTitle).
+	showTitle string
+	ok        bool
 }
 
 func (s *MetadataService) updateEpisodeMetadataState(ctx context.Context, seriesID string, incomplete bool, lastCheckedAt *time.Time) {
@@ -7634,7 +7642,11 @@ func parseEpisodeLinkHint(file *models.MediaFile, libraryRoots ...string) episod
 		return episodeLinkHint{}
 	}
 	if fnh.EpisodeNum != 0 {
-		return episodeLinkHint{seasonNum: fnh.SeasonNum, seasonKnown: fnh.SeasonKnown, episodeNum: fnh.EpisodeNum, ok: true}
+		hint := episodeLinkHint{seasonNum: fnh.SeasonNum, seasonKnown: fnh.SeasonKnown, episodeNum: fnh.EpisodeNum, ok: true}
+		if !fnh.SeasonKnown {
+			hint.showTitle = fnh.EpisodeShowTitle
+		}
+		return hint
 	}
 	if fnh.AirDate != "" {
 		// A by-date name has no episode number, but its season folder and

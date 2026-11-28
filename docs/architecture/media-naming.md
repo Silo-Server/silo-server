@@ -89,6 +89,12 @@ title, not a season, and so is a folder the file's own title names (`Drama/Seaso
   becomes the episode: `Season 21/301.mkv` is S21E301. A folder that agrees keeps the compact
   reading: `Season 3/301.mkv` is S3E1. A season in the file name beats the folder.
   `TestEpisodeNamingCompactCodeRespectsContainingSeason` holds these cases.
+- A series library reads a fansub-style number after a spaced dash (`[Group] Show - 05 (1080p)
+  [CRC]`) as an episode with no season. A season label that ends the show title before such a
+  number sets the season: `Show S2 - 05`, `Show Season 2 - 05`, and `Show 2nd Season - 05` are
+  S2E05. The one-letter `S` takes its number directly, and a label that completes the show
+  folder's title (`Open Season 2/Open Season 2 - 05`) stays part of the title.
+  `TestFansubEpisodeNames` holds these cases.
 
 ## Linking files that have no season
 
@@ -96,20 +102,32 @@ title, not a season, and so is a folder the file's own title names (`Drama/Seaso
 episode number but no known season through `unseasonedEpisodeIndex`
 (`internal/metadata/unseasoned_episode.go`):
 
+- The index reads every stored episode of the series (`ListAllBySeries`), not only episodes that
+  already hold a file: the file being linked is what makes its episode available.
 - The index leaves out season 0, episode 0, and rows whose `MetadataSource` is
   `scanner_fallback` or empty without a provider match. Fallback episodes can never establish
   a season.
 - A distinctive title (`isDistinctiveSingleEpisodeTitle`: not generic, at least 10 characters
   and two words) links the file when exactly one indexed episode has that title. If some episode
   carries the file's number, the matched episode must have that number too.
-- Otherwise the number must match exactly one indexed episode, in season 1, where absolute and
-  per-season numbering read the same. A non-generic title in the file name must match that
-  episode's title. Requiring season 1 also defers the link until season 1 metadata is stored.
+- Otherwise the number links to season 1's episode with that number, where absolute and
+  per-season numbering read the same. Requiring season 1 also defers the link until season 1
+  metadata is stored. A non-generic title in the file name must match that episode's title;
+  release details such as `(1080p)` are not a title.
+- The file links only when it names no show beyond its series: naming's `EpisodeShowTitle` (the
+  show title the file name gives that its show folder doesn't) is empty or equals the series'
+  title or original title. A later season numbered per season carries more in its name
+  (`Show II - 05`, `Show Final Season - 05`), and so do extras whose label precedes a number
+  (`Show - NCOP 1`, `Show - OVA - 01`, the recap `Show - 05.5`); such files stay unlinked even
+  when only season 1 has the number, because a later season may not be stored yet.
 - Nothing derives a cumulative absolute order from season lengths, because stored seasons may be
-  incomplete. A file that fails these rules stays unlinked; it is not moved to season 0.
+  incomplete and providers split anime seasons differently. A number past season 1
+  (`Show - 105` for an episode of season 3) stays unlinked; mapping it needs the provider's
+  absolute numbering, which the metadata plugin contract does not carry. A file that fails these
+  rules stays unlinked; it is not moved to season 0.
 
-`TestUnseasonedEpisodeResolution`, `TestUnseasonedEpisodeLinksUseProviderEvidence`, and
-`TestUnseasonedEpisodeRetriesWhenProviderMetadataArrives` cover these rules.
+`TestEnsureSeriesEpisodeLinks_UnseasonedNumbers` covers these rules, and
+`TestUnseasonedEpisodeLinksProviderOnlyEpisodeDB` covers the link to an episode with no file yet.
 
 Air-date names link through `selectAirDateEpisodeCandidate` in the same file: one candidate
 links; several are narrowed by the series' TVDB, then TMDB, then IMDb ID; a date that stays

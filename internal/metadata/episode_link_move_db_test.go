@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 
@@ -128,5 +129,74 @@ func TestEpisodeLinkFollowsSameTitleMoveDB(t *testing.T) {
 				t.Fatalf("retitled file took episode %q", after.EpisodeID)
 			}
 		})
+	}
+}
+
+// TestUnseasonedEpisodeLinksProviderOnlyEpisodeDB checks that a file with an
+// episode number and no season links to a provider episode that holds no file
+// yet. The linker must read every stored episode: listing only episodes that
+// already have a file (episode_libraries) would never offer one to its first
+// file.
+func TestUnseasonedEpisodeLinksProviderOnlyEpisodeDB(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	pool, err := pgxpool.New(t.Context(), dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+
+	ctx := t.Context()
+	var folderID int
+	if err := pool.QueryRow(ctx, `INSERT INTO media_folders (type, name, enabled) VALUES ('series', $1, true) RETURNING id`,
+		fmt.Sprintf("unseasoned-link-%d", time.Now().UnixNano())).Scan(&folderID); err != nil {
+		t.Fatal(err)
+	}
+	seriesID := fmt.Sprintf("series-tvdb-unseasoned-%d", folderID)
+	t.Cleanup(func() {
+		cleanup := context.Background()
+		_, _ = pool.Exec(cleanup, `DELETE FROM media_files WHERE media_folder_id = $1`, folderID)
+		_, _ = pool.Exec(cleanup, `DELETE FROM media_items WHERE content_id = $1`, seriesID)
+		_, _ = pool.Exec(cleanup, `DELETE FROM media_folders WHERE id = $1`, folderID)
+	})
+	if _, err := pool.Exec(ctx, `INSERT INTO media_items (content_id, type, title, status) VALUES ($1, 'series', 'Show', 'matched')`, seriesID); err != nil {
+		t.Fatal(err)
+	}
+	// Both seasons have an episode 5; the absolute number names season 1's.
+	for season := 1; season <= 2; season++ {
+		if _, err := pool.Exec(ctx, `INSERT INTO episodes (content_id, series_id, season_number, episode_number, title, metadata_source, tvdb_id)
+			VALUES ($1, $2, $3, 5, $4, 'provider', $5)`,
+			fmt.Sprintf("%s-%d-5", seriesID, season), seriesID, season, fmt.Sprintf("Arrival %d", season), strconv.Itoa(9000+season)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	files := scanner.NewFileRepository(pool)
+	file, err := files.Upsert(ctx, models.MediaFile{
+		MediaFolderID: folderID,
+		ContentID:     seriesID,
+		FilePath:      fmt.Sprintf("/library-%d/Show/[Group] Show - 05 (1080p) [ABCD1234].mkv", folderID),
+		FileSize:      1024,
+		BaseTitle:     "Show",
+		BaseType:      "series",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := NewMetadataService(nil, nil, nil, catalog.NewItemRepository(pool), catalog.NewProviderIDRepository(pool),
+		catalog.NewEpisodeRepository(pool), catalog.NewSeasonRepository(pool),
+		catalog.NewLibraryItemRepository(pool), catalog.NewFolderRepository(pool),
+		nil, files, NewSkippedRootRepository(pool), nil, catalog.NewRootClaimRepository(pool))
+
+	if err := s.linkSeriesFilesToEpisodesWithOptions(ctx, seriesID, false); err != nil {
+		t.Fatal(err)
+	}
+	after, err := files.GetByID(ctx, file.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := seriesID + "-1-5"; after.EpisodeID != want {
+		t.Fatalf("file linked to episode %q, want %q", after.EpisodeID, want)
 	}
 }

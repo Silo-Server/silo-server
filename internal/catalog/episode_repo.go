@@ -976,6 +976,25 @@ func (r *EpisodeRepository) ListBySeries(ctx context.Context, seriesID string) (
 	return scanEpisodes(rows)
 }
 
+// ListAllBySeries returns every episode row of a series, with a file or not.
+// Like ListBySeriesAndAirDates it does not apply episodeAvailabilityPredicate:
+// the episode linker matches files to provider episodes before their
+// episode_libraries rows exist.
+func (r *EpisodeRepository) ListAllBySeries(ctx context.Context, seriesID string) ([]*models.Episode, error) {
+	query := `SELECT ` + episodeColumns + `
+		FROM episodes
+		WHERE series_id = $1
+		ORDER BY season_number ASC, episode_number ASC`
+
+	rows, err := r.pool.Query(ctx, query, seriesID)
+	if err != nil {
+		return nil, fmt.Errorf("listing all episodes by series: %w", err)
+	}
+	defer rows.Close()
+
+	return scanEpisodes(rows)
+}
+
 func (r *EpisodeRepository) ListBySeriesIDs(ctx context.Context, seriesIDs []string) (map[string][]*models.Episode, error) {
 	result := make(map[string][]*models.Episode, len(seriesIDs))
 	if len(seriesIDs) == 0 {
