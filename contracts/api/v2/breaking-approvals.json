@@ -1,3 +1,88 @@
 {
-  "approvals": []
+  "approvals": [
+    {
+      "operation_id": "createAdminUserProfile",
+      "change_id": "request-property-max-length-decreased",
+      "fingerprint": "d9ee79d22e72330db76ccdfc086db33e8469ad82d9847325ef789103bfbc9901",
+      "reason": "New profile PINs must be exactly four digits, the format every first-party client (web, Apple, Android, Roku) already sets and enters; a longer or non-numeric PIN set through the API locked its profile on every client. Checking a PIN keeps the old range, so existing PINs still unlock.",
+      "approved_in": "#5353"
+    },
+    {
+      "operation_id": "createAdminUserProfile",
+      "change_id": "request-property-min-length-increased",
+      "fingerprint": "368cd685fe638b689419c3501f1e3b509067445bccf266613d2c2efbe78ac8c3",
+      "reason": "New profile PINs must be exactly four digits, the format every first-party client (web, Apple, Android, Roku) already sets and enters; a longer or non-numeric PIN set through the API locked its profile on every client. Checking a PIN keeps the old range, so existing PINs still unlock.",
+      "approved_in": "#5353"
+    },
+    {
+      "operation_id": "createAdminUserProfile",
+      "change_id": "request-property-pattern-added",
+      "fingerprint": "a7a500ac1fae7f52c7355885178edd52da952c2c7e498ecbf2fcb2435908b39d",
+      "reason": "New profile PINs must be exactly four digits, the format every first-party client (web, Apple, Android, Roku) already sets and enters; a longer or non-numeric PIN set through the API locked its profile on every client. Checking a PIN keeps the old range, so existing PINs still unlock.",
+      "approved_in": "#5353"
+    },
+    {
+      "operation_id": "updateAdminUserProfile",
+      "change_id": "request-property-max-length-decreased",
+      "fingerprint": "1eb9cd44448e1245d8a621ac8d5fc21089a6b9d139fc8216c99aa046bec1db71",
+      "reason": "New profile PINs must be exactly four digits, the format every first-party client (web, Apple, Android, Roku) already sets and enters; a longer or non-numeric PIN set through the API locked its profile on every client. Checking a PIN keeps the old range, so existing PINs still unlock.",
+      "approved_in": "#5353"
+    },
+    {
+      "operation_id": "updateAdminUserProfile",
+      "change_id": "request-property-min-length-increased",
+      "fingerprint": "63c44f03721d2358210d8f69358c8839f650eefe8a2be8eefe0ecbe3436ce8e2",
+      "reason": "New profile PINs must be exactly four digits, the format every first-party client (web, Apple, Android, Roku) already sets and enters; a longer or non-numeric PIN set through the API locked its profile on every client. Checking a PIN keeps the old range, so existing PINs still unlock.",
+      "approved_in": "#5353"
+    },
+    {
+      "operation_id": "updateAdminUserProfile",
+      "change_id": "request-property-pattern-added",
+      "fingerprint": "a54b3595224eea102aa94f4161fa9009b294cd7af6e1d24b74f039cb801ff40a",
+      "reason": "New profile PINs must be exactly four digits, the format every first-party client (web, Apple, Android, Roku) already sets and enters; a longer or non-numeric PIN set through the API locked its profile on every client. Checking a PIN keeps the old range, so existing PINs still unlock.",
+      "approved_in": "#5353"
+    },
+    {
+      "operation_id": "createProfile",
+      "change_id": "request-property-max-length-decreased",
+      "fingerprint": "cf194db1deb1ee3b66d7dfb8edc596d1adcada0d98962a488366e2a2b3e2e952",
+      "reason": "New profile PINs must be exactly four digits, the format every first-party client (web, Apple, Android, Roku) already sets and enters; a longer or non-numeric PIN set through the API locked its profile on every client. Checking a PIN keeps the old range, so existing PINs still unlock.",
+      "approved_in": "#5353"
+    },
+    {
+      "operation_id": "createProfile",
+      "change_id": "request-property-min-length-increased",
+      "fingerprint": "67fbce26510e907f465f3aa96f38b771b45c0f9ec1183df15a494c7b12738cdf",
+      "reason": "New profile PINs must be exactly four digits, the format every first-party client (web, Apple, Android, Roku) already sets and enters; a longer or non-numeric PIN set through the API locked its profile on every client. Checking a PIN keeps the old range, so existing PINs still unlock.",
+      "approved_in": "#5353"
+    },
+    {
+      "operation_id": "createProfile",
+      "change_id": "request-property-pattern-added",
+      "fingerprint": "04dbeb3af31f5c993b0845dcb60d514e85811344db1dbe15e3cc5620183f0ce0",
+      "reason": "New profile PINs must be exactly four digits, the format every first-party client (web, Apple, Android, Roku) already sets and enters; a longer or non-numeric PIN set through the API locked its profile on every client. Checking a PIN keeps the old range, so existing PINs still unlock.",
+      "approved_in": "#5353"
+    },
+    {
+      "operation_id": "updateProfile",
+      "change_id": "request-property-max-length-decreased",
+      "fingerprint": "8d8e0d7fb6f0c59f2c6c34cde4bd42fd8816c9c55738d594aefa0338885dcc2f",
+      "reason": "New profile PINs must be exactly four digits, the format every first-party client (web, Apple, Android, Roku) already sets and enters; a longer or non-numeric PIN set through the API locked its profile on every client. Checking a PIN keeps the old range, so existing PINs still unlock.",
+      "approved_in": "#5353"
+    },
+    {
+      "operation_id": "updateProfile",
+      "change_id": "request-property-min-length-increased",
+      "fingerprint": "235bb54b54de37e9ead3455eaa0903a1c64f15755768a573a024e2b24b409143",
+      "reason": "New profile PINs must be exactly four digits, the format every first-party client (web, Apple, Android, Roku) already sets and enters; a longer or non-numeric PIN set through the API locked its profile on every client. Checking a PIN keeps the old range, so existing PINs still unlock.",
+      "approved_in": "#5353"
+    },
+    {
+      "operation_id": "updateProfile",
+      "change_id": "request-property-pattern-added",
+      "fingerprint": "06ad369823007883c53e8ce1ace0147645694ce60db0d337e4c41abd6610ef04",
+      "reason": "New profile PINs must be exactly four digits, the format every first-party client (web, Apple, Android, Roku) already sets and enters; a longer or non-numeric PIN set through the API locked its profile on every client. Checking a PIN keeps the old range, so existing PINs still unlock.",
+      "approved_in": "#5353"
+    }
+  ]
 }
