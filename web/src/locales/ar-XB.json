@@ -118687,6 +118687,32 @@
       "value": "episode"
     }
   ],
+  "web.detail.episodeRangeCode": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ES\u202C"
+    },
+    {
+      "type": 1,
+      "value": "season"
+    },
+    {
+      "type": 0,
+      "value": "\u202EE\u202C"
+    },
+    {
+      "type": 1,
+      "value": "start"
+    },
+    {
+      "type": 0,
+      "value": "\u202E–E\u202C"
+    },
+    {
+      "type": 1,
+      "value": "end"
+    }
+  ],
   "web.detail.episodes.heading": [
     {
       "type": 0,
@@ -118711,6 +118737,24 @@
       "value": "\u200F\u202ENow Viewing\u202C"
     }
   ],
+  "web.detail.episodes.numberRange": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "start"
+    },
+    {
+      "type": 0,
+      "value": "\u202E–\u202C"
+    },
+    {
+      "type": 1,
+      "value": "end"
+    }
+  ],
   "web.detail.episodes.numbered": [
     {
       "type": 0,
@@ -118719,6 +118763,100 @@
     {
       "type": 1,
       "value": "episode"
+    }
+  ],
+  "web.detail.episodes.numberedRange": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EEpisodes \u202C"
+    },
+    {
+      "type": 1,
+      "value": "start"
+    },
+    {
+      "type": 0,
+      "value": "\u202E–\u202C"
+    },
+    {
+      "type": 1,
+      "value": "end"
+    }
+  ],
+  "web.detail.episodes.partCode": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EE\u202C"
+    },
+    {
+      "type": 1,
+      "value": "episode"
+    }
+  ],
+  "web.detail.episodes.partOf": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPart of \u202C"
+    },
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": "\u202E · \u202C"
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.detail.episodes.partsHeading": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EIn this video\u202C"
+    }
+  ],
+  "web.detail.episodes.rangeBadge": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E episode\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E episodes\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.detail.episodes.runtimeMinutes": [
@@ -118751,6 +118889,66 @@
     {
       "type": 1,
       "value": "episode"
+    }
+  ],
+  "web.detail.episodes.spokenRange": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESeason \u202C"
+    },
+    {
+      "type": 1,
+      "value": "season"
+    },
+    {
+      "type": 0,
+      "value": "\u202E, Episodes \u202C"
+    },
+    {
+      "type": 1,
+      "value": "start"
+    },
+    {
+      "type": 0,
+      "value": "\u202E to \u202C"
+    },
+    {
+      "type": 1,
+      "value": "end"
+    }
+  ],
+  "web.detail.episodes.spokenRangeTitled": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESeason \u202C"
+    },
+    {
+      "type": 1,
+      "value": "season"
+    },
+    {
+      "type": 0,
+      "value": "\u202E, Episodes \u202C"
+    },
+    {
+      "type": 1,
+      "value": "start"
+    },
+    {
+      "type": 0,
+      "value": "\u202E to \u202C"
+    },
+    {
+      "type": 1,
+      "value": "end"
+    },
+    {
+      "type": 0,
+      "value": "\u202E, \u202C"
+    },
+    {
+      "type": 1,
+      "value": "title"
     }
   ],
   "web.detail.episodes.spokenSpecial": [

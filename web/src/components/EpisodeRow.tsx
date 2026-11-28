@@ -7,6 +7,12 @@ import { useOverlayPrefs } from "@/hooks/useOverlayPrefs";
 import { overlayDataFromEpisodeListItem } from "@/lib/overlays";
 import { useT } from "@/i18n";
 import WatchProgressBar from "@/components/WatchProgressBar";
+import EpisodeRangeBadge from "@/components/EpisodeRangeBadge";
+import {
+  combinedEpisodeTitle,
+  episodeRangeCount,
+  formatEpisodeNumberRange,
+} from "@/lib/episodeRange";
 
 interface EpisodeRowProps {
   episode: EpisodeListItem;
@@ -21,6 +27,8 @@ export default function EpisodeRow({ episode, rating, watched, progress }: Episo
     episode: episode.episode_number,
   });
   const { prefs: overlayPrefs } = useOverlayPrefs();
+  const isRange = episodeRangeCount(episode) > 1;
+  const title = combinedEpisodeTitle(episode) || fallbackTitle;
   const watchedState = watched ?? episode.user_data?.played ?? false;
   const derivedProgress =
     progress ??
@@ -45,8 +53,12 @@ export default function EpisodeRow({ episode, rating, watched, progress }: Episo
       }`}
     >
       {/* Episode number */}
-      <div className="text-muted-foreground/50 w-7 shrink-0 text-center text-sm font-semibold">
-        {episode.episode_number}
+      <div
+        className={`min-w-7 shrink-0 text-center text-sm font-semibold whitespace-nowrap ${
+          isRange ? "text-foreground" : "text-muted-foreground/50"
+        }`}
+      >
+        {formatEpisodeNumberRange(episode)}
       </div>
 
       {/* Thumbnail */}
@@ -54,7 +66,7 @@ export default function EpisodeRow({ episode, rating, watched, progress }: Episo
         {episode.still_url ? (
           <img
             src={episode.still_url}
-            alt={episode.title || fallbackTitle}
+            alt={title}
             className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
             loading="lazy"
             decoding="async"
@@ -78,9 +90,7 @@ export default function EpisodeRow({ episode, rating, watched, progress }: Episo
       {/* Info */}
       <div className="min-w-0 flex-1">
         <div className="mb-0.5 flex items-center gap-2">
-          <span className="text-foreground truncate text-sm font-semibold">
-            {episode.title || fallbackTitle}
-          </span>
+          <span className="text-foreground truncate text-sm font-semibold">{title}</span>
           {watchedState && (
             <svg
               className="text-success size-3.5 shrink-0"
@@ -95,7 +105,8 @@ export default function EpisodeRow({ episode, rating, watched, progress }: Episo
             </svg>
           )}
         </div>
-        <div className="text-muted-foreground text-xs">
+        <div className="text-muted-foreground flex flex-wrap items-center text-xs">
+          <EpisodeRangeBadge episode={episode} className="me-2" />
           {episode.air_date && <span>{episode.air_date}</span>}
           {episode.air_date && episode.runtime > 0 && (
             <span className="mx-1.5">{t("web.detail.separator.dot")}</span>

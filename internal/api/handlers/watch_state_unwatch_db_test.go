@@ -553,3 +553,92 @@ func (f audiobookMarkFixture) manualPlays(t *testing.T) []userstore.WatchHistory
 	}
 	return manual
 }
+
+// A season list shows a multi-episode file's later episodes inside its first
+// episode's row, so marking that row watched or unwatched covers them too:
+// otherwise Next Up offers an episode the list no longer shows, playing the
+// same video again.
+func TestMarkingMultiEpisodeRowCoversItsFoldedEpisodesPostgres(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := t.Context()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, sql, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	prefix := fmt.Sprintf("multi-episode-mark-%d", time.Now().UnixNano())
+	series := prefix + "-series"
+	e1, e2, e3 := prefix+"-s01e01", prefix+"-s01e02", prefix+"-s01e03"
+	var folder, userID int
+	if err := pool.QueryRow(ctx, `INSERT INTO media_folders (type,name,enabled) VALUES ('series',$1,true) RETURNING id`, prefix).Scan(&folder); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `INSERT INTO users (username,role) VALUES ($1,'user') RETURNING id`, prefix).Scan(&userID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id=$1`, userID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_files WHERE media_folder_id=$1`, folder)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id=$1`, series)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_folders WHERE id=$1`, folder)
+	})
+	exec(`INSERT INTO media_items (content_id,type,title) VALUES ($1,'series','Multi-episode Series')`, series)
+	exec(`INSERT INTO media_item_libraries (content_id,media_folder_id) VALUES ($1,$2)`, series, folder)
+	exec(`INSERT INTO episodes (content_id,series_id,season_number,episode_number,title) VALUES
+		($1,$4,1,1,'Part one'), ($2,$4,1,2,'Part two'), ($3,$4,1,3,'Next')`, e1, e2, e3, series)
+	exec(`INSERT INTO episode_libraries (episode_id,media_folder_id) VALUES ($1,$4), ($2,$4), ($3,$4)`, e1, e2, e3, folder)
+	exec(`INSERT INTO media_files (episode_id,media_folder_id,file_path,file_size,duration,multi_episode_start,multi_episode_end) VALUES ($1,$2,$3,1,2640,1,2)`, e1, folder, "/"+e1)
+	exec(`INSERT INTO media_files (episode_id,media_folder_id,file_path,file_size,duration) VALUES ($1,$2,$3,1,1320)`, e3, folder, "/"+e3)
+	profileID := fmt.Sprintf("00000000-0000-4000-8000-%012d", time.Now().UnixNano()%1_000_000_000_000)
+	exec(`INSERT INTO user_profiles (id,user_id,name) VALUES ($1,$2,'Multi-episode fixture')`, profileID, userID)
+
+	provider := pgstore.NewPostgresProvider(pool)
+	watch := watchstate.NewService(provider)
+	handler := &ItemsHandler{
+		itemRepo:    catalog.NewItemRepository(pool),
+		seasonRepo:  catalog.NewSeasonRepository(pool),
+		episodeRepo: catalog.NewEpisodeRepository(pool),
+		fileRepo:    scanner.NewFileRepository(pool),
+		watchState:  watch,
+	}
+	completed := func(id string) bool {
+		t.Helper()
+		progress, err := watch.Progress(ctx, userID, profileID, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return progress != nil && progress.Completed
+	}
+	nextUp := catalog.NewNextUpRepository(pool, provider)
+
+	view, err := handler.SetWatchedState(ctx, userID, profileID, e1, true, false, catalog.AccessFilter{})
+	if err != nil {
+		t.Fatalf("mark watched: %v", err)
+	}
+	if !completed(e1) || !completed(e2) || completed(e3) || view.AffectedCount != 2 {
+		t.Fatalf("after marking the E1-E2 row watched: e1=%v e2=%v e3=%v affected=%d, want E1 and E2 only", completed(e1), completed(e2), completed(e3), view.AffectedCount)
+	}
+	results, err := nextUp.ListNextUp(ctx, catalog.NextUpQuery{UserID: userID, ProfileID: profileID, SeriesID: series, Limit: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 || results[0].ContentID != e3 {
+		t.Fatalf("next up = %+v, want %s", results, e3)
+	}
+
+	if _, err := handler.SetWatchedState(ctx, userID, profileID, e1, false, false, catalog.AccessFilter{}); err != nil {
+		t.Fatalf("mark unwatched: %v", err)
+	}
+	if completed(e1) || completed(e2) {
+		t.Fatalf("after marking the E1-E2 row unwatched: e1=%v e2=%v, want neither", completed(e1), completed(e2))
+	}
+}

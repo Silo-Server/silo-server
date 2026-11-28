@@ -442,6 +442,15 @@ type episodeFileResponse struct {
 	Unreadable bool `json:"-"`
 }
 
+// spannedEpisodeResponse is an episode listed as a part of the multi-episode
+// row that plays it instead of under a row of its own.
+type spannedEpisodeResponse struct {
+	ContentID     string
+	EpisodeNumber int
+	Title         string
+	Overview      string
+}
+
 // episodeResponse is the shape of an episode in API responses.
 type episodeResponse struct {
 	StillIsEpisodeStill *bool                   `json:"-"`
@@ -468,6 +477,11 @@ type episodeResponse struct {
 	MachineTranslatedFields []string `json:"-"`
 	// PendingTranslationLanguage reaches the v2 episode row only; v1 is frozen.
 	PendingTranslationLanguage string `json:"-"`
+	// EpisodeNumberEnd and SpannedEpisodes describe a multi-episode row: the
+	// last episode number its video plays and the later episodes folded into
+	// it. They reach the v2 episode row only; v1 is frozen.
+	EpisodeNumberEnd int                      `json:"-"`
+	SpannedEpisodes  []spannedEpisodeResponse `json:"-"`
 }
 
 type episodeImageFallback struct {
@@ -1060,8 +1074,12 @@ func (h *ItemsHandler) buildEpisodeResponses(ctx context.Context, v ItemViewer, 
 		stillURLs = h.detailSvc.PresignURLsWithExpiry(ctx, stillPaths, requestVariantHint("card", size))
 	}
 	hasCeiling := access.NormalizePlaybackQuality(filter.MaxPlaybackQuality) != ""
+	parts, folded := catalog.FoldSpannedEpisodes(episodes, filesByEpisode)
 	kept := resp[:0]
 	for i := range resp {
+		if folded[resp[i].ContentID] {
+			continue
+		}
 		served := filesByEpisode[resp[i].ContentID]
 		if hasCeiling && len(served) > 0 && !anyFileAllowed(served, filter) {
 			// Every version exceeds the viewer's quality ceiling, so there is
@@ -1074,6 +1092,14 @@ func (h *ItemsHandler) buildEpisodeResponses(ctx context.Context, v ItemViewer, 
 		ep.Files = episodeFileResponses(files, filter)
 		ep.UserData = userData[ep.ContentID]
 		ep.OverlaySummary = overlays.BuildSummary(files)
+		for _, part := range parts[ep.ContentID] {
+			ep.SpannedEpisodes = append(ep.SpannedEpisodes, spannedEpisodeResponse{
+				ContentID: part.ContentID, EpisodeNumber: part.EpisodeNumber, Title: part.Title, Overview: part.Overview,
+			})
+		}
+		if n := len(ep.SpannedEpisodes); n > 0 {
+			ep.EpisodeNumberEnd = ep.SpannedEpisodes[n-1].EpisodeNumber
+		}
 		kept = append(kept, ep)
 	}
 	return kept
@@ -2342,11 +2368,57 @@ func (h *ItemsHandler) resolveWatchedTargets(ctx context.Context, contentID stri
 		}
 		return "season", seriesID, h.episodeTargets(ctx, episodes), nil
 	default:
-		return itemTypeEpisode, seriesID, []watchedLeafTarget{{
+		var files []*models.MediaFile
+		if h.fileRepo != nil {
+			files, _ = h.fileRepo.GetByEpisodeID(ctx, target.Episode.ContentID)
+		}
+		targets := []watchedLeafTarget{{
 			ContentID:       target.Episode.ContentID,
-			DurationSeconds: h.contentDurationSeconds(ctx, "", target.Episode.ContentID, target.Episode.Runtime),
-		}}, nil
+			DurationSeconds: mediaFileDurationSeconds(files, target.Episode.ContentID, target.Episode.Runtime),
+		}}
+		folded, err := h.foldedEpisodeTargets(ctx, target.Episode, files)
+		if err != nil {
+			return "", "", nil, err
+		}
+		return itemTypeEpisode, seriesID, append(targets, folded...), nil
 	}
+}
+
+// foldedEpisodeTargets returns the watched targets of the episodes a season
+// list folds into episode's row (catalog.FoldSpannedEpisodes): marking a
+// multi-episode row covers every episode its video plays. files are the
+// episode's own files; an episode with no multi-episode file among them folds
+// nothing, so only such a row costs further lookups.
+func (h *ItemsHandler) foldedEpisodeTargets(ctx context.Context, episode *models.Episode, files []*models.MediaFile) ([]watchedLeafTarget, error) {
+	last := episode.EpisodeNumber
+	for _, f := range files {
+		if f != nil && f.EpisodeID == episode.ContentID && f.MultiEpisodeEnd > f.MultiEpisodeStart {
+			last = max(last, min(f.MultiEpisodeEnd, episode.EpisodeNumber+catalog.MaxEpisodeSpan))
+		}
+	}
+	if last == episode.EpisodeNumber || h.episodeRepo == nil {
+		return nil, nil
+	}
+	season, err := h.episodeRepo.ListBySeason(ctx, episode.SeriesID, episode.SeasonNumber)
+	if err != nil {
+		return nil, err
+	}
+	var candidates []*models.Episode
+	for _, ep := range season {
+		if ep.ContentID == episode.ContentID || (ep.EpisodeNumber > episode.EpisodeNumber && ep.EpisodeNumber <= last) {
+			candidates = append(candidates, ep)
+		}
+	}
+	served := h.listEpisodeFiles(ctx, episodeContentIDs(candidates))
+	parts, _ := catalog.FoldSpannedEpisodes(candidates, served)
+	targets := make([]watchedLeafTarget, 0, len(parts[episode.ContentID]))
+	for _, part := range parts[episode.ContentID] {
+		targets = append(targets, watchedLeafTarget{
+			ContentID:       part.ContentID,
+			DurationSeconds: mediaFileDurationSeconds(served[part.ContentID], part.ContentID, part.Runtime),
+		})
+	}
+	return targets, nil
 }
 
 // episodeTargets resolves the watched leaf targets for a season or series.

@@ -397,6 +397,8 @@ export interface EpisodeRef {
   contentId: string;
   seasonNumber: number;
   episodeNumber: number;
+  /** The last episode a multi-episode video plays (E04–E05 gives 5). */
+  episodeNumberEnd?: number;
   title: string;
   runtime: number;
   /** Optional display fields for post-roll / next-episode UI. */

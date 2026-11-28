@@ -161,15 +161,18 @@ func assertEpisodeListFiles(t *testing.T, ctx context.Context, pool *pgxpool.Poo
 		t.Fatalf("episode list files by episodes: %v", err)
 	}
 	type rendered struct {
-		ID, FolderID     int
-		Path, Resolution string
-		Size             int64
-		Rejected         bool
+		ID, FolderID         int
+		Path, Resolution     string
+		Size                 int64
+		Rejected             bool
+		EpisodeID            string
+		RangeStart, RangeEnd int
 	}
 	view := func(files []*models.MediaFile) []rendered {
 		out := make([]rendered, 0, len(files))
 		for _, f := range files {
-			out = append(out, rendered{f.ID, f.MediaFolderID, f.FilePath, f.Resolution, f.FileSize, f.ProbeRejected()})
+			out = append(out, rendered{f.ID, f.MediaFolderID, f.FilePath, f.Resolution, f.FileSize, f.ProbeRejected(),
+				f.EpisodeID, f.MultiEpisodeStart, f.MultiEpisodeEnd})
 		}
 		return out
 	}

@@ -18,7 +18,9 @@ import { useOptionalAuth } from "@/hooks/useAuth";
 import { useSettingValue } from "@/hooks/queries/settingValues";
 import { useViewTransitionNavigate } from "@/hooks/useViewTransition";
 import { useSeasonEpisodes, useSeasons } from "@/hooks/queries/episodes";
-import { codeNumber, useT, type MessageKey } from "@/i18n";
+import { useT, type MessageKey } from "@/i18n";
+import EpisodeRangeBadge from "@/components/EpisodeRangeBadge";
+import { combinedEpisodeTitle, formatEpisodeNumberRange } from "@/lib/episodeRange";
 import { createWatchTogetherRoom, type WatchTogetherSelectionMode } from "@/lib/watchTogether";
 import { copyWatchTogetherInvite } from "@/lib/watchTogetherActions";
 import { decodeThumbhash } from "@/lib/thumbhash";
@@ -129,14 +131,17 @@ function EpisodeChooser({
                 className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-start hover:bg-white/[0.04]"
               >
                 <span
-                  className={`text-muted-foreground shrink-0 text-xs font-semibold tabular-nums ${airDateLabel ? "" : "w-7"}`}
+                  className={`text-muted-foreground shrink-0 text-xs font-semibold whitespace-nowrap tabular-nums ${airDateLabel ? "" : "min-w-7"}`}
                 >
                   {airDateLabel ??
                     t("web.watchTogether.common.episodeNumber", {
-                      number: codeNumber(episode.episode_number),
+                      number: formatEpisodeNumberRange(episode),
                     })}
                 </span>
-                <span className="min-w-0 flex-1 truncate text-sm">{episode.title}</span>
+                <span className="min-w-0 flex-1 truncate text-sm">
+                  {combinedEpisodeTitle(episode) || episode.title}
+                </span>
+                <EpisodeRangeBadge episode={episode} />
                 {episode.user_data?.played ? (
                   <span className="text-muted-foreground text-[0.6875rem]">
                     {t("web.watchTogether.startSheet.watched")}

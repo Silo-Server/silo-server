@@ -1,17 +1,15 @@
 import type { EpisodeListItem } from "@/api/types";
-import {
-  formatEpisodeCode,
-  formatEpisodeLabel,
-  labelsEpisodesByAirDate,
-} from "@/lib/episodeCardLabels";
+import { formatEpisodeLabel, labelsEpisodesByAirDate } from "@/lib/episodeCardLabels";
 import { formatDate } from "@/lib/datetime";
+import { combinedEpisodeTitle, episodeRangeEnd, formatEpisodeRangeCode } from "@/lib/episodeRange";
 import { formatRuntimeMinutes } from "@/lib/mediaFormat";
 import { t } from "@/i18n";
 
 type EpisodeIdentity = Pick<
   EpisodeListItem,
   "season_number" | "episode_number" | "title" | "air_date"
->;
+> &
+  Partial<Pick<EpisodeListItem, "episode_number_end" | "spanned_episodes">>;
 
 /**
  * First caption line, "S01E02 · Pilot", in two parts: the code with its
@@ -24,7 +22,8 @@ export function episodeCardTitleParts(
   prefix: string;
   title?: string;
 } {
-  const title = episode.title?.trim();
+  // A multi-episode row shows its parts' shared name and its range code.
+  const title = combinedEpisodeTitle(episode);
   if (labelsEpisodesByAirDate(episodeLabels)) {
     // The air date is on the line below, so the title leads on its own; an
     // untitled episode shows the date (or its code when undated).
@@ -32,7 +31,7 @@ export function episodeCardTitleParts(
       ? { prefix: "", title }
       : { prefix: formatEpisodeLabel({ ...episode, episode_labels: episodeLabels }) };
   }
-  const code = formatEpisodeCode(episode.season_number, episode.episode_number);
+  const code = formatEpisodeRangeCode(episode.season_number, episode);
   return title ? { prefix: `${code} · `, title } : { prefix: code };
 }
 
@@ -43,9 +42,16 @@ export function episodeCardTitleParts(
  */
 export function episodeCardSpokenTitle(episode: EpisodeIdentity, episodeLabels?: string): string {
   const episodeNumber = episode.episode_number;
-  const title = episode.title?.trim();
+  const title = combinedEpisodeTitle(episode);
   if (labelsEpisodesByAirDate(episodeLabels)) {
     return title || formatEpisodeLabel({ ...episode, episode_labels: episodeLabels });
+  }
+  const end = episodeRangeEnd(episode);
+  if (end != null) {
+    const range = { season: episode.season_number, start: episodeNumber, end };
+    return title
+      ? t("web.detail.episodes.spokenRangeTitled", { ...range, title })
+      : t("web.detail.episodes.spokenRange", range);
   }
   if (episode.season_number === 0) {
     return title

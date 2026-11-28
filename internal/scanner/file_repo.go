@@ -92,10 +92,12 @@ const mfOverlayFileColumns = `mf.content_id, mf.episode_id, mf.media_folder_id, 
 	mf.video_tracks, mf.audio_tracks, mf.subtitle_tracks, mf.external_subtitles, mf.edition_key`
 
 // mfEpisodeListFileColumns adds what a season's episode list shows for each
-// version beyond its overlay badges: the file ID, the size, and the probe
-// timestamps MediaFile.ProbeRejected reads.
+// version beyond its overlay badges: the file ID, the size, the probe
+// timestamps MediaFile.ProbeRejected reads, and the episode range that folds
+// a multi-episode file's later episodes into its row.
 const mfEpisodeListFileColumns = mfOverlayFileColumns + `,
-	mf.id, mf.file_size, mf.probe_updated_at, mf.probe_failed_at`
+	mf.id, mf.file_size, mf.probe_updated_at, mf.probe_failed_at,
+	COALESCE(mf.multi_episode_start, 0), COALESCE(mf.multi_episode_end, 0)`
 
 // mfFileColumns qualifies every column with the "mf" alias for use in JOIN queries
 // where unqualified "id" would be ambiguous.
@@ -309,7 +311,7 @@ func scanOverlayMediaFiles(rows pgx.Rows) ([]*models.MediaFile, error) {
 // scanEpisodeListMediaFiles scans rows selected with mfEpisodeListFileColumns.
 func scanEpisodeListMediaFiles(rows pgx.Rows) ([]*models.MediaFile, error) {
 	return scanOverlayMediaFilesWith(rows, func(f *models.MediaFile) []any {
-		return []any{&f.ID, &f.FileSize, &f.ProbeUpdatedAt, &f.ProbeFailedAt}
+		return []any{&f.ID, &f.FileSize, &f.ProbeUpdatedAt, &f.ProbeFailedAt, &f.MultiEpisodeStart, &f.MultiEpisodeEnd}
 	})
 }
 

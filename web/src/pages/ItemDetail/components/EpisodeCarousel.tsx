@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { combinedEpisodeTitle } from "@/lib/episodeRange";
 import { Play, ChevronLeft, ChevronRight } from "lucide-react";
 import type { EpisodeListItem } from "@/api/types";
 import { WatchedCheckIndicator } from "@/components/CardWatchedBadge";
@@ -132,7 +133,7 @@ function EpisodeCarouselCard({
   const cardRef = useRef<HTMLDivElement>(null);
   const thumbhashUrl = ep.still_thumbhash ? decodeThumbhash(ep.still_thumbhash) : "";
   const episodeTitle =
-    ep.title ||
+    combinedEpisodeTitle(ep) ||
     episodeAirDateLabel(episodeLabels, ep.air_date) ||
     t("web.detail.episodes.numbered", { episode: ep.episode_number });
   const episodeHref = buildItemHref({

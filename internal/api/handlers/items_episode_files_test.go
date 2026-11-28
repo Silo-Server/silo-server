@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -55,5 +56,56 @@ func TestSeasonListHidesEpisodesAboveQualityCeiling(t *testing.T) {
 	capped := catalog.AccessFilter{MaxPlaybackQuality: "1080p", PresentationLibraryID: &browsed, ScopeFilesToLibrary: true}
 	if got := ids(capped); got != "e1,e3" {
 		t.Fatalf("1080p ceiling: episodes = %s, want e1,e3", got)
+	}
+}
+
+// A season list shows a multi-episode file once: an episode the file spans
+// leaves the list and its number range and parts move onto the file's first
+// episode. It folds only when nothing else plays it: an episode with a file of
+// its own stays, and so does one the first episode has a version without.
+func TestSeasonListFoldsEpisodesOfMultiEpisodeFiles(t *testing.T) {
+	multi := func(id int, first string, start, end int) *models.MediaFile {
+		return &models.MediaFile{ID: id, EpisodeID: first, MediaFolderID: 1, Resolution: "1080p", MultiEpisodeStart: start, MultiEpisodeEnd: end}
+	}
+	single := func(id int, episode string) *models.MediaFile {
+		return &models.MediaFile{ID: id, EpisodeID: episode, MediaFolderID: 1, Resolution: "1080p"}
+	}
+	h := &ItemsHandler{fileRepo: ceilingTestFiles{byEpisode: map[string][]*models.MediaFile{
+		"e1": {single(1, "e1")},
+		"e2": {multi(2, "e2", 2, 3)},
+		"e3": {multi(2, "e2", 2, 3)},
+		// E4 has a single-episode version too, which does not play E5.
+		"e4": {multi(4, "e4", 4, 5), single(5, "e4")},
+		"e5": {multi(4, "e4", 4, 5)},
+		// E7 has a file of its own besides the E6-E7 file.
+		"e6": {multi(6, "e6", 6, 7)},
+		"e7": {multi(6, "e6", 6, 7), single(7, "e7")},
+	}}}
+	var episodes []*models.Episode
+	for n := 1; n <= 7; n++ {
+		id := fmt.Sprintf("e%d", n)
+		episodes = append(episodes, &models.Episode{ContentID: id, SeasonNumber: 1, EpisodeNumber: n, Title: "Title " + id, Overview: "Overview " + id})
+	}
+
+	got := h.buildEpisodeResponses(t.Context(), ItemViewer{}, episodes)
+	var ids []string
+	for _, ep := range got {
+		ids = append(ids, ep.ContentID)
+	}
+	if strings.Join(ids, ",") != "e1,e2,e4,e5,e6,e7" {
+		t.Fatalf("episodes = %v, want e3 folded into e2 only", ids)
+	}
+	for _, ep := range got {
+		wantEnd := 0
+		if ep.ContentID == "e2" {
+			wantEnd = 3
+		}
+		if ep.EpisodeNumberEnd != wantEnd {
+			t.Errorf("%s episode_number_end = %d, want %d", ep.ContentID, ep.EpisodeNumberEnd, wantEnd)
+		}
+	}
+	parts := got[1].SpannedEpisodes
+	if len(parts) != 1 || parts[0].ContentID != "e3" || parts[0].EpisodeNumber != 3 || parts[0].Title != "Title e3" || parts[0].Overview != "Overview e3" {
+		t.Fatalf("e2 spanned episodes = %+v, want e3 with its title and overview", parts)
 	}
 }

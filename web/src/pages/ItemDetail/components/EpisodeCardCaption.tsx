@@ -3,6 +3,8 @@ import type { EpisodeListItem } from "@/api/types";
 import { useClampCut } from "@/hooks/useClampCut";
 import { useAppLanguage } from "@/i18n";
 import { cn } from "@/lib/utils";
+import EpisodeRangeBadge from "@/components/EpisodeRangeBadge";
+import { episodeRangeCount } from "@/lib/episodeRange";
 import MachineTranslatedLabel from "./MachineTranslatedLabel";
 import { hasMachineTranslation } from "./machineTranslation";
 import {
@@ -40,6 +42,7 @@ export default function EpisodeCardCaption({
   useAppLanguage();
   const { prefix, title } = episodeCardTitleParts(episode, episodeLabels);
   const metadata = episodeCardMetadata(episode);
+  const isRange = episodeRangeCount(episode) > 1;
   const overview = hideOverview ? "" : (episode.overview?.trim() ?? "");
   const showsTranslationLabel =
     overview !== "" && hasMachineTranslation(episode.machine_translated_fields);
@@ -73,8 +76,9 @@ export default function EpisodeCardCaption({
         </p>
         {badges && <span className="flex shrink-0 items-center gap-2">{badges}</span>}
       </div>
-      {(metadata || notice || showsTranslationLabel) && (
+      {(metadata || notice || showsTranslationLabel || isRange) && (
         <div className="text-muted-foreground flex items-center gap-2 text-xs">
+          <EpisodeRangeBadge episode={episode} />
           {metadata && <span className="min-w-0 truncate">{metadata}</span>}
           {notice && <span className="shrink-0">{notice}</span>}
           {showsTranslationLabel && <MachineTranslatedLabel compact />}

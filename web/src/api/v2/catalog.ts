@@ -405,6 +405,8 @@ export function episodeFromV2(episode: EpisodeV2): EpisodeListItem {
     overlay_summary: episode.overlay_summary,
     machine_translated_fields: episode.machine_translated_fields,
     pending_translation_language: episode.pending_translation_language,
+    episode_number_end: episode.episode_number_end,
+    spanned_episodes: episode.spanned_episodes,
   };
 }
 

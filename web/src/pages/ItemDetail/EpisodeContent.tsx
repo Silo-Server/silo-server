@@ -26,6 +26,16 @@ import EditMetadataDialog from "@/components/EditMetadataDialog";
 import MediaLocations from "@/components/MediaLocations";
 import PageBack from "@/components/PageBack";
 import EpisodeCarousel from "./components/EpisodeCarousel";
+import EpisodeParts from "./components/EpisodeParts";
+import EpisodeRangeBadge from "@/components/EpisodeRangeBadge";
+import ViewTransitionLink from "@/components/ViewTransitionLink";
+import {
+  combinedEpisodeTitle,
+  episodeRangeCount,
+  episodePartsDiffer,
+  episodeRangeEnd,
+  formatEpisodeRangeCode,
+} from "@/lib/episodeRange";
 import DetailHero from "./DetailHero";
 import { useDetailWatchTogether } from "@/pages/watchtogether/DetailWatchTogether";
 import MetadataBadges from "./components/MetadataBadges";
@@ -272,6 +282,21 @@ export default function EpisodeContent({
     libraryId,
   );
   const siblingEpisodes = episodesData?.episodes ?? [];
+  // A multi-episode file plays this episode and later ones: on its first
+  // episode the page names the whole range; a later episode it plays points
+  // to that row, which the season list shows in its place.
+  const rangeRow = siblingEpisodes.find(
+    (ep) => ep.content_id === item.content_id && episodeRangeCount(ep) > 1,
+  );
+  const containingRow = rangeRow
+    ? undefined
+    : siblingEpisodes.find((ep) =>
+        ep.spanned_episodes?.some((part) => part.content_id === item.content_id),
+      );
+  const heroTitle = (rangeRow && combinedEpisodeTitle(rangeRow)) || title;
+  // Episodes described differently get a tab each; otherwise the page shows
+  // the one description as for any episode.
+  const partTabsRow = rangeRow && episodePartsDiffer(rangeRow) ? rangeRow : undefined;
   const seasonLabel =
     navigationState?.parentSeasonLabel ??
     (currentSeason
@@ -303,10 +328,13 @@ export default function EpisodeContent({
     breadcrumbSegments.push({ label: seasonLabel, href: seasonHref });
   }
   if (episodeNum != null) {
+    const rangeEnd = rangeRow && episodeRangeEnd(rangeRow);
     breadcrumbSegments.push({
       label:
         episodeAirDateLabel(item.episode_labels, item.air_date) ??
-        t("web.detail.episodes.numbered", { episode: episodeNum }),
+        (rangeEnd != null
+          ? t("web.detail.episodes.numberedRange", { start: episodeNum, end: rangeEnd })
+          : t("web.detail.episodes.numbered", { episode: episodeNum })),
     });
   }
 
@@ -315,7 +343,22 @@ export default function EpisodeContent({
       <div className="episode-detail-viewport">
         <DetailHero
           variant="episode"
-          title={title}
+          title={heroTitle}
+          subtitle={
+            containingRow && seasonNum != null ? (
+              <ViewTransitionLink
+                to={buildItemHref({ contentId: containingRow.content_id, libraryId })}
+                state={episodeLinkState}
+                className="hover:text-foreground inline-flex items-center gap-2 underline-offset-4 hover:underline"
+              >
+                <EpisodeRangeBadge episode={containingRow} />
+                {t("web.detail.episodes.partOf", {
+                  code: formatEpisodeRangeCode(seasonNum, containingRow),
+                  title: combinedEpisodeTitle(containingRow),
+                })}
+              </ViewTransitionLink>
+            ) : undefined
+          }
           topNav={<PageBack />}
           context={<DetailBreadcrumb segments={breadcrumbSegments} />}
           backdropUrl={item.backdrop_url}
@@ -324,6 +367,7 @@ export default function EpisodeContent({
           logoUrl={item.logo_url}
           metadata={
             <div className="flex flex-wrap items-center gap-2">
+              {rangeRow && <EpisodeRangeBadge episode={rangeRow} className="py-0.5" />}
               <MetadataBadges
                 duration={formatRuntimeMinutes(selectedMediaSummary.durationMinutes) || undefined}
               />
@@ -336,7 +380,21 @@ export default function EpisodeContent({
             </div>
           }
           scoreRow={<ScoreRow ratings={item.ratings} />}
-          overview={overviewSource?.overview}
+          overview={partTabsRow ? undefined : overviewSource?.overview}
+          parts={
+            partTabsRow && (
+              <EpisodeParts
+                key={partTabsRow.content_id}
+                episode={partTabsRow}
+                hideOverviews={overviewHidden}
+                onRevealOverview={() => setRevealedOverviewId(item.content_id)}
+                clamp
+                translating={overviewTranslating}
+                onTranslate={onTranslateOverview}
+                machineTranslated={hasMachineTranslation(overviewSource?.machine_translated_fields)}
+              />
+            )
+          }
           overviewTranslating={overviewTranslating}
           onTranslateOverview={onTranslateOverview}
           overviewMachineTranslated={hasMachineTranslation(
@@ -457,7 +515,7 @@ export default function EpisodeContent({
                 </h2>
                 <EpisodeCarousel
                   episodes={siblingEpisodes}
-                  currentEpisodeNumber={episodeNum ?? -1}
+                  currentEpisodeNumber={containingRow?.episode_number ?? episodeNum ?? -1}
                   episodeLinkState={episodeLinkState}
                   libraryId={libraryId}
                   episodeLabels={item.episode_labels}
