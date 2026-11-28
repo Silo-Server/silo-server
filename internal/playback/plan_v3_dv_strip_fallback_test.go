@@ -88,8 +88,11 @@ func TestPlanPlaybackV3DV81StripFallbackSurvivesMissingHLSAudioConversion(t *tes
 			strip = append(strip, plan)
 		}
 	}
-	if len(strip) != 1 || strip[0].Delivery != DeliveryRemuxProgressiveV3 || strip[0].EffectiveRecipe.AudioCodec != audioCodecAACV3 {
-		t.Fatalf("strip plans = %d, want one progressive remux converting TrueHD to AAC", len(strip))
+	// The client decodes TrueHD; only MP4 forced the conversion, so the 7.1
+	// track keeps 5.1 surround.
+	if len(strip) != 1 || strip[0].Delivery != DeliveryRemuxProgressiveV3 || strip[0].EffectiveRecipe.AudioCodec != audioCodecAACV3 ||
+		strip[0].EffectiveRecipe.AudioChannels == nil || *strip[0].EffectiveRecipe.AudioChannels != 6 {
+		t.Fatalf("strip plans = %d, want one progressive remux converting TrueHD to AAC 5.1", len(strip))
 	}
 	if terminal == nil || terminal.Reason != TerminalAudioConversionUnsupportedV3 {
 		t.Fatalf("terminal = %#v, want the audio conversion cause once every recipe is exhausted", terminal)

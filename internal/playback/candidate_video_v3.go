@@ -43,9 +43,9 @@ type remuxAudioFactsV3 struct {
 	progressiveCodecConverts, progressiveChannelLimited, progressiveConverts bool
 	hlsCodecConverts, hlsChannelLimited, hlsTranscode, hlsQuirkConverts      bool
 	// hlsConverts includes the device quirk that converts audio HLS could copy.
-	hlsConverts          bool
-	hlsAACChannels       int
-	firefoxAAC, hlsQuirk *AppliedQuirkV3
+	hlsConverts                            bool
+	progressiveAACChannels, hlsAACChannels int
+	firefoxAAC, hlsQuirk                   *AppliedQuirkV3
 }
 
 func (f *videoFactsV3) originalRangeOK() bool {
@@ -238,8 +238,9 @@ func (p *candidatePlannerV3) remuxAudioFacts() {
 	a := &f.remuxAudio
 	a.progressiveChannelLimited = !f.noAudioTrack && deliveryExceedsMaxChannelsV3(request, DeliveryClassProgressiveV3, source.AudioCodec, source.AudioChannels)
 	a.hlsChannelLimited = !f.noAudioTrack && deliveryExceedsMaxChannelsV3(request, DeliveryClassHLSV3, source.AudioCodec, source.AudioChannels)
-	progressiveCodecOK := f.noAudioTrack || progressiveCopyFitsMP4V3(source.AudioCodec) &&
-		deliverySupportsAudioClaimV3(request, DeliveryClassProgressiveV3, source.AudioCodec, f.audioClaims, f.audioOK)
+	progressiveDecodes := deliverySupportsAudioClaimV3(request, DeliveryClassProgressiveV3, source.AudioCodec, f.audioClaims, f.audioOK)
+	progressiveFitsMP4 := progressiveCopyFitsMP4V3(source.AudioCodec)
+	progressiveCodecOK := f.noAudioTrack || progressiveFitsMP4 && progressiveDecodes
 	hlsCodecOK := f.noAudioTrack || hlsNativeAudioCodecV3(source.AudioCodec) &&
 		deliverySupportsAudioClaimV3(request, DeliveryClassHLSV3, source.AudioCodec, f.audioClaims, f.audioOK)
 	// Matroska AAC timestamps break Firefox once copied into MP4, so both
@@ -247,6 +248,10 @@ func (p *candidatePlannerV3) remuxAudioFacts() {
 	a.firefoxAAC, _ = firefoxMatroskaAACTimingQuirkV3(source, request)
 	a.progressiveCodecConverts = !progressiveCodecOK || a.firefoxAAC != nil
 	a.progressiveConverts = a.progressiveCodecConverts || a.progressiveChannelLimited
+	// A codec the client decodes but MP4 cannot carry keeps its surround, as
+	// many channels as a ceiling allows.
+	a.progressiveAACChannels = aacOutputChannelsV3(request, DeliveryClassProgressiveV3, source.AudioChannels,
+		a.progressiveChannelLimited || progressiveDecodes && !progressiveFitsMP4)
 	a.hlsCodecConverts = !hlsCodecOK || a.firefoxAAC != nil
 	a.hlsTranscode = a.hlsCodecConverts || a.hlsChannelLimited
 	a.hlsQuirk, _ = hlsEAC3AudioCorrectionV3(source, request)
