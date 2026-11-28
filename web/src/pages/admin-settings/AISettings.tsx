@@ -691,6 +691,19 @@ export default function AISettings() {
     );
   }
 
+  // Without loaded settings every field would show an empty or built-in value
+  // an admin could edit and save over the real ones.
+  if (form.loadError && !form.loaded) {
+    return (
+      <div className="max-w-5xl space-y-4">
+        <p role="alert">{t("web.admin.settings.ai.page.loadError")}</p>
+        <Button variant="outline" onClick={() => void form.retryLoad()}>
+          {t("common.retry")}
+        </Button>
+      </div>
+    );
+  }
+
   const value = (key: string, fallback = "") => form.getValue(key) || fallback;
 
   const providers = providerList.data?.providers ?? [];
