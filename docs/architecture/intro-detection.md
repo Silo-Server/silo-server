@@ -70,7 +70,9 @@ for a single item does not take the lock.
    grouped by library, season, and presentation (edition and audio language).
    One ffmpeg pass over each file's opening audio (25 percent of the runtime,
    at most ten minutes) computes a Chromaprint fingerprint and runs
-   `silencedetect` (-50 dB, at least 0.3 seconds). Both are cached together.
+   `silencedetect` (-50 dB, at least 0.3 seconds) on the stereo downmix. Both
+   are cached together. A 5.1 track measured on its own channels is silent
+   only while all six are, which reports a fraction of the downmix's silences.
    Each file is compared with the next eight episodes in episode order, and a
    file they leave without a confirmed match of 20 seconds or more with up to
    48 more.
@@ -251,7 +253,8 @@ tombstone is no marker to clients, as a manual clear is.
   `chromaprint+silence:v1` payload, little-endian: a point count and a
   silence count (`uint32` each), the raw points, then each silence as its
   start and end in whole milliseconds from the window start (`uint32` each).
-  `silencedetect` passes the audio through unchanged,
+  The stereo downmix ahead of `silencedetect` is the one the fingerprint
+  already took, and `silencedetect` passes it through unchanged,
   so the points are byte for byte what a fingerprint-only run produces and the
   cache key did not change. Rows in the older `chromaprint:raw:uint32le`
   payload still load; their matches skip silence splitting and trimming rather

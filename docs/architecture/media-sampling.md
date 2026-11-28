@@ -67,7 +67,7 @@ Supported:
 | Part | Values |
 |---|---|
 | Sampling mode | `Window` (start and duration; `KeyframesOnly` decodes only video keyframes and needs `Stats`), `Samples` (the keyframe at or before each of a list of times; `Stats` or `Sheets`), `At` (the frame at a time; `Images` only) |
-| Outputs | `Audio.Fingerprint` (raw Chromaprint points), `Audio.Silence` (silencedetect intervals), `Audio.Speech` (speech-band level every 10 ms), `Stats` (per-frame picture statistics), `Images` (JPEG images), `Sheets` (JPEG sprite sheets of the samples) |
+| Outputs | `Audio.Fingerprint` (raw Chromaprint points), `Audio.Silence` (silencedetect intervals, on the source's channels or, with `Stereo`, on its stereo downmix), `Audio.Speech` (speech-band level every 10 ms), `Stats` (per-frame picture statistics), `Images` (JPEG images), `Sheets` (JPEG sprite sheets of the samples) |
 | Attempts | software; hardware (QSV, VAAPI, VideoToolbox) for requests with a video output (`Images`, `Stats`, or `Sheets`), and NVENC's CUDA decoder for `Sheets`; see [Hardware decode](#hardware-decode) |
 
 Audio and `Stats` may share one run: ffmpeg reads the input once and writes

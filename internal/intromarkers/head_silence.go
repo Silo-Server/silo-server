@@ -23,8 +23,11 @@ const (
 )
 
 // headSilenceParams is the silence output of the intro fingerprint pass.
+// Silences are detected on the stereo downmix, which the split and trim
+// bounds below were tuned on: a 5.1 opening measured on its own channels
+// reports a fraction of them.
 func headSilenceParams() *mediasample.SilenceParams {
-	return &mediasample.SilenceParams{NoiseDB: headSilenceNoiseDB, MinSeconds: headSilenceMinSeconds}
+	return &mediasample.SilenceParams{NoiseDB: headSilenceNoiseDB, MinSeconds: headSilenceMinSeconds, Stereo: true}
 }
 
 // Layout of a chromaprint+silence:v1 payload, little-endian:
