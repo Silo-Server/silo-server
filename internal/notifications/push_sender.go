@@ -35,9 +35,12 @@ const (
 	// send's result after the send's own deadline.
 	pushFinalizeMargin = 5 * time.Second
 	// pushSendBudget is how much of its lease a claimed attempt must have left
-	// for its send to start: an attempt can make two relay requests (a retry
-	// after credential recovery), with a margin for recording the result. The
-	// send itself runs under the lease that is left (see processAttempt).
+	// for its send to start: two relay requests, with a margin for recording
+	// the result. A send can make up to six (a credential renewal or
+	// registration, a capability retry, and both again after credential
+	// recovery); it runs under the lease that is left (see processAttempt),
+	// so the context ends any request past it, and the Idempotency-Key lets
+	// the relay drop a resend from the worker that reclaims the attempt.
 	pushSendBudget = 2*pushRelayRequestTimeout + pushFinalizeMargin
 	// pushRetryClaimLimit sizes a retry batch so the sweep can send each
 	// attempt in it, one at a time, inside the lease.
