@@ -123,15 +123,26 @@ function Editor({
   // The stored arrangement opens when it was made from the chosen order;
   // another order, or a start over, builds a fresh one from its seasons.
   const arrangerOn = custom || arrangerEdited;
-  const stored = useCustomSeasons(contentId, arrangerOn, null);
+  // Both load while the dialog is open, so switching to Custom shows them at
+  // once; the fresh one is the same query the read-only layouts show.
+  const stored = useCustomSeasons(contentId, true, null);
   const startFrom: EpisodeOrderChoice | null =
     choice && stored.data && (restarts > 0 || !sameBase(stored.data.choice, choice))
       ? { ...choice, layout: "custom" }
       : null;
-  const fresh = useCustomSeasons(contentId, arrangerOn && startFrom !== null, startFrom);
+  const fresh = useCustomSeasons(contentId, startFrom !== null, startFrom);
   const arrangement = startFrom ? fresh.data : stored.data;
-  const arrangementLoading = !arrangement || (startFrom !== null && fresh.isFetching);
   const arrangementFailed = stored.isError || fresh.isError;
+  // The arranger keeps showing the last arrangement, dimmed, while the next
+  // one loads, instead of blanking the dialog.
+  const arrangerKey = `${restarts}:${JSON.stringify(startFrom)}`;
+  const [shownArrangement, setShownArrangement] = useState<{
+    key: string;
+    data: NonNullable<typeof arrangement>;
+  } | null>(null);
+  if (arrangement && shownArrangement?.key !== arrangerKey)
+    setShownArrangement({ key: arrangerKey, data: arrangement });
+  const arrangementSwitching = !!shownArrangement && shownArrangement.key !== arrangerKey;
 
   function update(patch: Partial<Draft>) {
     if (!draft) return;
@@ -144,8 +155,6 @@ function Editor({
   function startOver() {
     setArrangerEdited(false);
     setRestarts((n) => n + 1);
-    // The same start over again reloads the same query.
-    if (startFrom) void fresh.refetch();
   }
 
   function requestClose() {
@@ -243,7 +252,7 @@ function Editor({
                 onArrange={() => update({ layout: "custom" })}
               />
             )}
-            {custom && arrangementLoading && (
+            {custom && (!shownArrangement || (arrangementSwitching && arrangementFailed)) && (
               <div className="text-muted-foreground flex flex-1 items-center justify-center gap-2 p-10 text-sm">
                 {arrangementFailed ? (
                   t("web.item.arrangeSeasons.failed")
@@ -252,13 +261,14 @@ function Editor({
                 )}
               </div>
             )}
-            {arrangerOn && arrangement && !arrangementLoading && (
+            {arrangerOn && shownArrangement && !(arrangementSwitching && arrangementFailed) && (
               <SeasonArranger
                 // A start over or another base order starts from new data.
-                key={`${restarts}:${JSON.stringify(startFrom)}`}
+                key={shownArrangement.key}
                 contentId={contentId}
                 title={title}
-                data={arrangement}
+                data={shownArrangement.data}
+                busy={arrangementSwitching}
                 dirtyFromStart={startFrom !== null || state.choice.layout !== "custom"}
                 hidden={!custom}
                 onDirtyChange={setArrangerEdited}

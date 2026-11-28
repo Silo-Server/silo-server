@@ -82,7 +82,9 @@ export function EpisodeOrderSeasonsView({
   const t = useT();
   // The order's seasons with stills, posters and files, as the arranger
   // would start from them.
-  const query = useCustomSeasons(contentId, true, { ...choice, layout: "custom" });
+  const query = useCustomSeasons(contentId, true, { ...choice, layout: "custom" }, true);
+  // Another order is loading: the last one stays, dimmed.
+  const switching = query.isPlaceholderData;
   const data = query.data;
   const absolute = choice.layout === "absolute";
   const seasons = useMemo(() => (data ? shownSeasons(data, absolute) : []), [data, absolute]);
@@ -177,7 +179,7 @@ export function EpisodeOrderSeasonsView({
   };
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="motion-safe:animate-in motion-safe:fade-in-0 flex min-h-0 flex-1 flex-col motion-safe:duration-200">
       <div className="border-border/10 text-muted-foreground flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b px-5 py-2.5 text-xs">
         <span>{t("web.item.arrangeSeasons.seasonCount", { count: regular.length })}</span>
         <span>
@@ -195,6 +197,7 @@ export function EpisodeOrderSeasonsView({
             })}
           </span>
         )}
+        {switching && <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />}
         <span className="min-w-0 flex-1 basis-60">{t("web.item.episodeOrder.readOnlyHint")}</span>
         <Button variant="outline" size="xs" onClick={onArrange}>
           {t("web.item.episodeOrder.arrange")}
@@ -203,7 +206,11 @@ export function EpisodeOrderSeasonsView({
 
       <div
         ref={bodyRef}
-        className="flex max-h-[70vh] min-h-0 flex-1 flex-col overflow-y-auto md:max-h-none md:flex-row md:overflow-hidden"
+        aria-busy={switching}
+        className={cn(
+          "flex max-h-[70vh] min-h-0 flex-1 flex-col overflow-y-auto transition-opacity md:max-h-none md:flex-row md:overflow-hidden",
+          switching && "pointer-events-none opacity-50",
+        )}
       >
         <aside className="border-border/10 min-h-0 shrink-0 p-3 md:w-[420px] md:overflow-y-auto md:border-e">
           <h2 className="px-1.5 pb-2 text-sm font-semibold">
@@ -249,13 +256,11 @@ export function EpisodeOrderSeasonsView({
 
           {shown && (
             <>
-              <div className="mb-3 flex flex-wrap items-center gap-3">
-                <h2 className="text-xl font-semibold tracking-tight">{nameOf(shown)}</h2>
-                <span className="text-muted-foreground text-sm">
-                  {t("web.item.arrangeSeasons.episodeCount", { count: shown.episodes.length })}
-                </span>
-              </div>
-              {shown.number !== 0 && !absolute && <SeasonCard season={shown} provider={provider} />}
+              <SeasonHeader
+                season={shown}
+                name={nameOf(shown)}
+                provider={absolute || shown.number === 0 ? undefined : provider}
+              />
               <VirtualEpisodeList
                 // Each season scrolls from its top.
                 key={shown.number}
@@ -278,26 +283,47 @@ export function EpisodeOrderSeasonsView({
   );
 }
 
-/** A season's poster, title and description as the provider has them. */
-function SeasonCard({ season, provider }: { season: ShownSeason; provider: string }) {
+/**
+ * The shown season's heading: its poster beside the name, and where its
+ * details come from with the start of its description.
+ */
+function SeasonHeader({
+  season,
+  name,
+  provider,
+}: {
+  season: ShownSeason;
+  name: string;
+  /** The provider the season's details come from; none for Absolute and Specials. */
+  provider?: string;
+}) {
   const t = useT();
   return (
-    <div className="surface-panel mb-4 flex gap-4 rounded-2xl p-4">
-      <div className="bg-surface border-border relative aspect-[2/3] w-24 shrink-0 overflow-hidden rounded-xl border">
-        {season.posterUrl ? (
-          <img src={season.posterUrl} alt="" className="h-full w-full object-cover" />
-        ) : (
-          <div className="text-muted-foreground flex h-full items-center justify-center p-2 text-center text-xs font-medium">
-            {t("web.item.arrangeSeasons.posterNone")}
-          </div>
-        )}
-      </div>
-      <div className="min-w-0 flex-1 space-y-1.5">
-        <p className="text-muted-foreground text-[0.6875rem]">
-          {t("web.item.arrangeSeasons.fromProvider", { provider, number: season.number })}
-        </p>
-        {season.overview && (
-          <p className="text-muted-foreground text-sm leading-relaxed whitespace-pre-line">
+    <div className="mb-4 flex items-start gap-4">
+      {provider && season.posterUrl && (
+        <img
+          src={season.posterUrl}
+          alt=""
+          className="border-border aspect-[2/3] w-16 shrink-0 rounded-lg border object-cover"
+        />
+      )}
+      <div className="min-w-0 flex-1 space-y-1">
+        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+          <h2 className="text-xl font-semibold tracking-tight">{name}</h2>
+          <span className="text-muted-foreground text-sm">
+            {t("web.item.arrangeSeasons.episodeCount", { count: season.episodes.length })}
+          </span>
+          {provider && (
+            <span className="text-muted-foreground text-xs">
+              {t("web.item.arrangeSeasons.fromProvider", { provider, number: season.number })}
+            </span>
+          )}
+        </div>
+        {provider && season.overview && (
+          <p
+            className="text-muted-foreground line-clamp-3 max-w-4xl text-sm leading-relaxed"
+            title={season.overview}
+          >
             {season.overview}
           </p>
         )}

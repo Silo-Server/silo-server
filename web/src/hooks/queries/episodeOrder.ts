@@ -80,12 +80,14 @@ type CustomSeasonsSave = V2Body<"PUT /api/v2/admin/items/{id}/custom-seasons">;
 
 /**
  * A series' arranged seasons. With `startFrom`, a fresh arrangement from that
- * order's seasons instead of the stored one.
+ * order's seasons instead of the stored one; with `keepPrevious`, the last
+ * order's seasons stay while another order's load.
  */
 export function useCustomSeasons(
   contentId: string,
   enabled: boolean,
   startFrom: EpisodeOrderChoice | null,
+  keepPrevious = false,
 ) {
   return useQuery({
     queryKey: ["custom-seasons", contentId, startFrom] as const,
@@ -107,7 +109,11 @@ export function useCustomSeasons(
     },
     enabled,
     staleTime: Infinity,
-    gcTime: 0,
+    // The stored arrangement loads fresh on every opening; an order's own
+    // seasons are kept a while, so switching layouts and orders back and
+    // forth shows them at once.
+    gcTime: startFrom ? 5 * 60_000 : 0,
+    placeholderData: keepPrevious ? keepPreviousData : undefined,
     retry: false,
   });
 }

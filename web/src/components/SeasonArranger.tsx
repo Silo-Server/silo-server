@@ -60,6 +60,7 @@ export function SeasonArranger({
   data,
   dirtyFromStart,
   hidden,
+  busy,
   onDirtyChange,
   onStartOver,
   onCancel,
@@ -72,6 +73,8 @@ export function SeasonArranger({
   dirtyFromStart: boolean;
   /** Kept mounted while another layout shows, so its edits survive the switch. */
   hidden: boolean;
+  /** Another arrangement is loading to replace this one. */
+  busy: boolean;
   /** Whether the admin has changed anything since the arrangement loaded. */
   onDirtyChange: (edited: boolean) => void;
   /** Rebuilds the seasons from the base order; the dialog confirms first. */
@@ -350,7 +353,14 @@ export function SeasonArranger({
     t("web.item.arrangeSeasons.episodeCount", { count: totalEpisodes }),
   ].join(" · ");
   return (
-    <div className={cn("flex min-h-0 flex-1 flex-col", hidden && "hidden")}>
+    <div
+      aria-busy={busy}
+      className={cn(
+        "motion-safe:animate-in motion-safe:fade-in-0 flex min-h-0 flex-1 flex-col transition-opacity motion-safe:duration-200",
+        hidden && "hidden",
+        busy && "pointer-events-none opacity-50",
+      )}
+    >
       <div className="border-border/10 text-muted-foreground flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b px-5 py-2.5 text-xs">
         <span className="bg-primary/15 text-primary rounded-md px-2 py-0.5 font-semibold">
           {t("web.item.arrangeSeasons.custom")}
