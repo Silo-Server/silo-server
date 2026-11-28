@@ -104258,93 +104258,6 @@
       }
     }
   ],
-  "web.home.addRow.rules.sentenceNamed": [
-    {
-      "type": 8,
-      "value": "libraries",
-      "children": []
-    },
-    {
-      "type": 8,
-      "value": "w",
-      "children": [
-        {
-          "type": 6,
-          "value": "count",
-          "options": {
-            "other": {
-              "value": [
-                {
-                  "type": 0,
-                  "value": "ライブラリの"
-                }
-              ]
-            }
-          },
-          "offset": 0,
-          "pluralType": "cardinal"
-        }
-      ]
-    },
-    {
-      "type": 8,
-      "value": "scope",
-      "children": []
-    },
-    {
-      "type": 8,
-      "value": "w",
-      "children": [
-        {
-          "type": 0,
-          "value": "を表示"
-        }
-      ]
-    },
-    {
-      "type": 5,
-      "value": "rules",
-      "options": {
-        "yes": {
-          "value": [
-            {
-              "type": 8,
-              "value": "break",
-              "children": []
-            },
-            {
-              "type": 8,
-              "value": "w",
-              "children": [
-                {
-                  "type": 0,
-                  "value": "次の条件の"
-                }
-              ]
-            },
-            {
-              "type": 8,
-              "value": "match",
-              "children": []
-            },
-            {
-              "type": 8,
-              "value": "w",
-              "children": [
-                {
-                  "type": 0,
-                  "value": "に一致："
-                }
-              ]
-            }
-          ]
-        },
-        "other": {
-          "value": []
-        }
-      }
-    }
-  ],
   "web.home.addRow.rules.sentencePicked": [
     {
       "type": 8,
@@ -105765,32 +105678,6 @@
             {
               "type": 0,
               "value": "行を削除"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.home.rows.deleteMany.description": [
-    {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "選択した行は全員の"
-            },
-            {
-              "type": 1,
-              "value": "page"
-            },
-            {
-              "type": 0,
-              "value": "から削除されます。Siloがいずれかの行専用にコレクションを作成していた場合、他で使われていなければそのコレクションも削除されます。"
             }
           ]
         }

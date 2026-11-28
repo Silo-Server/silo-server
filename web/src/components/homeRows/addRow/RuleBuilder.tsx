@@ -11,7 +11,7 @@ import LibraryMultiSelect from "@/components/LibraryMultiSelect";
 import { useQueryRuleCapabilities } from "@/hooks/queries/personSearch";
 import { useShownRatingSources } from "@/hooks/queries/ratingsCapability";
 import { Button } from "@/components/ui/button";
-import { useT, type MessageKey } from "@/i18n";
+import { exactAmount, useT, type MessageKey } from "@/i18n";
 import {
   Select,
   SelectContent,
@@ -216,7 +216,7 @@ export function RuleBuilder({
               ? "web.home.addRow.rules.sentencePicked"
               : "web.home.addRow.rules.sentenceAll",
           {
-            count: value.library_ids.length,
+            amount: exactAmount(value.library_ids.length),
             rules: groups.length > 0 ? "yes" : "no",
             w: word,
             scope: () => (

@@ -115044,14 +115044,22 @@
       "value": "w",
       "children": [
         {
-          "type": 6,
-          "value": "count",
+          "type": 5,
+          "value": "amount",
           "options": {
-            "one": {
+            "exactlyOne": {
               "value": [
                 {
                   "type": 0,
                   "value": "library"
+                }
+              ]
+            },
+            "exactlyTwo": {
+              "value": [
+                {
+                  "type": 0,
+                  "value": "libraries"
                 }
               ]
             },
@@ -115063,9 +115071,7 @@
                 }
               ]
             }
-          },
-          "offset": 0,
-          "pluralType": "cardinal"
+          }
         }
       ]
     },
@@ -116640,14 +116646,30 @@
   ],
   "web.home.rows.deleteMany.description": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
               "value": "The row goes away from "
+            },
+            {
+              "type": 1,
+              "value": "page"
+            },
+            {
+              "type": 0,
+              "value": " for everyone. If Silo made a collection just for one of them, it removes that collection too when nothing else uses it."
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "The rows go away from "
             },
             {
               "type": 1,
@@ -116675,9 +116697,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.home.rows.deleteMany.title": [
