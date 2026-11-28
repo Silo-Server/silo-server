@@ -154,6 +154,8 @@ type pendingRun struct {
 	// slot is the nightly slot lockScheduled admitted the run for; zero for
 	// a manual run.
 	slot time.Time
+	// err fails a scheduled run lockScheduled could not admit (failAdmission).
+	err error
 }
 
 // New builds a Service.
@@ -299,47 +301,15 @@ func (s *Service) RunTask(ctx context.Context, progress func(float64, string)) (
 		if run, skipped, err = s.lockScheduled(ctx); run == nil {
 			return skipped, err
 		}
+		if run.err != nil {
+			return s.failAdmission(ctx, run)
+		}
 	}
 	held, id, kind := run.held, run.id, run.kind
 	defer held.Release(context.WithoutCancel(ctx))
 	ctx, cancel := withLost(ctx, held)
 	defer cancel()
 	return s.backupWith(ctx, held, kind, id, run.slot, progress, nil, nil)
-}
-
-// lockScheduled takes the lock for a run the task manager started: a
-// manual one, or the nightly one, which skips when the lock is held or
-// another server already backed up its slot. A nil run is a skip or an
-// error.
-func (s *Service) lockScheduled(ctx context.Context) (*pendingRun, RunResult, error) {
-	kind := KindNightly
-	if taskmanager.StartedManually(ctx) {
-		kind = KindManual
-	}
-	held, err := s.opts.Locker.TryLock(ctx)
-	if errors.Is(err, ErrBusy) {
-		return nil, RunResult{Skipped: SkippedBusy}, nil
-	}
-	if err != nil {
-		return nil, RunResult{}, err
-	}
-	var slot time.Time
-	if kind == KindNightly {
-		// Every API server fires the trigger; under the lock, the first to
-		// finish the slot's backup leaves the others nothing to do. The run
-		// records this slot, so moving backup.time while it runs cannot leave
-		// tonight open for a second copy.
-		slot = nightlySlot(s.opts.Now(), s.backupTime(ctx), s.opts.Location)
-		done, err := s.slotBackedUp(ctx, slot)
-		if err != nil || done {
-			held.Release(context.WithoutCancel(ctx))
-			if err != nil {
-				return nil, RunResult{}, err
-			}
-			return nil, RunResult{Skipped: SkippedAlreadyDone}, nil
-		}
-	}
-	return &pendingRun{held: held, kind: kind, slot: slot}, RunResult{}, nil
 }
 
 // Backup takes one backup under held, the subsystem lock the caller holds; a

@@ -3,6 +3,7 @@ package backup
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -70,19 +71,28 @@ func (t *Task) Execute(ctx context.Context, progress taskmanager.ProgressReporte
 	return nil
 }
 
+// backupTime is readBackupTime for the trigger schedule, which cannot fail:
+// a setting it cannot read is the default.
 func (s *Service) backupTime(ctx context.Context) string {
-	if s.opts.Settings == nil {
-		return config.DefaultBackupTime
-	}
-	raw, err := s.opts.Settings.Get(ctx, config.BackupTimeSettingKey)
+	at, err := s.readBackupTime(ctx)
 	if err != nil {
 		return config.DefaultBackupTime
 	}
+	return at
+}
+
+// readBackupTime is backup.time as HH:MM. An unset or invalid value is the
+// default; a read that failed is an error.
+func (s *Service) readBackupTime(ctx context.Context) (string, error) {
+	raw, err := s.readSetting(ctx, config.BackupTimeSettingKey)
+	if err != nil {
+		return "", err
+	}
 	hour, minute, ok := config.ParseBackupTime(raw)
 	if !ok {
-		return config.DefaultBackupTime
+		return config.DefaultBackupTime, nil
 	}
-	return fmt.Sprintf("%02d:%02d", hour, minute)
+	return fmt.Sprintf("%02d:%02d", hour, minute), nil
 }
 
 // nightlySlot is the scheduled time a nightly run at now belongs to: the
@@ -147,4 +157,65 @@ func (s *Service) SyncSchedule(ctx context.Context, mgr ScheduleManager) error {
 		return nil
 	}
 	return mgr.UpdateTriggers(TaskKey, want)
+}
+
+// lockScheduled takes the lock for a run the task manager started: a
+// manual one, or the nightly one, which skips when the lock is held or
+// another server already backed up its slot. A nil run is a skip or an
+// error; a run carrying err holds the lock only so failAdmission can report
+// it.
+func (s *Service) lockScheduled(ctx context.Context) (*pendingRun, RunResult, error) {
+	kind := KindNightly
+	if taskmanager.StartedManually(ctx) {
+		kind = KindManual
+	}
+	held, err := s.opts.Locker.TryLock(ctx)
+	if errors.Is(err, ErrBusy) {
+		return nil, RunResult{Skipped: SkippedBusy}, nil
+	}
+	if err != nil {
+		return nil, RunResult{}, err
+	}
+	if kind != KindNightly {
+		return &pendingRun{held: held, kind: kind}, RunResult{}, nil
+	}
+	// Every API server fires the trigger; under the lock, the first to finish
+	// the slot's backup leaves the others nothing to do. The run records this
+	// slot, so moving backup.time while it runs cannot leave tonight open for
+	// a second copy. A backup.time it cannot read fails the run
+	// (failAdmission): the default time would name another slot, which could
+	// skip tonight or leave it open for another server.
+	at, readErr := s.readBackupTime(ctx)
+	if readErr != nil {
+		return unadmittedRun(held, kind, readErr)
+	}
+	slot := nightlySlot(s.opts.Now(), at, s.opts.Location)
+	done, err := s.slotBackedUp(ctx, slot)
+	if err != nil || done {
+		held.Release(context.WithoutCancel(ctx))
+		if err != nil {
+			return nil, RunResult{}, err
+		}
+		return nil, RunResult{Skipped: SkippedAlreadyDone}, nil
+	}
+	return &pendingRun{held: held, kind: kind, slot: slot}, RunResult{}, nil
+}
+
+// unadmittedRun is a run that holds the lock only to be reported failed with
+// cause (failAdmission).
+func unadmittedRun(held Held, kind Kind, cause error) (*pendingRun, RunResult, error) {
+	return &pendingRun{held: held, kind: kind, err: cause}, RunResult{}, nil
+}
+
+// failAdmission ends a scheduled run lockScheduled could not admit, such as
+// one whose backup.time could not be read. It is published as a failed run in
+// backup status, with no nightly slot, so neither a later run that night nor
+// another server takes it as done, and its error fails the task.
+func (s *Service) failAdmission(ctx context.Context, run *pendingRun) (RunResult, error) {
+	defer run.held.Release(context.WithoutCancel(ctx))
+	started := s.opts.Now()
+	id := FolderName(started, run.kind)
+	op := s.beginOperation(ctx, run.held, ActiveOperation{Operation: OperationBackup, BackupID: id, Kind: run.kind, StartedAt: started})
+	op.end(ctx, &LastRun{ID: id, Kind: run.kind, StartedAt: started, FinishedAt: s.opts.Now(), Status: RunFailed, Error: run.err.Error()})
+	return RunResult{}, run.err
 }
