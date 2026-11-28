@@ -134,6 +134,9 @@ function Editor({
   // Switched to Custom before the stored arrangement arrived: it reopens on
   // its own order when it does, unless the order changed meanwhile.
   const [reopenPending, setReopenPending] = useState(false);
+  // The read-only layout Custom was opened from stays on screen, dimmed,
+  // until the arrangement can show.
+  const [heldLayout, setHeldLayout] = useState<"seasons" | "absolute" | null>(null);
   if (reopenPending && stored.data) {
     setReopenPending(false);
     if (stored.data.saved && draft?.layout === "custom" && !arrangerEdited)
@@ -173,7 +176,12 @@ function Editor({
     const toCustom = patch.layout === "custom" && draft.layout !== "custom";
     if (toCustom && stored.data?.saved)
       next = { ...draftOf(stored.data.choice, libraryProvider), layout: "custom" };
-    setReopenPending(toCustom && !stored.data);
+    // Only a real change settles a pending reopen: clicking Custom again
+    // while it loads keeps waiting for the saved arrangement.
+    if (toCustom) {
+      setReopenPending(!stored.data);
+      setHeldLayout(draft.layout === "absolute" ? "absolute" : "seasons");
+    } else if (JSON.stringify(next) !== JSON.stringify(draft)) setReopenPending(false);
     const baseChanged = !!choice && !sameBase(choiceOf(next, libraryProvider), choice);
     if (arrangerEdited && baseChanged) setConfirm({ kind: "draft", next });
     else setEdited(next);
@@ -275,26 +283,32 @@ function Editor({
           </div>
         ) : (
           <>
-            {!custom && (
+            {(!custom || (heldLayout && !shownArrangement && !arrangementFailed)) && (
               <EpisodeOrderSeasonsView
                 contentId={contentId}
-                choice={choice!}
+                choice={custom && heldLayout ? { ...choice!, layout: heldLayout } : choice!}
+                busy={custom}
                 structure={structure}
                 files={draft.files}
                 preview={preview.data}
                 onReadFilesAs={(files) => update({ files })}
-                onArrange={() => update({ layout: "custom" })}
+                onArrange={() => {
+                  setStoredWanted(true);
+                  update({ layout: "custom" });
+                }}
               />
             )}
-            {custom && (!shownArrangement || (arrangementSwitching && arrangementFailed)) && (
-              <div className="text-muted-foreground flex flex-1 items-center justify-center gap-2 p-10 text-sm">
-                {arrangementFailed ? (
-                  t("web.item.arrangeSeasons.failed")
-                ) : (
-                  <Loader2 className="size-5 animate-spin" aria-hidden="true" />
-                )}
-              </div>
-            )}
+            {custom &&
+              ((!shownArrangement && (!heldLayout || arrangementFailed)) ||
+                (arrangementSwitching && arrangementFailed)) && (
+                <div className="text-muted-foreground flex flex-1 items-center justify-center gap-2 p-10 text-sm">
+                  {arrangementFailed ? (
+                    t("web.item.arrangeSeasons.failed")
+                  ) : (
+                    <Loader2 className="size-5 animate-spin" aria-hidden="true" />
+                  )}
+                </div>
+              )}
             {arrangerOn && shownArrangement && !(arrangementSwitching && arrangementFailed) && (
               <SeasonArranger
                 // A start over or another base order starts from new data.

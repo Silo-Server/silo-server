@@ -65,6 +65,7 @@ export function EpisodeOrderSeasonsView({
   structure,
   files,
   preview,
+  busy = false,
   onReadFilesAs,
   onArrange,
 }: {
@@ -76,6 +77,8 @@ export function EpisodeOrderSeasonsView({
   /** The provider whose numbering the file names follow. */
   files: Provider;
   preview: EpisodeOrderPreview | undefined;
+  /** Custom is loading in its place: shown dimmed, without input. */
+  busy?: boolean;
   onReadFilesAs: (provider: Provider) => void;
   onArrange: () => void;
 }) {
@@ -84,7 +87,7 @@ export function EpisodeOrderSeasonsView({
   // would start from them.
   const query = useCustomSeasons(contentId, true, { ...choice, layout: "custom" }, true);
   // Another order is loading: the last one stays, dimmed.
-  const switching = query.isPlaceholderData;
+  const switching = query.isPlaceholderData || busy;
   const data = query.data;
   const absolute = choice.layout === "absolute";
   const seasons = useMemo(() => (data ? shownSeasons(data, absolute) : []), [data, absolute]);
