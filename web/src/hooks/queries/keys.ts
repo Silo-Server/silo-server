@@ -147,6 +147,9 @@ export const collectionKeys = {
     ["collections", "preview", scope, fingerprint] as const,
   templates: () => ["collections", "templates"] as const,
   mdblistSearch: (query: string) => ["collections", "mdblist", "search", query] as const,
+  /** The lists of the MDBList account behind a scope's key. */
+  mdblistAccountLists: (scope: "server" | "personal") =>
+    ["collections", "mdblist", "account-lists", scope] as const,
 };
 
 export const requestKeys = {

@@ -112773,6 +112773,24 @@
       "value": "vos bibliothèques"
     }
   ],
+  "web.collections.copy.yourMdblistLists": [
+    {
+      "type": 0,
+      "value": "Vos listes MDBList"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsProfileHelp": [
+    {
+      "type": 0,
+      "value": "Depuis la connexion MDBList de ce profil, y compris les listes privées"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsServerHelp": [
+    {
+      "type": 0,
+      "value": "Depuis le compte propriétaire de la clé d’API MDBList du serveur, y compris les listes privées"
+    }
+  ],
   "web.collections.count.unavailable": [
     {
       "type": 0,
@@ -117465,6 +117483,16 @@
       "value": "Partagée"
     }
   ],
+  "web.collections.templateGallery.accountListsFailed": [
+    {
+      "type": 0,
+      "value": "Impossible de charger vos listes MDBList. "
+    },
+    {
+      "type": 1,
+      "value": "detail"
+    }
+  ],
   "web.collections.templateGallery.allThemes": [
     {
       "type": 0,
@@ -117479,6 +117507,26 @@
     {
       "type": 1,
       "value": "user"
+    }
+  ],
+  "web.collections.templateGallery.connectForOwnLists": [
+    {
+      "type": 0,
+      "value": "Connectez MDBList dans "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Paramètres › Fournisseurs de visionnage"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " pour choisir parmi vos propres listes, y compris les listes privées. La connexion lance aussi la synchronisation de l’historique de visionnage avec MDBList, que vous pouvez désactiver au même endroit."
     }
   ],
   "web.collections.templateGallery.groupHeading": [
@@ -117531,10 +117579,34 @@
       }
     }
   ],
+  "web.collections.templateGallery.listLiked": [
+    {
+      "type": 0,
+      "value": "Aimée"
+    }
+  ],
+  "web.collections.templateGallery.listPrivate": [
+    {
+      "type": 0,
+      "value": "Privée"
+    }
+  ],
+  "web.collections.templateGallery.listViews": [
+    {
+      "type": 0,
+      "value": "Listes à afficher"
+    }
+  ],
   "web.collections.templateGallery.lists": [
     {
       "type": 0,
       "value": "Listes"
+    }
+  ],
+  "web.collections.templateGallery.loadingOwnLists": [
+    {
+      "type": 0,
+      "value": "Chargement de vos listes…"
     }
   ],
   "web.collections.templateGallery.noMatches": [
@@ -117551,10 +117623,36 @@
       "value": " »."
     }
   ],
+  "web.collections.templateGallery.noOwnMatches": [
+    {
+      "type": 0,
+      "value": "Aucune de vos listes ne correspond à « "
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": " »."
+    }
+  ],
   "web.collections.templateGallery.noPicks": [
     {
       "type": 0,
       "value": "Aucune sélection populaire ici. Recherchez dans MDBList ou collez un lien."
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateProfile": [
+    {
+      "type": 0,
+      "value": "Les listes privées fonctionnent aussi si elles appartiennent au compte MDBList connecté à ce profil."
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateServer": [
+    {
+      "type": 0,
+      "value": "Les listes privées fonctionnent aussi si la clé d’API MDBList du serveur appartient au compte qui les possède."
     }
   ],
   "web.collections.templateGallery.searchFailed": [
@@ -117597,6 +117695,12 @@
     {
       "type": 0,
       "value": "Recherche désactivée"
+    }
+  ],
+  "web.collections.templateGallery.searchOwnLists": [
+    {
+      "type": 0,
+      "value": "Rechercher dans vos listes"
     }
   ],
   "web.collections.templateGallery.searchPlaceholder": [
@@ -117725,6 +117829,18 @@
     {
       "type": 0,
       "value": "Thèmes"
+    }
+  ],
+  "web.collections.templateGallery.viewBrowse": [
+    {
+      "type": 0,
+      "value": "Parcourir MDBList"
+    }
+  ],
+  "web.collections.templateGallery.viewOwnLists": [
+    {
+      "type": 0,
+      "value": "Vos listes"
     }
   ],
   "web.collections.templates.mediaKind.mixed": [

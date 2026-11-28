@@ -103889,6 +103889,24 @@
       "value": "καμία από τις βιβλιοθήκες σας"
     }
   ],
+  "web.collections.copy.yourMdblistLists": [
+    {
+      "type": 0,
+      "value": "Οι λίστες σας στο MDBList"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsProfileHelp": [
+    {
+      "type": 0,
+      "value": "Από τη σύνδεση MDBList αυτού του προφίλ, μαζί με τις ιδιωτικές"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsServerHelp": [
+    {
+      "type": 0,
+      "value": "Από τον λογαριασμό στον οποίο ανήκει το κλειδί API MDBList του διακομιστή, μαζί με τις ιδιωτικές"
+    }
+  ],
   "web.collections.count.unavailable": [
     {
       "type": 0,
@@ -108415,6 +108433,16 @@
       "value": "Κοινόχρηστη"
     }
   ],
+  "web.collections.templateGallery.accountListsFailed": [
+    {
+      "type": 0,
+      "value": "Δεν ήταν δυνατή η φόρτωση των λιστών σας από το MDBList. "
+    },
+    {
+      "type": 1,
+      "value": "detail"
+    }
+  ],
   "web.collections.templateGallery.allThemes": [
     {
       "type": 0,
@@ -108429,6 +108457,26 @@
     {
       "type": 1,
       "value": "user"
+    }
+  ],
+  "web.collections.templateGallery.connectForOwnLists": [
+    {
+      "type": 0,
+      "value": "Συνδέστε το MDBList στις "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Ρυθμίσεις › Πάροχοι παρακολούθησης"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " για να επιλέγετε από τις δικές σας λίστες, μαζί με τις ιδιωτικές. Η σύνδεση ξεκινά επίσης τον συγχρονισμό του ιστορικού παρακολούθησης με το MDBList, τον οποίο μπορείτε να απενεργοποιήσετε εκεί."
     }
   ],
   "web.collections.templateGallery.groupHeading": [
@@ -108481,10 +108529,34 @@
       }
     }
   ],
+  "web.collections.templateGallery.listLiked": [
+    {
+      "type": 0,
+      "value": "Μου αρέσει"
+    }
+  ],
+  "web.collections.templateGallery.listPrivate": [
+    {
+      "type": 0,
+      "value": "Ιδιωτική"
+    }
+  ],
+  "web.collections.templateGallery.listViews": [
+    {
+      "type": 0,
+      "value": "Λίστες για εμφάνιση"
+    }
+  ],
   "web.collections.templateGallery.lists": [
     {
       "type": 0,
       "value": "Λίστες"
+    }
+  ],
+  "web.collections.templateGallery.loadingOwnLists": [
+    {
+      "type": 0,
+      "value": "Φόρτωση των λιστών σας…"
     }
   ],
   "web.collections.templateGallery.noMatches": [
@@ -108501,10 +108573,36 @@
       "value": "»."
     }
   ],
+  "web.collections.templateGallery.noOwnMatches": [
+    {
+      "type": 0,
+      "value": "Καμία από τις λίστες σας δεν ταιριάζει με «"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "»."
+    }
+  ],
   "web.collections.templateGallery.noPicks": [
     {
       "type": 0,
       "value": "Δεν υπάρχουν δημοφιλείς επιλογές εδώ. Κάντε αναζήτηση στο MDBList ή επικολλήστε έναν σύνδεσμο."
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateProfile": [
+    {
+      "type": 0,
+      "value": "Λειτουργούν και οι ιδιωτικές λίστες, αν ανήκουν στον συνδεδεμένο λογαριασμό MDBList αυτού του προφίλ."
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateServer": [
+    {
+      "type": 0,
+      "value": "Λειτουργούν και οι ιδιωτικές λίστες, αν το κλειδί API MDBList του διακομιστή ανήκει στον λογαριασμό στον οποίο ανήκουν."
     }
   ],
   "web.collections.templateGallery.searchFailed": [
@@ -108547,6 +108645,12 @@
     {
       "type": 0,
       "value": "Η αναζήτηση είναι απενεργοποιημένη"
+    }
+  ],
+  "web.collections.templateGallery.searchOwnLists": [
+    {
+      "type": 0,
+      "value": "Αναζήτηση στις λίστες σας"
     }
   ],
   "web.collections.templateGallery.searchPlaceholder": [
@@ -108659,6 +108763,18 @@
     {
       "type": 0,
       "value": "Θέματα"
+    }
+  ],
+  "web.collections.templateGallery.viewBrowse": [
+    {
+      "type": 0,
+      "value": "Περιήγηση στο MDBList"
+    }
+  ],
+  "web.collections.templateGallery.viewOwnLists": [
+    {
+      "type": 0,
+      "value": "Οι λίστες σας"
     }
   ],
   "web.collections.templates.mediaKind.mixed": [

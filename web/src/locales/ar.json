@@ -139579,6 +139579,24 @@
       "value": "مكتباتك"
     }
   ],
+  "web.collections.copy.yourMdblistLists": [
+    {
+      "type": 0,
+      "value": "قوائم MDBList الخاصة بك"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsProfileHelp": [
+    {
+      "type": 0,
+      "value": "من اتصال MDBList لهذا الملف الشخصي، بما فيها القوائم الخاصة"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsServerHelp": [
+    {
+      "type": 0,
+      "value": "من الحساب الذي يملك مفتاح MDBList API الخاص بالخادم، بما فيها القوائم الخاصة"
+    }
+  ],
   "web.collections.count.unavailable": [
     {
       "type": 0,
@@ -145184,6 +145202,16 @@
       "value": "مشتركة"
     }
   ],
+  "web.collections.templateGallery.accountListsFailed": [
+    {
+      "type": 0,
+      "value": "تعذّر تحميل قوائم MDBList الخاصة بك. "
+    },
+    {
+      "type": 1,
+      "value": "detail"
+    }
+  ],
   "web.collections.templateGallery.allThemes": [
     {
       "type": 0,
@@ -145198,6 +145226,26 @@
     {
       "type": 1,
       "value": "user"
+    }
+  ],
+  "web.collections.templateGallery.connectForOwnLists": [
+    {
+      "type": 0,
+      "value": "اربط MDBList في "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "الإعدادات ← مزودو المشاهدة"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " لتختار من قوائمك، بما فيها القوائم الخاصة. يبدأ الربط أيضًا مزامنة سجل المشاهدة مع MDBList، ويمكنك إيقافها من هناك."
     }
   ],
   "web.collections.templateGallery.groupHeading": [
@@ -145250,10 +145298,34 @@
       }
     }
   ],
+  "web.collections.templateGallery.listLiked": [
+    {
+      "type": 0,
+      "value": "مُعجب بها"
+    }
+  ],
+  "web.collections.templateGallery.listPrivate": [
+    {
+      "type": 0,
+      "value": "خاصة"
+    }
+  ],
+  "web.collections.templateGallery.listViews": [
+    {
+      "type": 0,
+      "value": "القوائم المعروضة"
+    }
+  ],
   "web.collections.templateGallery.lists": [
     {
       "type": 0,
       "value": "القوائم"
+    }
+  ],
+  "web.collections.templateGallery.loadingOwnLists": [
+    {
+      "type": 0,
+      "value": "جارٍ تحميل قوائمك…"
     }
   ],
   "web.collections.templateGallery.noMatches": [
@@ -145270,10 +145342,36 @@
       "value": "»."
     }
   ],
+  "web.collections.templateGallery.noOwnMatches": [
+    {
+      "type": 0,
+      "value": "لا تطابق أي من قوائمك «"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "»."
+    }
+  ],
   "web.collections.templateGallery.noPicks": [
     {
       "type": 0,
       "value": "لا توجد اختيارات شائعة هنا. ابحث في MDBList أو الصق رابطًا."
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateProfile": [
+    {
+      "type": 0,
+      "value": "تعمل القوائم الخاصة أيضًا إذا كانت تخص حساب MDBList المرتبط بهذا الملف الشخصي."
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateServer": [
+    {
+      "type": 0,
+      "value": "تعمل القوائم الخاصة أيضًا إذا كان مفتاح MDBList API الخاص بالخادم يخص الحساب الذي يملكها."
     }
   ],
   "web.collections.templateGallery.searchFailed": [
@@ -145316,6 +145414,12 @@
     {
       "type": 0,
       "value": "البحث معطّل"
+    }
+  ],
+  "web.collections.templateGallery.searchOwnLists": [
+    {
+      "type": 0,
+      "value": "البحث في قوائمك"
     }
   ],
   "web.collections.templateGallery.searchPlaceholder": [
@@ -145492,6 +145596,18 @@
     {
       "type": 0,
       "value": "المواضيع"
+    }
+  ],
+  "web.collections.templateGallery.viewBrowse": [
+    {
+      "type": 0,
+      "value": "تصفّح MDBList"
+    }
+  ],
+  "web.collections.templateGallery.viewOwnLists": [
+    {
+      "type": 0,
+      "value": "قوائمك"
     }
   ],
   "web.collections.templates.mediaKind.mixed": [

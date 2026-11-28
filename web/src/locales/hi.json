@@ -102879,6 +102879,24 @@
       "value": "आपकी लाइब्रेरी"
     }
   ],
+  "web.collections.copy.yourMdblistLists": [
+    {
+      "type": 0,
+      "value": "आपकी MDBList सूचियाँ"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsProfileHelp": [
+    {
+      "type": 0,
+      "value": "इस प्रोफ़ाइल के MDBList कनेक्शन से, निजी सूचियाँ भी"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsServerHelp": [
+    {
+      "type": 0,
+      "value": "सर्वर की MDBList API कुंजी वाले खाते से, निजी सूचियाँ भी"
+    }
+  ],
   "web.collections.count.unavailable": [
     {
       "type": 0,
@@ -107329,6 +107347,16 @@
       "value": "शेयर किया गया"
     }
   ],
+  "web.collections.templateGallery.accountListsFailed": [
+    {
+      "type": 0,
+      "value": "आपकी MDBList सूचियाँ लोड नहीं की जा सकीं। "
+    },
+    {
+      "type": 1,
+      "value": "detail"
+    }
+  ],
   "web.collections.templateGallery.allThemes": [
     {
       "type": 0,
@@ -107343,6 +107371,26 @@
     {
       "type": 0,
       "value": " द्वारा"
+    }
+  ],
+  "web.collections.templateGallery.connectForOwnLists": [
+    {
+      "type": 0,
+      "value": "अपनी सूचियों में से चुनने के लिए, निजी सूचियों समेत, "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "सेटिंग › वॉच प्रोवाइडर"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " में MDBList कनेक्ट करें। कनेक्ट करने पर MDBList के साथ देखने के इतिहास का सिंक भी शुरू हो जाता है, जिसे वहीं बंद किया जा सकता है।"
     }
   ],
   "web.collections.templateGallery.groupHeading": [
@@ -107395,10 +107443,34 @@
       }
     }
   ],
+  "web.collections.templateGallery.listLiked": [
+    {
+      "type": 0,
+      "value": "पसंद की गई"
+    }
+  ],
+  "web.collections.templateGallery.listPrivate": [
+    {
+      "type": 0,
+      "value": "निजी"
+    }
+  ],
+  "web.collections.templateGallery.listViews": [
+    {
+      "type": 0,
+      "value": "दिखाने के लिए सूचियाँ"
+    }
+  ],
   "web.collections.templateGallery.lists": [
     {
       "type": 0,
       "value": "सूचियाँ"
+    }
+  ],
+  "web.collections.templateGallery.loadingOwnLists": [
+    {
+      "type": 0,
+      "value": "आपकी सूचियाँ लोड हो रही हैं…"
     }
   ],
   "web.collections.templateGallery.noMatches": [
@@ -107415,10 +107487,36 @@
       "value": "” से मेल नहीं खाती।"
     }
   ],
+  "web.collections.templateGallery.noOwnMatches": [
+    {
+      "type": 0,
+      "value": "आपकी कोई भी सूची “"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "” से मेल नहीं खाती।"
+    }
+  ],
   "web.collections.templateGallery.noPicks": [
     {
       "type": 0,
       "value": "यहाँ कोई लोकप्रिय पसंद नहीं है। MDBList में खोजें या कोई लिंक पेस्ट करें।"
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateProfile": [
+    {
+      "type": 0,
+      "value": "निजी सूचियाँ भी काम करती हैं, अगर वे इस प्रोफ़ाइल से कनेक्ट किए गए MDBList खाते की हैं।"
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateServer": [
+    {
+      "type": 0,
+      "value": "निजी सूचियाँ भी काम करती हैं, अगर सर्वर की MDBList API कुंजी उन सूचियों के मालिक खाते की है।"
     }
   ],
   "web.collections.templateGallery.searchFailed": [
@@ -107461,6 +107559,12 @@
     {
       "type": 0,
       "value": "खोज बंद है"
+    }
+  ],
+  "web.collections.templateGallery.searchOwnLists": [
+    {
+      "type": 0,
+      "value": "अपनी सूचियाँ खोजें"
     }
   ],
   "web.collections.templateGallery.searchPlaceholder": [
@@ -107569,6 +107673,18 @@
     {
       "type": 0,
       "value": "थीम"
+    }
+  ],
+  "web.collections.templateGallery.viewBrowse": [
+    {
+      "type": 0,
+      "value": "MDBList ब्राउज़ करें"
+    }
+  ],
+  "web.collections.templateGallery.viewOwnLists": [
+    {
+      "type": 0,
+      "value": "आपकी सूचियाँ"
     }
   ],
   "web.collections.templates.mediaKind.mixed": [

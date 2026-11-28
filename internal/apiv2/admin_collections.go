@@ -9,6 +9,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	catalogsvc "github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/collectionutil"
+	"github.com/Silo-Server/silo-server/internal/mdblist"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -126,13 +127,14 @@ type AdminCollectionCapabilityOutputBody struct {
 	Groups  bool `json:"groups"`
 	Imports bool `json:"imports"`
 	// ImportSources lists the sources a new collection can be imported from.
-	ImportSources     []string                   `json:"import_sources" enum:"mdblist,tmdb,tmdb_list" doc:"Import sources a new collection can be created from; empty when imports is false" example:"[\"mdblist\",\"tmdb\",\"tmdb_list\"]"`
-	Artwork           bool                       `json:"artwork"`
-	ItemReorder       bool                       `json:"item_reorder"`
-	TemplateSummaries bool                       `json:"template_summaries" doc:"listAdminCollectionTemplateBundles returns each bundle's templates" example:"true"`
-	MDBListSearch     bool                       `json:"mdblist_search" doc:"searchMDBListLists and listTopMDBListLists return lists; false when the server has no MDBList API key" example:"true"`
-	ScheduleTimeZone  CollectionScheduleTimeZone `json:"schedule_time_zone"`
-	SectionReferences bool                       `json:"section_references" doc:"listAdminCollectionSections lists the rows that show a collection, and listAdminCollections items carry home_row_count and row_count" example:"true"`
+	ImportSources       []string                   `json:"import_sources" enum:"mdblist,tmdb,tmdb_list" doc:"Import sources a new collection can be created from; empty when imports is false" example:"[\"mdblist\",\"tmdb\",\"tmdb_list\"]"`
+	Artwork             bool                       `json:"artwork"`
+	ItemReorder         bool                       `json:"item_reorder"`
+	TemplateSummaries   bool                       `json:"template_summaries" doc:"listAdminCollectionTemplateBundles returns each bundle's templates" example:"true"`
+	MDBListSearch       bool                       `json:"mdblist_search" doc:"searchMDBListLists and listTopMDBListLists return lists; false when the server has no MDBList API key" example:"true"`
+	MDBListAccountLists bool                       `json:"mdblist_account_lists" doc:"listAdminMDBListLists returns the lists of the account that owns the server's MDBList API key, and server collections sync that account's private lists; false when the server has no MDBList API key" example:"true"`
+	ScheduleTimeZone    CollectionScheduleTimeZone `json:"schedule_time_zone"`
+	SectionReferences   bool                       `json:"section_references" doc:"listAdminCollectionSections lists the rows that show a collection, and listAdminCollections items carry home_row_count and row_count" example:"true"`
 }
 
 func adminCollectionOperation(method, path, id, summary string, guarded bool) Operation {
@@ -175,6 +177,7 @@ func registerAdminCollections(reg *Registry) {
 		})
 		out := &AdminCollectionCapabilityOutput{}
 		out.Body.MDBListSearch = reg.mdblistSearch()
+		out.Body.MDBListAccountLists = reg.serverMDBListAccountLists() != nil
 		out.Body.ScheduleTimeZone = reg.scheduleTimeZone()
 		out.Body.SectionReferences = reg.adminCollectionSections() != nil
 		if !ok {
@@ -190,6 +193,7 @@ func registerAdminCollections(reg *Registry) {
 		out.Body.TemplateSummaries = true
 		return out, nil
 	})
+	Register(reg, adminCollectionOperation(http.MethodGet, "/admin/collections/mdblist/lists", "listAdminMDBListLists", "List the lists of the MDBList account that owns the server's MDBList API key, private ones included, to sync as server collections.", false), reg.listAdminMDBListLists)
 	registerAdminCollectionGroups(reg)
 	registerAdminCollectionExtras(reg)
 	registerAdminCollectionSections(reg)
@@ -441,3 +445,29 @@ func (reg *Registry) reorderAdminCollectionItems(ctx context.Context, in *AdminC
 }
 
 func (c AdminCollectionCapabilityOutputBody) capabilityState() string { return StateAvailable }
+
+// serverMDBListAccountLists returns the service that lists the server key
+// account's MDBList lists, or nil when the server has no MDBList API key.
+func (reg *Registry) serverMDBListAccountLists() interface {
+	ServerMDBListAccountLists(context.Context) (handlers.MDBListAccountListsView, error)
+} {
+	svc, ok := reg.deps.CollectionImports.(interface {
+		ServerMDBListAccountLists(context.Context) (handlers.MDBListAccountListsView, error)
+	})
+	if !ok || !reg.mdblistSearch() {
+		return nil
+	}
+	return svc
+}
+
+func (reg *Registry) listAdminMDBListLists(ctx context.Context, _ *struct{}) (*MDBListAccountListCollectionOutput, error) {
+	svc := reg.serverMDBListAccountLists()
+	if svc == nil {
+		return mdblistAccountListsOf(handlers.MDBListAccountListsView{Lists: []mdblist.AccountList{}}), nil
+	}
+	view, err := svc.ServerMDBListAccountLists(ctx)
+	if err != nil {
+		return nil, collectionProblem(err)
+	}
+	return mdblistAccountListsOf(view), nil
+}

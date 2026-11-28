@@ -103045,6 +103045,24 @@
       "value": "deinen Mediatheken"
     }
   ],
+  "web.collections.copy.yourMdblistLists": [
+    {
+      "type": 0,
+      "value": "Deine MDBList-Listen"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsProfileHelp": [
+    {
+      "type": 0,
+      "value": "Aus der MDBList-Verbindung dieses Profils, auch private"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsServerHelp": [
+    {
+      "type": 0,
+      "value": "Vom Konto, dem der MDBList-API-Schlüssel des Servers gehört, auch private"
+    }
+  ],
   "web.collections.count.unavailable": [
     {
       "type": 0,
@@ -107389,6 +107407,16 @@
       "value": "Geteilt"
     }
   ],
+  "web.collections.templateGallery.accountListsFailed": [
+    {
+      "type": 0,
+      "value": "Deine MDBList-Listen konnten nicht geladen werden. "
+    },
+    {
+      "type": 1,
+      "value": "detail"
+    }
+  ],
   "web.collections.templateGallery.allThemes": [
     {
       "type": 0,
@@ -107403,6 +107431,26 @@
     {
       "type": 1,
       "value": "user"
+    }
+  ],
+  "web.collections.templateGallery.connectForOwnLists": [
+    {
+      "type": 0,
+      "value": "Verbinde MDBList unter "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Einstellungen › Anbieter für Wiedergabeverlauf"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", um aus deinen eigenen Listen zu wählen, auch aus privaten. Durch das Verbinden wird außerdem dein Wiedergabeverlauf mit MDBList synchronisiert; das kannst du dort ausschalten."
     }
   ],
   "web.collections.templateGallery.groupHeading": [
@@ -107455,10 +107503,34 @@
       }
     }
   ],
+  "web.collections.templateGallery.listLiked": [
+    {
+      "type": 0,
+      "value": "Gefällt mir"
+    }
+  ],
+  "web.collections.templateGallery.listPrivate": [
+    {
+      "type": 0,
+      "value": "Privat"
+    }
+  ],
+  "web.collections.templateGallery.listViews": [
+    {
+      "type": 0,
+      "value": "Anzuzeigende Listen"
+    }
+  ],
   "web.collections.templateGallery.lists": [
     {
       "type": 0,
       "value": "Listen"
+    }
+  ],
+  "web.collections.templateGallery.loadingOwnLists": [
+    {
+      "type": 0,
+      "value": "Deine Listen werden geladen…"
     }
   ],
   "web.collections.templateGallery.noMatches": [
@@ -107475,10 +107547,36 @@
       "value": "“."
     }
   ],
+  "web.collections.templateGallery.noOwnMatches": [
+    {
+      "type": 0,
+      "value": "Keine deiner Listen passt zu „"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "“."
+    }
+  ],
   "web.collections.templateGallery.noPicks": [
     {
       "type": 0,
       "value": "Keine beliebten Listen hier. Durchsuche MDBList oder füge einen Link ein."
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateProfile": [
+    {
+      "type": 0,
+      "value": "Private Listen funktionieren auch, wenn sie zum verbundenen MDBList-Konto dieses Profils gehören."
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateServer": [
+    {
+      "type": 0,
+      "value": "Private Listen funktionieren auch, wenn der MDBList-API-Schlüssel des Servers zu dem Konto gehört, dem sie gehören."
     }
   ],
   "web.collections.templateGallery.searchFailed": [
@@ -107521,6 +107619,12 @@
     {
       "type": 0,
       "value": "Suche ist aus"
+    }
+  ],
+  "web.collections.templateGallery.searchOwnLists": [
+    {
+      "type": 0,
+      "value": "Deine Listen durchsuchen"
     }
   ],
   "web.collections.templateGallery.searchPlaceholder": [
@@ -107633,6 +107737,18 @@
     {
       "type": 0,
       "value": "Themen"
+    }
+  ],
+  "web.collections.templateGallery.viewBrowse": [
+    {
+      "type": 0,
+      "value": "MDBList durchstöbern"
+    }
+  ],
+  "web.collections.templateGallery.viewOwnLists": [
+    {
+      "type": 0,
+      "value": "Deine Listen"
     }
   ],
   "web.collections.templates.mediaKind.mixed": [

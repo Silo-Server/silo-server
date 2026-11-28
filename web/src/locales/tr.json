@@ -102453,6 +102453,24 @@
       "value": "kitaplıklarınız"
     }
   ],
+  "web.collections.copy.yourMdblistLists": [
+    {
+      "type": 0,
+      "value": "MDBList listeleriniz"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsProfileHelp": [
+    {
+      "type": 0,
+      "value": "Bu profilin MDBList bağlantısından, özel olanlar dahil"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsServerHelp": [
+    {
+      "type": 0,
+      "value": "Sunucunun MDBList API anahtarının sahibi olan hesaptan, özel olanlar dahil"
+    }
+  ],
   "web.collections.count.unavailable": [
     {
       "type": 0,
@@ -106811,6 +106829,16 @@
       "value": "Paylaşılan"
     }
   ],
+  "web.collections.templateGallery.accountListsFailed": [
+    {
+      "type": 0,
+      "value": "MDBList listeleriniz yüklenemedi. "
+    },
+    {
+      "type": 1,
+      "value": "detail"
+    }
+  ],
   "web.collections.templateGallery.allThemes": [
     {
       "type": 0,
@@ -106825,6 +106853,26 @@
     {
       "type": 0,
       "value": " tarafından"
+    }
+  ],
+  "web.collections.templateGallery.connectForOwnLists": [
+    {
+      "type": 0,
+      "value": "Özel olanlar dahil kendi listelerinizden seçmek için "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Ayarlar › İzleme sağlayıcıları"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " sayfasında MDBList’i bağlayın. Bağlandığınızda izleme geçmişi de MDBList ile eşitlenmeye başlar; bunu aynı sayfadan kapatabilirsiniz."
     }
   ],
   "web.collections.templateGallery.groupHeading": [
@@ -106877,10 +106925,34 @@
       }
     }
   ],
+  "web.collections.templateGallery.listLiked": [
+    {
+      "type": 0,
+      "value": "Beğenildi"
+    }
+  ],
+  "web.collections.templateGallery.listPrivate": [
+    {
+      "type": 0,
+      "value": "Özel"
+    }
+  ],
+  "web.collections.templateGallery.listViews": [
+    {
+      "type": 0,
+      "value": "Gösterilecek listeler"
+    }
+  ],
   "web.collections.templateGallery.lists": [
     {
       "type": 0,
       "value": "Listeler"
+    }
+  ],
+  "web.collections.templateGallery.loadingOwnLists": [
+    {
+      "type": 0,
+      "value": "Listeleriniz yükleniyor…"
     }
   ],
   "web.collections.templateGallery.noMatches": [
@@ -106897,10 +106969,36 @@
       "value": "” ile eşleşen herkese açık liste yok."
     }
   ],
+  "web.collections.templateGallery.noOwnMatches": [
+    {
+      "type": 0,
+      "value": "Listelerinizden hiçbiri “"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "” ile eşleşmiyor."
+    }
+  ],
   "web.collections.templateGallery.noPicks": [
     {
       "type": 0,
       "value": "Burada popüler seçim yok. MDBList’te arayın veya bir bağlantı yapıştırın."
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateProfile": [
+    {
+      "type": 0,
+      "value": "Bu profilin bağlı MDBList hesabına aitse özel listeler de çalışır."
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateServer": [
+    {
+      "type": 0,
+      "value": "Sunucunun MDBList API anahtarı listelerin sahibi olan hesaba aitse özel listeler de çalışır."
     }
   ],
   "web.collections.templateGallery.searchFailed": [
@@ -106943,6 +107041,12 @@
     {
       "type": 0,
       "value": "Arama kapalı"
+    }
+  ],
+  "web.collections.templateGallery.searchOwnLists": [
+    {
+      "type": 0,
+      "value": "Listelerinizde ara"
     }
   ],
   "web.collections.templateGallery.searchPlaceholder": [
@@ -107047,6 +107151,18 @@
     {
       "type": 0,
       "value": "Temalar"
+    }
+  ],
+  "web.collections.templateGallery.viewBrowse": [
+    {
+      "type": 0,
+      "value": "MDBList’e göz at"
+    }
+  ],
+  "web.collections.templateGallery.viewOwnLists": [
+    {
+      "type": 0,
+      "value": "Listeleriniz"
     }
   ],
   "web.collections.templates.mediaKind.mixed": [

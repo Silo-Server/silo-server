@@ -344,6 +344,40 @@ type MDBListListCollectionOutput struct {
 	Body MDBListListCollection
 }
 
+// MDBListAccountList is a list of the MDBList account behind an API key: one
+// of its own, private ones included, or one it liked.
+type MDBListAccountList struct {
+	Name       string   `json:"name" example:"Weekend picks"`
+	URL        string   `json:"url" format:"uri" doc:"The list page, which a synced collection stores" example:"https://mdblist.com/lists/example-user/weekend-picks"`
+	MediaTypes []string `json:"media_types" enum:"movie,show" doc:"What the list holds; both for a list of movies and shows" example:"[\"movie\"]"`
+	Items      int      `json:"items" example:"42"`
+	Private    bool     `json:"private" doc:"Only the account can see the list; Silo reads it with the key" example:"true"`
+	Dynamic    bool     `json:"dynamic" doc:"MDBList updates the list from its filters" example:"false"`
+	Owned      bool     `json:"owned" doc:"false for a list the account liked" example:"true"`
+}
+
+// MDBListAccountListCollection is the envelope of an MDBList account's lists.
+type MDBListAccountListCollection struct {
+	Collection[MDBListAccountList]
+	Configured bool `json:"configured" doc:"false when there is no MDBList API key to read with; items is then empty and clients hide the choice" example:"true"`
+}
+
+// MDBListAccountListCollectionOutput is an MDBList account lists response.
+type MDBListAccountListCollectionOutput struct {
+	Body MDBListAccountListCollection
+}
+
+func mdblistAccountListsOf(v handlers.MDBListAccountListsView) *MDBListAccountListCollectionOutput {
+	items := make([]MDBListAccountList, 0, len(v.Lists))
+	for _, l := range v.Lists {
+		items = append(items, MDBListAccountList{
+			Name: l.Name, URL: l.URL, MediaTypes: l.MediaTypes, Items: l.Items,
+			Private: l.Private, Dynamic: l.Dynamic, Owned: l.Owned,
+		})
+	}
+	return &MDBListAccountListCollectionOutput{Body: MDBListAccountListCollection{Collection: NewCollection(items), Configured: v.Configured}}
+}
+
 // MDBListSearchInput is the searchMDBListLists request.
 type MDBListSearchInput struct {
 	Q string `query:"q" required:"true" minLength:"1" doc:"Free-text list search" example:"top watched"`

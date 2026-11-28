@@ -103503,6 +103503,24 @@
       "value": "kirjastosi"
     }
   ],
+  "web.collections.copy.yourMdblistLists": [
+    {
+      "type": 0,
+      "value": "MDBList-listasi"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsProfileHelp": [
+    {
+      "type": 0,
+      "value": "Tämän profiilin MDBList-yhteydestä, myös yksityiset"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsServerHelp": [
+    {
+      "type": 0,
+      "value": "Tililtä, jolle palvelimen MDBList API -avain kuuluu, myös yksityiset"
+    }
+  ],
   "web.collections.count.unavailable": [
     {
       "type": 0,
@@ -108053,6 +108071,16 @@
       "value": "Jaettu"
     }
   ],
+  "web.collections.templateGallery.accountListsFailed": [
+    {
+      "type": 0,
+      "value": "MDBList-listojesi lataaminen epäonnistui. "
+    },
+    {
+      "type": 1,
+      "value": "detail"
+    }
+  ],
   "web.collections.templateGallery.allThemes": [
     {
       "type": 0,
@@ -108067,6 +108095,26 @@
     {
       "type": 1,
       "value": "user"
+    }
+  ],
+  "web.collections.templateGallery.connectForOwnLists": [
+    {
+      "type": 0,
+      "value": "Yhdistä MDBList kohdassa "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Asetukset › Katselupalvelut"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", niin voit valita omista listoistasi, myös yksityisistä. Yhdistäminen aloittaa myös katseluhistorian synkronoinnin MDBListin kanssa. Voit poistaa sen käytöstä samasta kohdasta."
     }
   ],
   "web.collections.templateGallery.groupHeading": [
@@ -108119,10 +108167,34 @@
       }
     }
   ],
+  "web.collections.templateGallery.listLiked": [
+    {
+      "type": 0,
+      "value": "Tykätty"
+    }
+  ],
+  "web.collections.templateGallery.listPrivate": [
+    {
+      "type": 0,
+      "value": "Yksityinen"
+    }
+  ],
+  "web.collections.templateGallery.listViews": [
+    {
+      "type": 0,
+      "value": "Näytettävät listat"
+    }
+  ],
   "web.collections.templateGallery.lists": [
     {
       "type": 0,
       "value": "Listat"
+    }
+  ],
+  "web.collections.templateGallery.loadingOwnLists": [
+    {
+      "type": 0,
+      "value": "Ladataan listojasi…"
     }
   ],
   "web.collections.templateGallery.noMatches": [
@@ -108139,10 +108211,36 @@
       "value": "”."
     }
   ],
+  "web.collections.templateGallery.noOwnMatches": [
+    {
+      "type": 0,
+      "value": "Mikään listasi ei vastaa hakua ”"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "”."
+    }
+  ],
   "web.collections.templateGallery.noPicks": [
     {
       "type": 0,
       "value": "Ei suosittuja valintoja. Hae MDBListista tai liitä linkki."
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateProfile": [
+    {
+      "type": 0,
+      "value": "Myös yksityiset listat toimivat, jos ne kuuluvat tämän profiilin yhdistettyyn MDBList-tiliin."
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateServer": [
+    {
+      "type": 0,
+      "value": "Myös yksityiset listat toimivat, jos palvelimen MDBList API -avain kuuluu tilille, joka omistaa ne."
     }
   ],
   "web.collections.templateGallery.searchFailed": [
@@ -108185,6 +108283,12 @@
     {
       "type": 0,
       "value": "Haku ei ole käytössä"
+    }
+  ],
+  "web.collections.templateGallery.searchOwnLists": [
+    {
+      "type": 0,
+      "value": "Hae listoistasi"
     }
   ],
   "web.collections.templateGallery.searchPlaceholder": [
@@ -108297,6 +108401,18 @@
     {
       "type": 0,
       "value": "Teemat"
+    }
+  ],
+  "web.collections.templateGallery.viewBrowse": [
+    {
+      "type": 0,
+      "value": "Selaa MDBListiä"
+    }
+  ],
+  "web.collections.templateGallery.viewOwnLists": [
+    {
+      "type": 0,
+      "value": "Omat listasi"
     }
   ],
   "web.collections.templates.mediaKind.mixed": [

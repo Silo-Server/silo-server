@@ -122739,6 +122739,24 @@
       "value": "ваших бібліотеках"
     }
   ],
+  "web.collections.copy.yourMdblistLists": [
+    {
+      "type": 0,
+      "value": "Ваші списки MDBList"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsProfileHelp": [
+    {
+      "type": 0,
+      "value": "З підключення MDBList цього профілю, зокрема приватні"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsServerHelp": [
+    {
+      "type": 0,
+      "value": "З облікового запису, якому належить ключ API MDBList сервера, зокрема приватні"
+    }
+  ],
   "web.collections.count.unavailable": [
     {
       "type": 0,
@@ -127853,6 +127871,16 @@
       "value": "Спільна"
     }
   ],
+  "web.collections.templateGallery.accountListsFailed": [
+    {
+      "type": 0,
+      "value": "Не вдалося завантажити ваші списки MDBList. "
+    },
+    {
+      "type": 1,
+      "value": "detail"
+    }
+  ],
   "web.collections.templateGallery.allThemes": [
     {
       "type": 0,
@@ -127867,6 +127895,26 @@
     {
       "type": 1,
       "value": "user"
+    }
+  ],
+  "web.collections.templateGallery.connectForOwnLists": [
+    {
+      "type": 0,
+      "value": "Підключіть MDBList у розділі "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Налаштування › Постачальники перегляду"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", щоб вибирати з власних списків, зокрема приватних. Після підключення також почнеться синхронізація історії переглядів із MDBList – її можна вимкнути там же."
     }
   ],
   "web.collections.templateGallery.groupHeading": [
@@ -127919,10 +127967,34 @@
       }
     }
   ],
+  "web.collections.templateGallery.listLiked": [
+    {
+      "type": 0,
+      "value": "Вподобано"
+    }
+  ],
+  "web.collections.templateGallery.listPrivate": [
+    {
+      "type": 0,
+      "value": "Приватний"
+    }
+  ],
+  "web.collections.templateGallery.listViews": [
+    {
+      "type": 0,
+      "value": "Які списки показувати"
+    }
+  ],
   "web.collections.templateGallery.lists": [
     {
       "type": 0,
       "value": "Списки"
+    }
+  ],
+  "web.collections.templateGallery.loadingOwnLists": [
+    {
+      "type": 0,
+      "value": "Завантаження ваших списків…"
     }
   ],
   "web.collections.templateGallery.noMatches": [
@@ -127939,10 +128011,36 @@
       "value": "»."
     }
   ],
+  "web.collections.templateGallery.noOwnMatches": [
+    {
+      "type": 0,
+      "value": "Жоден із ваших списків не відповідає запиту «"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "»."
+    }
+  ],
   "web.collections.templateGallery.noPicks": [
     {
       "type": 0,
       "value": "Тут немає популярних добірок. Шукайте в MDBList або вставте посилання."
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateProfile": [
+    {
+      "type": 0,
+      "value": "Приватні списки теж підходять, якщо вони належать обліковому запису MDBList, підключеному до цього профілю."
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateServer": [
+    {
+      "type": 0,
+      "value": "Приватні списки теж підходять, якщо ключ API MDBList сервера належить обліковому запису, якому належать ці списки."
     }
   ],
   "web.collections.templateGallery.searchFailed": [
@@ -127985,6 +128083,12 @@
     {
       "type": 0,
       "value": "Пошук вимкнено"
+    }
+  ],
+  "web.collections.templateGallery.searchOwnLists": [
+    {
+      "type": 0,
+      "value": "Шукати у ваших списках"
     }
   ],
   "web.collections.templateGallery.searchPlaceholder": [
@@ -128129,6 +128233,18 @@
     {
       "type": 0,
       "value": "Теми"
+    }
+  ],
+  "web.collections.templateGallery.viewBrowse": [
+    {
+      "type": 0,
+      "value": "Огляд MDBList"
+    }
+  ],
+  "web.collections.templateGallery.viewOwnLists": [
+    {
+      "type": 0,
+      "value": "Ваші списки"
     }
   ],
   "web.collections.templates.mediaKind.mixed": [

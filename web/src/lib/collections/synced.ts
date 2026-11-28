@@ -247,6 +247,37 @@ export function mdblistPickId(list: Pick<MDBListListSummary, "id">): string {
   return `mdblist:${list.id}`;
 }
 
+/** One of the key account's own or liked MDBList lists: its name, nothing else. */
+export function mdblistAccountPick(list: {
+  name: string;
+  url: string;
+  media_types: readonly string[];
+}): SyncedPick {
+  const [only, ...others] = list.media_types;
+  return {
+    list: {
+      source: "mdblist",
+      url: `${list.url}/json`,
+      pickId: mdblistAccountPickId(list),
+      mediaKind: only !== undefined && others.length === 0 ? mdblistMediaKind(only) : "mixed",
+    },
+    name: list.name,
+    description: "",
+    schedule: "",
+  };
+}
+
+const MDBLIST_ACCOUNT_PICK = "mdblist-account:";
+
+export function mdblistAccountPickId(list: { url: string }): string {
+  return `${MDBLIST_ACCOUNT_PICK}${list.url}`;
+}
+
+/** Whether a pick id came from {@link mdblistAccountPickId}: one of the account's own lists. */
+export function isMdblistAccountPickId(id: string): boolean {
+  return id.startsWith(MDBLIST_ACCOUNT_PICK);
+}
+
 /** A chart: the ready-made pick for it when there is one, otherwise just its name. */
 export function chartPick(
   chart: TMDBChart,

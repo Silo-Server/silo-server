@@ -93829,6 +93829,24 @@
       "value": "pustaka anda"
     }
   ],
+  "web.collections.copy.yourMdblistLists": [
+    {
+      "type": 0,
+      "value": "Senarai MDBList anda"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsProfileHelp": [
+    {
+      "type": 0,
+      "value": "Daripada sambungan MDBList profil ini, termasuk senarai peribadi"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsServerHelp": [
+    {
+      "type": 0,
+      "value": "Daripada akaun yang memiliki kunci API MDBList pelayan, termasuk senarai peribadi"
+    }
+  ],
   "web.collections.count.unavailable": [
     {
       "type": 0,
@@ -97985,6 +98003,16 @@
       "value": "Dikongsi"
     }
   ],
+  "web.collections.templateGallery.accountListsFailed": [
+    {
+      "type": 0,
+      "value": "Tidak dapat memuatkan senarai MDBList anda. "
+    },
+    {
+      "type": 1,
+      "value": "detail"
+    }
+  ],
   "web.collections.templateGallery.allThemes": [
     {
       "type": 0,
@@ -97999,6 +98027,26 @@
     {
       "type": 1,
       "value": "user"
+    }
+  ],
+  "web.collections.templateGallery.connectForOwnLists": [
+    {
+      "type": 0,
+      "value": "Sambungkan MDBList dalam "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Tetapan › Pembekal tontonan"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " untuk memilih daripada senarai anda sendiri, termasuk senarai peribadi. Penyambungan juga memulakan penyegerakan sejarah tontonan dengan MDBList, yang boleh anda matikan di sana."
     }
   ],
   "web.collections.templateGallery.groupHeading": [
@@ -98051,10 +98099,34 @@
       }
     }
   ],
+  "web.collections.templateGallery.listLiked": [
+    {
+      "type": 0,
+      "value": "Disukai"
+    }
+  ],
+  "web.collections.templateGallery.listPrivate": [
+    {
+      "type": 0,
+      "value": "Peribadi"
+    }
+  ],
+  "web.collections.templateGallery.listViews": [
+    {
+      "type": 0,
+      "value": "Senarai untuk ditunjukkan"
+    }
+  ],
   "web.collections.templateGallery.lists": [
     {
       "type": 0,
       "value": "Senarai"
+    }
+  ],
+  "web.collections.templateGallery.loadingOwnLists": [
+    {
+      "type": 0,
+      "value": "Memuatkan senarai anda…"
     }
   ],
   "web.collections.templateGallery.noMatches": [
@@ -98071,10 +98143,36 @@
       "value": "”."
     }
   ],
+  "web.collections.templateGallery.noOwnMatches": [
+    {
+      "type": 0,
+      "value": "Tiada senarai anda yang sepadan dengan “"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "”."
+    }
+  ],
   "web.collections.templateGallery.noPicks": [
     {
       "type": 0,
       "value": "Tiada pilihan popular di sini. Cari dalam MDBList atau tampal pautan."
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateProfile": [
+    {
+      "type": 0,
+      "value": "Senarai peribadi juga berfungsi jika senarai itu milik akaun MDBList yang disambungkan oleh profil ini."
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateServer": [
+    {
+      "type": 0,
+      "value": "Senarai peribadi juga berfungsi jika kunci API MDBList pelayan milik akaun yang memiliki senarai itu."
     }
   ],
   "web.collections.templateGallery.searchFailed": [
@@ -98117,6 +98215,12 @@
     {
       "type": 0,
       "value": "Carian dimatikan"
+    }
+  ],
+  "web.collections.templateGallery.searchOwnLists": [
+    {
+      "type": 0,
+      "value": "Cari senarai anda"
     }
   ],
   "web.collections.templateGallery.searchPlaceholder": [
@@ -98213,6 +98317,18 @@
     {
       "type": 0,
       "value": "Tema"
+    }
+  ],
+  "web.collections.templateGallery.viewBrowse": [
+    {
+      "type": 0,
+      "value": "Semak imbas MDBList"
+    }
+  ],
+  "web.collections.templateGallery.viewOwnLists": [
+    {
+      "type": 0,
+      "value": "Senarai anda"
     }
   ],
   "web.collections.templates.mediaKind.mixed": [

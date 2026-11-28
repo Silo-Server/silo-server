@@ -104145,6 +104145,24 @@
       "value": "teie meediakogud"
     }
   ],
+  "web.collections.copy.yourMdblistLists": [
+    {
+      "type": 0,
+      "value": "Teie MDBListi loendid"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsProfileHelp": [
+    {
+      "type": 0,
+      "value": "Selle profiili MDBListi ühendusest, ka privaatsed"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsServerHelp": [
+    {
+      "type": 0,
+      "value": "Kontolt, millele kuulub serveri MDBListi API-võti, ka privaatsed"
+    }
+  ],
   "web.collections.count.unavailable": [
     {
       "type": 0,
@@ -108613,6 +108631,16 @@
       "value": "Jagatud"
     }
   ],
+  "web.collections.templateGallery.accountListsFailed": [
+    {
+      "type": 0,
+      "value": "Teie MDBListi loendite laadimine ebaõnnestus. "
+    },
+    {
+      "type": 1,
+      "value": "detail"
+    }
+  ],
   "web.collections.templateGallery.allThemes": [
     {
       "type": 0,
@@ -108627,6 +108655,26 @@
     {
       "type": 1,
       "value": "user"
+    }
+  ],
+  "web.collections.templateGallery.connectForOwnLists": [
+    {
+      "type": 0,
+      "value": "Ühendage MDBList jaotises "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Seaded › Vaatamisteenused"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", et valida oma loendite seast, sealhulgas privaatsete. Ühendamine käivitab ka vaatamisajaloo sünkroonimise MDBListiga; selle saate seal välja lülitada."
     }
   ],
   "web.collections.templateGallery.groupHeading": [
@@ -108679,10 +108727,34 @@
       }
     }
   ],
+  "web.collections.templateGallery.listLiked": [
+    {
+      "type": 0,
+      "value": "Meeldinud"
+    }
+  ],
+  "web.collections.templateGallery.listPrivate": [
+    {
+      "type": 0,
+      "value": "Privaatne"
+    }
+  ],
+  "web.collections.templateGallery.listViews": [
+    {
+      "type": 0,
+      "value": "Kuvatavad loendid"
+    }
+  ],
   "web.collections.templateGallery.lists": [
     {
       "type": 0,
       "value": "Loendid"
+    }
+  ],
+  "web.collections.templateGallery.loadingOwnLists": [
+    {
+      "type": 0,
+      "value": "Teie loendite laadimine…"
     }
   ],
   "web.collections.templateGallery.noMatches": [
@@ -108699,10 +108771,36 @@
       "value": "“."
     }
   ],
+  "web.collections.templateGallery.noOwnMatches": [
+    {
+      "type": 0,
+      "value": "Ükski teie loend ei vasta päringule „"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "“."
+    }
+  ],
   "web.collections.templateGallery.noPicks": [
     {
       "type": 0,
       "value": "Siin pole populaarseid valikuid. Otsige teenusest MDBList või kleepige link."
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateProfile": [
+    {
+      "type": 0,
+      "value": "Ka privaatsed loendid töötavad, kui need kuuluvad selle profiili ühendatud MDBListi kontole."
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateServer": [
+    {
+      "type": 0,
+      "value": "Ka privaatsed loendid töötavad, kui serveri MDBListi API-võti kuulub kontole, millele loendid kuuluvad."
     }
   ],
   "web.collections.templateGallery.searchFailed": [
@@ -108745,6 +108843,12 @@
     {
       "type": 0,
       "value": "Otsing on väljas"
+    }
+  ],
+  "web.collections.templateGallery.searchOwnLists": [
+    {
+      "type": 0,
+      "value": "Otsi oma loenditest"
     }
   ],
   "web.collections.templateGallery.searchPlaceholder": [
@@ -108857,6 +108961,18 @@
     {
       "type": 0,
       "value": "Teemad"
+    }
+  ],
+  "web.collections.templateGallery.viewBrowse": [
+    {
+      "type": 0,
+      "value": "Sirvi MDBListi"
+    }
+  ],
+  "web.collections.templateGallery.viewOwnLists": [
+    {
+      "type": 0,
+      "value": "Teie loendid"
     }
   ],
   "web.collections.templates.mediaKind.mixed": [

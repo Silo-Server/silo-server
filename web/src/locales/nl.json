@@ -102873,6 +102873,24 @@
       "value": "je bibliotheken"
     }
   ],
+  "web.collections.copy.yourMdblistLists": [
+    {
+      "type": 0,
+      "value": "Je MDBList-lijsten"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsProfileHelp": [
+    {
+      "type": 0,
+      "value": "Via de MDBList-koppeling van dit profiel, ook privélijsten"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsServerHelp": [
+    {
+      "type": 0,
+      "value": "Van het account dat eigenaar is van de MDBList-API-sleutel van de server, ook privélijsten"
+    }
+  ],
   "web.collections.count.unavailable": [
     {
       "type": 0,
@@ -107261,6 +107279,16 @@
       "value": "Gedeeld"
     }
   ],
+  "web.collections.templateGallery.accountListsFailed": [
+    {
+      "type": 0,
+      "value": "Kan je MDBList-lijsten niet laden. "
+    },
+    {
+      "type": 1,
+      "value": "detail"
+    }
+  ],
   "web.collections.templateGallery.allThemes": [
     {
       "type": 0,
@@ -107275,6 +107303,26 @@
     {
       "type": 1,
       "value": "user"
+    }
+  ],
+  "web.collections.templateGallery.connectForOwnLists": [
+    {
+      "type": 0,
+      "value": "Koppel MDBList in "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Instellingen › Kijkproviders"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " om uit je eigen lijsten te kiezen, ook privélijsten. Door te koppelen wordt ook je kijkgeschiedenis met MDBList gesynchroniseerd; dat kun je daar uitzetten."
     }
   ],
   "web.collections.templateGallery.groupHeading": [
@@ -107327,10 +107375,34 @@
       }
     }
   ],
+  "web.collections.templateGallery.listLiked": [
+    {
+      "type": 0,
+      "value": "Geliket"
+    }
+  ],
+  "web.collections.templateGallery.listPrivate": [
+    {
+      "type": 0,
+      "value": "Privé"
+    }
+  ],
+  "web.collections.templateGallery.listViews": [
+    {
+      "type": 0,
+      "value": "Te tonen lijsten"
+    }
+  ],
   "web.collections.templateGallery.lists": [
     {
       "type": 0,
       "value": "Lijsten"
+    }
+  ],
+  "web.collections.templateGallery.loadingOwnLists": [
+    {
+      "type": 0,
+      "value": "Je lijsten laden…"
     }
   ],
   "web.collections.templateGallery.noMatches": [
@@ -107347,10 +107419,36 @@
       "value": "”."
     }
   ],
+  "web.collections.templateGallery.noOwnMatches": [
+    {
+      "type": 0,
+      "value": "Geen van je lijsten komt overeen met “"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "”."
+    }
+  ],
   "web.collections.templateGallery.noPicks": [
     {
       "type": 0,
       "value": "Geen populaire keuzes hier. Zoek in MDBList of plak een link."
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateProfile": [
+    {
+      "type": 0,
+      "value": "Privélijsten werken ook als ze van het gekoppelde MDBList-account van dit profiel zijn."
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateServer": [
+    {
+      "type": 0,
+      "value": "Privélijsten werken ook als de MDBList-API-sleutel van de server hoort bij het account dat eigenaar is van de lijsten."
     }
   ],
   "web.collections.templateGallery.searchFailed": [
@@ -107393,6 +107491,12 @@
     {
       "type": 0,
       "value": "Zoeken staat uit"
+    }
+  ],
+  "web.collections.templateGallery.searchOwnLists": [
+    {
+      "type": 0,
+      "value": "Zoeken in je lijsten"
     }
   ],
   "web.collections.templateGallery.searchPlaceholder": [
@@ -107505,6 +107609,18 @@
     {
       "type": 0,
       "value": "Thema’s"
+    }
+  ],
+  "web.collections.templateGallery.viewBrowse": [
+    {
+      "type": 0,
+      "value": "MDBList doorbladeren"
+    }
+  ],
+  "web.collections.templateGallery.viewOwnLists": [
+    {
+      "type": 0,
+      "value": "Je lijsten"
     }
   ],
   "web.collections.templates.mediaKind.mixed": [

@@ -123201,6 +123201,24 @@
       "value": "vaše knižnice"
     }
   ],
+  "web.collections.copy.yourMdblistLists": [
+    {
+      "type": 0,
+      "value": "Vaše zoznamy v službe MDBList"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsProfileHelp": [
+    {
+      "type": 0,
+      "value": "Z pripojenia k službe MDBList v tomto profile, aj súkromné"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsServerHelp": [
+    {
+      "type": 0,
+      "value": "Z účtu, ktorému patrí kľúč API služby MDBList na serveri, aj súkromné"
+    }
+  ],
   "web.collections.count.unavailable": [
     {
       "type": 0,
@@ -128303,6 +128321,16 @@
       "value": "Zdieľané"
     }
   ],
+  "web.collections.templateGallery.accountListsFailed": [
+    {
+      "type": 0,
+      "value": "Nepodarilo sa načítať vaše zoznamy zo služby MDBList. "
+    },
+    {
+      "type": 1,
+      "value": "detail"
+    }
+  ],
   "web.collections.templateGallery.allThemes": [
     {
       "type": 0,
@@ -128317,6 +128345,26 @@
     {
       "type": 1,
       "value": "user"
+    }
+  ],
+  "web.collections.templateGallery.connectForOwnLists": [
+    {
+      "type": 0,
+      "value": "Pripojte službu MDBList v časti "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Nastavenia › Poskytovatelia sledovania"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " a vyberajte z vlastných zoznamov vrátane súkromných. Pripojením sa tiež spustí synchronizácia histórie sledovania so službou MDBList, ktorú tam môžete vypnúť."
     }
   ],
   "web.collections.templateGallery.groupHeading": [
@@ -128369,10 +128417,34 @@
       }
     }
   ],
+  "web.collections.templateGallery.listLiked": [
+    {
+      "type": 0,
+      "value": "Páči sa mi"
+    }
+  ],
+  "web.collections.templateGallery.listPrivate": [
+    {
+      "type": 0,
+      "value": "Súkromný"
+    }
+  ],
+  "web.collections.templateGallery.listViews": [
+    {
+      "type": 0,
+      "value": "Zoznamy na zobrazenie"
+    }
+  ],
   "web.collections.templateGallery.lists": [
     {
       "type": 0,
       "value": "Zoznamy"
+    }
+  ],
+  "web.collections.templateGallery.loadingOwnLists": [
+    {
+      "type": 0,
+      "value": "Načítavajú sa vaše zoznamy…"
     }
   ],
   "web.collections.templateGallery.noMatches": [
@@ -128389,10 +128461,36 @@
       "value": "“ nezodpovedajú žiadne verejné zoznamy."
     }
   ],
+  "web.collections.templateGallery.noOwnMatches": [
+    {
+      "type": 0,
+      "value": "Žiadny z vašich zoznamov nezodpovedá výrazu „"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "“."
+    }
+  ],
   "web.collections.templateGallery.noPicks": [
     {
       "type": 0,
       "value": "Nie sú tu žiadne obľúbené tipy. Vyhľadajte v službe MDBList alebo vložte odkaz."
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateProfile": [
+    {
+      "type": 0,
+      "value": "Súkromné zoznamy fungujú tiež, ak patria k účtu MDBList pripojenému v tomto profile."
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateServer": [
+    {
+      "type": 0,
+      "value": "Súkromné zoznamy fungujú tiež, ak kľúč API služby MDBList na serveri patrí účtu, ktorý ich vlastní."
     }
   ],
   "web.collections.templateGallery.searchFailed": [
@@ -128435,6 +128533,12 @@
     {
       "type": 0,
       "value": "Vyhľadávanie je vypnuté"
+    }
+  ],
+  "web.collections.templateGallery.searchOwnLists": [
+    {
+      "type": 0,
+      "value": "Hľadať vo vašich zoznamoch"
     }
   ],
   "web.collections.templateGallery.searchPlaceholder": [
@@ -128579,6 +128683,18 @@
     {
       "type": 0,
       "value": "Témy"
+    }
+  ],
+  "web.collections.templateGallery.viewBrowse": [
+    {
+      "type": 0,
+      "value": "Prehliadať MDBList"
+    }
+  ],
+  "web.collections.templateGallery.viewOwnLists": [
+    {
+      "type": 0,
+      "value": "Vaše zoznamy"
     }
   ],
   "web.collections.templates.mediaKind.mixed": [

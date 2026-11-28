@@ -379,9 +379,33 @@ accepts `sync_schedule`; see [Personal sync schedules](#personal-sync-schedules)
 `getCollectionCapabilities` also reports `contains_item`, `true` when `listCollections` accepts
 `contains_item`; see [Collections that hold a title](#collections-that-hold-a-title).
 
+`getAdminCollectionCapabilities` also reports `mdblist_account_lists`; see
+[Private MDBList lists](#private-mdblist-lists).
+
 `getAdminCollectionCapabilities` also reports `section_references`, `true` when
 `listAdminCollectionSections` is available and `listAdminCollections` items carry row counts; see
 [Rows that show a server collection](#rows-that-show-a-server-collection).
+
+## Private MDBList lists
+
+A server collection can follow a private MDBList list that the server's MDBList API key can
+read: one the key's account owns. `mdblist_account_lists` in the
+`getAdminCollectionCapabilities` document is `true` when the server has a key.
+
+- **Sync.** A sync reads the list's public feed first, so a public list costs no API quota.
+  When the feed refuses the list with its error object, as it does for a private list, the
+  sync reads the list through the MDBList API with the server's key: it looks up the list's
+  IDs from its `/lists/{user}/{slug}` URL (a movie list and a show list sharing one name have
+  two), reads each, and keeps MDBList's rank order. A link by numeric ID (`/lists/{id}`) skips
+  the lookup. Other paths, such as an external list's, keep the feed's refusal. When this read
+  fails, the stored sync message says why and what to change: no key, a key MDBList rejected,
+  a key that can't read the list, or the key's daily limit.
+- **Picking a list.** `listAdminMDBListLists` (`GET /api/v2/admin/collections/mdblist/lists`)
+  returns the lists of the account that owns the key: its own, private ones included, then the
+  ones it liked. Each item's `url` is what an import stores; a movie list and a show list that
+  share a name are one item with both `media_types`. External lists are left out. Without a
+  key it answers `configured: false` with no items. It reads the account's private lists, so
+  only administrators can call it.
 
 ## Personal collection descriptions
 

@@ -113235,6 +113235,24 @@
       "value": "les teves biblioteques"
     }
   ],
+  "web.collections.copy.yourMdblistLists": [
+    {
+      "type": 0,
+      "value": "Les teves llistes d’MDBList"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsProfileHelp": [
+    {
+      "type": 0,
+      "value": "De la connexió amb MDBList d’aquest perfil, també les privades"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsServerHelp": [
+    {
+      "type": 0,
+      "value": "Del compte propietari de la clau d’API d’MDBList del servidor, també les privades"
+    }
+  ],
   "web.collections.count.unavailable": [
     {
       "type": 0,
@@ -118043,6 +118061,16 @@
       "value": "Compartida"
     }
   ],
+  "web.collections.templateGallery.accountListsFailed": [
+    {
+      "type": 0,
+      "value": "No s’han pogut carregar les teves llistes d’MDBList. "
+    },
+    {
+      "type": 1,
+      "value": "detail"
+    }
+  ],
   "web.collections.templateGallery.allThemes": [
     {
       "type": 0,
@@ -118057,6 +118085,26 @@
     {
       "type": 1,
       "value": "user"
+    }
+  ],
+  "web.collections.templateGallery.connectForOwnLists": [
+    {
+      "type": 0,
+      "value": "Connecta MDBList a "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Configuració › Proveïdors de visualització"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " per triar entre les teves pròpies llistes, incloses les privades. En connectar-lo també es comença a sincronitzar l’historial de visualització amb MDBList, cosa que pots desactivar allà."
     }
   ],
   "web.collections.templateGallery.groupHeading": [
@@ -118109,10 +118157,34 @@
       }
     }
   ],
+  "web.collections.templateGallery.listLiked": [
+    {
+      "type": 0,
+      "value": "M’agrada"
+    }
+  ],
+  "web.collections.templateGallery.listPrivate": [
+    {
+      "type": 0,
+      "value": "Privada"
+    }
+  ],
+  "web.collections.templateGallery.listViews": [
+    {
+      "type": 0,
+      "value": "Llistes per mostrar"
+    }
+  ],
   "web.collections.templateGallery.lists": [
     {
       "type": 0,
       "value": "Llistes"
+    }
+  ],
+  "web.collections.templateGallery.loadingOwnLists": [
+    {
+      "type": 0,
+      "value": "S’estan carregant les teves llistes…"
     }
   ],
   "web.collections.templateGallery.noMatches": [
@@ -118129,10 +118201,36 @@
       "value": "»."
     }
   ],
+  "web.collections.templateGallery.noOwnMatches": [
+    {
+      "type": 0,
+      "value": "Cap de les teves llistes no coincideix amb «"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "»."
+    }
+  ],
   "web.collections.templateGallery.noPicks": [
     {
       "type": 0,
       "value": "Aquí no hi ha cap selecció popular. Cerca a MDBList o enganxa un enllaç."
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateProfile": [
+    {
+      "type": 0,
+      "value": "Les llistes privades també funcionen si pertanyen al compte d’MDBList connectat a aquest perfil."
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateServer": [
+    {
+      "type": 0,
+      "value": "Les llistes privades també funcionen si la clau d’API d’MDBList del servidor pertany al compte que n’és propietari."
     }
   ],
   "web.collections.templateGallery.searchFailed": [
@@ -118175,6 +118273,12 @@
     {
       "type": 0,
       "value": "La cerca està desactivada"
+    }
+  ],
+  "web.collections.templateGallery.searchOwnLists": [
+    {
+      "type": 0,
+      "value": "Cerca a les teves llistes"
     }
   ],
   "web.collections.templateGallery.searchPlaceholder": [
@@ -118303,6 +118407,18 @@
     {
       "type": 0,
       "value": "Temes"
+    }
+  ],
+  "web.collections.templateGallery.viewBrowse": [
+    {
+      "type": 0,
+      "value": "Explora MDBList"
+    }
+  ],
+  "web.collections.templateGallery.viewOwnLists": [
+    {
+      "type": 0,
+      "value": "Les teves llistes"
     }
   ],
   "web.collections.templates.mediaKind.mixed": [

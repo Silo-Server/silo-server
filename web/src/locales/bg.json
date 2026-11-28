@@ -103769,6 +103769,24 @@
       "value": "библиотеките ви"
     }
   ],
+  "web.collections.copy.yourMdblistLists": [
+    {
+      "type": 0,
+      "value": "Вашите списъци в MDBList"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsProfileHelp": [
+    {
+      "type": 0,
+      "value": "От връзката на този профил с MDBList, включително частните"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsServerHelp": [
+    {
+      "type": 0,
+      "value": "От акаунта, на който принадлежи API ключът за MDBList на сървъра, включително частните"
+    }
+  ],
   "web.collections.count.unavailable": [
     {
       "type": 0,
@@ -108267,6 +108285,16 @@
       "value": "Споделена"
     }
   ],
+  "web.collections.templateGallery.accountListsFailed": [
+    {
+      "type": 0,
+      "value": "Не можаха да се заредят вашите списъци в MDBList. "
+    },
+    {
+      "type": 1,
+      "value": "detail"
+    }
+  ],
   "web.collections.templateGallery.allThemes": [
     {
       "type": 0,
@@ -108281,6 +108309,26 @@
     {
       "type": 1,
       "value": "user"
+    }
+  ],
+  "web.collections.templateGallery.connectForOwnLists": [
+    {
+      "type": 0,
+      "value": "Свържете MDBList в "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Настройки › Доставчици за гледане"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", за да избирате от собствените си списъци, включително частните. Свързването също стартира синхронизирането на историята на гледане с MDBList, което можете да изключите там."
     }
   ],
   "web.collections.templateGallery.groupHeading": [
@@ -108333,10 +108381,34 @@
       }
     }
   ],
+  "web.collections.templateGallery.listLiked": [
+    {
+      "type": 0,
+      "value": "Харесан"
+    }
+  ],
+  "web.collections.templateGallery.listPrivate": [
+    {
+      "type": 0,
+      "value": "Частен"
+    }
+  ],
+  "web.collections.templateGallery.listViews": [
+    {
+      "type": 0,
+      "value": "Списъци за показване"
+    }
+  ],
   "web.collections.templateGallery.lists": [
     {
       "type": 0,
       "value": "Списъци"
+    }
+  ],
+  "web.collections.templateGallery.loadingOwnLists": [
+    {
+      "type": 0,
+      "value": "Зареждат се списъците ви…"
     }
   ],
   "web.collections.templateGallery.noMatches": [
@@ -108353,10 +108425,36 @@
       "value": "“."
     }
   ],
+  "web.collections.templateGallery.noOwnMatches": [
+    {
+      "type": 0,
+      "value": "Нито един от списъците ви не отговаря на „"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "“."
+    }
+  ],
   "web.collections.templateGallery.noPicks": [
     {
       "type": 0,
       "value": "Тук няма популярни предложения. Потърсете в MDBList или поставете връзка."
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateProfile": [
+    {
+      "type": 0,
+      "value": "Частните списъци също работят, ако принадлежат на свързания с този профил акаунт в MDBList."
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateServer": [
+    {
+      "type": 0,
+      "value": "Частните списъци също работят, ако API ключът за MDBList на сървъра принадлежи на акаунта, който ги притежава."
     }
   ],
   "web.collections.templateGallery.searchFailed": [
@@ -108399,6 +108497,12 @@
     {
       "type": 0,
       "value": "Търсенето е изключено"
+    }
+  ],
+  "web.collections.templateGallery.searchOwnLists": [
+    {
+      "type": 0,
+      "value": "Търсене в списъците ви"
     }
   ],
   "web.collections.templateGallery.searchPlaceholder": [
@@ -108511,6 +108615,18 @@
     {
       "type": 0,
       "value": "Теми"
+    }
+  ],
+  "web.collections.templateGallery.viewBrowse": [
+    {
+      "type": 0,
+      "value": "Разглеждане на MDBList"
+    }
+  ],
+  "web.collections.templateGallery.viewOwnLists": [
+    {
+      "type": 0,
+      "value": "Вашите списъци"
     }
   ],
   "web.collections.templates.mediaKind.mixed": [

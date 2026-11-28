@@ -93853,6 +93853,24 @@
       "value": "ライブラリ"
     }
   ],
+  "web.collections.copy.yourMdblistLists": [
+    {
+      "type": 0,
+      "value": "自分のMDBListリスト"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsProfileHelp": [
+    {
+      "type": 0,
+      "value": "このプロフィールで連携したMDBListから（非公開のリストを含む）"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsServerHelp": [
+    {
+      "type": 0,
+      "value": "サーバーのMDBList APIキーを所有するアカウントから（非公開のリストを含む）"
+    }
+  ],
   "web.collections.count.unavailable": [
     {
       "type": 0,
@@ -97895,6 +97913,16 @@
       "value": "共有中"
     }
   ],
+  "web.collections.templateGallery.accountListsFailed": [
+    {
+      "type": 0,
+      "value": "MDBListのリストを読み込めませんでした。"
+    },
+    {
+      "type": 1,
+      "value": "detail"
+    }
+  ],
   "web.collections.templateGallery.allThemes": [
     {
       "type": 0,
@@ -97909,6 +97937,22 @@
     {
       "type": 1,
       "value": "user"
+    }
+  ],
+  "web.collections.templateGallery.connectForOwnLists": [
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "設定 › 視聴プロバイダー"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "でMDBListを連携すると、非公開のものも含めて自分のリストから選べます。連携するとMDBListとの視聴履歴の同期も開始されます。同期はそこでオフにできます。"
     }
   ],
   "web.collections.templateGallery.groupHeading": [
@@ -97961,10 +98005,34 @@
       }
     }
   ],
+  "web.collections.templateGallery.listLiked": [
+    {
+      "type": 0,
+      "value": "いいね済み"
+    }
+  ],
+  "web.collections.templateGallery.listPrivate": [
+    {
+      "type": 0,
+      "value": "非公開"
+    }
+  ],
+  "web.collections.templateGallery.listViews": [
+    {
+      "type": 0,
+      "value": "表示するリスト"
+    }
+  ],
   "web.collections.templateGallery.lists": [
     {
       "type": 0,
       "value": "リスト"
+    }
+  ],
+  "web.collections.templateGallery.loadingOwnLists": [
+    {
+      "type": 0,
+      "value": "リストを読み込み中…"
     }
   ],
   "web.collections.templateGallery.noMatches": [
@@ -97981,10 +98049,36 @@
       "value": "」に一致する公開リストはありません。"
     }
   ],
+  "web.collections.templateGallery.noOwnMatches": [
+    {
+      "type": 0,
+      "value": "「"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "」に一致するリストはありません。"
+    }
+  ],
   "web.collections.templateGallery.noPicks": [
     {
       "type": 0,
       "value": "人気のおすすめはありません。MDBListを検索するか、リンクを貼り付けてください。"
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateProfile": [
+    {
+      "type": 0,
+      "value": "このプロフィールで連携したMDBListアカウントのリストであれば、非公開のリストも使用できます。"
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateServer": [
+    {
+      "type": 0,
+      "value": "サーバーのMDBList APIキーがリストを所有するアカウントのものであれば、非公開のリストも使用できます。"
     }
   ],
   "web.collections.templateGallery.searchFailed": [
@@ -98027,6 +98121,12 @@
     {
       "type": 0,
       "value": "検索はオフです"
+    }
+  ],
+  "web.collections.templateGallery.searchOwnLists": [
+    {
+      "type": 0,
+      "value": "自分のリストを検索"
     }
   ],
   "web.collections.templateGallery.searchPlaceholder": [
@@ -98115,6 +98215,18 @@
     {
       "type": 0,
       "value": "テーマ"
+    }
+  ],
+  "web.collections.templateGallery.viewBrowse": [
+    {
+      "type": 0,
+      "value": "MDBListを閲覧"
+    }
+  ],
+  "web.collections.templateGallery.viewOwnLists": [
+    {
+      "type": 0,
+      "value": "自分のリスト"
     }
   ],
   "web.collections.templates.mediaKind.mixed": [

@@ -124041,6 +124041,24 @@
       "value": "ваших медиатеках"
     }
   ],
+  "web.collections.copy.yourMdblistLists": [
+    {
+      "type": 0,
+      "value": "Ваши списки MDBList"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsProfileHelp": [
+    {
+      "type": 0,
+      "value": "Из подключения MDBList этого профиля, включая приватные"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsServerHelp": [
+    {
+      "type": 0,
+      "value": "Из аккаунта, которому принадлежит API-ключ MDBList сервера, включая приватные"
+    }
+  ],
   "web.collections.count.unavailable": [
     {
       "type": 0,
@@ -129215,6 +129233,16 @@
       "value": "Общая"
     }
   ],
+  "web.collections.templateGallery.accountListsFailed": [
+    {
+      "type": 0,
+      "value": "Не удалось загрузить ваши списки MDBList. "
+    },
+    {
+      "type": 1,
+      "value": "detail"
+    }
+  ],
   "web.collections.templateGallery.allThemes": [
     {
       "type": 0,
@@ -129229,6 +129257,26 @@
     {
       "type": 1,
       "value": "user"
+    }
+  ],
+  "web.collections.templateGallery.connectForOwnLists": [
+    {
+      "type": 0,
+      "value": "Подключите MDBList в разделе "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Настройки › Провайдеры просмотра"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", чтобы выбирать из своих списков, включая приватные. После подключения также начнётся синхронизация истории просмотров с MDBList — её можно выключить там же."
     }
   ],
   "web.collections.templateGallery.groupHeading": [
@@ -129281,10 +129329,34 @@
       }
     }
   ],
+  "web.collections.templateGallery.listLiked": [
+    {
+      "type": 0,
+      "value": "Понравился"
+    }
+  ],
+  "web.collections.templateGallery.listPrivate": [
+    {
+      "type": 0,
+      "value": "Приватный"
+    }
+  ],
+  "web.collections.templateGallery.listViews": [
+    {
+      "type": 0,
+      "value": "Показываемые списки"
+    }
+  ],
   "web.collections.templateGallery.lists": [
     {
       "type": 0,
       "value": "Списки"
+    }
+  ],
+  "web.collections.templateGallery.loadingOwnLists": [
+    {
+      "type": 0,
+      "value": "Загрузка ваших списков…"
     }
   ],
   "web.collections.templateGallery.noMatches": [
@@ -129301,10 +129373,36 @@
       "value": "»."
     }
   ],
+  "web.collections.templateGallery.noOwnMatches": [
+    {
+      "type": 0,
+      "value": "Ни один из ваших списков не соответствует запросу «"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "»."
+    }
+  ],
   "web.collections.templateGallery.noPicks": [
     {
       "type": 0,
       "value": "Здесь нет популярных подборок. Найдите список в MDBList или вставьте ссылку."
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateProfile": [
+    {
+      "type": 0,
+      "value": "Приватные списки тоже подходят, если они принадлежат аккаунту MDBList, подключённому к этому профилю."
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateServer": [
+    {
+      "type": 0,
+      "value": "Приватные списки тоже подходят, если API-ключ MDBList сервера принадлежит аккаунту, которому принадлежат эти списки."
     }
   ],
   "web.collections.templateGallery.searchFailed": [
@@ -129347,6 +129445,12 @@
     {
       "type": 0,
       "value": "Поиск выключен"
+    }
+  ],
+  "web.collections.templateGallery.searchOwnLists": [
+    {
+      "type": 0,
+      "value": "Поиск по вашим спискам"
     }
   ],
   "web.collections.templateGallery.searchPlaceholder": [
@@ -129491,6 +129595,18 @@
     {
       "type": 0,
       "value": "Темы"
+    }
+  ],
+  "web.collections.templateGallery.viewBrowse": [
+    {
+      "type": 0,
+      "value": "Обзор MDBList"
+    }
+  ],
+  "web.collections.templateGallery.viewOwnLists": [
+    {
+      "type": 0,
+      "value": "Ваши списки"
     }
   ],
   "web.collections.templates.mediaKind.mixed": [

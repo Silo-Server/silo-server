@@ -176,6 +176,7 @@ GET /api/v2/admin/collections/capabilities	non-media
 POST /api/v2/admin/collections/import/mdblist	non-media
 POST /api/v2/admin/collections/import/tmdb	non-media
 POST /api/v2/admin/collections/import/tmdb-list	non-media
+GET /api/v2/admin/collections/mdblist/lists	non-media
 GET /api/v2/admin/collections/order	non-media
 PUT /api/v2/admin/collections/order	non-media
 POST /api/v2/admin/collections/preview	non-media
@@ -1273,6 +1274,7 @@ GET /api/v2/admin/collections/capabilities	non-media
 POST /api/v2/admin/collections/import/mdblist	non-media
 POST /api/v2/admin/collections/import/tmdb	non-media
 POST /api/v2/admin/collections/import/tmdb-list	non-media
+GET /api/v2/admin/collections/mdblist/lists	non-media
 GET /api/v2/admin/collections/order	non-media
 PUT /api/v2/admin/collections/order	non-media
 POST /api/v2/admin/collections/preview	non-media

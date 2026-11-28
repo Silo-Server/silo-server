@@ -1,9 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 
-import { v2 } from "@/api/v2/request";
+import { v2, type V2Result } from "@/api/v2/request";
 import { discoveryFromV2 } from "@/api/personalCollections";
 import { TEMPLATE_STALE_TIME, type CollectionTemplateCatalog } from "@/lib/collectionTemplates";
-import { PERSONAL_SCOPE } from "@/lib/collections/scope";
+import { PERSONAL_SCOPE, type ScopeKind } from "@/lib/collections/scope";
 import { useScopeSync } from "./collectionScope";
 import { collectionKeys } from "./keys";
 
@@ -26,6 +26,23 @@ export function useMDBListSearch(query: string, enabled = true) {
         discoveryFromV2,
       ),
     enabled: enabled && trimmed.length > 0,
+    staleTime: 60_000,
+  });
+}
+
+export type MDBListAccountList =
+  V2Result<"GET /api/v2/admin/collections/mdblist/lists">["items"][number];
+
+/**
+ * The lists of the MDBList account whose key a scope's collections read with,
+ * private ones included: for server collections, the account that owns the
+ * server's MDBList API key.
+ */
+export function useMDBListAccountLists(scopeKind: ScopeKind, enabled = true) {
+  return useQuery({
+    queryKey: collectionKeys.mdblistAccountLists(scopeKind),
+    queryFn: () => v2("GET /api/v2/admin/collections/mdblist/lists").then((body) => body.items),
+    enabled: enabled && scopeKind === "server",
     staleTime: 60_000,
   });
 }

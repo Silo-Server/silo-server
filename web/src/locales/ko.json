@@ -94377,6 +94377,24 @@
       "value": "내 라이브러리"
     }
   ],
+  "web.collections.copy.yourMdblistLists": [
+    {
+      "type": 0,
+      "value": "내 MDBList 목록"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsProfileHelp": [
+    {
+      "type": 0,
+      "value": "이 프로필의 MDBList 연결에서 가져온 목록(비공개 목록 포함)"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsServerHelp": [
+    {
+      "type": 0,
+      "value": "서버의 MDBList API 키를 소유한 계정의 목록(비공개 목록 포함)"
+    }
+  ],
   "web.collections.count.unavailable": [
     {
       "type": 0,
@@ -98513,6 +98531,16 @@
       "value": "공유됨"
     }
   ],
+  "web.collections.templateGallery.accountListsFailed": [
+    {
+      "type": 0,
+      "value": "MDBList 목록을 불러올 수 없어요. "
+    },
+    {
+      "type": 1,
+      "value": "detail"
+    }
+  ],
   "web.collections.templateGallery.allThemes": [
     {
       "type": 0,
@@ -98527,6 +98555,22 @@
     {
       "type": 1,
       "value": "user"
+    }
+  ],
+  "web.collections.templateGallery.connectForOwnLists": [
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "설정 › 시청 제공자"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "에서 MDBList를 연결하면 비공개 목록을 포함한 내 목록에서 선택할 수 있어요. 연결하면 MDBList와 시청 기록 동기화도 시작되며, 동기화는 같은 곳에서 끌 수 있어요."
     }
   ],
   "web.collections.templateGallery.groupHeading": [
@@ -98579,10 +98623,34 @@
       }
     }
   ],
+  "web.collections.templateGallery.listLiked": [
+    {
+      "type": 0,
+      "value": "좋아요 표시함"
+    }
+  ],
+  "web.collections.templateGallery.listPrivate": [
+    {
+      "type": 0,
+      "value": "비공개"
+    }
+  ],
+  "web.collections.templateGallery.listViews": [
+    {
+      "type": 0,
+      "value": "표시할 목록"
+    }
+  ],
   "web.collections.templateGallery.lists": [
     {
       "type": 0,
       "value": "목록"
+    }
+  ],
+  "web.collections.templateGallery.loadingOwnLists": [
+    {
+      "type": 0,
+      "value": "내 목록을 불러오는 중…"
     }
   ],
   "web.collections.templateGallery.noMatches": [
@@ -98599,10 +98667,36 @@
       "value": "”에 맞는 공개 목록이 없어요."
     }
   ],
+  "web.collections.templateGallery.noOwnMatches": [
+    {
+      "type": 0,
+      "value": "“"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "”에 맞는 내 목록이 없어요."
+    }
+  ],
   "web.collections.templateGallery.noPicks": [
     {
       "type": 0,
       "value": "여기에는 인기 추천이 없어요. MDBList를 검색하거나 링크를 붙여넣으세요."
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateProfile": [
+    {
+      "type": 0,
+      "value": "이 프로필에 연결된 MDBList 계정의 목록이라면 비공개 목록도 사용할 수 있어요."
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateServer": [
+    {
+      "type": 0,
+      "value": "서버의 MDBList API 키가 목록을 소유한 계정의 키라면 비공개 목록도 사용할 수 있어요."
     }
   ],
   "web.collections.templateGallery.searchFailed": [
@@ -98645,6 +98739,12 @@
     {
       "type": 0,
       "value": "검색 꺼짐"
+    }
+  ],
+  "web.collections.templateGallery.searchOwnLists": [
+    {
+      "type": 0,
+      "value": "내 목록 검색"
     }
   ],
   "web.collections.templateGallery.searchPlaceholder": [
@@ -98737,6 +98837,18 @@
     {
       "type": 0,
       "value": "테마"
+    }
+  ],
+  "web.collections.templateGallery.viewBrowse": [
+    {
+      "type": 0,
+      "value": "MDBList 둘러보기"
+    }
+  ],
+  "web.collections.templateGallery.viewOwnLists": [
+    {
+      "type": 0,
+      "value": "내 목록"
     }
   ],
   "web.collections.templates.mediaKind.mixed": [

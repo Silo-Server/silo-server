@@ -123109,6 +123109,24 @@
       "value": "vaše knihovny"
     }
   ],
+  "web.collections.copy.yourMdblistLists": [
+    {
+      "type": 0,
+      "value": "Vaše seznamy MDBList"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsProfileHelp": [
+    {
+      "type": 0,
+      "value": "Z připojení MDBList tohoto profilu, včetně soukromých"
+    }
+  ],
+  "web.collections.copy.yourMdblistListsServerHelp": [
+    {
+      "type": 0,
+      "value": "Z účtu, kterému patří klíč API MDBList tohoto serveru, včetně soukromých"
+    }
+  ],
   "web.collections.count.unavailable": [
     {
       "type": 0,
@@ -128153,6 +128171,16 @@
       "value": "Sdíleno"
     }
   ],
+  "web.collections.templateGallery.accountListsFailed": [
+    {
+      "type": 0,
+      "value": "Vaše seznamy MDBList se nepodařilo načíst. "
+    },
+    {
+      "type": 1,
+      "value": "detail"
+    }
+  ],
   "web.collections.templateGallery.allThemes": [
     {
       "type": 0,
@@ -128167,6 +128195,26 @@
     {
       "type": 1,
       "value": "user"
+    }
+  ],
+  "web.collections.templateGallery.connectForOwnLists": [
+    {
+      "type": 0,
+      "value": "Připojte MDBList v "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Nastavení › Poskytovatelé sledování"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " a vybírejte z vlastních seznamů, včetně soukromých. Připojením se také spustí synchronizace historie sledování s MDBList, kterou tam můžete vypnout."
     }
   ],
   "web.collections.templateGallery.groupHeading": [
@@ -128219,10 +128267,34 @@
       }
     }
   ],
+  "web.collections.templateGallery.listLiked": [
+    {
+      "type": 0,
+      "value": "Oblíbený"
+    }
+  ],
+  "web.collections.templateGallery.listPrivate": [
+    {
+      "type": 0,
+      "value": "Soukromý"
+    }
+  ],
+  "web.collections.templateGallery.listViews": [
+    {
+      "type": 0,
+      "value": "Zobrazené seznamy"
+    }
+  ],
   "web.collections.templateGallery.lists": [
     {
       "type": 0,
       "value": "Seznamy"
+    }
+  ],
+  "web.collections.templateGallery.loadingOwnLists": [
+    {
+      "type": 0,
+      "value": "Načítání vašich seznamů…"
     }
   ],
   "web.collections.templateGallery.noMatches": [
@@ -128239,10 +128311,36 @@
       "value": "“ neodpovídají žádné veřejné seznamy."
     }
   ],
+  "web.collections.templateGallery.noOwnMatches": [
+    {
+      "type": 0,
+      "value": "Výrazu „"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "“ neodpovídá žádný z vašich seznamů."
+    }
+  ],
   "web.collections.templateGallery.noPicks": [
     {
       "type": 0,
       "value": "Žádné oblíbené tipy. Vyhledejte v MDBList nebo vložte odkaz."
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateProfile": [
+    {
+      "type": 0,
+      "value": "Fungují i soukromé seznamy, pokud patří účtu MDBList připojenému k tomuto profilu."
+    }
+  ],
+  "web.collections.templateGallery.pasteLinkPrivateServer": [
+    {
+      "type": 0,
+      "value": "Fungují i soukromé seznamy, pokud klíč API MDBList tohoto serveru patří účtu, který je vlastní."
     }
   ],
   "web.collections.templateGallery.searchFailed": [
@@ -128285,6 +128383,12 @@
     {
       "type": 0,
       "value": "Vyhledávání je vypnuto"
+    }
+  ],
+  "web.collections.templateGallery.searchOwnLists": [
+    {
+      "type": 0,
+      "value": "Hledat ve vašich seznamech"
     }
   ],
   "web.collections.templateGallery.searchPlaceholder": [
@@ -128429,6 +128533,18 @@
     {
       "type": 0,
       "value": "Témata"
+    }
+  ],
+  "web.collections.templateGallery.viewBrowse": [
+    {
+      "type": 0,
+      "value": "Procházet MDBList"
+    }
+  ],
+  "web.collections.templateGallery.viewOwnLists": [
+    {
+      "type": 0,
+      "value": "Vaše seznamy"
     }
   ],
   "web.collections.templates.mediaKind.mixed": [

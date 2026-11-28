@@ -225,7 +225,7 @@ func fetchMDBListJSONPage[T any](ctx context.Context, client *http.Client, pageU
 	var page []T
 	if err := json.Unmarshal(body, &page); err != nil {
 		if msg := mdblistFeedError(body); msg != "" {
-			return nil, fmt.Errorf("mdblist: %s", msg)
+			return nil, &MDBListFeedError{Message: msg}
 		}
 		return nil, fmt.Errorf("parsing mdblist response: %w", err)
 	}
