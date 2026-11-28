@@ -42,15 +42,25 @@ type speechPlan struct {
 	Runtime       float64
 }
 
+// maxFallbackStreams bounds how many other audio streams a sync tries when
+// the planned stream does not match. Each costs a decode of its own (about
+// 45 CPU-seconds, once per file and stream, then cached), and only a sync
+// that would otherwise end no_match pays it.
+const maxFallbackStreams = 3
+
 // planSpeech picks the audio stream and windows for a file. The stream is
 // the first decodable one in the subtitle's language, else the file's default
 // audio track as playback.SelectAudioTrack chooses it.
 func planSpeech(file *models.MediaFile, subtitleLanguage string) (speechPlan, error) {
+	return planSpeechStream(file, audioStreamFor(file.AudioTracks, subtitleLanguage))
+}
+
+// planSpeechStream plans the windows to decode from one audio stream.
+func planSpeechStream(file *models.MediaFile, stream int) (speechPlan, error) {
 	runtime := float64(file.Duration)
 	if runtime <= 0 {
 		return speechPlan{}, errors.New("media file has no known duration")
 	}
-	stream := audioStreamFor(file.AudioTracks, subtitleLanguage)
 	plan := speechPlan{AudioStream: stream, Runtime: runtime}
 	if stream < len(file.AudioTracks) {
 		plan.CenterChannel = hasCenterChannel(file.AudioTracks[stream])
@@ -81,6 +91,26 @@ func audioStreamFor(tracks []models.AudioTrack, language string) int {
 		}
 	}
 	return playback.SelectAudioTrack(tracks, "", nil)
+}
+
+// fallbackAudioStreams lists the decodable audio streams other than used, in
+// file order, at most maxFallbackStreams of them. The planned stream can be
+// the wrong one to listen to: the default track, or the one tagged with the
+// subtitle's language, is often a dub, while a translated subtitle follows
+// the original dialog. Untagged tracks give no way to tell them apart.
+func fallbackAudioStreams(tracks []models.AudioTrack, used int) []int {
+	anyDecodable := playback.AnyAudioTrackDecodable(tracks, "")
+	var streams []int
+	for i := range tracks {
+		if i == used || (anyDecodable && !playback.AudioTrackDecodable(tracks, i, "")) {
+			continue
+		}
+		streams = append(streams, i)
+		if len(streams) == maxFallbackStreams {
+			break
+		}
+	}
+	return streams
 }
 
 // centerLayouts are channel layouts with a front-center channel.
