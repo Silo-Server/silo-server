@@ -30,18 +30,21 @@ vi.mock("@/hooks/queries/admin/settings", () => ({
 
 const OTHER_KEY = "server.public_url";
 
-function Harness() {
+// The page swaps the group out while credential status is down (showRedis).
+function Harness({ showRedis = true }: { showRedis?: boolean }) {
   const form = useSettingsForm({ keys: [...REDIS_KEYS, OTHER_KEY] });
   const stagedDb = useRef<StagedRedisDb["current"]>(null);
   return (
     <>
-      <RedisGroup
-        form={form}
-        restartKeys={{ has: () => false }}
-        secrets={{ keepSaved: form.resetValue, setSecret: form.setValue, disabled: false }}
-        savesAndDiscards={0}
-        stagedDb={stagedDb}
-      />
+      {showRedis && (
+        <RedisGroup
+          form={form}
+          restartKeys={{ has: () => false }}
+          secrets={{ keepSaved: form.resetValue, setSecret: form.setValue, disabled: false }}
+          savesAndDiscards={0}
+          stagedDb={stagedDb}
+        />
+      )}
       {/* Another setting on the same page, so an edit can stay staged. */}
       <input
         aria-label="Other setting"
@@ -189,6 +192,24 @@ describe("RedisGroup", () => {
     expect(screen.getByText("2 staged")).toBeInTheDocument();
 
     serverSettings.current = { "redis.db": "3" };
+    rerender(<Harness />);
+    await userEvent.clear(screen.getByLabelText("Connection URL"));
+
+    expect(screen.getByText("0 staged")).toBeInTheDocument();
+    expect(screen.getByLabelText("Database number")).toHaveValue(3);
+  });
+
+  it("takes back the number a URL edit staged after the group is swapped out and back", async () => {
+    serverSettings.current = { "redis.db": "2" };
+    sensitiveStatus.current = { configured: ["redis.url"], managed_by_env: [] };
+    const { rerender } = render(<Harness />);
+    await userEvent.type(screen.getByLabelText("Connection URL"), "redis://other:6379");
+    expect(screen.getByText("2 staged")).toBeInTheDocument();
+
+    // Credential status fails, the settings refresh, and the group returns.
+    rerender(<Harness showRedis={false} />);
+    serverSettings.current = { "redis.db": "3" };
+    rerender(<Harness showRedis={false} />);
     rerender(<Harness />);
     await userEvent.clear(screen.getByLabelText("Connection URL"));
 
