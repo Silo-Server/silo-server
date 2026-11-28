@@ -71,6 +71,8 @@ func (t *Task) Execute(ctx context.Context, progress taskmanager.ProgressReporte
 	return nil
 }
 
+// backupTime is readBackupTime for the trigger schedule, which cannot fail:
+// a setting it cannot read is the default.
 func (s *Service) backupTime(ctx context.Context) string {
 	at, err := s.readBackupTime(ctx)
 	if err != nil {
@@ -79,16 +81,12 @@ func (s *Service) backupTime(ctx context.Context) string {
 	return at
 }
 
-// readBackupTime is backupTime, except that a setting it cannot read is an
-// error rather than the default. An unset or invalid backup.time is still
-// the default.
+// readBackupTime is backup.time as HH:MM. An unset or invalid value is the
+// default; a read that failed is an error.
 func (s *Service) readBackupTime(ctx context.Context) (string, error) {
-	if s.opts.Settings == nil {
-		return config.DefaultBackupTime, nil
-	}
-	raw, err := s.opts.Settings.Get(ctx, config.BackupTimeSettingKey)
+	raw, err := s.readSetting(ctx, config.BackupTimeSettingKey)
 	if err != nil {
-		return "", fmt.Errorf("reading %s: %w", config.BackupTimeSettingKey, err)
+		return "", err
 	}
 	hour, minute, ok := config.ParseBackupTime(raw)
 	if !ok {
