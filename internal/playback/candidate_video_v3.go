@@ -238,7 +238,8 @@ func (p *candidatePlannerV3) remuxAudioFacts() {
 	a := &f.remuxAudio
 	a.progressiveChannelLimited = !f.noAudioTrack && deliveryExceedsMaxChannelsV3(request, DeliveryClassProgressiveV3, source.AudioCodec, source.AudioChannels)
 	a.hlsChannelLimited = !f.noAudioTrack && deliveryExceedsMaxChannelsV3(request, DeliveryClassHLSV3, source.AudioCodec, source.AudioChannels)
-	progressiveCodecOK := f.noAudioTrack || deliverySupportsAudioClaimV3(request, DeliveryClassProgressiveV3, source.AudioCodec, f.audioClaims, f.audioOK)
+	progressiveCodecOK := f.noAudioTrack || progressiveCopyFitsMP4V3(source.AudioCodec) &&
+		deliverySupportsAudioClaimV3(request, DeliveryClassProgressiveV3, source.AudioCodec, f.audioClaims, f.audioOK)
 	hlsCodecOK := f.noAudioTrack || hlsNativeAudioCodecV3(source.AudioCodec) &&
 		deliverySupportsAudioClaimV3(request, DeliveryClassHLSV3, source.AudioCodec, f.audioClaims, f.audioOK)
 	// Matroska AAC timestamps break Firefox once copied into MP4, so both
