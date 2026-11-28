@@ -1299,7 +1299,7 @@
 ./internal/scanner TestAudiobookRegroupKeepsContentIDsDB
 ./internal/scanner TestAudiobookUnreadableDiscKeepsIndexedBookDB
 
-# An audiobook library scan reports the books it added and the files it newly
+# An audiobook library scan reports, in files, what it added, rewrote and newly
 # marked missing, and nothing for a scan that changed nothing, so library
 # ingest refreshes Home rows only after a real change.
 ./internal/scanner TestScanFolderAudiobookReportsCatalogChangesDB
