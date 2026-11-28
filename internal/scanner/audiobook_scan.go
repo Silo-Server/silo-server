@@ -166,23 +166,24 @@ func audiobookFolderUnchanged(existing []*models.MediaFile, onDisk []audiobookDi
 // Errors are returned but the worker loop treats them as "do not skip".
 //
 // Audio files ffprobe already rejected (rejectedAudiobookParts) have no row
-// and are left out of the comparison; unreadable counts them.
-func (s *Scanner) audiobookFolderShouldSkip(ctx context.Context, folder *models.MediaFolder, folderPath, physical string, allowedPaths map[string]bool, walked *audiobookWalkedBook) (unreadable int, skip bool, err error) {
+// and are left out of the comparison; unreadable counts them. files is the
+// number of the book's files when it is skipped.
+func (s *Scanner) audiobookFolderShouldSkip(ctx context.Context, folder *models.MediaFolder, folderPath, physical string, allowedPaths map[string]bool, walked *audiobookWalkedBook) (unreadable, files int, skip bool, err error) {
 	if s.fileRepo == nil || s.itemRepo == nil {
-		return 0, false, nil
+		return 0, 0, false, nil
 	}
 
 	// A book with no rows cannot be unchanged, so its files are not read.
 	existing, err := s.fileRepo.ListByObservedRootPath(ctx, folder.ID, folderPath)
 	if err != nil {
-		return 0, false, fmt.Errorf("list existing files: %w", err)
+		return 0, 0, false, fmt.Errorf("list existing files: %w", err)
 	}
 	if len(existing) == 0 {
-		return 0, false, nil
+		return 0, 0, false, nil
 	}
 	for _, file := range existing {
 		if file == nil || file.CanonicalRootPath != physical {
-			return 0, false, nil
+			return 0, 0, false, nil
 		}
 	}
 	var onDisk []audiobookDiskFile
@@ -191,13 +192,13 @@ func (s *Scanner) audiobookFolderShouldSkip(ctx context.Context, folder *models.
 		return err
 	})
 	if errors.Is(err, errFolderHasNoMedia) {
-		return 0, false, nil
+		return 0, 0, false, nil
 	}
 	if err != nil || len(onDisk) == 0 {
-		return 0, false, err
+		return 0, 0, false, err
 	}
 	if !audiobookFolderUnchanged(existing, onDisk) {
-		return 0, false, nil
+		return 0, 0, false, nil
 	}
 	// A previous scan may have retired an ignored part without rebuilding the
 	// remaining files' presentation. Matching sizes and mtimes do not make that
@@ -207,47 +208,47 @@ func (s *Scanner) audiobookFolderShouldSkip(ctx context.Context, folder *models.
 	for _, file := range existing {
 		if len(existing) == 1 {
 			if file.PresentationKind != "" || file.EditionKey != "" {
-				return 0, false, nil
+				return 0, 0, false, nil
 			}
 		} else if file.PresentationKind != audiobookMultipartKind || file.PresentationPartTotal != len(existing) {
-			return 0, false, nil
+			return 0, 0, false, nil
 		}
 	}
 
 	contentID := existing[0].ContentID
 	if contentID == "" {
-		return 0, false, nil
+		return 0, 0, false, nil
 	}
 	// All files must share the same content_id; fragmented folders need reconcile.
 	for _, mf := range existing[1:] {
 		if mf.ContentID != contentID {
-			return 0, false, nil
+			return 0, 0, false, nil
 		}
 	}
 	if audiobookTagRereadRequested(ctx, contentID) {
-		return 0, false, nil
+		return 0, 0, false, nil
 	}
 	items, err := s.itemRepo.GetByIDs(ctx, []string{contentID})
 	if err != nil {
-		return 0, false, fmt.Errorf("get item for skip check: %w", err)
+		return 0, 0, false, fmt.Errorf("get item for skip check: %w", err)
 	}
 	if len(items) == 0 || items[0] == nil {
-		return 0, false, nil
+		return 0, 0, false, nil
 	}
 	if strings.TrimSpace(items[0].Title) == "" {
-		return 0, false, nil
+		return 0, 0, false, nil
 	}
 	if strings.EqualFold(strings.TrimSpace(items[0].Status), "unmatched") {
-		return 0, false, nil
+		return 0, 0, false, nil
 	}
 	paths := make([]string, len(existing))
 	for i, file := range existing {
 		paths[i] = file.FilePath
 	}
 	if !s.confirmUnchangedFiles(ctx, folder.ID, paths) {
-		return 0, false, nil
+		return 0, 0, false, nil
 	}
-	return unreadable, true, nil
+	return unreadable, len(existing), true, nil
 }
 
 // statAudiobookDiskFiles stats the parts of a book (audiobookBookParts) for
@@ -733,7 +734,7 @@ func groupAudiobookCandidates(scans []audiobookRootScan) [][]string {
 	return groups
 }
 
-func (s *Scanner) reconcileAudiobookAliases(ctx context.Context, folder *models.MediaFolder, aliases []string, inventory audiobookInventory, inventoryAt time.Time, skipped, unreadable *int64) error {
+func (s *Scanner) reconcileAudiobookAliases(ctx context.Context, folder *models.MediaFolder, aliases []string, inventory audiobookInventory, inventoryAt time.Time, skipped, unreadable *int64, files *audiobookFileCounts) error {
 	// Prefer the already indexed location. Adding an alias should not churn
 	// file IDs or overwrite a filesystem-derived title on every scan.
 	if s.fileRepo != nil && len(aliases) > 1 {
@@ -754,7 +755,7 @@ func (s *Scanner) reconcileAudiobookAliases(ctx context.Context, folder *models.
 			return err
 		}
 		walked := inventory.book(path)
-		err := s.reconcileAudiobookFolder(ctx, folder, path, inventory.seen, walked, inventoryAt, skipped, unreadable)
+		err := s.reconcileAudiobookFolder(ctx, folder, path, inventory.seen, walked, inventoryAt, skipped, unreadable, files)
 		walked.release()
 		if err != nil {
 			if !errors.Is(err, errFolderHasNoMedia) {
@@ -776,17 +777,34 @@ func (s *Scanner) reconcileAudiobookAliases(ctx context.Context, folder *models.
 //
 // This bypasses the per-file movie/TV pipeline because audiobooks are
 // inherently folder-scoped (one book = one item, possibly multi-file).
-func (s *Scanner) ScanAudiobookFolder(ctx context.Context, folder *models.MediaFolder, fullScan bool) error {
+//
+// The returned ScanResult counts files, as it does for other libraries: New
+// are the files this scan added, Updated the files of books it rewrote that
+// were already indexed, Unchanged the files of books it skipped, and Missing
+// the files it newly marked missing. Library ingest reads it to decide whether
+// the scan changed the catalog.
+func (s *Scanner) ScanAudiobookFolder(ctx context.Context, folder *models.MediaFolder, fullScan bool) (*ScanResult, error) {
 	if folder == nil {
-		return fmt.Errorf("ScanAudiobookFolder: nil folder")
+		return nil, errors.New("ScanAudiobookFolder: nil folder")
 	}
 	return s.scanAudiobookPaths(ctx, folder, folder.Paths, fullScan, true, "")
 }
 
-func (s *Scanner) scanAudiobookPaths(ctx context.Context, folder *models.MediaFolder, roots []string, fullScan, honorIgnores bool, admit string) error {
+func (s *Scanner) scanAudiobookPaths(ctx context.Context, folder *models.MediaFolder, roots []string, fullScan, honorIgnores bool, admit string) (*ScanResult, error) {
 	if s == nil || folder == nil {
-		return fmt.Errorf("ScanAudiobookFolder: nil scanner or folder")
+		return nil, errors.New("ScanAudiobookFolder: nil scanner or folder")
 	}
+	result := &ScanResult{}
+	err := s.scanAudiobookPathsInto(ctx, folder, roots, fullScan, honorIgnores, admit, result)
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// scanAudiobookPathsInto runs the scan for scanAudiobookPaths, adding its
+// counts to result as it goes.
+func (s *Scanner) scanAudiobookPathsInto(ctx context.Context, folder *models.MediaFolder, roots []string, fullScan, honorIgnores bool, admit string, result *ScanResult) error {
 	ctx = withScopedScan(ctx, fullScan)
 
 	warning, err := s.scanWarningBeforeWalk(ctx, folder.ID, fullScan)
@@ -830,7 +848,7 @@ func (s *Scanner) scanAudiobookPaths(ctx context.Context, folder *models.MediaFo
 		// library converges — but only when a root was readable, and the
 		// empty-walk guard requires operator confirmation before deleting.
 		if len(reconcileRoots) > 0 {
-			if err := s.reconcileAudiobookMissingFiles(ctx, folder, reconcileRoots, inventoryAt, seenPaths, protectedPaths, fullScan); err != nil {
+			if err := s.reconcileAudiobookMissingFiles(ctx, folder, reconcileRoots, inventoryAt, seenPaths, protectedPaths, fullScan, result); err != nil {
 				slog.WarnContext(ctx, "audiobook scan: missing-file reconcile failed", "component", "scanner", "folder_id", folder.ID, "error", err)
 			}
 		} else if len(scans) > 0 {
@@ -846,13 +864,13 @@ func (s *Scanner) scanAudiobookPaths(ctx context.Context, folder *models.MediaFo
 		return nil
 	}
 
-	if err := s.reconcileAudiobookCandidates(ctx, folder, candidates, inventory, inventoryAt); err != nil {
+	if err := s.reconcileAudiobookCandidates(ctx, folder, candidates, inventory, inventoryAt, result); err != nil {
 		return err
 	}
 
 	// Reconcile files that vanished from disk now that the full walk's
 	// seenPaths is known and the scan completed without cancellation.
-	if err := s.reconcileAudiobookMissingFiles(ctx, folder, reconcileRoots, inventoryAt, seenPaths, protectedPaths, fullScan); err != nil {
+	if err := s.reconcileAudiobookMissingFiles(ctx, folder, reconcileRoots, inventoryAt, seenPaths, protectedPaths, fullScan, result); err != nil {
 		slog.WarnContext(ctx, "audiobook scan: missing-file reconcile failed", "component", "scanner", "folder_id", folder.ID, "error", err)
 	}
 	if walkFailures > 0 {
@@ -868,8 +886,8 @@ func (s *Scanner) scanAudiobookPaths(ctx context.Context, folder *models.MediaFo
 // parallel. ffprobe dominates per-book wall time (hundreds of ms each), so
 // single-threaded scans of a large library take days; the worker pool brings
 // this to hours. It fails when the scan is canceled, or when every attempted
-// book failed.
-func (s *Scanner) reconcileAudiobookCandidates(ctx context.Context, folder *models.MediaFolder, candidates [][]string, inventory audiobookInventory, inventoryAt time.Time) error {
+// book failed. It adds the files of the books it wrote and skipped to result.
+func (s *Scanner) reconcileAudiobookCandidates(ctx context.Context, folder *models.MediaFolder, candidates [][]string, inventory audiobookInventory, inventoryAt time.Time, result *ScanResult) error {
 	workers := audiobookScanWorkers()
 	slog.InfoContext(ctx, "audiobook scan: starting", "component", "scanner",
 		"folder_id", folder.ID,
@@ -889,8 +907,14 @@ func (s *Scanner) reconcileAudiobookCandidates(ctx context.Context, folder *mode
 		cancelMu   sync.Mutex
 		failures   scanFailures
 		cancelErr  error
+		files      audiobookFileCounts
 	)
 	start := time.Now()
+	defer func() {
+		result.New += int(atomic.LoadInt64(&files.added))
+		result.Updated += int(atomic.LoadInt64(&files.updated))
+		result.Unchanged += int(atomic.LoadInt64(&files.unchanged))
+	}()
 	for range workers {
 		wg.Go(func() {
 			for aliases := range ch {
@@ -898,7 +922,7 @@ func (s *Scanner) reconcileAudiobookCandidates(ctx context.Context, folder *mode
 				if ctx.Err() != nil {
 					return
 				}
-				if err := s.reconcileAudiobookAliases(ctx, folder, aliases, inventory, inventoryAt, &skipped, &unreadable); err != nil {
+				if err := s.reconcileAudiobookAliases(ctx, folder, aliases, inventory, inventoryAt, &skipped, &unreadable, &files); err != nil {
 					if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 						cancelMu.Lock()
 						if cancelErr == nil {
@@ -973,8 +997,9 @@ func (s *Scanner) reconcileAudiobookCandidates(ctx context.Context, folder *mode
 // remaining files are removed (a rename therefore converges on the newly
 // indexed path instead of leaving a stale duplicate). A scan that saw zero
 // files while the DB still has rows only reconciles when the operator has
-// confirmed cleanup, so an unmounted source can't wipe the catalog.
-func (s *Scanner) reconcileAudiobookMissingFiles(ctx context.Context, folder *models.MediaFolder, roots []string, inventoryAt time.Time, seenPaths map[string]bool, protectedPaths []string, fullScan bool) error {
+// confirmed cleanup, so an unmounted source can't wipe the catalog. It adds
+// the files it newly marked missing and the rows its sweep removed to result.
+func (s *Scanner) reconcileAudiobookMissingFiles(ctx context.Context, folder *models.MediaFolder, roots []string, inventoryAt time.Time, seenPaths map[string]bool, protectedPaths []string, fullScan bool, result *ScanResult) error {
 	if s.fileRepo == nil || s.libraryRepo == nil || len(roots) == 0 {
 		return nil
 	}
@@ -1020,12 +1045,16 @@ func (s *Scanner) reconcileAudiobookMissingFiles(ctx context.Context, folder *mo
 						"folder_id", folder.ID, "path", mf.FilePath, "error", err)
 					continue
 				}
+				result.Missing++
 			}
 			missing++
 		}
 	}
 
 	trashed, removedMemberships, deletedItems, err := s.sweepMissingWithProtectedRoots(ctx, folder, protectedPaths)
+	result.FilesDeleted += trashed
+	result.MembershipsRemoved += removedMemberships
+	result.ItemsDeleted += deletedItems
 	if trashed > 0 {
 		slog.InfoContext(ctx, "audiobook scan: emptied trash", "component", "scanner", "folder_id", folder.ID, "deleted", trashed)
 	}
@@ -1077,10 +1106,10 @@ func audiobookScanProgress(folderID int, total, processed, failed, skipped int) 
 
 // audiobookFolderUnchangedOnDisk runs audiobookFolderShouldSkip for the book
 // at physical, logging a failed check, which then counts as changed.
-func (s *Scanner) audiobookFolderUnchangedOnDisk(ctx context.Context, folder *models.MediaFolder, folderPath, physical string, physicalErr error, allowedPaths map[string]bool, walked *audiobookWalkedBook) (rejected int, unchanged bool) {
+func (s *Scanner) audiobookFolderUnchangedOnDisk(ctx context.Context, folder *models.MediaFolder, folderPath, physical string, physicalErr error, allowedPaths map[string]bool, walked *audiobookWalkedBook) (rejected, files int, unchanged bool) {
 	err := physicalErr
 	if err == nil {
-		rejected, unchanged, err = s.audiobookFolderShouldSkip(ctx, folder, folderPath, physical, allowedPaths, walked)
+		rejected, files, unchanged, err = s.audiobookFolderShouldSkip(ctx, folder, folderPath, physical, allowedPaths, walked)
 	}
 	// A folder gone since the walk is reported by the parse that follows.
 	if err != nil && !errors.Is(physicalErr, os.ErrNotExist) {
@@ -1090,7 +1119,7 @@ func (s *Scanner) audiobookFolderUnchangedOnDisk(ctx context.Context, folder *mo
 			"error", err,
 		)
 	}
-	return rejected, unchanged && err == nil
+	return rejected, files, unchanged && err == nil
 }
 
 // audiobookRootUnmoved checks, after the parse, that folderPath still resolves
@@ -1113,14 +1142,15 @@ func audiobookRootUnmoved(folderPath, physical string, physicalErr error) error 
 
 // unreadable, when set, counts audio files ffprobe rejected that the book was
 // indexed without.
-func (s *Scanner) reconcileAudiobookFolder(ctx context.Context, folder *models.MediaFolder, folderPath string, allowedPaths map[string]bool, walked *audiobookWalkedBook, inventoryAt time.Time, skipped, unreadable *int64) error {
+func (s *Scanner) reconcileAudiobookFolder(ctx context.Context, folder *models.MediaFolder, folderPath string, allowedPaths map[string]bool, walked *audiobookWalkedBook, inventoryAt time.Time, skipped, unreadable *int64, files *audiobookFileCounts) error {
 	// Resolved once per book, so the skip check, the identity lookup and the
 	// rows it writes agree on the physical root.
 	physical, physicalErr := canonicalWalkPath(folderPath)
-	if rejected, unchanged := s.audiobookFolderUnchangedOnDisk(ctx, folder, folderPath, physical, physicalErr, allowedPaths, walked); unchanged {
+	if rejected, unchangedFiles, unchanged := s.audiobookFolderUnchangedOnDisk(ctx, folder, folderPath, physical, physicalErr, allowedPaths, walked); unchanged {
 		// Linking runs when either format is added or its metadata changes.
 		// An unchanged, unlinked book must not repeat the candidate search.
 		atomic.AddInt64(skipped, 1)
+		files.skipped(unchangedFiles)
 		if unreadable != nil {
 			atomic.AddInt64(unreadable, int64(rejected))
 		}
@@ -1165,6 +1195,10 @@ func (s *Scanner) reconcileAudiobookFolder(ctx context.Context, folder *models.M
 	} else if err != nil {
 		return fmt.Errorf("upsert audiobook presentation: %w", err)
 	}
+	added, err := countAudiobookFilesAddedTx(ctx, tx, parsed)
+	if err != nil {
+		return err
+	}
 	if err := s.upsertAudiobookSeriesTx(ctx, tx, contentID, parsed); err != nil {
 		return fmt.Errorf("upsert audiobook series: %w", err)
 	}
@@ -1187,6 +1221,7 @@ func (s *Scanner) reconcileAudiobookFolder(ctx context.Context, folder *models.M
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit audiobook folder transaction: %w", err)
 	}
+	files.wrote(added, len(parsed.Files))
 	s.applyAudiobookCovers(ctx, folder.ID, contentID, folderPath, parsed)
 	if err := s.upsertAudiobookPeople(ctx, contentID, parsed); err != nil {
 		return fmt.Errorf("upsert audiobook people: %w", err)
@@ -2285,4 +2320,48 @@ func parseSeriesIndex(raw string) *float64 {
 		return nil
 	}
 	return &v
+}
+
+// audiobookFileCounts counts the files behind the books a scan wrote or
+// skipped, in ScanResult's units: added files had no row before the scan,
+// updated files had one and were rewritten with their book, and unchanged
+// files belong to skipped books. Workers update it concurrently; a nil
+// receiver counts nothing.
+type audiobookFileCounts struct {
+	added, updated, unchanged int64
+}
+
+// wrote records the total files of a written book, added of which are new.
+func (c *audiobookFileCounts) wrote(added, total int) {
+	if c == nil {
+		return
+	}
+	atomic.AddInt64(&c.added, int64(added))
+	atomic.AddInt64(&c.updated, int64(total-added))
+}
+
+// skipped records the files of a book the scan left alone.
+func (c *audiobookFileCounts) skipped(files int) {
+	if c == nil {
+		return
+	}
+	atomic.AddInt64(&c.unchanged, int64(files))
+}
+
+// countAudiobookFilesAddedTx counts the book's files whose rows the
+// transaction's upsert inserted. The upsert leaves created_at alone on a row
+// it updates, and now() is the transaction's start, so only rows this
+// transaction inserted carry it.
+func countAudiobookFilesAddedTx(ctx context.Context, tx pgx.Tx, book *parsedAudiobook) (int, error) {
+	paths := make([]string, len(book.Files))
+	for i, af := range book.Files {
+		paths[i] = af.Path
+	}
+	var added int
+	if err := tx.QueryRow(ctx, `
+		SELECT count(*) FROM media_files WHERE file_path = ANY($1) AND created_at = now()
+	`, paths).Scan(&added); err != nil {
+		return 0, fmt.Errorf("count added audiobook files: %w", err)
+	}
+	return added, nil
 }

@@ -1324,6 +1324,11 @@
 ./internal/scanner TestAudiobookRegroupKeepsContentIDsDB
 ./internal/scanner TestAudiobookUnreadableDiscKeepsIndexedBookDB
 
+# An audiobook library scan reports, in files, what it added, rewrote and newly
+# marked missing, and nothing for a scan that changed nothing, so library
+# ingest refreshes Home rows only after a real change.
+./internal/scanner TestScanFolderAudiobookReportsCatalogChangesDB
+
 # A provider match owns an audiobook's year, genres and credits: a rescan only
 # fills what is empty, and the match keeps the tag narrator and the book's own
 # cover, and a renamed folder of a matched book keeps its item. Audiobooks
