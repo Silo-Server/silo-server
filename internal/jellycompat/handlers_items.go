@@ -2277,17 +2277,38 @@ func (h *ItemsHandler) handleEpisodeBrowse(w http.ResponseWriter, r *http.Reques
 // episode can match: the ParentId library is outside the session's libraries,
 // or ParentId names a collection.
 func (h *ItemsHandler) browseEpisodeItems(ctx context.Context, session *Session, query itemsQuery, repo episodeBrowser, offset, limit int) ([]upstreamListItem, map[string]compatEpisodeTarget, int, bool, error) {
+	episodes, total, ok, err := h.matchingEpisodes(ctx, session, query, repo, offset, limit)
+	if err != nil || !ok {
+		return nil, nil, 0, ok, err
+	}
+	contentIDs := contentIDsFromEpisodes(episodes)
+	targets, err := h.fetchCompatEpisodeTargetsByContentIDsWithDurations(ctx, session, contentIDs, nil)
+	if err != nil {
+		return nil, nil, 0, false, err
+	}
+	listItems := make([]upstreamListItem, 0, len(contentIDs))
+	for _, contentID := range contentIDs {
+		if target, ok := targets[contentID]; ok {
+			listItems = append(listItems, target.Item)
+		}
+	}
+	return listItems, targets, total, true, nil
+}
+
+// matchingEpisodes pages the episodes browseEpisodeItems lists, without
+// hydrating them. ok is false when no episode can match.
+func (h *ItemsHandler) matchingEpisodes(ctx context.Context, session *Session, query itemsQuery, repo episodeBrowser, offset, limit int) ([]*models.Episode, int, bool, error) {
 	// Only an Ids lookup reaches here with a collection ParentId. The episode
 	// browse can't match a collection's members, so it lists no episodes rather
 	// than named episodes outside the collection.
 	if query.parentCollectionID != "" {
-		return nil, nil, 0, false, nil
+		return nil, 0, false, nil
 	}
 	access, filters := h.episodeBrowseFilters(ctx, session, query)
 	// The access filter checks each episode's series, so a ParentId library is
 	// intersected with the session's libraries before episodes are matched to it.
 	if query.parentLibraryID > 0 && !narrowAccessToLibrary(&access, query.parentLibraryID) {
-		return nil, nil, 0, false, nil
+		return nil, 0, false, nil
 	}
 	filters.LibraryID = query.parentLibraryID
 	// /Shows/{id}/Episodes shares episodeBrowseFilters but has no Ids filter in
@@ -2303,20 +2324,20 @@ func (h *ItemsHandler) browseEpisodeItems(ctx context.Context, session *Session,
 	// episodes it keeps.
 	episodes, total, err := h.browseEpisodes(ctx, session, repo, query.parentItemID, query.parentSeasonID, nil, "", filters, access, query.enableTotalRecordCount)
 	if err != nil {
-		return nil, nil, 0, false, err
+		return nil, 0, false, err
 	}
-	contentIDs := contentIDsFromEpisodes(episodes)
-	targets, err := h.fetchCompatEpisodeTargetsByContentIDsWithDurations(ctx, session, contentIDs, nil)
-	if err != nil {
-		return nil, nil, 0, false, err
+	return episodes, total, true, nil
+}
+
+// withoutEpisodeType returns query for the media_items half of a mixed browse:
+// its types less Episode. Without a type filter the media_items browse serves
+// every other type.
+func withoutEpisodeType(query itemsQuery) itemsQuery {
+	query.itemTypes = slices.DeleteFunc(slices.Clone(query.itemTypes), func(t string) bool { return t == compatEpisodeType })
+	if len(query.itemTypes) > 0 {
+		query.itemType = query.itemTypes[0]
 	}
-	listItems := make([]upstreamListItem, 0, len(contentIDs))
-	for _, contentID := range contentIDs {
-		if target, ok := targets[contentID]; ok {
-			listItems = append(listItems, target.Item)
-		}
-	}
-	return listItems, targets, total, true, nil
+	return query
 }
 
 // mixedEpisodeBrowser returns the episode browse when a search lists Episode
@@ -2958,11 +2979,7 @@ func (h *ItemsHandler) handleBrowseItems(w http.ResponseWriter, r *http.Request,
 	browseQuery := query
 	episodeRepo, mixed := h.mixedEpisodeBrowser(query)
 	if mixed {
-		browseQuery.itemTypes = slices.DeleteFunc(slices.Clone(query.itemTypes), func(t string) bool { return t == compatEpisodeType })
-		// Without a type filter the media_items browse serves every other type.
-		if len(browseQuery.itemTypes) > 0 {
-			browseQuery.itemType = browseQuery.itemTypes[0]
-		}
+		browseQuery = withoutEpisodeType(query)
 	}
 	// Limit=0 asks only for TotalRecordCount (Wholphin's letter jump); the
 	// catalog treats a zero limit as its default page, so fetch one row.
@@ -4639,6 +4656,9 @@ func (h *ItemsHandler) validateThemeOwner(w http.ResponseWriter, r *http.Request
 
 // Mixed Ids requests retain the catalog's composed predicates for ordinary
 // media. Read only the selected-ID set before merging collection rows and paging.
+// The media_items browse holds no episodes, so named episodes are matched
+// through the episode browse whenever the query lists them, as
+// handleBrowseItems does (#5342).
 func (h *ItemsHandler) filteredSpecificMediaIDs(ctx context.Context, session *Session, query itemsQuery) ([]string, error) {
 	if len(query.specificIDs) == 0 || query.hasItemTypeFilter && len(query.itemTypes) == 0 {
 		return nil, nil
@@ -4654,21 +4674,33 @@ func (h *ItemsHandler) filteredSpecificMediaIDs(ctx context.Context, session *Se
 	// or omitted IDs across pages even when the response asks for random order.
 	query.sort, query.order = catalog.BrowseSortTitle, "asc"
 	allowed := make(map[string]bool, len(selected))
-	for query.startIndex < len(selected) {
-		result, err := h.content.BrowseItems(ctx, session, buildBrowseParams(query))
-		if err != nil {
+	episodeRepo, episodeOnly := h.episodeOnlyBrowser(query)
+	if !episodeOnly {
+		browseQuery := query
+		var mixed bool
+		if episodeRepo, mixed = h.mixedEpisodeBrowser(query); mixed {
+			browseQuery = withoutEpisodeType(query)
+		}
+		if err := h.addBrowsedIDs(ctx, session, browseQuery, len(selected), allowed); err != nil {
 			return nil, err
 		}
-		if result == nil {
-			return nil, fmt.Errorf("selected item browse returned no response")
+	}
+	if episodeRepo != nil {
+		// The Ids allowlist bounds the matches, so this ends once the browse
+		// runs out of them.
+		for offset := 0; offset < len(selected); {
+			episodes, _, ok, err := h.matchingEpisodes(ctx, session, query, episodeRepo, offset, len(selected)-offset)
+			if err != nil {
+				return nil, err
+			}
+			if !ok || len(episodes) == 0 {
+				break
+			}
+			for _, ep := range episodes {
+				allowed[ep.ContentID] = true
+			}
+			offset += len(episodes)
 		}
-		for _, item := range result.Items {
-			allowed[item.ContentID] = true
-		}
-		if !result.HasMore || len(result.Items) == 0 {
-			break
-		}
-		query.startIndex += len(result.Items)
 	}
 	result := make([]string, 0, len(allowed))
 	for _, id := range selected {
@@ -4677,6 +4709,28 @@ func (h *ItemsHandler) filteredSpecificMediaIDs(ctx context.Context, session *Se
 		}
 	}
 	return result, nil
+}
+
+// addBrowsedIDs marks in allowed every item the media_items browse for query
+// returns, paging through up to selected rows.
+func (h *ItemsHandler) addBrowsedIDs(ctx context.Context, session *Session, query itemsQuery, selected int, allowed map[string]bool) error {
+	for query.startIndex < selected {
+		result, err := h.content.BrowseItems(ctx, session, buildBrowseParams(query))
+		if err != nil {
+			return err
+		}
+		if result == nil {
+			return errors.New("selected item browse returned no response")
+		}
+		for _, item := range result.Items {
+			allowed[item.ContentID] = true
+		}
+		if !result.HasMore || len(result.Items) == 0 {
+			return nil
+		}
+		query.startIndex += len(result.Items)
+	}
+	return nil
 }
 
 const (
