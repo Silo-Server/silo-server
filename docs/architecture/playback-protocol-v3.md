@@ -1148,7 +1148,18 @@ segment's start. It never waits and never restarts FFmpeg, because a restart
 past the end writes nothing and the player would request the segment again. A
 request that waited on the restart lock checks the end again first. A seek into
 the tail before any run has reached the end restarts FFmpeg there once; it
-writes nothing, and the request answers the same segment. A crash, a kill, a
+writes nothing, and the request answers the same segment.
+
+A native encoded transcode that starts or reanchors in the tail would give the
+player only such segments, and a player whose first segment holds no media
+cannot prepare. So before the plan is returned, a start past zero probes the
+file's last video frame (`playback.ResolveTranscodeStart`): FFmpeg copies the
+video packets from a seek to the stored duration, and from up to 300 s earlier
+when that finds none, since MPEG-TS seeks forward. When the start's segment
+begins after that frame, the plan starts at the segment that holds it, and
+playback ends at the end of the video as above. A probe that fails, finds no
+video, or has no stored duration to seek to keeps the requested start. The
+Jellyfin-compatible start path does not probe. A crash, a kill, a
 non-zero exit, or an exit after a demux error has not reached the end, so a
 request past its output restarts it as before. A keyframe-planned copy remux
 lists only the source's own segments and keeps its own rules. The integrated

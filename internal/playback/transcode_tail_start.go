@@ -12,6 +12,18 @@ import (
 	"github.com/Silo-Server/silo-server/internal/fspath"
 )
 
+// transcodeStartProbeSlots bounds concurrent ResolveTranscodeStart probes
+// apart from the copy-seek probes, so resumes of encoded transcodes never
+// hold up a copy remux's seek.
+var transcodeStartProbeSlots = make(chan struct{}, maxConcurrentCopySeekProbes)
+
+// transcodeStartProbeBacksteps are how far before the end of the file the
+// probe looks again when its first seek finds no video packet. MPEG-TS seeks
+// forward, to the first keyframe at or after the target, so a seek to the end
+// lands past the last keyframe; and a tail longer than the first step leaves
+// that step past the video too. Each step bounds what a probe reads.
+var transcodeStartProbeBacksteps = []float64{10, 60, 300}
+
 // ResolveTranscodeStart returns where an encoded transcode asked to start at
 // requestedSeconds should start. That is requestedSeconds itself, unless its
 // segment begins after the file's last video frame. In that case it is the
@@ -28,7 +40,10 @@ import (
 // The probe seeks to the end of the file (durationSeconds, or the requested
 // position when it is later) and copies the video packets from the keyframe
 // it lands on, so it reads only the last group of pictures wherever playback
-// starts. A probe that finds no video packet returns requestedSeconds.
+// starts. When that finds no video packet it looks again from earlier
+// (transcodeStartProbeBacksteps). A probe that finds none returns
+// requestedSeconds, and so does a file with no known duration, whose probe
+// would read from the requested position to the end.
 func ResolveTranscodeStart(
 	ctx context.Context,
 	ffmpegPath string,
@@ -37,7 +52,7 @@ func ResolveTranscodeStart(
 	durationSeconds float64,
 	segmentDuration int,
 ) (float64, error) {
-	if requestedSeconds <= 0 {
+	if requestedSeconds <= 0 || durationSeconds <= 0 {
 		return requestedSeconds, nil
 	}
 	if strings.TrimSpace(inputPath) == "" {
@@ -58,12 +73,20 @@ func ResolveTranscodeStart(
 		probeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), copySeekProbeTimeout)
 		defer cancel()
 		select {
-		case copySeekProbeSlots <- struct{}{}:
-			defer func() { <-copySeekProbeSlots }()
+		case transcodeStartProbeSlots <- struct{}{}:
+			defer func() { <-transcodeStartProbeSlots }()
 		case <-probeCtx.Done():
 			return lastVideoFrame{}, probeCtx.Err()
 		}
-		return probeLastVideoFrame(probeCtx, resolvedFFmpegPath, inputPath, probeAt)
+		last, err := probeLastVideoFrame(probeCtx, resolvedFFmpegPath, inputPath, probeAt)
+		for _, step := range transcodeStartProbeBacksteps {
+			if err != nil || last.found || probeAt <= 0 {
+				break
+			}
+			probeAt = math.Max(0, probeAt-step)
+			last, err = probeLastVideoFrame(probeCtx, resolvedFFmpegPath, inputPath, probeAt)
+		}
+		return last, err
 	})
 
 	var last lastVideoFrame

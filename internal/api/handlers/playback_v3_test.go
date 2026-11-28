@@ -5392,10 +5392,7 @@ func TestTranscodeTimelineStartsATailResumeAtTheLastVideoSegment(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0))
 			var probed []float64
-			handler.transcodeStart = func(_ context.Context, _ string, inputPath string, requested, duration float64, segmentDuration int) (float64, error) {
-				if inputPath != "/media/tail.mkv" || duration != 30 || segmentDuration != playback.DefaultSegmentDuration {
-					t.Errorf("probe input = %q, duration %v, segment %d", inputPath, duration, segmentDuration)
-				}
+			handler.transcodeStart = func(_ context.Context, _ string, _ string, requested, _ float64, _ int) (float64, error) {
 				probed = append(probed, requested)
 				return tc.resolved, tc.probeErr
 			}

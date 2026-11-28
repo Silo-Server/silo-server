@@ -3069,7 +3069,7 @@ func (h *PlaybackHandler) prepareTransportTimelineV3(ctx context.Context, sessio
 // behaved before, and playback past the end still ends the stream.
 func (h *PlaybackHandler) moveTailStartToLastVideoSegmentV3(ctx context.Context, session *playback.Session, file *models.MediaFile, plan *playback.PlanV3, durationSeconds float64) {
 	requested := plan.Timeline.SourceStartSeconds
-	if requested <= 0 || file == nil || strings.TrimSpace(file.FilePath) == "" {
+	if requested <= 0 || file == nil || strings.TrimSpace(file.FilePath) == "" || file.IsAudioOnly() {
 		return
 	}
 	resolver := h.transcodeStart
