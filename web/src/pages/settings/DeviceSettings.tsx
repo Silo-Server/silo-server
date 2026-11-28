@@ -8,6 +8,7 @@ import {
   isCapturedProfileAuthorityActive,
   type ProfileRequestContextSnapshot,
 } from "@/api/client";
+import { adminAuthorityScope } from "@/api/v2/adminAuthority";
 import { v2ErrorText } from "@/api/v2/request";
 import type { UserDevice } from "@/api/types";
 import { useT } from "@/i18n";
@@ -35,6 +36,7 @@ import {
 import {
   effectiveSettingsQueryKey,
   type EffectiveSettingsMap,
+  isSettingValueMissing,
   settingsCapabilitiesSupportKey,
   useSettingsCapabilities,
   useClearSettingValue,
@@ -337,7 +339,18 @@ function DeviceDetail({
   // The server value reasserts itself whenever the panel is (re)opened.
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   const appearanceSetting = settings[SETTING_KEYS.PLAYBACK_SUBTITLE_APPEARANCE];
-  const appearance = useAutosavedDraft(parseSubtitleAppearance(appearanceSetting?.value));
+  // Keyed like the admin editor, so a detail view remounted for this device
+  // (another device picked, then this one again) joins a save or reset still
+  // in flight instead of racing it.
+  const appearance = useAutosavedDraft(
+    parseSubtitleAppearance(appearanceSetting?.value),
+    JSON.stringify([
+      adminAuthorityScope(),
+      device.profile_id ?? "",
+      device.device_id,
+      SETTING_KEYS.PLAYBACK_SUBTITLE_APPEARANCE,
+    ]),
+  );
   const appearanceAuthority = useRef<ProfileRequestContextSnapshot | null>(null);
   const appearanceChangedHere = appearanceSetting?.scope === "profile_device";
 
@@ -632,10 +645,18 @@ function DeviceDetail({
                   identity,
                 });
               } catch (error) {
-                toast.error(v2ErrorText(error, t("web.settings.device.settingResetFailed")));
-                throw error;
+                // A 404 means another client cleared it first: the state asked for.
+                if (!isSettingValueMissing(error)) {
+                  toast.error(v2ErrorText(error, t("web.settings.device.settingResetFailed")));
+                  throw error;
+                }
               }
-              await queryClient.refetchQueries({ queryKey: effective, exact: true });
+              // Edits queued behind the reset build on this read, so a failed
+              // read fails the clear rather than leave them on the old override.
+              await queryClient.refetchQueries(
+                { queryKey: effective, exact: true },
+                { throwOnError: true },
+              );
             },
             () =>
               parseSubtitleAppearance(
