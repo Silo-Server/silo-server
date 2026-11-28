@@ -220,3 +220,20 @@ it("builds an edit made after a reset on the value the device inherits", async (
     fontSize: "large",
   });
 });
+
+// A reset that fails leaves the stored value unknown, so an edit queued
+// behind it is dropped rather than sent on the pre-reset override.
+it("drops an edit queued behind a reset that fails", async () => {
+  const cleared = deferred();
+  const onSave = vi.fn().mockResolvedValue(undefined);
+  const onReset = vi.fn(() => cleared.promise);
+  const { unmount } = renderDialog(onSave, onReset);
+
+  fireEvent.click(screen.getByRole("button", { name: "Reset override" }));
+  unmount();
+  renderDialog(onSave, onReset);
+  fireEvent.click(radio("Large"));
+  await act(async () => cleared.reject(new Error("rejected")));
+
+  expect(onSave).not.toHaveBeenCalled();
+});

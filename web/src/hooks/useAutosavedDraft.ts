@@ -80,8 +80,8 @@ const viewOf = <T>(m: Machine<T>) => ({
  *
  * Unmounting drops edits that haven't been sent, so nothing goes out after
  * the editor is gone (where a reset or a reopened editor couldn't stop it);
- * a save already in flight still completes. Call `discardQueued` before
- * clearing the stored value while the editor is mounted.
+ * a save already in flight still completes. Reset the stored value through
+ * `clear`, which orders the reset after that save.
  *
  * With a `key` naming the stored value, an editor opened while an earlier
  * one's save for that key is still in flight starts from that save, not from
@@ -161,10 +161,10 @@ export function useAutosavedDraft<T extends object>(initial: T, key?: string) {
    * already sent has settled (so that save can't land after it and write the
    * value back), and edits made after it wait for it and then build on
    * `cleared()`, read once the clear has succeeded: the value in effect with
-   * nothing stored here, such as one inherited from a wider scope. It
-   * outlives the editor: the
-   * value stays in flight under its key until the clear settles, so an editor
-   * reopened meanwhile queues behind it.
+   * nothing stored here, such as one inherited from a wider scope. If the
+   * clear fails, edits made after it are dropped. The clear outlives the
+   * editor: the value stays in flight under its key until the clear settles,
+   * so an editor reopened meanwhile queues behind it.
    */
   const clear = useCallback(
     (request: () => Promise<unknown>, cleared: () => T) => {
@@ -176,7 +176,12 @@ export function useAutosavedDraft<T extends object>(initial: T, key?: string) {
           () => {
             m.confirmed = cleared();
           },
-          () => undefined,
+          () => {
+            // The stored value is unknown after a failed clear, so edits
+            // queued behind it don't go out built on a guess.
+            m.queued = null;
+            m.queuedSave = null;
+          },
         );
       if (m.sending) m.queuedClear = op;
       else run(m, {}, op);
