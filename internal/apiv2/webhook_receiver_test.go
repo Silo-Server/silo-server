@@ -65,7 +65,8 @@ func TestWebhookReceiverRealDeliveryDB(t *testing.T) {
 		name, body string
 		status     int
 	}{
-		{"ignored", payload.String(), 204}, {"malformed", "invalid multipart", 400},
+		// The NUL byte reaches the logged excerpt, which Postgres text refuses.
+		{"ignored", payload.String(), 204}, {"malformed", "invalid\x00multipart", 400},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			{

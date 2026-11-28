@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -22,7 +23,7 @@ func (r *Repository) CreateEventLog(ctx context.Context, entry WebhookEventLog) 
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
-	attrsJSON, err := json.Marshal(entry.Attrs)
+	attrsJSON, err := json.Marshal(replaceNULBytesInAttrs(entry.Attrs))
 	if err != nil {
 		return nil, fmt.Errorf("marshal webhook event log attrs: %w", err)
 	}
@@ -34,12 +35,12 @@ func (r *Repository) CreateEventLog(ctx context.Context, entry WebhookEventLog) 
 		RETURNING id, connection_id, received_at, COALESCE(request_id, ''), http_status, outcome,
 		          summary, COALESCE(error_message, ''), COALESCE(body_excerpt, ''), attrs`,
 		entry.ConnectionID,
-		entry.RequestID,
+		replaceNULByte(entry.RequestID),
 		entry.HTTPStatus,
 		entry.Outcome,
-		entry.Summary,
-		entry.ErrorMessage,
-		entry.BodyExcerpt,
+		replaceNULByte(entry.Summary),
+		replaceNULByte(entry.ErrorMessage),
+		replaceNULByte(entry.BodyExcerpt),
 		string(attrsJSON),
 	)
 
@@ -68,6 +69,29 @@ func (r *Repository) CreateEventLog(ctx context.Context, entry WebhookEventLog) 
 		return nil, fmt.Errorf("commit create webhook event log: %w", err)
 	}
 	return created, nil
+}
+
+// replaceNULByte swaps NUL bytes for U+FFFD. A delivery body or a field parsed
+// from it may carry 0x00, which Postgres text and jsonb columns refuse, and the
+// delivery would then have no log row at all.
+func replaceNULByte(s string) string {
+	return strings.ReplaceAll(s, "\x00", "\uFFFD")
+}
+
+// replaceNULBytesInAttrs applies replaceNULByte to the keys and string values
+// of an attrs map.
+func replaceNULBytesInAttrs(attrs map[string]any) map[string]any {
+	if attrs == nil {
+		return nil
+	}
+	out := make(map[string]any, len(attrs))
+	for key, value := range attrs {
+		if text, ok := value.(string); ok {
+			value = replaceNULByte(text)
+		}
+		out[replaceNULByte(key)] = value
+	}
+	return out
 }
 
 func scanWebhookEventLog(row interface {
