@@ -1263,7 +1263,10 @@ not a durable receipt proving session teardown.
 `getAdminBuildInfo` reports the running binary's build identity: `display`,
 `revision`, `dirty`, `vcs_time`, `build_number`, `built_at` and `available`. It
 requires an acting administrator. Build metadata is diagnostic; clients detect
-features through capability documents. Unknown build timestamps are omitted, and
+features through capability documents. `display` is the release version on a
+release image (for example `0.24.0`) and the short revision on every other
+build, with `+dirty` for a modified tree, or `unavailable`; `revision` always
+carries the commit. Unknown build timestamps are omitted, and
 present ones are UTC with millisecond precision. `build_number` is a numeric
 counter. A node reports the same shape in `last_stats.build`.
 

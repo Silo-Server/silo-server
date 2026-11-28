@@ -1,6 +1,8 @@
 package buildinfo
 
 import (
+	"os"
+	"regexp"
 	"runtime/debug"
 	"strconv"
 	"strings"
@@ -14,10 +16,22 @@ var (
 	dirtyOverride       string
 	buildNumberOverride string
 	builtAtOverride     string
+	versionOverride     string
 )
 
+// versionFile holds the release version of a published release image. The
+// release workflow adds it as a layer on top of the image CI already built and
+// tested, so the binary itself never changes between a build and its release.
+// Builds outside Docker can set versionOverride with -ldflags instead.
+const versionFile = "/usr/share/silo/version"
+
+// releaseVersion matches a release tag without its leading v: 0.24.0,
+// 1.0.0-beta.1 or 1.0.0-rc.1. Anything else in the file or the ldflag is ignored.
+var releaseVersion = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(beta|rc)\.[1-9][0-9]*)?$`)
+
 // Info describes the running Silo build from Go VCS metadata and CI-injected
-// container identity.
+// container identity. Display is the release version for a release build and
+// the short revision otherwise.
 type Info struct {
 	Display     string `json:"display"`
 	Revision    string `json:"revision"`
@@ -34,11 +48,48 @@ func Current() Info {
 	overrideBuildNumber := parseBuildNumber(buildNumberOverride)
 	overrideBuiltAt := strings.TrimSpace(builtAtOverride)
 
-	info, ok := debug.ReadBuildInfo()
-	if !ok {
-		return buildInfo(overrideRevision, overrideDirty, "", overrideBuildNumber, overrideBuiltAt)
+	var current Info
+	if info, ok := debug.ReadBuildInfo(); ok {
+		current = resolve(info.Settings, overrideRevision, overrideDirty, overrideBuildNumber, overrideBuiltAt)
+	} else {
+		current = buildInfo(overrideRevision, overrideDirty, "", overrideBuildNumber, overrideBuiltAt)
 	}
-	return resolve(info.Settings, overrideRevision, overrideDirty, overrideBuildNumber, overrideBuiltAt)
+	return withVersion(current, version())
+}
+
+// version is read once: the file belongs to the image and cannot change while
+// the process runs.
+var version = sync.OnceValue(func() string { return readVersion(versionOverride, versionFile) })
+
+func readVersion(override, path string) string {
+	if v := strings.TrimSpace(override); v != "" {
+		return validVersion(v)
+	}
+	data, err := os.ReadFile(path) //nolint:gosec // G304: versionFile in production, a temp file in tests
+	if err != nil {
+		return ""
+	}
+	return validVersion(strings.TrimSpace(string(data)))
+}
+
+func validVersion(v string) string {
+	if !releaseVersion.MatchString(v) {
+		return ""
+	}
+	return v
+}
+
+// withVersion names a release build by its version, keeping the revision in
+// Revision and a dirty tree visible in Display.
+func withVersion(info Info, version string) Info {
+	if version == "" || !info.Available {
+		return info
+	}
+	info.Display = version
+	if info.Dirty {
+		info.Display += "+dirty"
+	}
+	return info
 }
 
 // UserAgent names this Silo build for third-party APIs that ask callers to

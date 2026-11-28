@@ -1,0 +1,201 @@
+name: Release published
+run-name: Tag the image for ${{ github.event.release.tag_name || inputs.tag }}
+
+# Tags the image CI already built and tested for a release's commit with the
+# release version (see scripts/release/release_version.py for which tags).
+# The only change to that image is one added file, /usr/share/silo/version,
+# which the server reads to report its version. See docs/release-versioning.md.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Published release to tag the image for again, for example v0.24.0"
+        required: true
+        type: string
+
+concurrency:
+  group: release-published
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+# bash adds pipefail, so a failing command in a pipeline fails its step.
+defaults:
+  run:
+    shell: bash
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  tag-image:
+    name: Tag the release image
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+    steps:
+      - name: Check out the release
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # every tag
+          persist-credentials: false
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # latest never moves to an older commit. Before the first release it
+      # follows every main build, so main builds merged between drafting and
+      # publishing the first release would otherwise be rolled back onto an
+      # older binary and their already-migrated database. A release commit
+      # behind latest's leaves latest where it is; a failed comparison fails
+      # the job, which can be re-run, rather than risk that downgrade.
+      - name: Choose the tags
+        id: tags
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Main builds look for v-prefixed tags to tell whether a release
+          # exists, so a release tagged without the v would leave latest
+          # following main.
+          if [[ "$TAG" != v* ]]; then
+            echo "::error::Release tags start with v, for example v0.24.0, and ${TAG} doesn't."
+            exit 1
+          fi
+          # A manual run can name any tag; only a published release gets tagged.
+          if [[ "$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" != false ]]; then
+            echo "::error::${TAG} isn't a published release."
+            exit 1
+          fi
+          commit="$(git rev-list -n 1 "refs/tags/${TAG}")"
+          version="${TAG#v}"
+          image="${REGISTRY}/${IMAGE_NAME,,}"
+          python3 scripts/release/release_version.py docker-tags "$TAG" > "$RUNNER_TEMP/tags.txt"
+          if grep -qx latest "$RUNNER_TEMP/tags.txt"; then
+            # latest always exists (main builds pushed it before the first
+            # release), so a failed lookup or a missing label is an error, not
+            # a reason to skip the check.
+            if ! latest_image="$(docker buildx imagetools inspect "${image}:latest" --format '{{json .Image}}')"; then
+              echo "::error::Couldn't read ${image}:latest to compare it with ${TAG}. Run Release published again."
+              exit 1
+            fi
+            latest_revision="$(jq -r 'if has("linux/amd64") then ."linux/amd64" else . end | .config.Labels["org.opencontainers.image.revision"] // ""' <<< "$latest_image")"
+            if [[ -z "$latest_revision" ]]; then
+              echo "::error::${image}:latest has no org.opencontainers.image.revision label, so ${TAG} can't be checked against it."
+              exit 1
+            fi
+            if [[ "$latest_revision" != "$commit" ]]; then
+              if ! order="$(gh api "repos/${GITHUB_REPOSITORY}/compare/${latest_revision}...${commit}" --jq .status)"; then
+                echo "::error::Couldn't compare ${TAG} with latest (${latest_revision::9}). Run Release published again."
+                exit 1
+              fi
+              if [[ "$order" == "behind" ]]; then
+                sed -i '/^latest$/d' "$RUNNER_TEMP/tags.txt"
+                echo "::warning::latest holds ${latest_revision::9}, a newer commit than ${TAG} (${commit::9}); leaving latest there until the next release."
+              fi
+            fi
+          fi
+          {
+            echo "commit=${commit}"
+            echo "version=${version}"
+            echo "image=${image}"
+            echo "list<<EOF"
+            sed "s|^|${image}:|" "$RUNNER_TEMP/tags.txt"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+          echo "Tags for ${TAG} (commit ${commit::9}):"
+          cat "$RUNNER_TEMP/tags.txt"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      # Pin the commit's image by digest so a later push of the same tag can't
+      # change what this release is built on. The layer only copies a file, so
+      # both platforms build without emulation. The version tag never moves:
+      # when a re-run finds this release's image already published, the tags
+      # are pointed at it instead, since a later Docker Image run for the same
+      # commit can replace the commit's tag.
+      - name: Write the version layer
+        id: layer
+        env:
+          COMMIT: ${{ steps.tags.outputs.commit }}
+          IMAGE: ${{ steps.tags.outputs.image }}
+          VERSION: ${{ steps.tags.outputs.version }}
+        run: |
+          # Ask the registry directly, so a missing version (404) is told
+          # apart from a failed lookup, which stops the job rather than
+          # rebuilding a version that may already be published.
+          repo="${IMAGE#*/}"
+          token="$(curl -fsS "https://${REGISTRY}/token?scope=repository:${repo}:pull" | jq -r .token)"
+          status="$(curl -sS -o /dev/null -w '%{http_code}' -I \
+            -H "Authorization: Bearer ${token}" \
+            -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
+            "https://${REGISTRY}/v2/${repo}/manifests/${VERSION}")"
+          case "$status" in
+            200)
+              released="$(docker buildx imagetools inspect "${IMAGE}:${VERSION}" --format '{{json .Manifest}}' | jq -r .digest)"
+              echo "::notice::${IMAGE}:${VERSION} is already published; pointing the tags at it."
+              echo "released=${released}" >> "$GITHUB_OUTPUT"
+              exit 0
+              ;;
+            404) ;;
+            *)
+              echo "::error::Couldn't tell whether ${IMAGE}:${VERSION} is published (HTTP ${status}). Run Release published again."
+              exit 1
+              ;;
+          esac
+          digest="$(docker buildx imagetools inspect "${IMAGE}:${COMMIT}" --format '{{json .Manifest}}' | jq -r .digest)" || digest=""
+          if [[ -z "$digest" || "$digest" == null ]]; then
+            echo "::error::${IMAGE}:${COMMIT} doesn't exist. The Docker Image workflow must have published this commit."
+            exit 1
+          fi
+          context="$RUNNER_TEMP/version-layer"
+          mkdir -p "$context"
+          printf '%s\n' "$VERSION" > "$context/version"
+          printf 'FROM %s@%s\nCOPY version /usr/share/silo/version\n' "$IMAGE" "$digest" > "$context/Dockerfile"
+          echo "CONTEXT=$context" >> "$GITHUB_ENV"
+
+      - name: Build and push the release image
+        if: steps.layer.outputs.released == ''
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ${{ env.CONTEXT }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          provenance: false
+          tags: ${{ steps.tags.outputs.list }}
+          labels: |
+            org.opencontainers.image.version=${{ steps.tags.outputs.version }}
+            org.opencontainers.image.revision=${{ steps.tags.outputs.commit }}
+
+      - name: Point the tags at the published release image
+        if: steps.layer.outputs.released != ''
+        env:
+          IMAGE: ${{ steps.tags.outputs.image }}
+          RELEASED: ${{ steps.layer.outputs.released }}
+          TAGS: ${{ steps.tags.outputs.list }}
+        run: |
+          args=()
+          while IFS= read -r tag; do
+            if [[ -n "$tag" ]]; then
+              args+=(-t "$tag")
+            fi
+          done <<< "$TAGS"
+          docker buildx imagetools create "${args[@]}" "${IMAGE}@${RELEASED}"
+
+      - name: Check the published image
+        env:
+          IMAGE: ${{ steps.tags.outputs.image }}
+          VERSION: ${{ steps.tags.outputs.version }}
+        run: docker buildx imagetools inspect "${IMAGE}:${VERSION}"

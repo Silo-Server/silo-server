@@ -165,6 +165,7 @@ jobs:
           if [ -f scripts/ci/test_content_mtimes.py ]; then
             python3 scripts/ci/test_content_mtimes.py
           fi
+          python3 scripts/release/test_release_version.py
       - name: Check workflows and shell
         run: make verify-actionlint verify-shellcheck
       - name: Test image packaging scripts

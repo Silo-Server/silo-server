@@ -1,71 +1,111 @@
 name: Release
-run-name: Prepare ${{ inputs.version }}
+run-name: Prepare v${{ inputs.version }}
+
+# Drafts a GitHub release for the main commit this runs on. Publishing the
+# draft runs release-published.yml, which tags the image CI already built for
+# this commit with the version. See docs/release-versioning.md.
 
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: Semantic version tag (vMAJOR.MINOR.PATCH[-PRERELEASE][+BUILD])
+        description: "Version, for example 0.24.0, 1.0.0-beta.1 or 1.0.0-rc.1. A version with -beta.N or -rc.N is a prerelease."
         required: true
         type: string
-      prerelease:
-        description: Mark this release as a prerelease
-        required: true
-        default: true
-        type: boolean
 
 concurrency:
   group: release
   cancel-in-progress: false
 
 permissions:
-  contents: write
+  contents: read
+
+# bash adds pipefail, so a failing command in a pipeline fails its step.
+defaults:
+  run:
+    shell: bash
 
 jobs:
   release:
     name: Prepare draft GitHub release
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write # create the draft release
+      actions: read # find the commit's CI run
+    env:
+      GH_TOKEN: ${{ github.token }}
     steps:
-      - name: Validate release request
-        shell: bash
-        env:
-          PRERELEASE: ${{ inputs.prerelease }}
-          VERSION: ${{ inputs.version }}
+      - name: Require main
+        if: github.ref != 'refs/heads/main'
         run: |
-          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
-            echo "::error::Releases must be created from the main branch."
-            exit 1
-          fi
+          echo "::error::Releases are made from main."
+          exit 1
 
-          core_identifier='(0|[1-9][0-9]*)'
-          prerelease_identifier='(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)'
-          build_identifier='[0-9A-Za-z-]+'
-          version_pattern="^v${core_identifier}\\.${core_identifier}\\.${core_identifier}(-${prerelease_identifier}(\\.${prerelease_identifier})*)?(\\+${build_identifier}(\\.${build_identifier})*)?$"
-
-          if [[ ! "$VERSION" =~ $version_pattern ]]; then
-            echo "::error::Version must use vMAJOR.MINOR.PATCH with optional prerelease and build metadata."
-            exit 1
-          fi
-
-          version_without_build="${VERSION%%+*}"
-
-          if [[ "$version_without_build" == *-* && "$PRERELEASE" != "true" ]]; then
-            echo "::error::A version with a prerelease suffix must be marked as a prerelease."
-            exit 1
-          fi
-
-          if [[ "$version_without_build" != *-* && "$PRERELEASE" == "true" ]]; then
-            echo "::error::A stable version cannot be marked as a prerelease."
+      # A draft has no tag until it is published, so the version check can't
+      # see it. One draft at a time keeps a second one from repeating its
+      # version or drafting an older version on a newer commit. This runs
+      # before the checkout, so a draft published in between is already a tag
+      # there.
+      - name: Require no other draft release
+        run: |
+          drafts="$(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName,isDraft \
+            --jq '[.[] | select(.isDraft) | if .tagName == "" then "(untagged)" else .tagName end] | join(", ")')"
+          if [[ -n "$drafts" ]]; then
+            echo "::error::Publish or delete the draft release ${drafts} first."
             exit 1
           fi
 
       - name: Check out the release commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.sha }}
+          fetch-depth: 0 # every tag
+          persist-credentials: false
+
+      - name: Check the version
+        id: version
+        env:
+          VERSION: ${{ inputs.version }}
+        run: python3 scripts/release/release_version.py check "$VERSION" | tee -a "$GITHUB_OUTPUT"
+
+      # The notes start at this tag, so an empty range means a release with
+      # nothing new, such as a second beta on the same commit. A stable
+      # release's range starts at the previous stable one, so promoting a
+      # beta's or candidate's commit still passes.
+      - name: Require new commits since the previous release
+        if: steps.version.outputs.previous_tag != ''
+        env:
+          PREVIOUS_TAG: ${{ steps.version.outputs.previous_tag }}
+        run: |
+          if [[ "$(git rev-list --count "${PREVIOUS_TAG}..${GITHUB_SHA}")" -eq 0 ]]; then
+            echo "::error::${GITHUB_SHA::9} has no commits since ${PREVIOUS_TAG}."
+            exit 1
+          fi
+
+      # A push run of CI records the commit it tested, so it can be looked up
+      # by this commit. A manual Docker Image run skips CI, so the image
+      # existing doesn't prove CI passed.
+      - name: Require CI to have passed on this commit
+        run: |
+          conclusion="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --event push --branch main \
+            --commit "$GITHUB_SHA" --limit 1 --json conclusion --jq '.[0].conclusion // ""')"
+          if [[ "$conclusion" != "success" ]]; then
+            echo "::error::CI has not passed on ${GITHUB_SHA::9} (${conclusion:-still running or missing})."
+            exit 1
+          fi
+
+      # The release reuses this commit's image, so it must exist. Ask the
+      # registry, not the Docker Image workflow's run list: a workflow_run
+      # build records main's head at trigger time, which can be a later commit
+      # than the one it publishes.
+      - name: Require the commit's image to be published
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_SHA}"
+          if ! docker buildx imagetools inspect "$image" > /dev/null; then
+            echo "::error::$image isn't published yet. Release once the Docker Image workflow has published ${GITHUB_SHA::9}."
+            exit 1
+          fi
 
       - name: Stage the v2 OpenAPI artifact and its digest
-        shell: bash
         run: |
           # The release carries the exact committed bytes of the v2 contract,
           # never a regenerated copy, so downstream copies can be verified
@@ -76,29 +116,32 @@ jobs:
             cd "$asset_dir"
             sha256sum openapi.json > openapi.json.sha256
             sha256sum -c openapi.json.sha256
-            echo "openapi.json sha256: $(cut -d ' ' -f 1 openapi.json.sha256)"
           )
           echo "ASSET_DIR=$asset_dir" >> "$GITHUB_ENV"
 
-      - name: Create release with generated notes
-        shell: bash
+      # The first release has no earlier tag, so generated notes would list
+      # every pull request ever merged; its notes are written by hand.
+      - name: Create the draft release
         env:
-          GH_TOKEN: ${{ github.token }}
-          PRERELEASE: ${{ inputs.prerelease }}
-          VERSION: ${{ inputs.version }}
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+          PRERELEASE: ${{ steps.version.outputs.prerelease }}
+          PREVIOUS_TAG: ${{ steps.version.outputs.previous_tag }}
         run: |
-          args=(
-            --repo "$GITHUB_REPOSITORY"
-            --target "$GITHUB_SHA"
-            --draft
-            --generate-notes
-            --fail-on-no-commits
-          )
-
+          args=(--repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --draft --title "Silo $VERSION")
           if [[ "$PRERELEASE" == "true" ]]; then
             args+=(--prerelease)
           fi
-
-          gh release create "$VERSION" "${args[@]}" \
-            "$ASSET_DIR/openapi.json" \
-            "$ASSET_DIR/openapi.json.sha256"
+          if [[ -n "$PREVIOUS_TAG" ]]; then
+            args+=(--generate-notes --notes-start-tag "$PREVIOUS_TAG")
+          else
+            args+=(--notes "First release: replace this line with release notes.")
+          fi
+          gh release create "$TAG" "${args[@]}" \
+            "$ASSET_DIR/openapi.json" "$ASSET_DIR/openapi.json.sha256"
+          {
+            echo "Drafted $TAG on ${GITHUB_SHA::9}."
+            echo
+            echo "Edit the notes, including upgrade and compatibility impact, then publish the draft."
+            echo "Publishing tags this commit's Docker image as $VERSION."
+          } >> "$GITHUB_STEP_SUMMARY"

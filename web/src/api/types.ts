@@ -4437,7 +4437,7 @@ export interface NodeLastStats {
 
 /** A node's build identity as reported on its health response. */
 export interface NodeBuildInfo {
-  /** Short revision, `+dirty` when built from a modified tree, or "unavailable". */
+  /** Release version on a release image, otherwise the short revision; `+dirty` when built from a modified tree, or "unavailable". */
   display?: string;
   revision?: string;
   dirty?: boolean;
