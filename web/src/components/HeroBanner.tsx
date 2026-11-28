@@ -538,10 +538,11 @@ export default function HeroBanner({
           >
             {/* The key restarts the animation in lockstep with the
                   setInterval timer: on slide change, and whenever the timer
-                  starts a fresh 8s cycle (unpause, or the hero shown again).
-                  Stopping mid-cycle freezes the bar via
+                  starts a fresh 8s cycle (unpause, the hero shown again, or
+                  the slide count changing, which the timer effect depends
+                  on). Stopping mid-cycle freezes the bar via
                   `animation-play-state: paused` without remounting. */}
-            <span key={`${activeIndex}-${playCycle}`} />
+            <span key={`${activeIndex}-${playCycle}-${slideCount}`} />
           </div>
           {/* On phones the counter rides in the pill, which backs it over
                 bright artwork. */}
